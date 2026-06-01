@@ -10,6 +10,7 @@ import {
   SQL_ORDER_IN_SALDO_SCOPE,
   SQL_ORDER_SALDO_RESIDUAL
 } from '../services/orderPaymentBalance.service';
+import { CARTERA_IMPORTED_MOVEMENTS_AGG_SUBQUERY } from '../sql/carteraImportedSql';
 
 export type CustomerDeliveryAddressDto = { id: string; label: string; address: string; city: string };
 
@@ -1145,21 +1146,37 @@ AND NOT EXISTS (
 AND TRIM(COALESCE(p.invoice_id, '')) = ''
 AND TRIM(COALESCE(p.order_id, '')) = ''`;
 
-/** Saldo unificado: arrastre + pedidos + comprobantes manuales − recibos sin imputar − dedupe import. */
+/** Saldo = facturas/pedidos (LupoHub + import Tango) − NC − recibos. */
 function carteraSaldoSqlExpr(): string {
   return `ROUND(
     COALESCE(ob.facturas_bruto, 0)
     + COALESCE(mfac.manual_fac, 0)
+    + COALESCE(imp.import_debe, 0)
+    - COALESCE(ncv.nc_iva, 0)
     - COALESCE(mnc.manual_nc, 0)
-    + COALESCE(mm.last_saldo, 0)
+    - COALESCE(imp.import_nc, 0)
     - COALESCE(pay.total_pagos, 0)
-    - CASE
-        WHEN ABS(COALESCE(mm.last_saldo, 0)) < 0.005 THEN
-          COALESCE(pay_mm.total_matched, 0) + COALESCE(mm_orphan.total_orphan, 0)
-        ELSE 0
-      END,
+    - COALESCE(imp.import_rec, 0),
     2
   )`;
+}
+
+function carteraTotalFacturasSql(): string {
+  return `ROUND(
+    COALESCE(ob.facturas_bruto, 0) + COALESCE(mfac.manual_fac, 0) + COALESCE(imp.import_debe, 0),
+    2
+  )`;
+}
+
+function carteraTotalNcSql(): string {
+  return `ROUND(
+    COALESCE(ncv.nc_iva, 0) + COALESCE(mnc.manual_nc, 0) + COALESCE(imp.import_nc, 0),
+    2
+  )`;
+}
+
+function carteraTotalRecibosSql(): string {
+  return `ROUND(COALESCE(pay.total_pagos, 0) + COALESCE(imp.import_rec, 0), 2)`;
 }
 
 /** Saldos: pedidos con cobro pendiente (IVA 21% sobre neto, neto de NC) menos pagos/recibos en `payments`. */
@@ -1424,20 +1441,18 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
              END
          ) d
          GROUP BY d.customer_id`;
-  const payMatchedSubquery = sqlCarteraPagosMatchedImportSubquery(user.role === 'SELLER');
   const payParams: any[] = user.role === 'SELLER' ? [user.id, user.id] : [];
-  const payMatchedParams: any[] = user.role === 'SELLER' ? [user.id, user.id] : [];
-  const paramsWithNc = [...baseParams, ...payParams, ...payMatchedParams];
-  const paramsSimple = [...baseParams, ...payParams, ...payMatchedParams];
+  const paramsWithNc = [...baseParams, ...payParams];
+  const paramsSimple = [...baseParams, ...payParams];
   const saldoExpr = carteraSaldoSqlExpr();
 
   const sqlWithNc = `
     SELECT
       c.id AS customerId,
-      ROUND(COALESCE(ob.facturas_bruto, 0) + COALESCE(mfac.manual_fac, 0), 2) AS orderCargosPendientes,
-      ROUND(COALESCE(ncv.nc_iva, 0) + COALESCE(mnc.manual_nc, 0), 2) AS totalNotasCredito,
-      ROUND(COALESCE(mm.last_saldo, 0), 2) AS multimediaSaldo,
-      ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
+      ${carteraTotalFacturasSql()} AS orderCargosPendientes,
+      ${carteraTotalNcSql()} AS totalNotasCredito,
+      ROUND(COALESCE(imp.import_debe, 0) - COALESCE(imp.import_nc, 0) - COALESCE(imp.import_rec, 0), 2) AS multimediaSaldo,
+      ${carteraTotalRecibosSql()} AS totalPagos,
       ${saldoExpr} AS saldoPendienteUnificado
     FROM customers c
     LEFT JOIN (
@@ -1480,10 +1495,8 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
         AND ${SQL_ORDER_IN_SALDO_SCOPE}
       GROUP BY o.customer_id
     ) ncv ON ncv.customer_id = c.id
-    LEFT JOIN (${CARTERA_MM_LAST_SALDO_SUBQUERY}) mm ON mm.customer_id = c.id
+    LEFT JOIN (${CARTERA_IMPORTED_MOVEMENTS_AGG_SUBQUERY}) imp ON imp.customer_id = c.id
     LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
-    LEFT JOIN (${payMatchedSubquery}) pay_mm ON pay_mm.customer_id = c.id
-    LEFT JOIN (${SQL_CARTERA_MM_REC_SIN_PAGO}) mm_orphan ON mm_orphan.customer_id = c.id
     WHERE 1=1 ${sellerFilter}
       AND ABS(${saldoExpr}) > 0.005
     ORDER BY c.business_name ASC, c.name ASC
@@ -1493,10 +1506,10 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
   const sqlSimple = `
     SELECT
       c.id AS customerId,
-      ROUND(COALESCE(ob.facturas_bruto, 0) + COALESCE(mfac.manual_fac, 0), 2) AS orderCargosPendientes,
-      ROUND(COALESCE(ncv.nc_iva, 0) + COALESCE(mnc.manual_nc, 0), 2) AS totalNotasCredito,
-      ROUND(COALESCE(mm.last_saldo, 0), 2) AS multimediaSaldo,
-      ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
+      ${carteraTotalFacturasSql()} AS orderCargosPendientes,
+      ${carteraTotalNcSql()} AS totalNotasCredito,
+      ROUND(COALESCE(imp.import_debe, 0) - COALESCE(imp.import_nc, 0) - COALESCE(imp.import_rec, 0), 2) AS multimediaSaldo,
+      ${carteraTotalRecibosSql()} AS totalPagos,
       ${saldoExpr} AS saldoPendienteUnificado
     FROM customers c
     LEFT JOIN (
@@ -1539,10 +1552,8 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
         AND ${SQL_ORDER_IN_SALDO_SCOPE}
       GROUP BY o.customer_id
     ) ncv ON ncv.customer_id = c.id
-    LEFT JOIN (${CARTERA_MM_LAST_SALDO_SUBQUERY}) mm ON mm.customer_id = c.id
+    LEFT JOIN (${CARTERA_IMPORTED_MOVEMENTS_AGG_SUBQUERY}) imp ON imp.customer_id = c.id
     LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
-    LEFT JOIN (${payMatchedSubquery}) pay_mm ON pay_mm.customer_id = c.id
-    LEFT JOIN (${SQL_CARTERA_MM_REC_SIN_PAGO}) mm_orphan ON mm_orphan.customer_id = c.id
     WHERE 1=1 ${sellerFilter}
       AND ABS(${saldoExpr}) > 0.005
     ORDER BY c.business_name ASC, c.name ASC
@@ -1637,11 +1648,9 @@ async function fetchCarteraSaldoUnificadoMap(
              CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
              ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END
          ) d GROUP BY d.customer_id`;
-  const payMatchedSubquery = sqlCarteraPagosMatchedImportSubquery(sellerScoped);
   const paySellerId = sellerIdFilter || (user.role === 'SELLER' ? user.id : '');
   const payParams: any[] = sellerScoped ? [paySellerId, paySellerId] : [];
-  const payMatchedParams: any[] = sellerScoped ? [paySellerId, paySellerId] : [];
-  const params = [...baseParams, ...payParams, ...payMatchedParams];
+  const params = [...baseParams, ...payParams];
   const saldoExpr = carteraSaldoSqlExpr();
   const sql = `
     SELECT c.id AS customerId, ${saldoExpr} AS saldoPendienteUnificado
@@ -1661,10 +1670,16 @@ async function fetchCarteraSaldoUnificadoMap(
       SELECT customer_id, SUM(ROUND(importe_neto, 2)) AS manual_nc
       FROM customer_manual_comprobantes WHERE tipo = 'NC' GROUP BY customer_id
     ) mnc ON mnc.customer_id = c.id
-    LEFT JOIN (${CARTERA_MM_LAST_SALDO_SUBQUERY}) mm ON mm.customer_id = c.id
+    LEFT JOIN (
+      SELECT o.customer_id,
+        SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), (${SQL_ORDER_NETO_GRAVADO})) * 1.21, 2)) AS nc_iva
+      FROM orders o
+      LEFT JOIN (SELECT order_id, SUM(amount_credited) AS cn_total FROM credit_notes GROUP BY order_id) cn ON cn.order_id = o.id
+      WHERE ${SQL_ORDER_ACTIVE_COND} AND ${SQL_ORDER_IN_SALDO_SCOPE}
+      GROUP BY o.customer_id
+    ) ncv ON ncv.customer_id = c.id
+    LEFT JOIN (${CARTERA_IMPORTED_MOVEMENTS_AGG_SUBQUERY}) imp ON imp.customer_id = c.id
     LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
-    LEFT JOIN (${payMatchedSubquery}) pay_mm ON pay_mm.customer_id = c.id
-    LEFT JOIN (${SQL_CARTERA_MM_REC_SIN_PAGO}) mm_orphan ON mm_orphan.customer_id = c.id
     WHERE 1=1 ${sellerFilter}
   `;
   const rows = (await query(sql, params)) as Array<{ customerId: string; saldoPendienteUnificado: number }>;

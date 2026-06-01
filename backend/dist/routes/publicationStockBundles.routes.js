@@ -6,6 +6,7 @@ const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
 router.get('/', auth_1.authMiddleware, publicationStockBundles_controller_1.listBundles);
 router.get('/source-preview', auth_1.authMiddleware, publicationStockBundles_controller_1.getSourcePreview);
+router.get('/listing-variations', auth_1.authMiddleware, publicationStockBundles_controller_1.getListingVariations);
 router.get('/by-product', auth_1.authMiddleware, publicationStockBundles_controller_1.getBundlesByProduct);
 router.post('/create-listing-from-source', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, publicationStockBundles_controller_1.createListingFromSource);
 router.post('/group', auth_1.authMiddleware, auth_1.adminOrDepositoMiddleware, publicationStockBundles_controller_1.saveBundleGroup);

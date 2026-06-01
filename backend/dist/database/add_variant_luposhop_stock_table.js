@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addVariantLuposhopStockTable = addVariantLuposhopStockTable;
+exports.addVariantLuposhopStockTable = void 0;
 const db_1 = require("./db");
 /** Snapshot del último stock enviado con éxito a la tienda online (webhook Lupo Shop). */
 function addVariantLuposhopStockTable() {
@@ -39,3 +39,4 @@ function addVariantLuposhopStockTable() {
         }
     });
 }
+exports.addVariantLuposhopStockTable = addVariantLuposhopStockTable;

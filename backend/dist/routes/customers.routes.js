@@ -7,6 +7,7 @@ const express_1 = require("express");
 const multer_1 = __importDefault(require("multer"));
 const customers_controller_1 = require("../controllers/customers.controller");
 const multimediaHistorial_controller_1 = require("../controllers/multimediaHistorial.controller");
+const manualComprobantes_controller_1 = require("../controllers/manualComprobantes.controller");
 const auth_1 = require("../middleware/auth");
 const router = (0, express_1.Router)();
 const upload = (0, multer_1.default)({ storage: multer_1.default.memoryStorage() });
@@ -24,6 +25,7 @@ router.post('/multimedia-historial/import', auth_1.authMiddleware, upload.single
 router.get('/multimedia-saldos-summary', auth_1.authMiddleware, multimediaHistorial_controller_1.getMultimediaSaldosSummary);
 router.post('/assign-sellers-resumen', auth_1.authMiddleware, upload.single('file'), customers_controller_1.assignCustomerSellersFromResumen);
 router.get('/:id/multimedia-ledger', auth_1.authMiddleware, multimediaHistorial_controller_1.getCustomerMultimediaLedger);
+router.get('/:customerId/manual-comprobante-refs', auth_1.authMiddleware, manualComprobantes_controller_1.listManualComprobanteRefs);
 router.get('/', auth_1.authMiddleware, customers_controller_1.getCustomers);
 router.post('/', auth_1.authMiddleware, customers_controller_1.createCustomer);
 router.post('/import', auth_1.authMiddleware, customers_controller_1.importCustomers);

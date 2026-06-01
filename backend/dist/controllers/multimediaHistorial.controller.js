@@ -15,23 +15,13 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -47,6 +37,10 @@ const XLSX = __importStar(require("xlsx"));
 const uuid_1 = require("uuid");
 const db_1 = require("../database/db");
 const multimediaHistorialExcel_1 = require("../utils/multimediaHistorialExcel");
+const orderPaymentBalance_service_1 = require("../services/orderPaymentBalance.service");
+const ledgerDocType_1 = require("../utils/ledgerDocType");
+const ledgerRunningSaldo_1 = require("../utils/ledgerRunningSaldo");
+const SQL_ORDER_ACTIVE_COND = `o.status NOT IN ('Cancelado', 'Borrador') AND (o.archived = 0 OR o.archived IS NULL)`;
 function normalizeNameForMatch(v) {
     return String(v !== null && v !== void 0 ? v : '')
         .normalize('NFD')
@@ -56,6 +50,17 @@ function normalizeNameForMatch(v) {
 }
 function canManage(role) {
     return role === 'ADMIN' || role === 'SELLER' || role === 'WAREHOUSE' || role === 'DEPOSITO';
+}
+/** Número AFIP al estilo Tango/Multimedias: A00021000000006 (sin guiones). */
+function formatLedgerAfipNumero(cbteTipo, puntoVta, cbteDesde) {
+    const letra = cbteTipo === 1 || cbteTipo === 3
+        ? 'A'
+        : cbteTipo === 6 || cbteTipo === 8
+            ? 'B'
+            : cbteTipo === 11 || cbteTipo === 13
+                ? 'C'
+                : 'X';
+    return `${letra}${String(puntoVta || 0).padStart(5, '0')}${String(cbteDesde || 0).padStart(8, '0')}`;
 }
 function tryFuzzyNameMatch(normSheet, customerByNorm) {
     if (!normSheet || normSheet.length < 5)
@@ -229,7 +234,7 @@ const exportMultimediaHistorial = (req, res) => __awaiter(void 0, void 0, void 0
 exports.exportMultimediaHistorial = exportMultimediaHistorial;
 /** POST multipart file → importa movimientos por cliente */
 const importMultimediaHistorial = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
+    var _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r;
     try {
         const user = req.user;
         if (!user || !canManage(user.role)) {
@@ -254,19 +259,19 @@ const importMultimediaHistorial = (req, res) => __awaiter(void 0, void 0, void 0
             if (c.legacy_code) {
                 const lc = String(c.legacy_code).trim();
                 if (lc) {
-                    customerByLegacy.set(lc, { id: c.id, seller_id: (_a = c.seller_id) !== null && _a !== void 0 ? _a : null });
-                    customerByLegacy.set((0, multimediaHistorialExcel_1.padLegacyCode)(lc), { id: c.id, seller_id: (_b = c.seller_id) !== null && _b !== void 0 ? _b : null });
+                    customerByLegacy.set(lc, { id: c.id, seller_id: (_e = c.seller_id) !== null && _e !== void 0 ? _e : null });
+                    customerByLegacy.set((0, multimediaHistorialExcel_1.padLegacyCode)(lc), { id: c.id, seller_id: (_f = c.seller_id) !== null && _f !== void 0 ? _f : null });
                 }
             }
             const k1 = normalizeNameForMatch(c.business_name);
             const k2 = normalizeNameForMatch(c.name);
             if (k1 && !customerByNorm.has(k1))
-                customerByNorm.set(k1, { id: c.id, seller_id: (_c = c.seller_id) !== null && _c !== void 0 ? _c : null });
+                customerByNorm.set(k1, { id: c.id, seller_id: (_g = c.seller_id) !== null && _g !== void 0 ? _g : null });
             if (k2 && !customerByNorm.has(k2))
-                customerByNorm.set(k2, { id: c.id, seller_id: (_d = c.seller_id) !== null && _d !== void 0 ? _d : null });
+                customerByNorm.set(k2, { id: c.id, seller_id: (_h = c.seller_id) !== null && _h !== void 0 ? _h : null });
             const cu = (0, multimediaHistorialExcel_1.normalizeCuitDigits)(c.cuit);
             if (cu.length >= 8 && !customerByCuit.has(cu)) {
-                customerByCuit.set(cu, { id: c.id, seller_id: (_e = c.seller_id) !== null && _e !== void 0 ? _e : null });
+                customerByCuit.set(cu, { id: c.id, seller_id: (_j = c.seller_id) !== null && _j !== void 0 ? _j : null });
             }
         }
         let sheetsProcessed = 0;
@@ -294,8 +299,8 @@ const importMultimediaHistorial = (req, res) => __awaiter(void 0, void 0, void 0
                 continue;
             }
             sheetsProcessed++;
-            const legacy = (0, multimediaHistorialExcel_1.padLegacyCode)(parsed.code || ((_f = (0, multimediaHistorialExcel_1.parseSheetName)(sheetName)) === null || _f === void 0 ? void 0 : _f.code) || '');
-            yield (0, db_1.execute)(`UPDATE customers SET legacy_code = ?, account_zone = ?, account_seller_label = ? WHERE id = ?`, [legacy || null, ((_g = parsed.zona) === null || _g === void 0 ? void 0 : _g.trim()) || null, ((_h = parsed.vendedorHabitual) === null || _h === void 0 ? void 0 : _h.trim()) || null, cust.id]);
+            const legacy = (0, multimediaHistorialExcel_1.padLegacyCode)(parsed.code || ((_k = (0, multimediaHistorialExcel_1.parseSheetName)(sheetName)) === null || _k === void 0 ? void 0 : _k.code) || '');
+            yield (0, db_1.execute)(`UPDATE customers SET legacy_code = ?, account_zone = ?, account_seller_label = ? WHERE id = ?`, [legacy || null, ((_l = parsed.zona) === null || _l === void 0 ? void 0 : _l.trim()) || null, ((_m = parsed.vendedorHabitual) === null || _m === void 0 ? void 0 : _m.trim()) || null, cust.id]);
             customersUpdated++;
             yield (0, db_1.execute)(`DELETE FROM customer_multimedia_entries WHERE customer_id = ?`, [cust.id]);
             let order = 0;
@@ -314,13 +319,13 @@ const importMultimediaHistorial = (req, res) => __awaiter(void 0, void 0, void 0
                     order++,
                     lineDate,
                     tipo,
-                    ((_j = m.numero) === null || _j === void 0 ? void 0 : _j.trim()) || null,
-                    ((_k = m.edc) === null || _k === void 0 ? void 0 : _k.trim()) || null,
+                    ((_o = m.numero) === null || _o === void 0 ? void 0 : _o.trim()) || null,
+                    ((_p = m.edc) === null || _p === void 0 ? void 0 : _p.trim()) || null,
                     vto,
                     m.importe,
                     m.saldo,
-                    ((_l = m.detalle) === null || _l === void 0 ? void 0 : _l.trim()) || null,
-                    ((_m = m.paginaPdf) === null || _m === void 0 ? void 0 : _m.trim()) || null,
+                    ((_q = m.detalle) === null || _q === void 0 ? void 0 : _q.trim()) || null,
+                    ((_r = m.paginaPdf) === null || _r === void 0 ? void 0 : _r.trim()) || null,
                 ]);
                 rowsInserted++;
             }
@@ -348,7 +353,7 @@ const importMultimediaHistorial = (req, res) => __awaiter(void 0, void 0, void 0
 exports.importMultimediaHistorial = importMultimediaHistorial;
 /** GET /customers/:id/multimedia-ledger — movimientos importados (Excel Tango/Multimedias) para la ficha del cliente. */
 const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _s, _t, _u, _v;
     try {
         const user = req.user;
         if (!user || !canManage(user.role)) {
@@ -361,6 +366,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
         if (user.role === 'SELLER' && cust.seller_id !== user.id) {
             return res.status(403).json({ message: 'No autorizado' });
         }
+        yield (0, orderPaymentBalance_service_1.backfillPaymentOrdersFromLegacy)();
         const entries = (yield (0, db_1.query)(`SELECT line_order, line_date, tipo, numero, edc, vto, importe, saldo, detalle, pagina_pdf
        FROM customer_multimedia_entries WHERE customer_id = ? ORDER BY line_order ASC, line_date ASC`, [id]));
         const paymentEntries = (yield (0, db_1.query)(`SELECT
@@ -371,41 +377,145 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
          p.amount,
          p.notes,
          p.invoice_id,
+         p.order_id,
          GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids,
-         GROUP_CONCAT(DISTINCT pir.invoice_ref) AS invoice_refs
+         GROUP_CONCAT(DISTINCT pir.invoice_ref) AS invoice_refs,
+         GROUP_CONCAT(DISTINCT po.order_id) AS payment_order_ids
        FROM payments p
        LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
        LEFT JOIN payment_invoice_refs pir ON pir.payment_id = p.id
+       LEFT JOIN payment_orders po ON po.payment_id = p.id
        WHERE p.customer_id = ?
-       GROUP BY p.id, p.date, p.created_at, p.receipt_number, p.amount, p.notes, p.invoice_id
+       GROUP BY p.id, p.date, p.created_at, p.receipt_number, p.amount, p.notes, p.invoice_id, p.order_id
        ORDER BY p.created_at ASC, p.date ASC`, [id]));
-        const normalizeDocNumber = (value) => {
-            const raw = String(value || '').trim().toUpperCase();
-            if (!raw)
-                return '';
-            const cleaned = raw.replace(/[^A-Z0-9-]/g, '');
-            const parts = cleaned.split('-').map((p) => p.replace(/^0+/, '') || '0');
-            return parts.join('-');
-        };
-        const normalizeDocType = (tipo, detalle) => {
-            const t = `${String(tipo || '')} ${String(detalle || '')}`.toUpperCase();
-            if (/\bREC\b|RECIBO|COBRO|PAGO/.test(t))
-                return 'REC';
-            if (/\bFAC\b|FACTURA|FCA|FCB|FCC|FCE|COMPROBANTE/.test(t))
-                return 'FAC';
-            if (/NOTA\s*DE\s*CRED|CREDITO|\bNC\b/.test(t))
-                return 'NC';
-            if (/NOTA\s*DE\s*DEB|DEBITO|\bND\b/.test(t))
-                return 'ND';
-            return String(tipo || '').trim().toUpperCase();
-        };
+        const orderSaldoRows = (yield (0, db_1.query)(`SELECT
+         o.id AS order_id,
+         o.date AS order_date,
+         o.remito_number,
+         (${orderPaymentBalance_service_1.SQL_ORDER_SALDO_RESIDUAL}) AS residual,
+         i.cbte_tipo,
+         i.punto_venta,
+         i.cbte_desde,
+         CASE WHEN i.id IS NOT NULL THEN 1 ELSE 0 END AS has_invoice
+       FROM orders o
+       LEFT JOIN (
+         SELECT order_id, SUM(amount_credited) AS cn_total
+         FROM credit_notes
+         GROUP BY order_id
+       ) cn ON cn.order_id = o.id
+       LEFT JOIN invoices i ON i.order_id = o.id
+       WHERE o.customer_id = ?
+         AND ${SQL_ORDER_ACTIVE_COND}
+         AND ${orderPaymentBalance_service_1.SQL_ORDER_IN_SALDO_SCOPE}
+         AND (${orderPaymentBalance_service_1.SQL_ORDER_SALDO_RESIDUAL}) > 0.005
+       ORDER BY o.date ASC, o.id ASC`, [id]));
+        const creditNoteRows = (yield (0, db_1.query)(`SELECT
+         cn.id,
+         cn.order_id,
+         cn.cbte_tipo,
+         cn.punto_venta,
+         cn.cbte_desde,
+         cn.created_at,
+         cn.amount_credited
+       FROM credit_notes cn
+       JOIN orders o ON o.id = cn.order_id
+       WHERE o.customer_id = ?
+       ORDER BY cn.created_at ASC, cn.id ASC`, [id]));
+        let manualComprobanteRows = [];
+        try {
+            manualComprobanteRows = (yield (0, db_1.query)(`SELECT id, tipo, fecha, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, importe_neto, agip_ret_per, notes, ref_order_id, sin_detalle, pdf_path, created_at
+         FROM customer_manual_comprobantes
+         WHERE customer_id = ?
+         ORDER BY fecha ASC, created_at ASC`, [id]));
+        }
+        catch (_w) {
+            manualComprobanteRows = (yield (0, db_1.query)(`SELECT id, tipo, fecha, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, importe_neto, agip_ret_per, notes, ref_order_id, created_at
+         FROM customer_manual_comprobantes
+         WHERE customer_id = ?
+         ORDER BY fecha ASC, created_at ASC`, [id]));
+        }
+        const normalizeDocType = (tipo, detalle) => (0, ledgerDocType_1.normalizeLedgerDocType)(tipo, detalle);
         const maxLineOrder = entries.reduce((m, e) => Math.max(m, Number(e.line_order || 0)), 0);
+        const orderSaldoAsEntries = orderSaldoRows.map((ord, idx) => {
+            const residual = Math.round(Number(ord.residual || 0) * 100) / 100;
+            const hasInvoice = !!Number(ord.has_invoice);
+            const numero = hasInvoice
+                ? formatLedgerAfipNumero(Number(ord.cbte_tipo || 0), Number(ord.punto_venta || 0), Number(ord.cbte_desde || 0))
+                : ord.remito_number != null && Number(ord.remito_number) > 0
+                    ? String(Number(ord.remito_number))
+                    : String(ord.order_id || '').slice(0, 12);
+            return {
+                lineOrder: maxLineOrder + 50000 + idx,
+                lineDate: ord.order_date,
+                tipo: hasInvoice ? 'FAC' : 'PED',
+                numero,
+                edc: null,
+                vto: null,
+                importe: residual > 0 ? residual : null,
+                saldo: null,
+                detalle: `Pedido ${ord.order_id || ''} · Saldo pendiente${hasInvoice ? ' (facturado)' : ' (sin factura)'}`,
+                paginaPdf: null,
+                source: 'system'
+            };
+        });
+        const creditNoteAsEntries = creditNoteRows.map((cn, idx) => {
+            const importe = Math.round(Number(cn.amount_credited || 0) * 1.21 * 100) / 100;
+            const numero = formatLedgerAfipNumero(Number(cn.cbte_tipo || 0), Number(cn.punto_venta || 0), Number(cn.cbte_desde || 0));
+            return {
+                lineOrder: maxLineOrder + 60000 + idx,
+                lineDate: cn.created_at,
+                tipo: 'NC',
+                numero,
+                edc: null,
+                vto: null,
+                importe: importe > 0 ? importe : null,
+                saldo: null,
+                detalle: `Pedido ${cn.order_id || ''} · NC AFIP LupoHub`,
+                paginaPdf: null,
+                source: 'system'
+            };
+        });
+        const manualComprobanteAsEntries = manualComprobanteRows.map((m, idx) => {
+            const importe = m.tipo === 'FACTURA'
+                ? Math.round((Number(m.importe_neto || 0) + Number(m.agip_ret_per || 0)) * 100) / 100
+                : Math.round(Number(m.importe_neto || 0) * 100) / 100;
+            const sinDetalle = !!Number(m.sin_detalle);
+            const numero = sinDetalle
+                ? 'Sin nº AFIP'
+                : formatLedgerAfipNumero(Number(m.cbte_tipo || 0), Number(m.punto_venta || 0), Number(m.cbte_desde || 0));
+            const tipoLabel = m.tipo === 'NC' ? 'NC' : 'FAC';
+            const detalleExtra = m.notes ? String(m.notes).trim() : '';
+            const pdfNote = m.pdf_path ? ' · PDF adjunto' : '';
+            const pedidoRef = m.ref_order_id ? `Pedido ${m.ref_order_id}` : 'Sin pedido';
+            return {
+                lineOrder: maxLineOrder + 70000 + idx,
+                lineDate: m.fecha || m.created_at,
+                tipo: tipoLabel,
+                numero,
+                edc: null,
+                vto: null,
+                importe: importe > 0 ? importe : null,
+                saldo: null,
+                detalle: `${pedidoRef} · Comprobante manual${pdfNote}${detalleExtra ? ` · ${detalleExtra}` : ''}`,
+                paginaPdf: null,
+                source: 'system'
+            };
+        });
         const paymentAsEntries = paymentEntries.map((p, idx) => {
-            const refs = Array.from(new Set([
+            const invoiceRefs = Array.from(new Set([
                 ...String(p.invoice_ids || p.invoice_id || '').split(',').map((x) => x.trim()).filter(Boolean),
                 ...String(p.invoice_refs || '').split(',').map((x) => x.trim()).filter(Boolean),
             ]));
-            const refsText = refs.length ? `Factura(s): ${refs.join(' | ')}` : 'Factura(s): -';
+            const orderRefs = Array.from(new Set([
+                ...String(p.payment_order_ids || '').split(',').map((x) => x.trim()).filter(Boolean),
+                ...(p.order_id ? [String(p.order_id).trim()] : []),
+            ])).filter((oid) => oid && !oid.startsWith('mm-'));
+            const parts = [];
+            if (invoiceRefs.length)
+                parts.push(`Factura(s): ${invoiceRefs.join(' | ')}`);
+            if (orderRefs.length)
+                parts.push(`Pedido(s): ${orderRefs.join(' | ')}`);
+            const refsText = parts.length ? parts.join(' · ') : 'Sin imputar';
             const detail = `${refsText}${p.notes ? ` | ${String(p.notes).trim()}` : ''}`;
             return {
                 lineOrder: maxLineOrder + 100000 + idx,
@@ -435,6 +545,9 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 paginaPdf: e.pagina_pdf,
                 source: 'imported'
             })),
+            ...orderSaldoAsEntries,
+            ...creditNoteAsEntries,
+            ...manualComprobanteAsEntries,
             ...paymentAsEntries
         ];
         // Unificación real: evitar duplicados entre importado y sistema.
@@ -442,16 +555,17 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
         const movementByKey = new Map();
         for (const row of mergedEntries) {
             const tipoNorm = normalizeDocType(row.tipo, row.detalle);
-            if (!['REC', 'FAC', 'NC', 'ND'].includes(tipoNorm)) {
+            if (!['REC', 'FAC', 'NC', 'ND', 'PED'].includes(tipoNorm)) {
                 deduped.push(row);
                 continue;
             }
-            const key = [
-                tipoNorm,
-                String(row.lineDate || '').slice(0, 10),
-                normalizeDocNumber(row.numero),
-                Number(row.importe || 0).toFixed(2),
-            ].join('|');
+            const key = (0, ledgerRunningSaldo_1.ledgerMovementDedupeKey)({
+                tipo: row.tipo,
+                detalle: row.detalle,
+                lineDate: row.lineDate,
+                numero: row.numero,
+                importe: row.importe,
+            });
             const prev = movementByKey.get(key);
             if (!prev) {
                 movementByKey.set(key, row);
@@ -465,43 +579,27 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
             }
         }
         deduped.push(...Array.from(movementByKey.values()));
-        deduped.sort((a, b) => {
+        const unified = (0, ledgerRunningSaldo_1.filterSystemDuplicatesAgainstImport)(deduped);
+        unified.sort((a, b) => {
             const da = new Date(a.lineDate || 0).getTime() || 0;
             const db = new Date(b.lineDate || 0).getTime() || 0;
             if (da !== db)
                 return da - db;
             return Number(a.lineOrder || 0) - Number(b.lineOrder || 0);
         });
-        let runningSaldo = 0;
-        let hasRunningSaldo = false;
-        for (const row of deduped) {
-            if (row.saldo != null) {
-                runningSaldo = Number(row.saldo) || 0;
-                hasRunningSaldo = true;
-            }
-            else if (row.importe != null) {
-                const tipoNorm = normalizeDocType(row.tipo, row.detalle);
-                const amount = Number(row.importe) || 0;
-                if (tipoNorm === 'REC' || tipoNorm === 'NC') {
-                    runningSaldo = (hasRunningSaldo ? runningSaldo : 0) - amount;
-                    hasRunningSaldo = true;
-                }
-                else if (tipoNorm === 'FAC' || tipoNorm === 'ND') {
-                    runningSaldo = (hasRunningSaldo ? runningSaldo : 0) + amount;
-                    hasRunningSaldo = true;
-                }
-            }
-            row.saldo = hasRunningSaldo ? Number(runningSaldo.toFixed(2)) : null;
+        (0, ledgerRunningSaldo_1.applyLedgerRunningSaldo)(unified);
+        const lastSaldo = (0, ledgerRunningSaldo_1.applyLedgerRunningSaldoSimple)(unified);
+        for (const row of unified) {
+            row.saldo = (_s = row.saldoCorrido) !== null && _s !== void 0 ? _s : null;
         }
-        const lastSaldo = hasRunningSaldo ? Number(runningSaldo.toFixed(2)) : 0;
         res.json({
             customerId: id,
-            legacyCode: (_a = cust.legacy_code) !== null && _a !== void 0 ? _a : null,
-            accountZone: (_b = cust.account_zone) !== null && _b !== void 0 ? _b : null,
-            accountSellerLabel: (_c = cust.account_seller_label) !== null && _c !== void 0 ? _c : null,
-            movementCount: deduped.length,
+            legacyCode: (_t = cust.legacy_code) !== null && _t !== void 0 ? _t : null,
+            accountZone: (_u = cust.account_zone) !== null && _u !== void 0 ? _u : null,
+            accountSellerLabel: (_v = cust.account_seller_label) !== null && _v !== void 0 ? _v : null,
+            movementCount: unified.length,
             lastSaldo,
-            entries: deduped
+            entries: unified
         });
     }
     catch (e) {

@@ -1,8 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.countCalendarMonthsInRange = countCalendarMonthsInRange;
-exports.fixedExpenseMonthsInRange = fixedExpenseMonthsInRange;
-exports.round2 = round2;
+exports.round2 = exports.fixedExpenseMonthsInRange = exports.countCalendarMonthsInRange = void 0;
 /** Clave año-mes para comparar meses calendario (m = 0-11). */
 function monthKey(year, monthIndex) {
     return year * 12 + monthIndex;
@@ -19,6 +17,7 @@ function countCalendarMonthsInRange(from, to) {
         return 0;
     return monthKey(b.y, b.m - 1) - monthKey(a.y, a.m - 1) + 1;
 }
+exports.countCalendarMonthsInRange = countCalendarMonthsInRange;
 /** Meses aplicables de un gasto fijo dentro del rango del resumen. */
 function fixedExpenseMonthsInRange(from, to, startsFrom, endsAt) {
     const rangeStart = parseYmd(from);
@@ -35,6 +34,8 @@ function fixedExpenseMonthsInRange(from, to, startsFrom, endsAt) {
     }
     return Math.max(0, end - start + 1);
 }
+exports.fixedExpenseMonthsInRange = fixedExpenseMonthsInRange;
 function round2(n) {
     return Math.round(n * 100) / 100;
 }
+exports.round2 = round2;

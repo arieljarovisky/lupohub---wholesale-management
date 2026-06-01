@@ -9,13 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.digitCore = digitCore;
-exports.nameEmbedsOwnSkuCode = nameEmbedsOwnSkuCode;
-exports.mergeGroupKeysForProduct = mergeGroupKeysForProduct;
-exports.mergeTwoVariants = mergeTwoVariants;
-exports.mergeManualVariantPair = mergeManualVariantPair;
-exports.mergeManualIntoKeeper = mergeManualIntoKeeper;
-exports.runMergeDuplicateProductsBySku = runMergeDuplicateProductsBySku;
+exports.runMergeDuplicateProductsBySku = exports.mergeManualIntoKeeper = exports.mergeManualVariantPair = exports.mergeTwoVariants = exports.mergeGroupKeysForProduct = exports.nameEmbedsOwnSkuCode = exports.digitCore = void 0;
 /**
  * Fusiona productos duplicados que representan el mismo artículo (mismo “núcleo” de SKU:
  * guiones/espacios distintos, ceros a la izquierda, prefijo numérico común sin los últimos 2 dígitos
@@ -65,6 +59,7 @@ function digitCore(s) {
         return '';
     return d.replace(/^0+/, '') || '0';
 }
+exports.digitCore = digitCore;
 /**
  * True si el nombre/descripción del artículo incluye el código del propio SKU (núcleo numérico o forma compacta).
  * Requisito para fusionar candidatos por prefijo `dpre:` (evita unir dos artículos que solo comparten dígitos al azar).
@@ -87,6 +82,7 @@ function nameEmbedsOwnSkuCode(name, sku) {
         return true;
     return false;
 }
+exports.nameEmbedsOwnSkuCode = nameEmbedsOwnSkuCode;
 /** Misma lógica que el import Tango: agrupa por núcleo numérico o por SKU compacto. */
 function mergeGroupKey(sku) {
     const keys = mergeGroupKeysForProduct(sku);
@@ -112,6 +108,7 @@ function mergeGroupKeysForProduct(sku) {
         out.add(`c:${c}`);
     return [...out];
 }
+exports.mergeGroupKeysForProduct = mergeGroupKeysForProduct;
 class SkuMergeDsu {
     constructor(n) {
         this.parent = Array.from({ length: n }, (_, i) => i);
@@ -250,12 +247,13 @@ function mergeTwoVariants(fromVariantId, toVariantId, keeperProductId) {
         yield (0, stock_controller_1.syncStockToExternalPlatforms)(toVariantId, sumStock);
     });
 }
+exports.mergeTwoVariants = mergeTwoVariants;
 /**
  * Une la variante `absorbVariantId` en `keeperVariantId` (mismo producto, mismo talle, mismo color por nombre/código/id).
  */
 function mergeManualVariantPair(keeperVariantId, absorbVariantId) {
+    var _a, _b, _c, _d;
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c, _d;
         if (!keeperVariantId || !absorbVariantId || keeperVariantId === absorbVariantId) {
             throw new Error('Indicá dos variantes distintas.');
         }
@@ -292,6 +290,7 @@ function mergeManualVariantPair(keeperVariantId, absorbVariantId) {
         yield mergeTwoVariants(absorbVariantId, keeperVariantId, k.product_id);
     });
 }
+exports.mergeManualVariantPair = mergeManualVariantPair;
 function mergePriceListItems(keeperId, duplicateId) {
     return __awaiter(this, void 0, void 0, function* () {
         if (!(yield tableExists('price_list_items')))
@@ -312,8 +311,8 @@ function mergePriceListItems(keeperId, duplicateId) {
 }
 /** Color equivalente en el keeper: mismo color_id, mismo nombre/código cruzado (name↔code), o código canónico 3 dígitos. */
 function findKeeperProductColorSemMatch(keeperProductId, dupColorId) {
+    var _a, _b, _c, _d;
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c, _d;
         const exact = yield (0, db_1.get)(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ? LIMIT 1`, [
             keeperProductId,
             dupColorId,
@@ -462,6 +461,7 @@ function mergeManualIntoKeeper(keeperProductId, duplicateProductIds, opts) {
         return { dryRun, keeperProductId: keeper.id, variantsMerged, productsRemoved, errors };
     });
 }
+exports.mergeManualIntoKeeper = mergeManualIntoKeeper;
 function pickKeeper(products) {
     const sorted = [...products].sort((a, b) => {
         const ta = isTrivialProductName(a);
@@ -476,8 +476,8 @@ function pickKeeper(products) {
     });
     return sorted[0];
 }
-function runMergeDuplicateProductsBySku() {
-    return __awaiter(this, arguments, void 0, function* (opts = {}) {
+function runMergeDuplicateProductsBySku(opts = {}) {
+    return __awaiter(this, void 0, void 0, function* () {
         const dryRun = opts.dryRun === true;
         const details = [];
         const errors = [];
@@ -586,3 +586,4 @@ function runMergeDuplicateProductsBySku() {
         };
     });
 }
+exports.runMergeDuplicateProductsBySku = runMergeDuplicateProductsBySku;

@@ -15,23 +15,13 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -45,23 +35,18 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getMercadoLibreProductAdsAds = exports.getMercadoLibreProductAdsCampaigns = exports.getMercadoLibreProductAdsAdvertisers = exports.processMLQuestionsAi = exports.saveMLQuestionsAiConfig = exports.getMLQuestionsAiConfig = exports.saveMLAutoMessageConfig = exports.getMLAutoMessageConfig = exports.importProductFromTiendaNube = exports.importProductFromMercadoLibre = exports.duplicateTiendaNubeProduct = exports.createTiendaNubeProduct = exports.getTiendaNubeProductVariants = exports.getMercadoLibreItemVariations = exports.getMercadoLibreStock = exports.getMercadoLibreStockTotals = exports.getMercadoLibreOrders = exports.getMercadoLibreQuestions = exports.emitirNotaCreditoExternalInvoice = exports.getExternalInvoicesHistory = exports.invoiceMercadoLibreOrdersBulk = exports.invoiceTiendaNubeOrdersBulk = exports.getTiendaNubeOrders = exports.getTiendaNubeStockTotals = exports.getTiendaNubeStock = exports.importStockFromMercadoLibre = exports.syncAllStockFromMercadoLibre = exports.getVariantExternalStocks = exports.syncSelectedStockToMercadoLibre = exports.syncAllStockToMercadoLibre = exports.syncSelectedStockToTiendaNube = exports.syncAllStockToTiendaNube = exports.handleMercadoLibreWebhook = exports.testMercadoLibreOrder = exports.syncMercadoLibreOrdersFromDate = exports.syncTiendaNubeOrdersFromDate = exports.testTiendaNubeOrder = exports.handleTiendaNubeWebhook = exports.syncProductsFromMercadoLibre = exports.debugMercadoLibreItem = exports.testMercadoLibreConnection = exports.disconnectIntegration = exports.normalizeSizesInTiendaNube = exports.syncProductsFromTiendaNube = exports.updateMercadoLibreStock = exports.handleTiendaNubeCallback = exports.getTiendaNubeAuthUrl = exports.handleMercadoLibreCallback = exports.getMercadoLibreAuthUrl = exports.getIntegrationStatus = void 0;
-exports.getMercadoLibreDisplayAdsCampaigns = exports.getMercadoLibreDisplayAdsAdvertisers = exports.getMercadoLibreBrandAdsCampaigns = exports.getMercadoLibreBrandAdsAdvertisers = void 0;
-exports.normalizeMercadoLibreItemId = normalizeMercadoLibreItemId;
-exports.mercadoLibreItemIdCandidates = mercadoLibreItemIdCandidates;
-exports.resolveMercadoLibreCatalogProductItems = resolveMercadoLibreCatalogProductItems;
-exports.resolveMercadoLibreUserProductItems = resolveMercadoLibreUserProductItems;
-exports.getValidMLToken = getValidMLToken;
-exports.runAutoSyncMLtoTN = runAutoSyncMLtoTN;
-exports.mlBaseTitle = mlBaseTitle;
-exports.mlStripTrailingPublicationIndex = mlStripTrailingPublicationIndex;
-exports.mlColorSizeFromTitle = mlColorSizeFromTitle;
+exports.createTiendaNubeProduct = exports.getTiendaNubeProductVariants = exports.getMercadoLibreItemVariations = exports.getMercadoLibreStock = exports.mlColorSizeFromTitle = exports.mlStripTrailingPublicationIndex = exports.mlBaseTitle = exports.getMercadoLibreStockTotals = exports.getMercadoLibreOrders = exports.getMercadoLibreQuestions = exports.emitirNotaCreditoExternalInvoice = exports.getExternalInvoicesHistory = exports.invoiceMercadoLibreOrdersBulk = exports.invoiceTiendaNubeOrdersBulk = exports.getTiendaNubeOrders = exports.getTiendaNubeStockTotals = exports.getTiendaNubeStock = exports.importStockFromMercadoLibre = exports.syncAllStockFromMercadoLibre = exports.getVariantExternalStocks = exports.syncSelectedStockToMercadoLibre = exports.syncAllStockToMercadoLibre = exports.syncSelectedStockToTiendaNube = exports.syncAllStockToTiendaNube = exports.runAutoSyncMLtoTN = exports.handleMercadoLibreWebhook = exports.testMercadoLibreOrder = exports.syncMercadoLibreOrdersFromDate = exports.syncTiendaNubeOrdersFromDate = exports.testTiendaNubeOrder = exports.handleTiendaNubeWebhook = exports.syncProductsFromMercadoLibre = exports.debugMercadoLibreItem = exports.testMercadoLibreConnection = exports.disconnectIntegration = exports.syncSkusToTiendaNube = exports.normalizeColorsInTiendaNube = exports.normalizeSizesInTiendaNube = exports.syncProductsFromTiendaNube = exports.updateMercadoLibreStock = exports.handleTiendaNubeCallback = exports.getTiendaNubeAuthUrl = exports.handleMercadoLibreCallback = exports.getMercadoLibreAuthUrl = exports.getIntegrationStatus = exports.getValidMLToken = exports.resolveMercadoLibreUserProductItems = exports.resolveMercadoLibreCatalogProductItems = exports.mercadoLibreItemIdCandidates = exports.normalizeMercadoLibreItemId = void 0;
+exports.getMercadoLibreDisplayAdsCampaigns = exports.getMercadoLibreDisplayAdsAdvertisers = exports.getMercadoLibreBrandAdsCampaigns = exports.getMercadoLibreBrandAdsAdvertisers = exports.getMercadoLibreProductAdsAds = exports.getMercadoLibreProductAdsCampaigns = exports.getMercadoLibreProductAdsAdvertisers = exports.processMLQuestionsAi = exports.saveMLQuestionsAiConfig = exports.getMLQuestionsAiConfig = exports.saveMLAutoMessageConfig = exports.getMLAutoMessageConfig = exports.importProductFromTiendaNube = exports.importProductFromMercadoLibre = exports.duplicateTiendaNubeProduct = void 0;
 const axios_1 = __importDefault(require("axios"));
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 const products_controller_1 = require("./products.controller");
 const tiendanubeClient_1 = require("../utils/tiendanubeClient");
 const mlQuestionsAi = __importStar(require("../services/mlQuestionsAi.service"));
+const tiendanubeVariantMerge_service_1 = require("../services/tiendanubeVariantMerge.service");
+const colorNameStandard_1 = require("../utils/colorNameStandard");
+const skuString_1 = require("../utils/skuString");
+const talleStandard_1 = require("../utils/talleStandard");
 const ML_AUTH_URL = 'https://auth.mercadolibre.com.ar/authorization';
 const ML_TOKEN_URL = 'https://api.mercadolibre.com/oauth/token';
 const TN_AUTH_URL = 'https://www.tiendanube.com/apps/authorize';
@@ -82,11 +67,17 @@ function normalizeMercadoLibreItemId(raw) {
     }
     catch (_a) { }
     s = s.replace(/\s+/g, '');
-    // Si pegan URL, extraer token tipo MLA123 / MLAU-123
+    // Si pegan URL: priorizar ID de catálogo /p/MLA... (todos los colores/talles)
     if (/^https?:\/\//i.test(s)) {
-        const m = s.match(/\/(ML[A-Z]{0,5}-?\d+)(?:[/?#]|$)/i);
-        if (m === null || m === void 0 ? void 0 : m[1])
-            s = m[1];
+        const catalog = s.match(/\/p\/(ML[A-Z]{0,5}-?\d+)/i);
+        if (catalog === null || catalog === void 0 ? void 0 : catalog[1]) {
+            s = catalog[1];
+        }
+        else {
+            const m = s.match(/\/(ML[A-Z]{0,5}-?\d+)(?:[/?#]|$)/i);
+            if (m === null || m === void 0 ? void 0 : m[1])
+                s = m[1];
+        }
     }
     s = s.toUpperCase();
     // Permitir "MLAU-123456" -> "MLAU123456"
@@ -100,6 +91,7 @@ function normalizeMercadoLibreItemId(raw) {
     // Solo números: se resolverá en candidates con múltiples sitios.
     return s;
 }
+exports.normalizeMercadoLibreItemId = normalizeMercadoLibreItemId;
 /** Genera candidatos de itemId para tolerar formatos no estándar (ej. MLAU... -> MLA...). */
 function mercadoLibreItemIdCandidates(raw) {
     const base = normalizeMercadoLibreItemId(raw);
@@ -128,6 +120,7 @@ function mercadoLibreItemIdCandidates(raw) {
     }
     return Array.from(new Set(out.filter(Boolean)));
 }
+exports.mercadoLibreItemIdCandidates = mercadoLibreItemIdCandidates;
 /** Normaliza SKU para matching flexible entre canales (quita separadores y mayúsculas). */
 function normalizeSkuForMatch(raw) {
     return (raw !== null && raw !== void 0 ? raw : '')
@@ -138,8 +131,8 @@ function normalizeSkuForMatch(raw) {
 }
 /** Obtiene SKU desde la API de ML cuando en la orden no viene claro. */
 function resolveMlOrderItemSku(accessToken, mlItemId, mlVariationId) {
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c, _d, _e, _f, _g, _h;
         try {
             if (!mlItemId)
                 return '';
@@ -218,10 +211,11 @@ function resolveMercadoLibreCatalogProductItems(productId, accessToken) {
         }
     });
 }
+exports.resolveMercadoLibreCatalogProductItems = resolveMercadoLibreCatalogProductItems;
 /** Resuelve IDs de item a partir de un user_product_id (ej. MLAU...). */
 function resolveMercadoLibreUserProductItems(userProductId, sellerId, accessToken) {
+    var _a;
     return __awaiter(this, void 0, void 0, function* () {
-        var _a;
         const up = (userProductId || '').toString().trim();
         const perStatus = {
             active: { hits: 0, pages: 0, failedRequests: 0 },
@@ -298,9 +292,337 @@ function resolveMercadoLibreUserProductItems(userProductId, sellerId, accessToke
         }
     });
 }
+exports.resolveMercadoLibreUserProductItems = resolveMercadoLibreUserProductItems;
+/** Extrae filas de variación desde un ítem ML (con o sin array item.variations). */
+function extractMlVariationsFromItemData(it) {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
+    if (!it || it.error)
+        return [];
+    const out = [];
+    if (Array.isArray(it.variations) && it.variations.length > 0) {
+        for (const v of it.variations) {
+            const skuAttr = Array.isArray(v.attributes) && v.attributes.find((a) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
+            const skuFromAttr = skuAttr ? ((_b = (_a = skuAttr.value_name) !== null && _a !== void 0 ? _a : skuAttr.value) !== null && _b !== void 0 ? _b : '').toString().trim() : '';
+            const sku = skuFromAttr || ((_d = (_c = v.seller_sku) !== null && _c !== void 0 ? _c : v.seller_custom_field) !== null && _d !== void 0 ? _d : '').toString().trim();
+            let color = '';
+            let size = '';
+            (v.attribute_combinations || []).forEach((attr) => {
+                const id = (attr.id || '').toString().toUpperCase();
+                const name = (attr.value_name || attr.name || '').toString().trim();
+                if (id === 'COLOR' || id === 'COLOUR' || id === 'COR')
+                    color = name;
+                if (id === 'SIZE' || id === 'SIZE_TYPE' || id === 'TALLE' || id === 'Talla')
+                    size = name;
+            });
+            out.push({
+                variationId: String(v.id),
+                sku,
+                color,
+                size,
+                stock: v.available_quantity || 0
+            });
+        }
+        return out;
+    }
+    const attrs = Array.isArray(it.attributes) ? it.attributes : [];
+    const skuAttr = attrs.find((a) => ((a === null || a === void 0 ? void 0 : a.id) || '').toString().toUpperCase() === 'SELLER_SKU');
+    const sku = ((_f = (_e = it.seller_sku) !== null && _e !== void 0 ? _e : it.seller_custom_field) !== null && _f !== void 0 ? _f : (skuAttr ? ((_h = (_g = skuAttr.value_name) !== null && _g !== void 0 ? _g : skuAttr.value) !== null && _h !== void 0 ? _h : '') : '')).toString().trim();
+    const colorAttr = attrs.find((a) => ['COLOR', 'COLOUR', 'COR'].includes(((a === null || a === void 0 ? void 0 : a.id) || '').toString().toUpperCase()));
+    const sizeAttr = attrs.find((a) => ['SIZE', 'SIZE_TYPE', 'TALLE', 'TALLA'].includes(((a === null || a === void 0 ? void 0 : a.id) || '').toString().toUpperCase()));
+    const parsed = mlColorSizeFromTitle((it.title || '').toString().trim());
+    out.push({
+        variationId: String(it.id),
+        sku,
+        color: (colorAttr ? ((_k = (_j = colorAttr.value_name) !== null && _j !== void 0 ? _j : colorAttr.value) !== null && _k !== void 0 ? _k : '') : parsed.color).toString().trim(),
+        size: (sizeAttr ? ((_m = (_l = sizeAttr.value_name) !== null && _l !== void 0 ? _l : sizeAttr.value) !== null && _m !== void 0 ? _m : '') : parsed.size).toString().trim(),
+        stock: it.available_quantity || 0
+    });
+    return out;
+}
+/** ID de producto de catálogo (/p/MLA...) desde el permalink del ítem. */
+function catalogProductIdFromMercadoLibreItem(item) {
+    var _a;
+    const link = ((_a = item === null || item === void 0 ? void 0 : item.permalink) !== null && _a !== void 0 ? _a : '').toString();
+    const m = link.match(/\/p\/(ML[A-Z]{0,5}-?\d+)/i);
+    return (m === null || m === void 0 ? void 0 : m[1]) ? normalizeMercadoLibreItemId(m[1]) : '';
+}
+/** Reúne IDs de publicaciones ML asociadas (UP, catálogo /p/MLA..., ítem resuelto). */
+function gatherMercadoLibreItemIdsForAllVariations(opts) {
+    var _a, _b;
+    return __awaiter(this, void 0, void 0, function* () {
+        const seen = new Set();
+        const add = (id) => {
+            const s = String(id || '').trim();
+            if (!s)
+                return;
+            for (const c of mercadoLibreItemIdCandidates(s))
+                seen.add(c);
+        };
+        if (opts.resolvedItemId)
+            add(opts.resolvedItemId);
+        for (const id of opts.preloadedCatalogIds || [])
+            add(id);
+        for (const id of opts.preloadedUserProductIds || [])
+            add(id);
+        const catalogProductIds = new Set();
+        catalogProductIds.add(opts.requestedRaw);
+        catalogProductIds.add(opts.requestedNormalized);
+        const catalogFromItem = opts.item ? catalogProductIdFromMercadoLibreItem(opts.item) : '';
+        if (catalogFromItem)
+            catalogProductIds.add(catalogFromItem);
+        for (const c of mercadoLibreItemIdCandidates(opts.requestedRaw)) {
+            if (/^MLA\d+$/i.test(c))
+                catalogProductIds.add(c);
+        }
+        const mUp = opts.requestedNormalized.match(/^MLAU(\d+)$/i);
+        if (mUp)
+            catalogProductIds.add(`MLA${mUp[1]}`);
+        const mLa = opts.requestedNormalized.match(/^MLA(\d+)$/i);
+        if (mLa)
+            catalogProductIds.add(`MLAU${mLa[1]}`);
+        for (const pid of catalogProductIds) {
+            const catIds = yield resolveMercadoLibreCatalogProductItems(pid, opts.accessToken);
+            for (const id of catIds)
+                add(id);
+        }
+        const userProductIds = new Set();
+        if (opts.shouldResolveAsUserProduct)
+            userProductIds.add(opts.requestedNormalized);
+        const upFromItem = ((_b = (_a = opts.item) === null || _a === void 0 ? void 0 : _a.user_product_id) !== null && _b !== void 0 ? _b : '').toString().trim();
+        if (/^MLAU\d+$/i.test(upFromItem))
+            userProductIds.add(upFromItem);
+        if (mLa)
+            userProductIds.add(`MLAU${mLa[1]}`);
+        if (mUp)
+            userProductIds.add(opts.requestedNormalized);
+        for (const upId of userProductIds) {
+            const upResolved = yield resolveMercadoLibreUserProductItems(upId, opts.sellerId, opts.accessToken);
+            for (const id of upResolved.itemCandidates)
+                add(id);
+        }
+        if (opts.item) {
+            const siblingIds = yield findMercadoLibreSiblingListingIds(opts.item, opts.sellerId, opts.accessToken);
+            for (const id of siblingIds)
+                add(id);
+            const familyName = mlFamilyNameFromItem(opts.item);
+            if (familyName) {
+                const familyIds = yield resolveMercadoLibreItemsByFamilyName(familyName, opts.sellerId, opts.accessToken);
+                for (const id of familyIds)
+                    add(id);
+            }
+            const skuPrefixes = new Set();
+            for (const sku of collectMercadoLibreItemSkus(opts.item)) {
+                const prefix = extractArticlePrefixFromMlSku(sku);
+                if (prefix)
+                    skuPrefixes.add(prefix);
+            }
+            for (const prefix of skuPrefixes) {
+                const skuIds = yield resolveMercadoLibreItemsByArticlePrefix(prefix, opts.sellerId, opts.accessToken);
+                for (const id of skuIds)
+                    add(id);
+            }
+        }
+        return Array.from(seen).slice(0, 120);
+    });
+}
+/** Agrega variaciones de varias publicaciones ML (todos los colores/talles). */
+function aggregateMercadoLibreVariationsFromItemIds(itemIds, accessToken) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const byVariationId = {};
+        for (const candidate of itemIds) {
+            try {
+                const itemRes = yield axios_1.default.get(`https://api.mercadolibre.com/items/${candidate}?include_attributes=all`, {
+                    headers: { Authorization: `Bearer ${accessToken}` }
+                });
+                for (const row of extractMlVariationsFromItemData(itemRes === null || itemRes === void 0 ? void 0 : itemRes.data)) {
+                    byVariationId[row.variationId] = row;
+                }
+            }
+            catch (_a) {
+                // ignorar ítem inválido
+            }
+        }
+        return Object.values(byVariationId);
+    });
+}
+/** Publicaciones del mismo vendedor con el mismo título base (un listing por talle/color). */
+function findMercadoLibreSiblingListingIds(item, sellerId, accessToken) {
+    var _a;
+    return __awaiter(this, void 0, void 0, function* () {
+        const baseTitle = mlBaseTitle(((item === null || item === void 0 ? void 0 : item.title) || '').toString().trim());
+        const baseTitleLoose = mlStripTrailingPublicationIndex(baseTitle);
+        if (!baseTitle)
+            return [];
+        const siblingIds = [];
+        const seen = new Set();
+        const pageLimit = 50;
+        for (const status of ['active', 'paused']) {
+            let offset = 0;
+            while (offset < 500) {
+                const searchRes = yield axios_1.default.get(`https://api.mercadolibre.com/users/${encodeURIComponent(String(sellerId))}/items/search`, {
+                    headers: { Authorization: `Bearer ${accessToken}` },
+                    params: { q: baseTitleLoose || baseTitle, limit: pageLimit, offset, status },
+                    validateStatus: () => true
+                });
+                const rows = searchRes.status === 200 && Array.isArray((_a = searchRes.data) === null || _a === void 0 ? void 0 : _a.results)
+                    ? searchRes.data.results.map((x) => String(x || '').trim()).filter(Boolean)
+                    : [];
+                for (const id of rows) {
+                    if (!seen.has(id)) {
+                        seen.add(id);
+                        siblingIds.push(id);
+                    }
+                }
+                if (rows.length < pageLimit)
+                    break;
+                offset += pageLimit;
+            }
+        }
+        const unique = Array.from(new Set(siblingIds));
+        return unique.filter((sid) => {
+            // Se valida título al extraer variaciones; aquí solo limitamos cantidad.
+            return sid && sid !== String((item === null || item === void 0 ? void 0 : item.id) || '');
+        }).slice(0, 120);
+    });
+}
+function mlFamilyNameFromItem(item) {
+    var _a;
+    return String((_a = item === null || item === void 0 ? void 0 : item.family_name) !== null && _a !== void 0 ? _a : '').trim();
+}
+/** Prefijo de artículo Lupo/Tango desde SKU (ej. 24650150542 → 24650, 24650-130-280 → 24650). */
+function extractArticlePrefixFromMlSku(sku) {
+    const s = String(sku || '').trim();
+    if (!s)
+        return null;
+    const dashHead = s.split('-')[0];
+    if (/^\d{4,7}$/.test(dashHead))
+        return dashHead;
+    const digits = s.replace(/\D/g, '');
+    if (digits.length >= 11)
+        return digits.slice(0, 5);
+    if (digits.length >= 8)
+        return digits.slice(0, 5);
+    if (/^\d{4,7}$/.test(digits))
+        return digits;
+    return null;
+}
+function collectMercadoLibreItemSkus(it) {
+    var _a, _b;
+    const out = new Set();
+    const add = (v) => {
+        const t = String(v !== null && v !== void 0 ? v : '').trim();
+        if (t)
+            out.add(t);
+    };
+    add(it === null || it === void 0 ? void 0 : it.seller_sku);
+    add(it === null || it === void 0 ? void 0 : it.seller_custom_field);
+    const attrs = Array.isArray(it === null || it === void 0 ? void 0 : it.attributes) ? it.attributes : [];
+    const skuAttr = attrs.find((a) => ((a === null || a === void 0 ? void 0 : a.id) || '').toString().toUpperCase() === 'SELLER_SKU');
+    if (skuAttr)
+        add((_a = skuAttr.value_name) !== null && _a !== void 0 ? _a : skuAttr.value);
+    if (Array.isArray(it === null || it === void 0 ? void 0 : it.variations)) {
+        for (const v of it.variations) {
+            add(v === null || v === void 0 ? void 0 : v.seller_sku);
+            add(v === null || v === void 0 ? void 0 : v.seller_custom_field);
+            const vAttr = Array.isArray(v === null || v === void 0 ? void 0 : v.attributes) && v.attributes.find((a) => (a.id || '').toUpperCase() === 'SELLER_SKU');
+            if (vAttr)
+                add((_b = vAttr.value_name) !== null && _b !== void 0 ? _b : vAttr.value);
+        }
+    }
+    return [...out];
+}
+/** Busca publicaciones del vendedor paginando /items/search. */
+function searchMercadoLibreSellerItems(sellerId, accessToken, params, maxResults = 200) {
+    var _a;
+    return __awaiter(this, void 0, void 0, function* () {
+        const seen = new Set();
+        const out = [];
+        const pageLimit = 50;
+        let offset = 0;
+        while (out.length < maxResults && offset < 5000) {
+            const res = yield axios_1.default.get(`https://api.mercadolibre.com/users/${encodeURIComponent(String(sellerId))}/items/search`, {
+                headers: { Authorization: `Bearer ${accessToken}` },
+                params: Object.assign(Object.assign({}, params), { limit: pageLimit, offset }),
+                validateStatus: () => true
+            });
+            if (res.status >= 400 || !res.data)
+                break;
+            const rows = Array.isArray((_a = res.data) === null || _a === void 0 ? void 0 : _a.results) ? res.data.results : [];
+            for (const x of rows) {
+                const id = String(x || '').trim();
+                if (!id || seen.has(id))
+                    continue;
+                seen.add(id);
+                out.push(id);
+            }
+            if (rows.length < pageLimit)
+                break;
+            offset += pageLimit;
+        }
+        return out;
+    });
+}
+/** Publicaciones hermanas por family_name (User Product / catálogo ML). */
+function resolveMercadoLibreItemsByFamilyName(familyName, sellerId, accessToken) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const fn = String(familyName || '').trim();
+        if (!fn)
+            return [];
+        const statuses = ['active', 'paused'];
+        const seen = new Set();
+        const out = [];
+        for (const st of statuses) {
+            const ids = yield searchMercadoLibreSellerItems(sellerId, accessToken, { q: fn, status: st }, 120);
+            for (const id of ids) {
+                if (seen.has(id))
+                    continue;
+                seen.add(id);
+                out.push(id);
+            }
+        }
+        return out.slice(0, 120);
+    });
+}
+/** Publicaciones del mismo artículo por prefijo de SKU (24650 → 24650130542, 24650140542…). */
+function resolveMercadoLibreItemsByArticlePrefix(prefix, sellerId, accessToken) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const p = String(prefix || '').trim().replace(/\D/g, '');
+        if (!p || p.length < 4)
+            return [];
+        const searchIds = yield searchMercadoLibreSellerItems(sellerId, accessToken, { q: p, status: 'active' }, 200);
+        const prefixLoose = p.replace(/^0+/, '') || p;
+        const matched = [];
+        const seen = new Set();
+        for (const id of searchIds) {
+            if (seen.has(id))
+                continue;
+            seen.add(id);
+            try {
+                const r = yield axios_1.default.get(`https://api.mercadolibre.com/items/${id}?include_attributes=all`, {
+                    headers: { Authorization: `Bearer ${accessToken}` },
+                    validateStatus: () => true
+                });
+                const it = r.data;
+                if (!(it === null || it === void 0 ? void 0 : it.id))
+                    continue;
+                const skus = collectMercadoLibreItemSkus(it);
+                const hit = skus.some((s) => {
+                    const d = s.replace(/\D/g, '');
+                    return d.startsWith(p) || d.startsWith(prefixLoose) || s.startsWith(p) || s.startsWith(prefixLoose);
+                });
+                if (hit)
+                    matched.push(String(it.id));
+            }
+            catch (_a) {
+                // ignorar ítem inválido
+            }
+        }
+        return matched.slice(0, 120);
+    });
+}
 /** PUT a Tienda Nube con reintentos ante 429 (Too Many Requests). */
-function putTnVariantWithRetry(url_1, body_1, headers_1) {
-    return __awaiter(this, arguments, void 0, function* (url, body, headers, maxRetries = 2) {
+function putTnVariantWithRetry(url, body, headers, maxRetries = 2) {
+    return __awaiter(this, void 0, void 0, function* () {
         yield (0, tiendanubeClient_1.tnPutWithRetry)(axios_1.default, url, body, { headers }, {
             maxRetries: Math.max(0, maxRetries),
             // minIntervalMs se resuelve dentro del helper desde env TN_RATE_LIMIT_DELAY_MS
@@ -311,8 +633,8 @@ function putTnVariantWithRetry(url_1, body_1, headers_1) {
 const FRONTEND_URL = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/$/, '');
 // Función para obtener un token válido de Mercado Libre (refresca automáticamente si expiró)
 function getValidMLToken() {
+    var _a;
     return __awaiter(this, void 0, void 0, function* () {
-        var _a;
         const integration = yield (0, db_1.get)(`SELECT access_token, refresh_token, expires_at, user_id FROM integrations WHERE platform = 'mercadolibre'`);
         if (!integration) {
             return null;
@@ -355,6 +677,7 @@ function getValidMLToken() {
         return { access_token: integration.access_token, user_id: integration.user_id };
     });
 }
+exports.getValidMLToken = getValidMLToken;
 const getIntegrationStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const integrations = yield (0, db_1.query)('SELECT platform, store_id, user_id FROM integrations');
@@ -437,7 +760,7 @@ const getTiendaNubeAuthUrl = (req, res) => {
 };
 exports.getTiendaNubeAuthUrl = getTiendaNubeAuthUrl;
 const handleTiendaNubeCallback = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _b, _c, _d, _e, _f, _g, _h;
     const { code } = req.query;
     const appId = process.env.TIENDA_NUBE_APP_ID;
     const clientSecret = process.env.TIENDA_NUBE_CLIENT_SECRET;
@@ -482,7 +805,7 @@ const handleTiendaNubeCallback = (req, res) => __awaiter(void 0, void 0, void 0,
                     console.log(`[TN] Webhook ${ev} registrado:`, webhookUrl);
                 }
                 catch (whErr) {
-                    const msg = ((_c = (_b = (_a = whErr.response) === null || _a === void 0 ? void 0 : _a.data) === null || _b === void 0 ? void 0 : _b.url) === null || _c === void 0 ? void 0 : _c[0]) || ((_f = (_e = (_d = whErr.response) === null || _d === void 0 ? void 0 : _d.data) === null || _e === void 0 ? void 0 : _e.event) === null || _f === void 0 ? void 0 : _f[0]) || whErr.message;
+                    const msg = ((_d = (_c = (_b = whErr.response) === null || _b === void 0 ? void 0 : _b.data) === null || _c === void 0 ? void 0 : _c.url) === null || _d === void 0 ? void 0 : _d[0]) || ((_g = (_f = (_e = whErr.response) === null || _e === void 0 ? void 0 : _e.data) === null || _f === void 0 ? void 0 : _f.event) === null || _g === void 0 ? void 0 : _g[0]) || whErr.message;
                     console.warn(`[TN] No se pudo registrar webhook ${ev} (puede existir ya):`, msg);
                 }
             }
@@ -493,13 +816,13 @@ const handleTiendaNubeCallback = (req, res) => __awaiter(void 0, void 0, void 0,
         res.redirect(`${FRONTEND_URL}/#settings?status=success&platform=tiendanube`);
     }
     catch (error) {
-        console.error('Error in Tienda Nube callback:', ((_g = error.response) === null || _g === void 0 ? void 0 : _g.data) || error.message);
+        console.error('Error in Tienda Nube callback:', ((_h = error.response) === null || _h === void 0 ? void 0 : _h.data) || error.message);
         res.redirect(`${FRONTEND_URL}/#settings?status=error&platform=tiendanube`);
     }
 });
 exports.handleTiendaNubeCallback = handleTiendaNubeCallback;
 const updateMercadoLibreStock = (sku, newStock) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _j;
     try {
         const mlToken = yield getValidMLToken();
         if (!mlToken)
@@ -567,12 +890,12 @@ const updateMercadoLibreStock = (sku, newStock) => __awaiter(void 0, void 0, voi
         }
     }
     catch (error) {
-        console.error(`[ML Sync Error] SKU ${sku}:`, ((_a = error.response) === null || _a === void 0 ? void 0 : _a.data) || error.message);
+        console.error(`[ML Sync Error] SKU ${sku}:`, ((_j = error.response) === null || _j === void 0 ? void 0 : _j.data) || error.message);
     }
 });
 exports.updateMercadoLibreStock = updateMercadoLibreStock;
 const syncProductsFromTiendaNube = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _k, _l, _m;
     try {
         // 1. Get Access Token
         const integration = yield (0, db_1.get)(`SELECT * FROM integrations WHERE platform = 'tiendanube'`);
@@ -614,7 +937,7 @@ const syncProductsFromTiendaNube = (req, res) => __awaiter(void 0, void 0, void 
                     productCount++;
                     const variants = tnProduct.variants || [];
                     variantCount += variants.length;
-                    log(`  ${((_a = tnProduct.name) === null || _a === void 0 ? void 0 : _a.es) || tnProduct.name} (ID: ${tnProduct.id}): ${variants.length} variantes`);
+                    log(`  ${((_k = tnProduct.name) === null || _k === void 0 ? void 0 : _k.es) || tnProduct.name} (ID: ${tnProduct.id}): ${variants.length} variantes`);
                 }
                 page++;
                 // Safety break (hasta 200 páginas = 40.000 productos)
@@ -623,7 +946,7 @@ const syncProductsFromTiendaNube = (req, res) => __awaiter(void 0, void 0, void 
             }
             catch (error) {
                 // If 404, likely means page out of range or end of list
-                if (((_b = error.response) === null || _b === void 0 ? void 0 : _b.status) === 404) {
+                if (((_l = error.response) === null || _l === void 0 ? void 0 : _l.status) === 404) {
                     hasMore = false;
                 }
                 else {
@@ -643,66 +966,63 @@ const syncProductsFromTiendaNube = (req, res) => __awaiter(void 0, void 0, void 
         });
     }
     catch (error) {
-        console.error('Error syncing products:', ((_c = error.response) === null || _c === void 0 ? void 0 : _c.data) || error.message);
+        console.error('Error syncing products:', ((_m = error.response) === null || _m === void 0 ? void 0 : _m.data) || error.message);
         res.status(500).json({ message: 'Error sincronizando productos', error: error.message });
     }
 });
 exports.syncProductsFromTiendaNube = syncProductsFromTiendaNube;
-/** Talles estándar para el público: P, M, G, GG, XG, XXG, XXXG (+ U para único) */
-const STANDARD_SIZES = ['P', 'M', 'G', 'GG', 'XG', 'XXG', 'XXXG', 'U'];
-/** Mapeo de nombres comunes a talle estándar (clave en mayúsculas/normalizada) */
-function normalizeSizeToStandard(raw) {
-    const v = raw.trim().toUpperCase().replace(/\s+/g, ' ');
-    if (!v)
-        return 'U';
-    // Ya estándar
-    if (STANDARD_SIZES.includes(v))
-        return v;
-    // Único / sin talla
-    if (/^U$|UNICO|ÚNICO|LISO|UNICA|ÚNICA/i.test(v))
-        return 'U';
-    // Pequeño
-    if (/^P$|^S$|^PP$|^XS$|^1$|^2$|^34$|^36$|^35$|^XXS$/i.test(v))
-        return 'P';
-    // Mediano
-    if (/^M$|^3$|^4$|^38$|^40$/i.test(v))
-        return 'M';
-    // Grande
-    if (/^G$|^L$|^5$|^6$|^42$|^44$/i.test(v))
-        return 'G';
-    if (/^GG$|^7$|^8$|^46$/i.test(v))
-        return 'GG';
-    // Extra grande
-    if (/^XG$|^XL$|^9$|^10$|^48$/i.test(v))
-        return 'XG';
-    if (/^XXG$|^XXL$|^11$|^12$|^50$/i.test(v))
-        return 'XXG';
-    if (/^XXXG$|^XXXL$|^13$|^52$/i.test(v))
-        return 'XXXG';
-    // Por texto
-    if (/EXTRA\s*GRANDE|XXL|XX\s*L/i.test(v) && !/XXX/i.test(v))
-        return 'XXG';
-    if (/XXX|TRIPLE/i.test(v))
-        return 'XXXG';
-    if (/XL|EXTRA\s*LARGE/i.test(v))
-        return 'XG';
-    if (/GRANDE|LARGE|^L$/i.test(v))
-        return 'G';
-    if (/MEDIANO|MEDIUM|^M$/i.test(v))
-        return 'M';
-    if (/PEQUEÑO|SMALL|^S$|^P$/i.test(v))
-        return 'P';
-    return v; // dejar como está si no hay match
-}
 const delay = (ms) => new Promise(r => setTimeout(r, ms));
-const normalizeSizesInTiendaNube = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
-    try {
-        const integration = yield (0, db_1.get)(`SELECT * FROM integrations WHERE platform = 'tiendanube'`);
-        if (!integration || !integration.access_token) {
-            return res.status(400).json({ message: 'No estás conectado a Tienda Nube' });
-        }
-        const { access_token, user_id: store_id } = integration;
+function getTiendaNubeStoreId(integration) {
+    var _a, _b;
+    const id = String((_b = (_a = integration.store_id) !== null && _a !== void 0 ? _a : integration.user_id) !== null && _b !== void 0 ? _b : '').trim();
+    return id || null;
+}
+function parseTnNormalizeBatchBody(req) {
+    var _a, _b, _c, _d, _e, _f;
+    const body = (req.body && typeof req.body === 'object' ? req.body : {});
+    const startPage = Math.max(1, parseInt(String((_a = body.startPage) !== null && _a !== void 0 ? _a : 1), 10) || 1);
+    const maxPages = Math.min(10, Math.max(1, parseInt(String((_b = body.maxPages) !== null && _b !== void 0 ? _b : 2), 10) || 2));
+    const maxUpdates = Math.min(200, Math.max(1, parseInt(String((_c = body.maxUpdates) !== null && _c !== void 0 ? _c : 25), 10) || 25));
+    const raw = body.resume;
+    let resume;
+    if (raw && typeof raw === 'object') {
+        const r = raw;
+        resume = {
+            page: Math.max(1, parseInt(String((_d = r.page) !== null && _d !== void 0 ? _d : startPage), 10) || startPage),
+            productIndex: Math.max(0, parseInt(String((_e = r.productIndex) !== null && _e !== void 0 ? _e : 0), 10) || 0),
+            variantIndex: Math.max(0, parseInt(String((_f = r.variantIndex) !== null && _f !== void 0 ? _f : 0), 10) || 0),
+        };
+    }
+    return { startPage, maxPages, maxUpdates, resume };
+}
+function tnAttributeLabel(attr) {
+    var _a, _b, _c;
+    return ((_c = (_b = (_a = attr === null || attr === void 0 ? void 0 : attr.es) !== null && _a !== void 0 ? _a : attr === null || attr === void 0 ? void 0 : attr.en) !== null && _b !== void 0 ? _b : attr === null || attr === void 0 ? void 0 : attr.pt) !== null && _c !== void 0 ? _c : (typeof attr === 'string' ? attr : '')).toString();
+}
+function tnVariantValueText(val) {
+    var _a, _b, _c, _d;
+    return ((_d = ((_c = (_b = (_a = val === null || val === void 0 ? void 0 : val.es) !== null && _a !== void 0 ? _a : val === null || val === void 0 ? void 0 : val.pt) !== null && _b !== void 0 ? _b : val === null || val === void 0 ? void 0 : val.en) !== null && _c !== void 0 ? _c : val)) === null || _d === void 0 ? void 0 : _d.toString().trim()) || '';
+}
+/** Clave única Color+Talle+… para detectar variantes repetidas en Tienda Nube. */
+function tnVariantComboKey(values, attrIndex, replaceAtAttr) {
+    const parts = [];
+    for (let i = 0; i < values.length; i++) {
+        const text = i === attrIndex && replaceAtAttr !== undefined ? replaceAtAttr : tnVariantValueText(values[i]);
+        parts.push(text
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .trim());
+    }
+    return parts.join('||');
+}
+function normalizeTiendaNubeVariantAttribute(options) {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
+    return __awaiter(this, void 0, void 0, function* () {
+        const { access_token, store_id, isTargetAttribute, normalizeValue, completedMessage } = options;
+        const shouldUpdate = (_a = options.shouldUpdate) !== null && _a !== void 0 ? _a : ((c, n) => c !== n);
+        const maxPages = (_b = options.maxPages) !== null && _b !== void 0 ? _b : 2;
+        const maxUpdates = (_c = options.maxUpdates) !== null && _c !== void 0 ? _c : 40;
         const logs = [];
         const log = (msg) => {
             console.log(msg);
@@ -710,80 +1030,322 @@ const normalizeSizesInTiendaNube = (req, res) => __awaiter(void 0, void 0, void 
         };
         let updatedVariants = 0;
         let skippedProducts = 0;
-        let page = 1;
-        let hasMore = true;
-        const isSizeAttr = (name) => /talle|talla|size|tamano|tamaño/i.test(name);
-        while (hasMore) {
-            const response = yield axios_1.default.get(`https://api.tiendanube.com/v1/${store_id}/products`, {
-                headers: { 'Authentication': `bearer ${access_token}`, 'User-Agent': TN_USER_AGENT },
-                params: { page, per_page: 50 }
-            });
-            const products = response.data;
-            if (!(products === null || products === void 0 ? void 0 : products.length)) {
-                hasMore = false;
-                break;
+        let skippedDuplicates = 0;
+        let mergedVariants = 0;
+        let updatesThisBatch = 0;
+        let page = (_f = (_e = (_d = options.resume) === null || _d === void 0 ? void 0 : _d.page) !== null && _e !== void 0 ? _e : options.startPage) !== null && _f !== void 0 ? _f : 1;
+        let productStart = (_h = (_g = options.resume) === null || _g === void 0 ? void 0 : _g.productIndex) !== null && _h !== void 0 ? _h : 0;
+        let variantStart = (_k = (_j = options.resume) === null || _j === void 0 ? void 0 : _j.variantIndex) !== null && _k !== void 0 ? _k : 0;
+        let pagesProcessed = 0;
+        let stoppedByCap = false;
+        let lastPageFull = false;
+        const perPage = 50;
+        const tnHeaders = { Authentication: `bearer ${access_token}`, 'User-Agent': TN_USER_AGENT };
+        while (pagesProcessed < maxPages && updatesThisBatch < maxUpdates) {
+            let products = [];
+            try {
+                const response = yield axios_1.default.get(`https://api.tiendanube.com/v1/${store_id}/products`, {
+                    headers: tnHeaders,
+                    params: { page, per_page: perPage },
+                });
+                products = Array.isArray(response.data) ? response.data : [];
             }
-            for (const tnProduct of products) {
+            catch (err) {
+                const ax = err;
+                if (((_l = ax.response) === null || _l === void 0 ? void 0 : _l.status) === 404) {
+                    break;
+                }
+                throw err;
+            }
+            if (!products.length)
+                break;
+            lastPageFull = products.length >= perPage;
+            log(`[TN] Página ${page}: ${products.length} productos`);
+            for (let pi = productStart; pi < products.length; pi++) {
+                const tnProduct = products[pi];
                 const productAttributes = tnProduct.attributes || [];
-                let sizeAttrIndex = -1;
+                let attrIndex = -1;
                 for (let i = 0; i < productAttributes.length; i++) {
-                    const attr = productAttributes[i];
-                    const name = ((_c = (_b = (_a = attr === null || attr === void 0 ? void 0 : attr.es) !== null && _a !== void 0 ? _a : attr === null || attr === void 0 ? void 0 : attr.en) !== null && _b !== void 0 ? _b : attr === null || attr === void 0 ? void 0 : attr.pt) !== null && _c !== void 0 ? _c : (typeof attr === 'string' ? attr : '')).toString();
-                    if (isSizeAttr(name)) {
-                        sizeAttrIndex = i;
+                    if (isTargetAttribute(tnAttributeLabel(productAttributes[i]))) {
+                        attrIndex = i;
                         break;
                     }
                 }
-                if (sizeAttrIndex === -1) {
+                if (attrIndex === -1) {
                     skippedProducts++;
+                    variantStart = 0;
                     continue;
                 }
-                for (const variant of tnProduct.variants || []) {
+                let variants = tnProduct.variants || [];
+                try {
+                    const allVariants = yield (0, tiendanubeVariantMerge_service_1.fetchAllTiendaNubeProductVariants)(store_id, tnProduct.id, tnHeaders);
+                    if (allVariants.length > 0)
+                        variants = allVariants;
+                }
+                catch (fetchErr) {
+                    const m = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+                    log(`  [WARN] Producto ${tnProduct.id}: no se pudieron listar todas las variantes (${m})`);
+                }
+                const plans = [];
+                for (let vi = 0; vi < variants.length; vi++) {
+                    const variant = variants[vi];
                     const values = variant.values || [];
-                    if (sizeAttrIndex >= values.length)
+                    if (attrIndex >= values.length)
                         continue;
-                    const sizeVal = values[sizeAttrIndex];
-                    const current = ((_g = ((_f = (_e = (_d = sizeVal === null || sizeVal === void 0 ? void 0 : sizeVal.es) !== null && _d !== void 0 ? _d : sizeVal === null || sizeVal === void 0 ? void 0 : sizeVal.pt) !== null && _e !== void 0 ? _e : sizeVal === null || sizeVal === void 0 ? void 0 : sizeVal.en) !== null && _f !== void 0 ? _f : sizeVal)) === null || _g === void 0 ? void 0 : _g.toString().trim()) || '';
-                    const normalized = normalizeSizeToStandard(current);
-                    if (normalized === current)
+                    let current = '';
+                    let normalized = '';
+                    try {
+                        current = tnVariantValueText(values[attrIndex]);
+                        normalized = normalizeValue(current);
+                    }
+                    catch (normErr) {
+                        const m = normErr instanceof Error ? normErr.message : String(normErr);
+                        log(`  [ERROR] Variante ${variant.id}: normalización falló (${m})`);
+                        continue;
+                    }
+                    const willUpdate = shouldUpdate(current, normalized);
+                    plans.push({
+                        variant,
+                        vi,
+                        current,
+                        normalized,
+                        willUpdate,
+                        newKey: tnVariantComboKey(values, attrIndex, normalized),
+                    });
+                }
+                const groupsByEffectiveKey = new Map();
+                for (const p of plans) {
+                    const values = p.variant.values || [];
+                    const key = p.willUpdate ? p.newKey : tnVariantComboKey(values, attrIndex);
+                    if (!groupsByEffectiveKey.has(key))
+                        groupsByEffectiveKey.set(key, []);
+                    groupsByEffectiveKey.get(key).push(p);
+                }
+                const mergedKeys = new Set();
+                for (let pi2 = 0; pi2 < plans.length; pi2++) {
+                    const p = plans[pi2];
+                    if (pi === productStart && p.vi < variantStart)
+                        continue;
+                    if (updatesThisBatch >= maxUpdates) {
+                        stoppedByCap = true;
+                        return {
+                            updatedVariants,
+                            skippedProducts,
+                            skippedDuplicates,
+                            mergedVariants,
+                            logs,
+                            hasMore: true,
+                            resume: { page, productIndex: pi, variantIndex: p.vi },
+                        };
+                    }
+                    const values = p.variant.values || [];
+                    const effKey = p.willUpdate ? p.newKey : tnVariantComboKey(values, attrIndex);
+                    const group = groupsByEffectiveKey.get(effKey) || [];
+                    if (group.length > 1) {
+                        if (mergedKeys.has(effKey))
+                            continue;
+                        mergedKeys.add(effKey);
+                        try {
+                            const { mergedCount } = yield (0, tiendanubeVariantMerge_service_1.mergeTiendaNubeDuplicateVariants)({
+                                storeId: store_id,
+                                productId: tnProduct.id,
+                                attrIndex,
+                                group: group.map((g) => ({
+                                    variant: g.variant,
+                                    current: g.current,
+                                    normalized: g.normalized,
+                                    willUpdate: g.willUpdate,
+                                })),
+                                headers: tnHeaders,
+                                log,
+                            });
+                            mergedVariants += mergedCount;
+                            updatedVariants += 1;
+                            updatesThisBatch++;
+                        }
+                        catch (err) {
+                            skippedDuplicates++;
+                            const m = err instanceof Error ? err.message : String(err);
+                            log(`  [ERROR] Producto ${tnProduct.id} fusión (${effKey}): ${m}`);
+                        }
+                        continue;
+                    }
+                    if (!p.willUpdate)
                         continue;
                     const newValues = values.map((obj, i) => {
-                        if (i !== sizeAttrIndex)
+                        if (i !== attrIndex)
                             return obj;
                         const langKeys = obj && typeof obj === 'object' ? Object.keys(obj) : ['es'];
                         const next = {};
                         for (const lang of langKeys)
-                            next[lang] = normalized;
+                            next[lang] = p.normalized;
                         return next;
                     });
                     try {
-                        yield axios_1.default.put(`https://api.tiendanube.com/v1/${store_id}/products/${tnProduct.id}/variants/${variant.id}`, { values: newValues }, { headers: { 'Authentication': `bearer ${access_token}`, 'User-Agent': TN_USER_AGENT } });
+                        yield (0, tiendanubeClient_1.tnPutWithRetry)(axios_1.default, `https://api.tiendanube.com/v1/${store_id}/products/${tnProduct.id}/variants/${p.variant.id}`, { values: newValues }, { headers: tnHeaders });
                         updatedVariants++;
-                        log(`  [TN] Producto ${tnProduct.id} variante ${variant.id}: "${current}" → "${normalized}"`);
-                        yield delay(250);
+                        updatesThisBatch++;
+                        log(`  [TN] Producto ${tnProduct.id} variante ${p.variant.id}: "${p.current}" → "${p.normalized}"`);
                     }
                     catch (err) {
-                        log(`  [ERROR] Variante ${variant.id}: ${((_j = (_h = err.response) === null || _h === void 0 ? void 0 : _h.data) === null || _j === void 0 ? void 0 : _j.description) || err.message}`);
+                        const ax = err;
+                        const desc = ((_o = (_m = ax.response) === null || _m === void 0 ? void 0 : _m.data) === null || _o === void 0 ? void 0 : _o.description) || ax.message || '';
+                        if (/cannot be repeated|no pueden repetirse|variantes.*repetid/i.test(desc)) {
+                            skippedDuplicates++;
+                            log(`  [SKIP] Variante ${p.variant.id}: combinación ya existe (${desc})`);
+                        }
+                        else {
+                            log(`  [ERROR] Variante ${p.variant.id}: ${desc}`);
+                        }
                     }
                 }
+                variantStart = 0;
             }
+            productStart = 0;
             page++;
+            pagesProcessed++;
+            if (!lastPageFull)
+                break;
             if (page > 300)
-                hasMore = false; // hasta 300 páginas × 50 = 15.000 productos
+                break;
         }
-        res.json({
-            message: 'Normalización de talles en Tienda Nube completada',
+        const hasMore = stoppedByCap || (lastPageFull && pagesProcessed >= maxPages);
+        if (!hasMore)
+            log(completedMessage);
+        return {
             updatedVariants,
             skippedProducts,
-            logs
-        });
+            skippedDuplicates,
+            mergedVariants,
+            logs,
+            hasMore,
+            nextPage: hasMore && !stoppedByCap ? page : undefined,
+        };
+    });
+}
+const normalizeSizesInTiendaNube = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _o, _p;
+    try {
+        const integration = yield (0, db_1.get)(`SELECT * FROM integrations WHERE platform = 'tiendanube'`);
+        if (!(integration === null || integration === void 0 ? void 0 : integration.access_token)) {
+            return res.status(400).json({ message: 'No estás conectado a Tienda Nube' });
+        }
+        const store_id = getTiendaNubeStoreId(integration);
+        if (!store_id) {
+            return res.status(400).json({ message: 'Integración Tienda Nube sin ID de tienda (store_id)' });
+        }
+        const batch = parseTnNormalizeBatchBody(req);
+        const result = yield normalizeTiendaNubeVariantAttribute(Object.assign({ access_token: integration.access_token, store_id, isTargetAttribute: (name) => /talle|talla|size|tamano|tamaño/i.test(name), normalizeValue: talleStandard_1.normalizeSizeToStandard, completedMessage: 'Normalización de talles en Tienda Nube completada' }, batch));
+        res.json(Object.assign({ message: result.hasMore
+                ? 'Lote de talles procesado; hay más productos pendientes'
+                : 'Normalización de talles en Tienda Nube completada' }, result));
     }
     catch (error) {
-        console.error('Error normalizing sizes:', ((_k = error.response) === null || _k === void 0 ? void 0 : _k.data) || error.message);
-        res.status(500).json({ message: 'Error normalizando talles en Tienda Nube', error: error.message });
+        const ax = error;
+        console.error('Error normalizing sizes:', ((_o = ax.response) === null || _o === void 0 ? void 0 : _o.data) || ax.message);
+        res.status(500).json({
+            message: 'Error normalizando talles en Tienda Nube',
+            error: ax.message,
+            detail: (_p = ax.response) === null || _p === void 0 ? void 0 : _p.data,
+        });
     }
 });
 exports.normalizeSizesInTiendaNube = normalizeSizesInTiendaNube;
+const normalizeColorsInTiendaNube = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _q, _r;
+    try {
+        const integration = yield (0, db_1.get)(`SELECT * FROM integrations WHERE platform = 'tiendanube'`);
+        if (!(integration === null || integration === void 0 ? void 0 : integration.access_token)) {
+            return res.status(400).json({ message: 'No estás conectado a Tienda Nube' });
+        }
+        const store_id = getTiendaNubeStoreId(integration);
+        if (!store_id) {
+            return res.status(400).json({ message: 'Integración Tienda Nube sin ID de tienda (store_id)' });
+        }
+        const batch = parseTnNormalizeBatchBody(req);
+        const result = yield normalizeTiendaNubeVariantAttribute(Object.assign({ access_token: integration.access_token, store_id, isTargetAttribute: (name) => /color|colour|colore|cor\b|colores/i.test(name) && !/talle|talla|size|tamano|tamaño/i.test(name), normalizeValue: colorNameStandard_1.normalizeColorNameToStandard, shouldUpdate: colorNameStandard_1.shouldUpdateColorValue, completedMessage: 'Normalización de colores en Tienda Nube completada' }, batch));
+        res.json(Object.assign({ message: result.hasMore
+                ? 'Lote de colores procesado; hay más productos pendientes'
+                : 'Normalización de colores en Tienda Nube completada' }, result));
+    }
+    catch (error) {
+        const ax = error;
+        console.error('Error normalizing colors:', ((_q = ax.response) === null || _q === void 0 ? void 0 : _q.data) || ax.message);
+        res.status(500).json({
+            message: 'Error normalizando colores en Tienda Nube',
+            error: ax.message,
+            detail: (_r = ax.response) === null || _r === void 0 ? void 0 : _r.data,
+        });
+    }
+});
+exports.normalizeColorsInTiendaNube = normalizeColorsInTiendaNube;
+/** Envía a Tienda Nube el SKU de LupoHub (base-talle-color) en todas las variantes vinculadas. */
+const syncSkusToTiendaNube = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _s, _t, _u;
+    try {
+        const integration = yield (0, db_1.get)(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
+        if (!(integration === null || integration === void 0 ? void 0 : integration.access_token)) {
+            return res.status(400).json({ message: 'No estás conectado a Tienda Nube' });
+        }
+        const store_id = getTiendaNubeStoreId(integration);
+        if (!store_id) {
+            return res.status(400).json({ message: 'Integración Tienda Nube sin ID de tienda (store_id)' });
+        }
+        const rows = yield (0, db_1.query)(`SELECT pv.id AS variant_id, pv.sku, pv.tienda_nube_variant_id, p.tienda_nube_id
+       FROM product_variants pv
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       WHERE pv.tienda_nube_variant_id IS NOT NULL
+         AND p.tienda_nube_id IS NOT NULL
+         AND pv.sku IS NOT NULL
+         AND TRIM(pv.sku) <> ''`);
+        const headers = {
+            Authentication: `bearer ${integration.access_token}`,
+            'User-Agent': TN_USER_AGENT,
+            'Content-Type': 'application/json',
+        };
+        const logs = [];
+        let updated = 0;
+        let errors = 0;
+        let skipped = 0;
+        for (const r of rows) {
+            const lupoSku = (0, skuString_1.skuToCanonicalString)(r.sku);
+            if (!lupoSku) {
+                skipped++;
+                continue;
+            }
+            try {
+                yield (0, tiendanubeClient_1.tnPutWithRetry)(axios_1.default, `https://api.tiendanube.com/v1/${store_id}/products/${r.tienda_nube_id}/variants/${r.tienda_nube_variant_id}`, { sku: lupoSku }, { headers });
+                updated++;
+                if (logs.length < 200)
+                    logs.push(`[OK] ${lupoSku} (variante ${r.tienda_nube_variant_id})`);
+            }
+            catch (err) {
+                errors++;
+                const ax = err;
+                if (logs.length < 200) {
+                    logs.push(`[ERROR] ${lupoSku}: ${((_t = (_s = ax.response) === null || _s === void 0 ? void 0 : _s.data) === null || _t === void 0 ? void 0 : _t.description) || ax.message}`);
+                }
+            }
+            if (TN_RATE_LIMIT_DELAY_MS > 0)
+                yield sleep(TN_RATE_LIMIT_DELAY_MS);
+        }
+        res.json({
+            message: 'Sincronización de SKU a Tienda Nube completada',
+            total: rows.length,
+            updated,
+            errors,
+            skipped,
+            logs,
+        });
+    }
+    catch (error) {
+        const ax = error;
+        console.error('Error syncing SKUs to TN:', ((_u = ax.response) === null || _u === void 0 ? void 0 : _u.data) || ax.message);
+        res.status(500).json({ message: 'Error sincronizando SKU a Tienda Nube', error: ax.message });
+    }
+});
+exports.syncSkusToTiendaNube = syncSkusToTiendaNube;
 const disconnectIntegration = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const { platform } = req.params;
     if (!platform || !['mercadolibre', 'tiendanube'].includes(platform)) {
@@ -799,7 +1361,7 @@ const disconnectIntegration = (req, res) => __awaiter(void 0, void 0, void 0, fu
 });
 exports.disconnectIntegration = disconnectIntegration;
 const testMercadoLibreConnection = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _v, _w, _x, _y, _z;
     try {
         const mlToken = yield getValidMLToken();
         if (!mlToken) {
@@ -828,23 +1390,23 @@ const testMercadoLibreConnection = (req, res) => __awaiter(void 0, void 0, void 
                 nickname: userRes.data.nickname,
                 email: userRes.data.email,
                 country: userRes.data.country_id,
-                totalItems: ((_a = itemsRes.data.paging) === null || _a === void 0 ? void 0 : _a.total) || ((_b = itemsRes.data.results) === null || _b === void 0 ? void 0 : _b.length) || 0,
+                totalItems: ((_v = itemsRes.data.paging) === null || _v === void 0 ? void 0 : _v.total) || ((_w = itemsRes.data.results) === null || _w === void 0 ? void 0 : _w.length) || 0,
                 expiresAt: (integration === null || integration === void 0 ? void 0 : integration.expires_at) ? new Date(integration.expires_at).toLocaleString() : 'N/A'
             }
         });
     }
     catch (error) {
-        console.error('Error testing ML connection:', ((_c = error.response) === null || _c === void 0 ? void 0 : _c.data) || error.message);
+        console.error('Error testing ML connection:', ((_x = error.response) === null || _x === void 0 ? void 0 : _x.data) || error.message);
         res.status(500).json({
             success: false,
             message: 'Error de conexión',
-            details: ((_e = (_d = error.response) === null || _d === void 0 ? void 0 : _d.data) === null || _e === void 0 ? void 0 : _e.message) || error.message
+            details: ((_z = (_y = error.response) === null || _y === void 0 ? void 0 : _y.data) === null || _z === void 0 ? void 0 : _z.message) || error.message
         });
     }
 });
 exports.testMercadoLibreConnection = testMercadoLibreConnection;
 const debugMercadoLibreItem = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _0, _1, _2, _3, _4;
     try {
         const mlToken = yield getValidMLToken();
         if (!mlToken) {
@@ -855,7 +1417,7 @@ const debugMercadoLibreItem = (req, res) => __awaiter(void 0, void 0, void 0, fu
         const searchRes = yield axios_1.default.get(`https://api.mercadolibre.com/users/${user_id}/items/search?limit=1`, {
             headers: { Authorization: `Bearer ${access_token}` }
         });
-        const itemId = (_a = searchRes.data.results) === null || _a === void 0 ? void 0 : _a[0];
+        const itemId = (_0 = searchRes.data.results) === null || _0 === void 0 ? void 0 : _0[0];
         if (!itemId) {
             return res.json({ message: 'No hay publicaciones' });
         }
@@ -864,13 +1426,13 @@ const debugMercadoLibreItem = (req, res) => __awaiter(void 0, void 0, void 0, fu
             headers: { Authorization: `Bearer ${access_token}` }
         });
         const item = itemRes.data;
-        const firstVariation = (_b = item.variations) === null || _b === void 0 ? void 0 : _b[0];
+        const firstVariation = (_1 = item.variations) === null || _1 === void 0 ? void 0 : _1[0];
         res.json({
             itemId: item.id,
             title: item.title,
             seller_custom_field: item.seller_custom_field,
             seller_sku: item.seller_sku,
-            variation_count: ((_c = item.variations) === null || _c === void 0 ? void 0 : _c.length) || 0,
+            variation_count: ((_2 = item.variations) === null || _2 === void 0 ? void 0 : _2.length) || 0,
             first_variation: firstVariation ? {
                 id: firstVariation.id,
                 seller_custom_field: firstVariation.seller_custom_field,
@@ -879,16 +1441,16 @@ const debugMercadoLibreItem = (req, res) => __awaiter(void 0, void 0, void 0, fu
                 attribute_combinations: firstVariation.attribute_combinations,
                 all_keys: Object.keys(firstVariation)
             } : null,
-            item_attributes: (_d = item.attributes) === null || _d === void 0 ? void 0 : _d.filter((a) => { var _a, _b, _c; return ((_a = a.id) === null || _a === void 0 ? void 0 : _a.includes('SKU')) || ((_b = a.id) === null || _b === void 0 ? void 0 : _b.includes('GTIN')) || ((_c = a.id) === null || _c === void 0 ? void 0 : _c.includes('CODE')); })
+            item_attributes: (_3 = item.attributes) === null || _3 === void 0 ? void 0 : _3.filter((a) => { var _a, _b, _c; return ((_a = a.id) === null || _a === void 0 ? void 0 : _a.includes('SKU')) || ((_b = a.id) === null || _b === void 0 ? void 0 : _b.includes('GTIN')) || ((_c = a.id) === null || _c === void 0 ? void 0 : _c.includes('CODE')); })
         });
     }
     catch (error) {
-        res.status(500).json({ error: error.message, details: (_e = error.response) === null || _e === void 0 ? void 0 : _e.data });
+        res.status(500).json({ error: error.message, details: (_4 = error.response) === null || _4 === void 0 ? void 0 : _4.data });
     }
 });
 exports.debugMercadoLibreItem = debugMercadoLibreItem;
 const syncProductsFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
+    var _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16;
     try {
         const mlToken = yield getValidMLToken();
         if (!mlToken) {
@@ -918,7 +1480,7 @@ const syncProductsFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, voi
                 logs.push(`[ML] Página ${Math.floor(offset / limit) + 1}: ${results.length} items (total acumulado: ${allItems.length})`);
                 offset += limit;
                 // Continuar si hay más items (respetar total de la API y límite configurable)
-                const total = ((_a = searchRes.data.paging) === null || _a === void 0 ? void 0 : _a.total) || 0;
+                const total = ((_5 = searchRes.data.paging) === null || _5 === void 0 ? void 0 : _5.total) || 0;
                 if (offset >= total || results.length === 0)
                     break;
                 if (allItems.length >= ML_SYNC_MAX_ITEMS)
@@ -926,8 +1488,8 @@ const syncProductsFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, voi
             } while (true);
         }
         catch (searchError) {
-            logs.push(`[ML ERROR] Error buscando items: ${((_c = (_b = searchError.response) === null || _b === void 0 ? void 0 : _b.data) === null || _c === void 0 ? void 0 : _c.message) || searchError.message}`);
-            logs.push(`[ML ERROR] Status: ${(_d = searchError.response) === null || _d === void 0 ? void 0 : _d.status}`);
+            logs.push(`[ML ERROR] Error buscando items: ${((_7 = (_6 = searchError.response) === null || _6 === void 0 ? void 0 : _6.data) === null || _7 === void 0 ? void 0 : _7.message) || searchError.message}`);
+            logs.push(`[ML ERROR] Status: ${(_8 = searchError.response) === null || _8 === void 0 ? void 0 : _8.status}`);
             logs.push(`[ML ERROR] URL: https://api.mercadolibre.com/users/${realUserId}/items/search`);
             return res.json({
                 message: 'Error obteniendo publicaciones de ML',
@@ -974,12 +1536,12 @@ const syncProductsFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, voi
                         for (const v of variations) {
                             // SKU en ML: atributo SELLER_SKU en variación (/items con include_attributes=all)
                             const skuAttr = Array.isArray(v.attributes) && v.attributes.find((a) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
-                            const mlSku = (skuAttr ? ((_f = (_e = skuAttr.value_name) !== null && _e !== void 0 ? _e : skuAttr.value) !== null && _f !== void 0 ? _f : '').toString().trim() : '')
-                                || ((_h = (_g = v.seller_sku) !== null && _g !== void 0 ? _g : v.seller_custom_field) !== null && _h !== void 0 ? _h : '').toString().trim();
+                            const mlSku = (skuAttr ? ((_10 = (_9 = skuAttr.value_name) !== null && _9 !== void 0 ? _9 : skuAttr.value) !== null && _10 !== void 0 ? _10 : '').toString().trim() : '')
+                                || ((_12 = (_11 = v.seller_sku) !== null && _11 !== void 0 ? _11 : v.seller_custom_field) !== null && _12 !== void 0 ? _12 : '').toString().trim();
                             // Extraer color y talle de attribute_combinations
                             const attrCombs = v.attribute_combinations || [];
-                            const mlColor = ((_j = attrCombs.find((a) => a.id === 'COLOR')) === null || _j === void 0 ? void 0 : _j.value_name) || '';
-                            const mlSize = ((_k = attrCombs.find((a) => a.id === 'SIZE')) === null || _k === void 0 ? void 0 : _k.value_name) || '';
+                            const mlColor = ((_13 = attrCombs.find((a) => a.id === 'COLOR')) === null || _13 === void 0 ? void 0 : _13.value_name) || '';
+                            const mlSize = ((_14 = attrCombs.find((a) => a.id === 'SIZE')) === null || _14 === void 0 ? void 0 : _14.value_name) || '';
                             let row = null;
                             // Método 1: Buscar por SKU si existe
                             if (mlSku) {
@@ -1061,7 +1623,7 @@ const syncProductsFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, voi
                 }
             }
             catch (e) {
-                logs.push(`[ML Lote Error]: ${((_m = (_l = e === null || e === void 0 ? void 0 : e.response) === null || _l === void 0 ? void 0 : _l.data) === null || _m === void 0 ? void 0 : _m.message) || (e === null || e === void 0 ? void 0 : e.message) || 'Error'}`);
+                logs.push(`[ML Lote Error]: ${((_16 = (_15 = e === null || e === void 0 ? void 0 : e.response) === null || _15 === void 0 ? void 0 : _15.data) === null || _16 === void 0 ? void 0 : _16.message) || (e === null || e === void 0 ? void 0 : e.message) || 'Error'}`);
             }
         }
         logs.push(`\n========== RESUMEN ==========`);
@@ -1089,15 +1651,15 @@ exports.syncProductsFromMercadoLibre = syncProductsFromMercadoLibre;
 // ==================== WEBHOOKS ====================
 // Webhook de Tienda Nube para órdenes/ventas
 const handleTiendaNubeWebhook = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z;
+    var _17, _18, _19, _20, _21, _22, _23, _24, _25, _26, _27, _28, _29, _30, _31, _32, _33, _34, _35, _36, _37, _38, _39, _40;
     try {
-        const event = ((_d = (_c = (_b = (_a = req.body) === null || _a === void 0 ? void 0 : _a.event) !== null && _b !== void 0 ? _b : req.headers['x-linkedstore-topic']) !== null && _c !== void 0 ? _c : req.headers['x-tiendanube-topic']) !== null && _d !== void 0 ? _d : '').toString();
-        const storeIdFromReq = ((_h = (_g = (_f = (_e = req.body) === null || _e === void 0 ? void 0 : _e.store_id) !== null && _f !== void 0 ? _f : req.headers['x-linkedstore-id']) !== null && _g !== void 0 ? _g : req.headers['x-tiendanube-store-id']) !== null && _h !== void 0 ? _h : '').toString();
+        const event = ((_20 = (_19 = (_18 = (_17 = req.body) === null || _17 === void 0 ? void 0 : _17.event) !== null && _18 !== void 0 ? _18 : req.headers['x-linkedstore-topic']) !== null && _19 !== void 0 ? _19 : req.headers['x-tiendanube-topic']) !== null && _20 !== void 0 ? _20 : '').toString();
+        const storeIdFromReq = ((_24 = (_23 = (_22 = (_21 = req.body) === null || _21 === void 0 ? void 0 : _21.store_id) !== null && _22 !== void 0 ? _22 : req.headers['x-linkedstore-id']) !== null && _23 !== void 0 ? _23 : req.headers['x-tiendanube-store-id']) !== null && _24 !== void 0 ? _24 : '').toString();
         console.log(`[TN Webhook] Evento: ${event}, Store: ${storeIdFromReq || '-'}`);
         // Verificar store_id solo cuando viene en el webhook.
         // En algunos eventos/proveedores no llega este dato y antes se ignoraba todo por error.
         const integration = yield (0, db_1.get)(`SELECT store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
-        const storedStoreId = (_k = ((_j = integration === null || integration === void 0 ? void 0 : integration.store_id) !== null && _j !== void 0 ? _j : integration === null || integration === void 0 ? void 0 : integration.user_id)) === null || _k === void 0 ? void 0 : _k.toString();
+        const storedStoreId = (_26 = ((_25 = integration === null || integration === void 0 ? void 0 : integration.store_id) !== null && _25 !== void 0 ? _25 : integration === null || integration === void 0 ? void 0 : integration.user_id)) === null || _26 === void 0 ? void 0 : _26.toString();
         if (!integration) {
             console.log('[TN Webhook] No hay integración de Tienda Nube, ignorando');
             return res.status(200).json({ received: true, ignored: true });
@@ -1108,7 +1670,7 @@ const handleTiendaNubeWebhook = (req, res) => __awaiter(void 0, void 0, void 0, 
         }
         // Procesar solo cuando la orden se paga (descontar stock). Responder 200 enseguida: TN tiene timeout de 3s y reintentos si no hay 2XX.
         if (event === 'order/paid') {
-            const orderId = (_r = (_p = (_m = (_l = req.body.id) !== null && _l !== void 0 ? _l : req.body.order_id) !== null && _m !== void 0 ? _m : (_o = req.body.order) === null || _o === void 0 ? void 0 : _o.id) !== null && _p !== void 0 ? _p : (_q = req.body.data) === null || _q === void 0 ? void 0 : _q.id) !== null && _r !== void 0 ? _r : (_s = req.body.data) === null || _s === void 0 ? void 0 : _s.order_id;
+            const orderId = (_32 = (_30 = (_28 = (_27 = req.body.id) !== null && _27 !== void 0 ? _27 : req.body.order_id) !== null && _28 !== void 0 ? _28 : (_29 = req.body.order) === null || _29 === void 0 ? void 0 : _29.id) !== null && _30 !== void 0 ? _30 : (_31 = req.body.data) === null || _31 === void 0 ? void 0 : _31.id) !== null && _32 !== void 0 ? _32 : (_33 = req.body.data) === null || _33 === void 0 ? void 0 : _33.order_id;
             if (orderId) {
                 processTiendaNubeOrder(String(orderId)).catch((err) => console.error('[TN Order] Error procesando orden en background:', (err === null || err === void 0 ? void 0 : err.message) || err));
             }
@@ -1118,7 +1680,7 @@ const handleTiendaNubeWebhook = (req, res) => __awaiter(void 0, void 0, void 0, 
         }
         // Al cancelar una orden, restaurar el stock que se había descontado
         if (event === 'order/cancelled') {
-            const orderId = (_y = (_w = (_u = (_t = req.body.id) !== null && _t !== void 0 ? _t : req.body.order_id) !== null && _u !== void 0 ? _u : (_v = req.body.order) === null || _v === void 0 ? void 0 : _v.id) !== null && _w !== void 0 ? _w : (_x = req.body.data) === null || _x === void 0 ? void 0 : _x.id) !== null && _y !== void 0 ? _y : (_z = req.body.data) === null || _z === void 0 ? void 0 : _z.order_id;
+            const orderId = (_39 = (_37 = (_35 = (_34 = req.body.id) !== null && _34 !== void 0 ? _34 : req.body.order_id) !== null && _35 !== void 0 ? _35 : (_36 = req.body.order) === null || _36 === void 0 ? void 0 : _36.id) !== null && _37 !== void 0 ? _37 : (_38 = req.body.data) === null || _38 === void 0 ? void 0 : _38.id) !== null && _39 !== void 0 ? _39 : (_40 = req.body.data) === null || _40 === void 0 ? void 0 : _40.order_id;
             if (orderId) {
                 processTiendaNubeOrderCancelled(String(orderId)).catch((err) => console.error('[TN Order] Error restaurando stock por cancelación:', (err === null || err === void 0 ? void 0 : err.message) || err));
             }
@@ -1136,7 +1698,7 @@ const handleTiendaNubeWebhook = (req, res) => __awaiter(void 0, void 0, void 0, 
 exports.handleTiendaNubeWebhook = handleTiendaNubeWebhook;
 // Procesar orden de Tienda Nube y descontar stock
 const processTiendaNubeOrder = (orderId) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d;
+    var _41, _42, _43, _44;
     try {
         const integration = yield (0, db_1.get)(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
         if (!(integration === null || integration === void 0 ? void 0 : integration.access_token))
@@ -1182,17 +1744,17 @@ const processTiendaNubeOrder = (orderId) => __awaiter(void 0, void 0, void 0, fu
         const { updateVariantStock } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
         let discountedCount = 0;
         for (const item of order.products || []) {
-            const tnVariantIdRaw = (_a = item.variant_id) !== null && _a !== void 0 ? _a : item.variantId;
+            const tnVariantIdRaw = (_41 = item.variant_id) !== null && _41 !== void 0 ? _41 : item.variantId;
             const tnVariantId = tnVariantIdRaw != null ? String(tnVariantIdRaw) : null;
             const tnProductId = item.product_id != null ? String(item.product_id) : '';
-            const quantity = Math.max(0, parseInt(String((_b = item.quantity) !== null && _b !== void 0 ? _b : 0), 10) || 0);
+            const quantity = Math.max(0, parseInt(String((_42 = item.quantity) !== null && _42 !== void 0 ? _42 : 0), 10) || 0);
             const itemSku = (item.sku || item.variant_sku || '').toString().trim();
             if (quantity === 0)
                 continue;
             if (tnProductId || tnVariantId) {
                 const { findBundleByListing, deductStockForBundleListing } = yield Promise.resolve().then(() => __importStar(require('../services/publicationStockBundle.service')));
                 const bundle = yield findBundleByListing('tiendanube', tnProductId || tnVariantId || '', tnVariantId || '');
-                if ((_c = bundle === null || bundle === void 0 ? void 0 : bundle.items) === null || _c === void 0 ? void 0 : _c.length) {
+                if ((_43 = bundle === null || bundle === void 0 ? void 0 : bundle.items) === null || _43 === void 0 ? void 0 : _43.length) {
                     const { ok, lines } = yield deductStockForBundleListing(bundle, quantity, 'VENTA_TIENDA_NUBE', `Orden TN: ${orderId}`);
                     if (ok)
                         discountedCount++;
@@ -1205,7 +1767,7 @@ const processTiendaNubeOrder = (orderId) => __awaiter(void 0, void 0, void 0, fu
                 const fromPub = yield (0, db_1.get)(`SELECT vp.variant_id AS id, COALESCE(vp.pack_size, 1) AS tn_pack FROM variant_publications vp WHERE vp.platform = 'tiendanube' AND vp.external_variant_id = ? LIMIT 1`, [tnVariantId]);
                 if (fromPub === null || fromPub === void 0 ? void 0 : fromPub.id) {
                     const row = yield (0, db_1.get)(`SELECT stock AS current_stock FROM stocks WHERE variant_id = ?`, [fromPub.id]);
-                    variant = { id: fromPub.id, current_stock: Number((_d = row === null || row === void 0 ? void 0 : row.current_stock) !== null && _d !== void 0 ? _d : 0), tn_pack: Math.max(1, Number(fromPub.tn_pack) || 1) };
+                    variant = { id: fromPub.id, current_stock: Number((_44 = row === null || row === void 0 ? void 0 : row.current_stock) !== null && _44 !== void 0 ? _44 : 0), tn_pack: Math.max(1, Number(fromPub.tn_pack) || 1) };
                 }
             }
             if (!(variant === null || variant === void 0 ? void 0 : variant.id) && tnVariantId) {
@@ -1281,7 +1843,7 @@ const processTiendaNubeOrder = (orderId) => __awaiter(void 0, void 0, void 0, fu
 });
 /** Restaurar stock cuando se cancela una orden de Tienda Nube (revierte los movimientos VENTA_TIENDA_NUBE de esa orden). */
 const processTiendaNubeOrderCancelled = (orderId) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _45;
     try {
         const ref = `Orden TN: ${orderId}`;
         const cancelRef = `Cancelación orden TN: ${orderId}`;
@@ -1304,7 +1866,7 @@ const processTiendaNubeOrderCancelled = (orderId) => __awaiter(void 0, void 0, v
             if (amountToRestore <= 0)
                 continue;
             const row = yield (0, db_1.get)(`SELECT stock FROM stocks WHERE variant_id = ?`, [m.variant_id]);
-            const currentStock = Number((_a = row === null || row === void 0 ? void 0 : row.stock) !== null && _a !== void 0 ? _a : 0);
+            const currentStock = Number((_45 = row === null || row === void 0 ? void 0 : row.stock) !== null && _45 !== void 0 ? _45 : 0);
             const newStock = currentStock + amountToRestore;
             const ok = yield updateVariantStock(m.variant_id, newStock, 'CANCEL_VENTA_TIENDA_NUBE', cancelRef, true);
             if (ok) {
@@ -1322,9 +1884,9 @@ const processTiendaNubeOrderCancelled = (orderId) => __awaiter(void 0, void 0, v
 });
 /** Prueba manual: procesar una orden de Tienda Nube por ID (mismo flujo que el webhook). Útil para verificar que el stock se descuenta. */
 const testTiendaNubeOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d;
+    var _46, _47, _48, _49;
     try {
-        const orderId = ((_d = (_b = (_a = req.body) === null || _a === void 0 ? void 0 : _a.orderId) !== null && _b !== void 0 ? _b : (_c = req.query) === null || _c === void 0 ? void 0 : _c.orderId) !== null && _d !== void 0 ? _d : '').toString().trim();
+        const orderId = ((_49 = (_47 = (_46 = req.body) === null || _46 === void 0 ? void 0 : _46.orderId) !== null && _47 !== void 0 ? _47 : (_48 = req.query) === null || _48 === void 0 ? void 0 : _48.orderId) !== null && _49 !== void 0 ? _49 : '').toString().trim();
         if (!orderId) {
             return res.status(400).json({
                 message: 'Falta orderId. Ejemplo: POST con body { "orderId": "12345" } o GET ?orderId=12345',
@@ -1345,9 +1907,9 @@ const testTiendaNubeOrder = (req, res) => __awaiter(void 0, void 0, void 0, func
 exports.testTiendaNubeOrder = testTiendaNubeOrder;
 /** Descontar stock de todas las ventas pagadas de Tienda Nube desde una fecha (ej. para sincronizar ventas que no se descontaron). Idempotente: órdenes ya procesadas se omiten. */
 const syncTiendaNubeOrdersFromDate = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f;
+    var _50, _51, _52, _53, _54, _55;
     try {
-        const fromParam = ((_d = (_b = (_a = req.body) === null || _a === void 0 ? void 0 : _a.fromDate) !== null && _b !== void 0 ? _b : (_c = req.query) === null || _c === void 0 ? void 0 : _c.fromDate) !== null && _d !== void 0 ? _d : '2026-03-09').toString().trim();
+        const fromParam = ((_53 = (_51 = (_50 = req.body) === null || _50 === void 0 ? void 0 : _50.fromDate) !== null && _51 !== void 0 ? _51 : (_52 = req.query) === null || _52 === void 0 ? void 0 : _52.fromDate) !== null && _53 !== void 0 ? _53 : '2026-03-09').toString().trim();
         const fromDate = fromParam.slice(0, 10);
         if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate)) {
             return res.status(400).json({ message: 'fromDate debe ser YYYY-MM-DD (ej. 2026-03-09)' });
@@ -1380,7 +1942,7 @@ const syncTiendaNubeOrdersFromDate = (req, res) => __awaiter(void 0, void 0, voi
                 validateStatus: () => true
             });
             if (listRes.status !== 200) {
-                const errMsg = ((_e = listRes.data) === null || _e === void 0 ? void 0 : _e.message) || ((_f = listRes.data) === null || _f === void 0 ? void 0 : _f.error) || JSON.stringify(listRes.data);
+                const errMsg = ((_54 = listRes.data) === null || _54 === void 0 ? void 0 : _54.message) || ((_55 = listRes.data) === null || _55 === void 0 ? void 0 : _55.error) || JSON.stringify(listRes.data);
                 return res.status(listRes.status === 403 ? 403 : 500).json({
                     message: `Error al listar órdenes de Tienda Nube: ${errMsg}`,
                     hint: listRes.status === 403 ? 'Reconectá Tienda Nube (scope read_orders).' : undefined
@@ -1415,9 +1977,9 @@ exports.syncTiendaNubeOrdersFromDate = syncTiendaNubeOrdersFromDate;
  * Idempotente: órdenes ya procesadas se omiten por movimiento VENTA_MERCADO_LIBRE.
  */
 const syncMercadoLibreOrdersFromDate = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _56, _57, _58, _59, _60, _61, _62;
     try {
-        const fromParam = ((_d = (_b = (_a = req.body) === null || _a === void 0 ? void 0 : _a.fromDate) !== null && _b !== void 0 ? _b : (_c = req.query) === null || _c === void 0 ? void 0 : _c.fromDate) !== null && _d !== void 0 ? _d : '2026-03-09').toString().trim();
+        const fromParam = ((_59 = (_57 = (_56 = req.body) === null || _56 === void 0 ? void 0 : _56.fromDate) !== null && _57 !== void 0 ? _57 : (_58 = req.query) === null || _58 === void 0 ? void 0 : _58.fromDate) !== null && _59 !== void 0 ? _59 : '2026-03-09').toString().trim();
         const fromDate = fromParam.slice(0, 10);
         if (!/^\d{4}-\d{2}-\d{2}$/.test(fromDate)) {
             return res.status(400).json({ message: 'fromDate debe ser YYYY-MM-DD (ej. 2026-03-09)' });
@@ -1433,15 +1995,15 @@ const syncMercadoLibreOrdersFromDate = (req, res) => __awaiter(void 0, void 0, v
         while (keepGoing && offset < 5000) {
             const searchRes = yield axios_1.default.get(`https://api.mercadolibre.com/orders/search?seller=${mlToken.user_id}&order.status=paid&order.date_created.from=${fromDate}T00:00:00.000-03:00&offset=${offset}&limit=${limit}&sort=date_desc`, { headers: { 'Authorization': `Bearer ${mlToken.access_token}` }, validateStatus: () => true });
             if (searchRes.status !== 200) {
-                const errMsg = ((_e = searchRes.data) === null || _e === void 0 ? void 0 : _e.message) ||
-                    ((_f = searchRes.data) === null || _f === void 0 ? void 0 : _f.error) ||
+                const errMsg = ((_60 = searchRes.data) === null || _60 === void 0 ? void 0 : _60.message) ||
+                    ((_61 = searchRes.data) === null || _61 === void 0 ? void 0 : _61.error) ||
                     JSON.stringify(searchRes.data);
                 return res.status(searchRes.status === 403 ? 403 : 500).json({
                     message: `Error al listar órdenes de Mercado Libre: ${errMsg}`,
                     hint: searchRes.status === 403 ? 'Reconectá Mercado Libre.' : undefined
                 });
             }
-            const results = Array.isArray((_g = searchRes.data) === null || _g === void 0 ? void 0 : _g.results) ? searchRes.data.results : [];
+            const results = Array.isArray((_62 = searchRes.data) === null || _62 === void 0 ? void 0 : _62.results) ? searchRes.data.results : [];
             for (const row of results) {
                 const orderId = (row === null || row === void 0 ? void 0 : row.id) != null ? String(row.id) : '';
                 if (!orderId)
@@ -1468,9 +2030,9 @@ const syncMercadoLibreOrdersFromDate = (req, res) => __awaiter(void 0, void 0, v
 exports.syncMercadoLibreOrdersFromDate = syncMercadoLibreOrdersFromDate;
 /** Prueba manual: procesar una orden de Mercado Libre por ID (mismo flujo que el webhook). */
 const testMercadoLibreOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f;
+    var _63, _64, _65, _66, _67, _68;
     try {
-        const orderId = ((_d = (_b = (_a = req.body) === null || _a === void 0 ? void 0 : _a.orderId) !== null && _b !== void 0 ? _b : (_c = req.query) === null || _c === void 0 ? void 0 : _c.orderId) !== null && _d !== void 0 ? _d : '').toString().trim();
+        const orderId = ((_66 = (_64 = (_63 = req.body) === null || _63 === void 0 ? void 0 : _63.orderId) !== null && _64 !== void 0 ? _64 : (_65 = req.query) === null || _65 === void 0 ? void 0 : _65.orderId) !== null && _66 !== void 0 ? _66 : '').toString().trim();
         if (!orderId) {
             return res.status(400).json({
                 message: 'Falta orderId. Ejemplo: POST con body { "orderId": "2000015720058034" } o GET ?orderId=2000015720058034'
@@ -1480,8 +2042,8 @@ const testMercadoLibreOrder = (req, res) => __awaiter(void 0, void 0, void 0, fu
         const before = yield (0, db_1.get)(`SELECT COUNT(*) AS n FROM stock_movements WHERE movement_type = 'VENTA_MERCADO_LIBRE' AND reference = ?`, [ref]);
         yield processMercadoLibreOrder(orderId);
         const after = yield (0, db_1.get)(`SELECT COUNT(*) AS n FROM stock_movements WHERE movement_type = 'VENTA_MERCADO_LIBRE' AND reference = ?`, [ref]);
-        const beforeN = Number((_e = before === null || before === void 0 ? void 0 : before.n) !== null && _e !== void 0 ? _e : 0);
-        const afterN = Number((_f = after === null || after === void 0 ? void 0 : after.n) !== null && _f !== void 0 ? _f : 0);
+        const beforeN = Number((_67 = before === null || before === void 0 ? void 0 : before.n) !== null && _67 !== void 0 ? _67 : 0);
+        const afterN = Number((_68 = after === null || after === void 0 ? void 0 : after.n) !== null && _68 !== void 0 ? _68 : 0);
         const created = Math.max(0, afterN - beforeN);
         return res.json({
             orderId,
@@ -1502,16 +2064,16 @@ const testMercadoLibreOrder = (req, res) => __awaiter(void 0, void 0, void 0, fu
 exports.testMercadoLibreOrder = testMercadoLibreOrder;
 // Webhook de Mercado Libre para órdenes/ventas
 const handleMercadoLibreWebhook = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
+    var _69, _70, _71, _72, _73, _74, _75, _76, _77, _78, _79, _80, _81;
     try {
-        const topic = ((_d = (_b = (_a = req.body) === null || _a === void 0 ? void 0 : _a.topic) !== null && _b !== void 0 ? _b : (_c = req.query) === null || _c === void 0 ? void 0 : _c.topic) !== null && _d !== void 0 ? _d : '').toString();
-        const resourceRaw = ((_h = (_f = (_e = req.body) === null || _e === void 0 ? void 0 : _e.resource) !== null && _f !== void 0 ? _f : (_g = req.query) === null || _g === void 0 ? void 0 : _g.resource) !== null && _h !== void 0 ? _h : '').toString();
-        const userIdRaw = ((_m = (_k = (_j = req.body) === null || _j === void 0 ? void 0 : _j.user_id) !== null && _k !== void 0 ? _k : (_l = req.query) === null || _l === void 0 ? void 0 : _l.user_id) !== null && _m !== void 0 ? _m : '').toString();
+        const topic = ((_72 = (_70 = (_69 = req.body) === null || _69 === void 0 ? void 0 : _69.topic) !== null && _70 !== void 0 ? _70 : (_71 = req.query) === null || _71 === void 0 ? void 0 : _71.topic) !== null && _72 !== void 0 ? _72 : '').toString();
+        const resourceRaw = ((_76 = (_74 = (_73 = req.body) === null || _73 === void 0 ? void 0 : _73.resource) !== null && _74 !== void 0 ? _74 : (_75 = req.query) === null || _75 === void 0 ? void 0 : _75.resource) !== null && _76 !== void 0 ? _76 : '').toString();
+        const userIdRaw = ((_80 = (_78 = (_77 = req.body) === null || _77 === void 0 ? void 0 : _77.user_id) !== null && _78 !== void 0 ? _78 : (_79 = req.query) === null || _79 === void 0 ? void 0 : _79.user_id) !== null && _80 !== void 0 ? _80 : '').toString();
         console.log(`[ML Webhook] Topic: ${topic}, Resource: ${resourceRaw}, User: ${userIdRaw || '-'}`);
         // Verificar user_id solo cuando viene en el webhook.
         // Mercado Libre a veces no lo envía y eso hacía que nunca se procese la orden.
         const integration = yield (0, db_1.get)(`SELECT user_id FROM integrations WHERE platform = 'mercadolibre'`);
-        const storedUserId = (_o = integration === null || integration === void 0 ? void 0 : integration.user_id) === null || _o === void 0 ? void 0 : _o.toString();
+        const storedUserId = (_81 = integration === null || integration === void 0 ? void 0 : integration.user_id) === null || _81 === void 0 ? void 0 : _81.toString();
         if (!integration) {
             console.log('[ML Webhook] No hay integración de Mercado Libre, ignorando');
             return res.status(200).json({ received: true, ignored: true });
@@ -1575,7 +2137,7 @@ const handleMercadoLibreWebhook = (req, res) => __awaiter(void 0, void 0, void 0
 exports.handleMercadoLibreWebhook = handleMercadoLibreWebhook;
 // Procesar orden de Mercado Libre y descontar stock
 const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _82, _83, _84, _85, _86;
     // Lock efímero para evitar doble procesamiento concurrente del mismo orderId (MySQL en prod).
     yield (0, db_1.execute)(`CREATE TABLE IF NOT EXISTS integration_order_locks (
       platform VARCHAR(64) NOT NULL,
@@ -1625,10 +2187,10 @@ const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, 
         yield sendThankYouMessage(orderId, order, mlToken.access_token);
         const { updateVariantStock } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
         for (const item of order.order_items || []) {
-            const mlItemId = (_a = item.item) === null || _a === void 0 ? void 0 : _a.id;
-            const mlVariationId = (_b = item.item) === null || _b === void 0 ? void 0 : _b.variation_id;
+            const mlItemId = (_82 = item.item) === null || _82 === void 0 ? void 0 : _82.id;
+            const mlVariationId = (_83 = item.item) === null || _83 === void 0 ? void 0 : _83.variation_id;
             const quantity = item.quantity;
-            let itemSku = (((_c = item.item) === null || _c === void 0 ? void 0 : _c.sku) || item.sku || '').toString().trim();
+            let itemSku = (((_84 = item.item) === null || _84 === void 0 ? void 0 : _84.sku) || item.sku || '').toString().trim();
             if (!itemSku) {
                 itemSku = yield resolveMlOrderItemSku(mlToken.access_token, mlItemId, mlVariationId);
             }
@@ -1636,7 +2198,7 @@ const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, 
                 const { findBundleByListing, deductStockForBundleListing } = yield Promise.resolve().then(() => __importStar(require('../services/publicationStockBundle.service')));
                 const extVar = (mlVariationId && String(mlVariationId).trim()) || '';
                 const bundle = yield findBundleByListing('mercadolibre', mlItemId, extVar);
-                if ((_d = bundle === null || bundle === void 0 ? void 0 : bundle.items) === null || _d === void 0 ? void 0 : _d.length) {
+                if ((_85 = bundle === null || bundle === void 0 ? void 0 : bundle.items) === null || _85 === void 0 ? void 0 : _85.length) {
                     const { ok, lines } = yield deductStockForBundleListing(bundle, quantity, 'VENTA_MERCADO_LIBRE', `Orden ML: ${orderId}`);
                     console.log(`[ML Order] Pack multicolor "${bundle.label || bundle.externalProductId}": ${lines.join('; ')}`);
                     continue;
@@ -1648,7 +2210,7 @@ const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, 
                 const fromPub = yield (0, db_1.get)(`SELECT vp.variant_id AS id, COALESCE(vp.pack_size, 1) AS ml_pack FROM variant_publications vp WHERE vp.platform = 'mercadolibre' AND vp.external_product_id = ? AND vp.external_variant_id = ? LIMIT 1`, [mlItemId, extVariantId]);
                 if (fromPub === null || fromPub === void 0 ? void 0 : fromPub.id) {
                     const row = yield (0, db_1.get)(`SELECT stock AS current_stock FROM stocks WHERE variant_id = ?`, [fromPub.id]);
-                    variant = { id: fromPub.id, current_stock: Number((_e = row === null || row === void 0 ? void 0 : row.current_stock) !== null && _e !== void 0 ? _e : 0), ml_pack: Math.max(1, Number(fromPub.ml_pack) || 1) };
+                    variant = { id: fromPub.id, current_stock: Number((_86 = row === null || row === void 0 ? void 0 : row.current_stock) !== null && _86 !== void 0 ? _86 : 0), ml_pack: Math.max(1, Number(fromPub.ml_pack) || 1) };
                 }
             }
             // Fallback legacy: variantes vinculadas por columna pv.mercado_libre_item_id
@@ -1763,7 +2325,7 @@ const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, 
             try {
                 yield (0, db_1.execute)(`DELETE FROM integration_order_locks WHERE platform = ? AND external_order_id = ?`, [lockPlatform, orderId]);
             }
-            catch (_f) {
+            catch (_87) {
                 // No romper flujo por falla al limpiar lock efimero.
             }
         }
@@ -1771,7 +2333,7 @@ const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, 
 });
 // Enviar mensaje de agradecimiento al comprador de ML
 const sendThankYouMessage = (orderId, order, accessToken) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
+    var _88, _89, _90, _91, _92, _93, _94, _95, _96;
     try {
         // Verificar si el mensaje automático está habilitado
         const config = yield (0, db_1.get)(`SELECT enabled, message_template FROM ml_auto_message_config WHERE id = 1`);
@@ -1779,7 +2341,7 @@ const sendThankYouMessage = (orderId, order, accessToken) => __awaiter(void 0, v
             console.log(`[ML Message] Mensaje automático deshabilitado, omitiendo orden ${orderId}`);
             return;
         }
-        const buyerId = (_a = order.buyer) === null || _a === void 0 ? void 0 : _a.id;
+        const buyerId = (_88 = order.buyer) === null || _88 === void 0 ? void 0 : _88.id;
         if (!buyerId) {
             console.log(`[ML Message] No se encontró buyer_id para orden ${orderId}`);
             return;
@@ -1791,7 +2353,7 @@ const sendThankYouMessage = (orderId, order, accessToken) => __awaiter(void 0, v
             return;
         }
         // Obtener el nombre del comprador
-        const buyerName = ((_b = order.buyer) === null || _b === void 0 ? void 0 : _b.first_name) || ((_c = order.buyer) === null || _c === void 0 ? void 0 : _c.nickname) || 'Cliente';
+        const buyerName = ((_89 = order.buyer) === null || _89 === void 0 ? void 0 : _89.first_name) || ((_90 = order.buyer) === null || _90 === void 0 ? void 0 : _90.nickname) || 'Cliente';
         // Obtener los productos comprados para personalizar el mensaje
         const productNames = (order.order_items || [])
             .map((item) => { var _a; return (_a = item.item) === null || _a === void 0 ? void 0 : _a.title; })
@@ -1820,9 +2382,9 @@ Equipo Lupo`;
         // Enviar mensaje usando la API de mensajes de ML
         // La API de mensajes usa el pack_id (si existe) o el order_id
         const packId = order.pack_id || orderId;
-        yield axios_1.default.post(`https://api.mercadolibre.com/messages/packs/${packId}/sellers/${((_d = order.seller) === null || _d === void 0 ? void 0 : _d.id) || ((_e = (yield getValidMLToken())) === null || _e === void 0 ? void 0 : _e.user_id)}`, {
+        yield axios_1.default.post(`https://api.mercadolibre.com/messages/packs/${packId}/sellers/${((_91 = order.seller) === null || _91 === void 0 ? void 0 : _91.id) || ((_92 = (yield getValidMLToken())) === null || _92 === void 0 ? void 0 : _92.user_id)}`, {
             from: {
-                user_id: (_f = order.seller) === null || _f === void 0 ? void 0 : _f.id
+                user_id: (_93 = order.seller) === null || _93 === void 0 ? void 0 : _93.id
             },
             to: {
                 user_id: buyerId
@@ -1840,7 +2402,7 @@ Equipo Lupo`;
     }
     catch (error) {
         // Si la tabla no existe, crearla
-        if (((_g = error.message) === null || _g === void 0 ? void 0 : _g.includes('ml_messages_sent')) || error.code === 'ER_NO_SUCH_TABLE') {
+        if (((_94 = error.message) === null || _94 === void 0 ? void 0 : _94.includes('ml_messages_sent')) || error.code === 'ER_NO_SUCH_TABLE') {
             try {
                 yield (0, db_1.execute)(`
           CREATE TABLE IF NOT EXISTS ml_messages_sent (
@@ -1858,8 +2420,8 @@ Equipo Lupo`;
             }
         }
         // Log del error pero no fallar el proceso principal
-        const errData = ((_h = error.response) === null || _h === void 0 ? void 0 : _h.data) || {};
-        const isNotFound = ((_j = error.response) === null || _j === void 0 ? void 0 : _j.status) === 404 || (errData.error === 'resource not found');
+        const errData = ((_95 = error.response) === null || _95 === void 0 ? void 0 : _95.data) || {};
+        const isNotFound = ((_96 = error.response) === null || _96 === void 0 ? void 0 : _96.status) === 404 || (errData.error === 'resource not found');
         if (isNotFound) {
             console.warn(`[ML Message] Mensaje automático no disponible para orden ${orderId} (API ML: recurso no encontrado). El pedido y el stock se procesaron correctamente.`);
         }
@@ -1870,8 +2432,8 @@ Equipo Lupo`;
 });
 /** Sincronización automática ML → TN (sin tocar inventario local). ML = fuente de verdad para canales. Incluye variantes con publicación padre (mercado_libre_id + variant_id) y variantes con publicación propia (mercado_libre_item_id). */
 function runAutoSyncMLtoTN() {
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c, _d, _e, _f, _g, _h;
         const mlToken = yield getValidMLToken();
         const tnIntegration = yield (0, db_1.get)(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
         if (!mlToken || !(tnIntegration === null || tnIntegration === void 0 ? void 0 : tnIntegration.access_token) || !(tnIntegration === null || tnIntegration === void 0 ? void 0 : tnIntegration.store_id)) {
@@ -2000,9 +2562,10 @@ function runAutoSyncMLtoTN() {
         return { updated, errors };
     });
 }
+exports.runAutoSyncMLtoTN = runAutoSyncMLtoTN;
 // Sincronizar todo el stock local a Tienda Nube
 const syncAllStockToTiendaNube = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _97, _98;
     try {
         const integration = yield (0, db_1.get)(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
         if (!(integration === null || integration === void 0 ? void 0 : integration.access_token) || !(integration === null || integration === void 0 ? void 0 : integration.store_id)) {
@@ -2036,7 +2599,7 @@ const syncAllStockToTiendaNube = (req, res) => __awaiter(void 0, void 0, void 0,
             }
             catch (e) {
                 errors++;
-                logs.push(`[ERROR] ${v.sku}: ${((_b = (_a = e.response) === null || _a === void 0 ? void 0 : _a.data) === null || _b === void 0 ? void 0 : _b.description) || e.message}`);
+                logs.push(`[ERROR] ${v.sku}: ${((_98 = (_97 = e.response) === null || _97 === void 0 ? void 0 : _97.data) === null || _98 === void 0 ? void 0 : _98.description) || e.message}`);
             }
             if (TN_RATE_LIMIT_DELAY_MS > 0)
                 yield sleep(TN_RATE_LIMIT_DELAY_MS);
@@ -2057,9 +2620,9 @@ const syncAllStockToTiendaNube = (req, res) => __awaiter(void 0, void 0, void 0,
 exports.syncAllStockToTiendaNube = syncAllStockToTiendaNube;
 // Enviar stock solo de variantes seleccionadas a Tienda Nube
 const syncSelectedStockToTiendaNube = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _99, _100, _101;
     try {
-        const variantIds = Array.isArray((_a = req.body) === null || _a === void 0 ? void 0 : _a.variantIds) ? req.body.variantIds.filter((id) => typeof id === 'string' && id.length > 0) : [];
+        const variantIds = Array.isArray((_99 = req.body) === null || _99 === void 0 ? void 0 : _99.variantIds) ? req.body.variantIds.filter((id) => typeof id === 'string' && id.length > 0) : [];
         if (variantIds.length === 0) {
             return res.status(400).json({ message: 'Indicá al menos una variante (variantIds)' });
         }
@@ -2095,7 +2658,7 @@ const syncSelectedStockToTiendaNube = (req, res) => __awaiter(void 0, void 0, vo
             }
             catch (e) {
                 errors++;
-                logs.push(`[ERROR] ${v.sku}: ${((_c = (_b = e.response) === null || _b === void 0 ? void 0 : _b.data) === null || _c === void 0 ? void 0 : _c.description) || e.message}`);
+                logs.push(`[ERROR] ${v.sku}: ${((_101 = (_100 = e.response) === null || _100 === void 0 ? void 0 : _100.data) === null || _101 === void 0 ? void 0 : _101.description) || e.message}`);
             }
             if (TN_RATE_LIMIT_DELAY_MS > 0)
                 yield sleep(TN_RATE_LIMIT_DELAY_MS);
@@ -2171,9 +2734,9 @@ const syncAllStockToMercadoLibre = (req, res) => __awaiter(void 0, void 0, void 
 exports.syncAllStockToMercadoLibre = syncAllStockToMercadoLibre;
 // Enviar stock solo de variantes seleccionadas a Mercado Libre
 const syncSelectedStockToMercadoLibre = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _102;
     try {
-        const variantIds = Array.isArray((_a = req.body) === null || _a === void 0 ? void 0 : _a.variantIds) ? req.body.variantIds.filter((id) => typeof id === 'string' && id.length > 0) : [];
+        const variantIds = Array.isArray((_102 = req.body) === null || _102 === void 0 ? void 0 : _102.variantIds) ? req.body.variantIds.filter((id) => typeof id === 'string' && id.length > 0) : [];
         if (variantIds.length === 0) {
             return res.status(400).json({ message: 'Indicá al menos una variante (variantIds)' });
         }
@@ -2229,9 +2792,9 @@ const syncSelectedStockToMercadoLibre = (req, res) => __awaiter(void 0, void 0, 
 exports.syncSelectedStockToMercadoLibre = syncSelectedStockToMercadoLibre;
 /** Obtener stock en ML y TN por variantes (para mostrar en inventario). */
 const getVariantExternalStocks = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f;
+    var _103, _104, _105, _106, _107, _108;
     try {
-        const variantIds = Array.isArray((_a = req.body) === null || _a === void 0 ? void 0 : _a.variantIds) ? req.body.variantIds.filter((id) => typeof id === 'string' && id.length > 0).slice(0, 100) : [];
+        const variantIds = Array.isArray((_103 = req.body) === null || _103 === void 0 ? void 0 : _103.variantIds) ? req.body.variantIds.filter((id) => typeof id === 'string' && id.length > 0).slice(0, 100) : [];
         if (variantIds.length === 0) {
             return res.json({ stocks: {} });
         }
@@ -2251,7 +2814,7 @@ const getVariantExternalStocks = (req, res) => __awaiter(void 0, void 0, void 0,
             for (const r of snapRows || []) {
                 const vid = r.variant_id;
                 if (vid && stocks[vid])
-                    stocks[vid].stockLupoShop = Number((_b = r.stock) !== null && _b !== void 0 ? _b : 0);
+                    stocks[vid].stockLupoShop = Number((_104 = r.stock) !== null && _104 !== void 0 ? _104 : 0);
             }
             // Valor inicial para no mostrar "Tienda: -" hasta el primer webhook exitoso.
             const localRows = yield (0, db_1.query)(`SELECT variant_id, stock FROM stocks WHERE variant_id IN (${placeholders})`, variantIds);
@@ -2260,11 +2823,11 @@ const getVariantExternalStocks = (req, res) => __awaiter(void 0, void 0, void 0,
                 if (!vid || !stocks[vid])
                     continue;
                 if (stocks[vid].stockLupoShop === undefined) {
-                    stocks[vid].stockLupoShop = Number((_c = r.stock) !== null && _c !== void 0 ? _c : 0);
+                    stocks[vid].stockLupoShop = Number((_105 = r.stock) !== null && _105 !== void 0 ? _105 : 0);
                 }
             }
         }
-        catch (_g) {
+        catch (_109) {
             // tabla aún no existe o error puntual: no rompe ML/TN
         }
         const mlToken = yield getValidMLToken();
@@ -2274,8 +2837,15 @@ const getVariantExternalStocks = (req, res) => __awaiter(void 0, void 0, void 0,
             const mlItemIds = new Map();
             for (const r of rows || []) {
                 const variantId = r.variant_id;
-                const mlItemId = r.mercado_libre_item_id || r.mercado_libre_id;
-                const variationId = r.mercado_libre_variant_id ? String(r.mercado_libre_variant_id) : null;
+                const ownItemId = r.mercado_libre_item_id != null && String(r.mercado_libre_item_id).trim() !== ''
+                    ? String(r.mercado_libre_item_id).trim()
+                    : null;
+                const mlItemId = ownItemId || r.mercado_libre_id;
+                const variationId = ownItemId
+                    ? null
+                    : r.mercado_libre_variant_id
+                        ? String(r.mercado_libre_variant_id)
+                        : null;
                 if (!mlItemId)
                     continue;
                 if (!mlItemIds.has(mlItemId))
@@ -2289,18 +2859,18 @@ const getVariantExternalStocks = (req, res) => __awaiter(void 0, void 0, void 0,
                     const variations = item.variations || [];
                     for (const { variantId, variationId } of variants) {
                         if (variations.length === 0) {
-                            stocks[variantId].stockML = (_d = item.available_quantity) !== null && _d !== void 0 ? _d : 0;
+                            stocks[variantId].stockML = (_106 = item.available_quantity) !== null && _106 !== void 0 ? _106 : 0;
                         }
                         else if (variationId) {
                             const v = variations.find((x) => String(x.id) === String(variationId));
-                            stocks[variantId].stockML = v ? ((_e = v.available_quantity) !== null && _e !== void 0 ? _e : 0) : undefined;
+                            stocks[variantId].stockML = v ? ((_107 = v.available_quantity) !== null && _107 !== void 0 ? _107 : 0) : undefined;
                         }
-                        else if (variations.length === 1) {
-                            stocks[variantId].stockML = (_f = variations[0].available_quantity) !== null && _f !== void 0 ? _f : 0;
+                        else {
+                            stocks[variantId].stockML = (_108 = item.available_quantity) !== null && _108 !== void 0 ? _108 : 0;
                         }
                     }
                 }
-                catch (_h) {
+                catch (_110) {
                     // ignore per-item errors
                 }
             }
@@ -2354,7 +2924,7 @@ const getVariantExternalStocks = (req, res) => __awaiter(void 0, void 0, void 0,
                             stocks[variantId].stockTN = tv.stock;
                     }
                 }
-                catch (_j) {
+                catch (_111) {
                     // ignore per-product errors
                 }
             }
@@ -2369,7 +2939,7 @@ const getVariantExternalStocks = (req, res) => __awaiter(void 0, void 0, void 0,
 exports.getVariantExternalStocks = getVariantExternalStocks;
 /** Opcional: sincronizar con Mercado Libre como fuente (ML → LupoHub → Tienda Nube). Para el flujo normal, LupoHub es la fuente de verdad y se envía a ML con syncAllStockToMercadoLibre. */
 const syncAllStockFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
+    var _112, _113, _114, _115, _116, _117, _118, _119;
     try {
         const mlToken = yield getValidMLToken();
         if (!mlToken) {
@@ -2401,8 +2971,8 @@ const syncAllStockFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, voi
                         continue;
                     if (item.variations && item.variations.length > 0) {
                         for (const v of item.variations) {
-                            const sellerCustom = ((_a = v.seller_custom_field) !== null && _a !== void 0 ? _a : '').toString().trim();
-                            const sellerSku = ((_b = v.seller_sku) !== null && _b !== void 0 ? _b : '').toString().trim();
+                            const sellerCustom = ((_112 = v.seller_custom_field) !== null && _112 !== void 0 ? _112 : '').toString().trim();
+                            const sellerSku = ((_113 = v.seller_sku) !== null && _113 !== void 0 ? _113 : '').toString().trim();
                             const mlSku = sellerCustom || sellerSku;
                             if (!mlSku) {
                                 logs.push(`[SKU ML] variación id=${v.id}: seller_custom_field="${sellerCustom}" seller_sku="${sellerSku}" → omitido (vacío)`);
@@ -2417,7 +2987,7 @@ const syncAllStockFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, voi
                                 logs.push(`[SKU ML] sin variante local para "${mlSku}" (normalizado: ${mlSkuNorm})`);
                                 continue;
                             }
-                            const mlQty = (_c = v.available_quantity) !== null && _c !== void 0 ? _c : 0;
+                            const mlQty = (_114 = v.available_quantity) !== null && _114 !== void 0 ? _114 : 0;
                             const ok = yield updateVariantStock(row.variant_id, mlQty, 'IMPORTACION_ML', 'ML = fuente de verdad', false);
                             if (ok) {
                                 updated++;
@@ -2430,8 +3000,8 @@ const syncAllStockFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, voi
                         }
                     }
                     else {
-                        const sellerCustom = ((_d = item.seller_custom_field) !== null && _d !== void 0 ? _d : '').toString().trim();
-                        const sellerSku = ((_e = item.seller_sku) !== null && _e !== void 0 ? _e : '').toString().trim();
+                        const sellerCustom = ((_115 = item.seller_custom_field) !== null && _115 !== void 0 ? _115 : '').toString().trim();
+                        const sellerSku = ((_116 = item.seller_sku) !== null && _116 !== void 0 ? _116 : '').toString().trim();
                         const mlSku = sellerCustom || sellerSku;
                         if (!mlSku) {
                             logs.push(`[SKU ML] ítem id=${item.id}: seller_custom_field="${sellerCustom}" seller_sku="${sellerSku}" → omitido (vacío)`);
@@ -2446,7 +3016,7 @@ const syncAllStockFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, voi
                             logs.push(`[SKU ML] sin variante local para ítem "${mlSku}" (normalizado: ${mlSkuNorm})`);
                             continue;
                         }
-                        const mlQty = (_f = item.available_quantity) !== null && _f !== void 0 ? _f : 0;
+                        const mlQty = (_117 = item.available_quantity) !== null && _117 !== void 0 ? _117 : 0;
                         const ok = yield updateVariantStock(variantRow.variant_id, mlQty, 'IMPORTACION_ML', 'ML = fuente de verdad', false);
                         if (ok) {
                             updated++;
@@ -2492,7 +3062,7 @@ const syncAllStockFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, voi
                 }
                 catch (e) {
                     tnErrors++;
-                    logs.push(`[TN ERROR] ${v.sku}: ${((_h = (_g = e.response) === null || _g === void 0 ? void 0 : _g.data) === null || _h === void 0 ? void 0 : _h.description) || e.message}`);
+                    logs.push(`[TN ERROR] ${v.sku}: ${((_119 = (_118 = e.response) === null || _118 === void 0 ? void 0 : _118.data) === null || _119 === void 0 ? void 0 : _119.description) || e.message}`);
                 }
                 if (TN_RATE_LIMIT_DELAY_MS > 0)
                     yield sleep(TN_RATE_LIMIT_DELAY_MS);
@@ -2519,7 +3089,7 @@ exports.syncAllStockFromMercadoLibre = syncAllStockFromMercadoLibre;
 // Opcional: importar stock desde Mercado Libre a la app (solo por SKU: seller_custom_field = SKU local; si no existe variante, se ignora).
 // Después de actualizar LupoHub, también envía el stock a Tienda Nube (variantes vinculadas).
 const importStockFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
+    var _120, _121, _122, _123, _124, _125, _126, _127;
     try {
         const mlToken = yield getValidMLToken();
         if (!mlToken) {
@@ -2551,8 +3121,8 @@ const importStockFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, void
                         continue;
                     if (item.variations && item.variations.length > 0) {
                         for (const v of item.variations) {
-                            const sellerCustom = ((_a = v.seller_custom_field) !== null && _a !== void 0 ? _a : '').toString().trim();
-                            const sellerSku = ((_b = v.seller_sku) !== null && _b !== void 0 ? _b : '').toString().trim();
+                            const sellerCustom = ((_120 = v.seller_custom_field) !== null && _120 !== void 0 ? _120 : '').toString().trim();
+                            const sellerSku = ((_121 = v.seller_sku) !== null && _121 !== void 0 ? _121 : '').toString().trim();
                             const mlSku = sellerCustom || sellerSku;
                             if (!mlSku) {
                                 logs.push(`[SKU ML] variación id=${v.id}: seller_custom_field="${sellerCustom}" seller_sku="${sellerSku}" → omitido (vacío)`);
@@ -2567,7 +3137,7 @@ const importStockFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, void
                                 logs.push(`[SKU ML] sin variante local para "${mlSku}" (normalizado: ${mlSkuNorm})`);
                                 continue;
                             }
-                            const mlQty = (_c = v.available_quantity) !== null && _c !== void 0 ? _c : 0;
+                            const mlQty = (_122 = v.available_quantity) !== null && _122 !== void 0 ? _122 : 0;
                             const ok = yield updateVariantStock(row.variant_id, mlQty, 'IMPORTACION_ML', 'Importación desde ML', false);
                             if (ok) {
                                 updated++;
@@ -2580,8 +3150,8 @@ const importStockFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, void
                         }
                     }
                     else {
-                        const sellerCustom = ((_d = item.seller_custom_field) !== null && _d !== void 0 ? _d : '').toString().trim();
-                        const sellerSku = ((_e = item.seller_sku) !== null && _e !== void 0 ? _e : '').toString().trim();
+                        const sellerCustom = ((_123 = item.seller_custom_field) !== null && _123 !== void 0 ? _123 : '').toString().trim();
+                        const sellerSku = ((_124 = item.seller_sku) !== null && _124 !== void 0 ? _124 : '').toString().trim();
                         const mlSku = sellerCustom || sellerSku;
                         if (!mlSku) {
                             logs.push(`[SKU ML] ítem id=${item.id}: seller_custom_field="${sellerCustom}" seller_sku="${sellerSku}" → omitido (vacío)`);
@@ -2596,7 +3166,7 @@ const importStockFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, void
                             logs.push(`[SKU ML] sin variante local para ítem "${mlSku}" (normalizado: ${mlSkuNorm})`);
                             continue;
                         }
-                        const mlQty = (_f = item.available_quantity) !== null && _f !== void 0 ? _f : 0;
+                        const mlQty = (_125 = item.available_quantity) !== null && _125 !== void 0 ? _125 : 0;
                         const ok = yield updateVariantStock(variantRow.variant_id, mlQty, 'IMPORTACION_ML', 'Importación desde ML', false);
                         if (ok) {
                             updated++;
@@ -2642,7 +3212,7 @@ const importStockFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, void
                 }
                 catch (e) {
                     tnErrors++;
-                    logs.push(`[TN ERROR] ${v.sku}: ${((_h = (_g = e.response) === null || _g === void 0 ? void 0 : _g.data) === null || _h === void 0 ? void 0 : _h.description) || e.message}`);
+                    logs.push(`[TN ERROR] ${v.sku}: ${((_127 = (_126 = e.response) === null || _126 === void 0 ? void 0 : _126.data) === null || _127 === void 0 ? void 0 : _127.description) || e.message}`);
                 }
                 if (TN_RATE_LIMIT_DELAY_MS > 0)
                     yield sleep(TN_RATE_LIMIT_DELAY_MS);
@@ -2670,7 +3240,7 @@ exports.importStockFromMercadoLibre = importStockFromMercadoLibre;
 // Obtener órdenes de Tienda Nube
 // Obtener stock/publicaciones de Tienda Nube (igual que getMercadoLibreStock pero para TN)
 const getTiendaNubeStock = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
+    var _128, _129, _130, _131, _132, _133, _134, _135, _136, _137;
     try {
         const integration = yield (0, db_1.get)(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
         if (!(integration === null || integration === void 0 ? void 0 : integration.access_token)) {
@@ -2704,7 +3274,7 @@ const getTiendaNubeStock = (req, res) => __awaiter(void 0, void 0, void 0, funct
             try {
                 if (!p || typeof p !== 'object')
                     continue;
-                const title = ((_a = p.name) === null || _a === void 0 ? void 0 : _a.es) || ((_b = p.name) === null || _b === void 0 ? void 0 : _b.pt) || ((_c = p.name) === null || _c === void 0 ? void 0 : _c.en) || p.name || '';
+                const title = ((_128 = p.name) === null || _128 === void 0 ? void 0 : _128.es) || ((_129 = p.name) === null || _129 === void 0 ? void 0 : _129.pt) || ((_130 = p.name) === null || _130 === void 0 ? void 0 : _130.en) || p.name || '';
                 const attrs = Array.isArray(p.attributes) ? p.attributes : [];
                 let sizeIdx = -1;
                 let colorIdx = -1;
@@ -2740,7 +3310,7 @@ const getTiendaNubeStock = (req, res) => __awaiter(void 0, void 0, void 0, funct
                     id: String(p.id),
                     title,
                     status: 'active',
-                    price: (_e = (_d = variantsList[0]) === null || _d === void 0 ? void 0 : _d.price) !== null && _e !== void 0 ? _e : 0,
+                    price: (_132 = (_131 = variantsList[0]) === null || _131 === void 0 ? void 0 : _131.price) !== null && _132 !== void 0 ? _132 : 0,
                     totalStock,
                     soldTotal: 0,
                     thumbnail: img,
@@ -2763,15 +3333,15 @@ const getTiendaNubeStock = (req, res) => __awaiter(void 0, void 0, void 0, funct
         });
     }
     catch (error) {
-        const detail = ((_g = (_f = error.response) === null || _f === void 0 ? void 0 : _f.data) === null || _g === void 0 ? void 0 : _g.description) || ((_j = (_h = error.response) === null || _h === void 0 ? void 0 : _h.data) === null || _j === void 0 ? void 0 : _j.message) || error.message;
-        console.error('Error fetching TN stock:', ((_k = error.response) === null || _k === void 0 ? void 0 : _k.data) || error.message);
+        const detail = ((_134 = (_133 = error.response) === null || _133 === void 0 ? void 0 : _133.data) === null || _134 === void 0 ? void 0 : _134.description) || ((_136 = (_135 = error.response) === null || _135 === void 0 ? void 0 : _135.data) === null || _136 === void 0 ? void 0 : _136.message) || error.message;
+        console.error('Error fetching TN stock:', ((_137 = error.response) === null || _137 === void 0 ? void 0 : _137.data) || error.message);
         res.status(500).json({ message: 'Error obteniendo stock de Tienda Nube', detail: detail || 'Error de conexión' });
     }
 });
 exports.getTiendaNubeStock = getTiendaNubeStock;
 // Totales de stock Tienda Nube (todos los productos, para las cards)
 const getTiendaNubeStockTotals = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _138, _139, _140, _141, _142;
     try {
         const integration = yield (0, db_1.get)(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
         if (!(integration === null || integration === void 0 ? void 0 : integration.access_token)) {
@@ -2834,14 +3404,14 @@ const getTiendaNubeStockTotals = (req, res) => __awaiter(void 0, void 0, void 0,
         });
     }
     catch (error) {
-        const detail = ((_b = (_a = error.response) === null || _a === void 0 ? void 0 : _a.data) === null || _b === void 0 ? void 0 : _b.description) || ((_d = (_c = error.response) === null || _c === void 0 ? void 0 : _c.data) === null || _d === void 0 ? void 0 : _d.message) || error.message;
-        console.error('Error fetching TN stock totals:', ((_e = error.response) === null || _e === void 0 ? void 0 : _e.data) || error.message);
+        const detail = ((_139 = (_138 = error.response) === null || _138 === void 0 ? void 0 : _138.data) === null || _139 === void 0 ? void 0 : _139.description) || ((_141 = (_140 = error.response) === null || _140 === void 0 ? void 0 : _140.data) === null || _141 === void 0 ? void 0 : _141.message) || error.message;
+        console.error('Error fetching TN stock totals:', ((_142 = error.response) === null || _142 === void 0 ? void 0 : _142.data) || error.message);
         res.status(500).json({ message: 'Error obteniendo totales de Tienda Nube', detail: detail || 'Error de conexión' });
     }
 });
 exports.getTiendaNubeStockTotals = getTiendaNubeStockTotals;
 const getTiendaNubeOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _143;
     try {
         const integration = yield (0, db_1.get)(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
         if (!(integration === null || integration === void 0 ? void 0 : integration.access_token)) {
@@ -2996,7 +3566,7 @@ const getTiendaNubeOrders = (req, res) => __awaiter(void 0, void 0, void 0, func
         });
     }
     catch (error) {
-        console.error('Error fetching TN orders:', ((_a = error.response) === null || _a === void 0 ? void 0 : _a.data) || error.message);
+        console.error('Error fetching TN orders:', ((_143 = error.response) === null || _143 === void 0 ? void 0 : _143.data) || error.message);
         res.status(500).json({ message: 'Error obteniendo órdenes de Tienda Nube', error: error.message });
     }
 });
@@ -3017,15 +3587,15 @@ function normalizeTnPaymentStatus(order) {
 }
 /** Emite facturas AFIP masivas para órdenes de Tienda Nube (solo pagadas). */
 const invoiceTiendaNubeOrdersBulk = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q;
+    var _144, _145, _146, _147, _148, _149, _150, _151, _152, _153, _154, _155, _156, _157, _158;
     try {
         const authUser = req.user;
         if (!authUser || !['ADMIN', 'WAREHOUSE', 'DEPOSITO'].includes(authUser.role)) {
             return res.status(403).json({ message: 'Solo ADMIN o Depósito pueden emitir facturas' });
         }
-        const orderIdsRaw = Array.isArray((_a = req.body) === null || _a === void 0 ? void 0 : _a.orderIds) ? req.body.orderIds : [];
+        const orderIdsRaw = Array.isArray((_144 = req.body) === null || _144 === void 0 ? void 0 : _144.orderIds) ? req.body.orderIds : [];
         const orderIds = Array.from(new Set(orderIdsRaw.map((x) => String(x).trim()).filter(Boolean)));
-        const cbteTipoFromBody = (_b = req.body) === null || _b === void 0 ? void 0 : _b.cbteTipo;
+        const cbteTipoFromBody = (_145 = req.body) === null || _145 === void 0 ? void 0 : _145.cbteTipo;
         const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? cbteTipoFromBody : undefined;
         if (!orderIds.length)
             return res.status(400).json({ message: 'Debes enviar orderIds con al menos una orden' });
@@ -3077,28 +3647,28 @@ const invoiceTiendaNubeOrdersBulk = (req, res) => __awaiter(void 0, void 0, void
                     results.push({ orderId: orderIdStr, status: 'skipped_unpaid', message: `La orden no está pagada (estado: ${paymentStatus})` });
                     continue;
                 }
-                const total = Number((_c = order === null || order === void 0 ? void 0 : order.total) !== null && _c !== void 0 ? _c : 0);
+                const total = Number((_146 = order === null || order === void 0 ? void 0 : order.total) !== null && _146 !== void 0 ? _146 : 0);
                 if (!Number.isFinite(total) || total <= 0) {
                     results.push({ orderId: orderIdStr, status: 'error', message: 'La orden tiene total inválido para facturar' });
                     continue;
                 }
-                const customerName = ((_d = order === null || order === void 0 ? void 0 : order.customer) === null || _d === void 0 ? void 0 : _d.name)
-                    || `${((_e = order === null || order === void 0 ? void 0 : order.customer) === null || _e === void 0 ? void 0 : _e.first_name) || ''} ${((_f = order === null || order === void 0 ? void 0 : order.customer) === null || _f === void 0 ? void 0 : _f.last_name) || ''}`.trim()
+                const customerName = ((_147 = order === null || order === void 0 ? void 0 : order.customer) === null || _147 === void 0 ? void 0 : _147.name)
+                    || `${((_148 = order === null || order === void 0 ? void 0 : order.customer) === null || _148 === void 0 ? void 0 : _148.first_name) || ''} ${((_149 = order === null || order === void 0 ? void 0 : order.customer) === null || _149 === void 0 ? void 0 : _149.last_name) || ''}`.trim()
                     || (order === null || order === void 0 ? void 0 : order.contact_name)
                     || (order === null || order === void 0 ? void 0 : order.billing_name)
                     || 'Consumidor Final';
-                const rawDoc = String((_k = (_h = (_g = order === null || order === void 0 ? void 0 : order.billing_address) === null || _g === void 0 ? void 0 : _g.doc_number) !== null && _h !== void 0 ? _h : (_j = order === null || order === void 0 ? void 0 : order.customer) === null || _j === void 0 ? void 0 : _j.doc_number) !== null && _k !== void 0 ? _k : '').replace(/\D/g, '');
+                const rawDoc = String((_153 = (_151 = (_150 = order === null || order === void 0 ? void 0 : order.billing_address) === null || _150 === void 0 ? void 0 : _150.doc_number) !== null && _151 !== void 0 ? _151 : (_152 = order === null || order === void 0 ? void 0 : order.customer) === null || _152 === void 0 ? void 0 : _152.doc_number) !== null && _153 !== void 0 ? _153 : '').replace(/\D/g, '');
                 const maybeCuit = rawDoc.length >= 10 ? rawDoc : undefined;
-                const condicionIvaRaw = (((_l = order === null || order === void 0 ? void 0 : order.billing_address) === null || _l === void 0 ? void 0 : _l.fiscal_regime)
-                    || ((_m = order === null || order === void 0 ? void 0 : order.customer) === null || _m === void 0 ? void 0 : _m.fiscal_regime)
-                    || ((_o = order === null || order === void 0 ? void 0 : order.customer) === null || _o === void 0 ? void 0 : _o.iva_condition)
+                const condicionIvaRaw = (((_154 = order === null || order === void 0 ? void 0 : order.billing_address) === null || _154 === void 0 ? void 0 : _154.fiscal_regime)
+                    || ((_155 = order === null || order === void 0 ? void 0 : order.customer) === null || _155 === void 0 ? void 0 : _155.fiscal_regime)
+                    || ((_156 = order === null || order === void 0 ? void 0 : order.customer) === null || _156 === void 0 ? void 0 : _156.iva_condition)
                     || 'Consumidor Final').toString();
                 payableOrders.push({
                     orderId: String(order.id),
-                    orderNumber: String((_p = order.number) !== null && _p !== void 0 ? _p : order.id),
+                    orderNumber: String((_157 = order.number) !== null && _157 !== void 0 ? _157 : order.id),
                     total,
                     date: String((order === null || order === void 0 ? void 0 : order.created_at) || new Date().toISOString().slice(0, 10)),
-                    customerId: `TN-${((_q = order === null || order === void 0 ? void 0 : order.customer) === null || _q === void 0 ? void 0 : _q.id) || order.id}`,
+                    customerId: `TN-${((_158 = order === null || order === void 0 ? void 0 : order.customer) === null || _158 === void 0 ? void 0 : _158.id) || order.id}`,
                     customerName,
                     customerCuit: maybeCuit,
                     condicionIva: condicionIvaRaw || 'Consumidor Final'
@@ -3176,15 +3746,15 @@ const invoiceTiendaNubeOrdersBulk = (req, res) => __awaiter(void 0, void 0, void
 exports.invoiceTiendaNubeOrdersBulk = invoiceTiendaNubeOrdersBulk;
 /** Emite facturas AFIP masivas para órdenes de Mercado Libre (solo pagadas). */
 const invoiceMercadoLibreOrdersBulk = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _159, _160, _161, _162, _163, _164, _165;
     try {
         const authUser = req.user;
         if (!authUser || !['ADMIN', 'WAREHOUSE', 'DEPOSITO'].includes(authUser.role)) {
             return res.status(403).json({ message: 'Solo ADMIN o Depósito pueden emitir facturas' });
         }
-        const orderIdsRaw = Array.isArray((_a = req.body) === null || _a === void 0 ? void 0 : _a.orderIds) ? req.body.orderIds : [];
+        const orderIdsRaw = Array.isArray((_159 = req.body) === null || _159 === void 0 ? void 0 : _159.orderIds) ? req.body.orderIds : [];
         const orderIds = Array.from(new Set(orderIdsRaw.map((x) => String(x).trim()).filter(Boolean)));
-        const cbteTipoFromBody = (_b = req.body) === null || _b === void 0 ? void 0 : _b.cbteTipo;
+        const cbteTipoFromBody = (_160 = req.body) === null || _160 === void 0 ? void 0 : _160.cbteTipo;
         const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? cbteTipoFromBody : undefined;
         if (!orderIds.length)
             return res.status(400).json({ message: 'Debes enviar orderIds con al menos una orden' });
@@ -3225,21 +3795,21 @@ const invoiceMercadoLibreOrdersBulk = (req, res) => __awaiter(void 0, void 0, vo
                     results.push({ orderId: orderIdStr, status: 'skipped_unpaid', message: `La orden no está pagada (estado: ${(order === null || order === void 0 ? void 0 : order.status) || 'desconocido'})` });
                     continue;
                 }
-                const total = Number((_c = order === null || order === void 0 ? void 0 : order.total_amount) !== null && _c !== void 0 ? _c : 0);
+                const total = Number((_161 = order === null || order === void 0 ? void 0 : order.total_amount) !== null && _161 !== void 0 ? _161 : 0);
                 if (!Number.isFinite(total) || total <= 0) {
                     results.push({ orderId: orderIdStr, status: 'error', message: 'La orden tiene total inválido para facturar' });
                     continue;
                 }
-                const buyerFirst = (((_d = order === null || order === void 0 ? void 0 : order.buyer) === null || _d === void 0 ? void 0 : _d.first_name) || '').toString().trim();
-                const buyerLast = (((_e = order === null || order === void 0 ? void 0 : order.buyer) === null || _e === void 0 ? void 0 : _e.last_name) || '').toString().trim();
+                const buyerFirst = (((_162 = order === null || order === void 0 ? void 0 : order.buyer) === null || _162 === void 0 ? void 0 : _162.first_name) || '').toString().trim();
+                const buyerLast = (((_163 = order === null || order === void 0 ? void 0 : order.buyer) === null || _163 === void 0 ? void 0 : _163.last_name) || '').toString().trim();
                 const customerName = `${buyerFirst} ${buyerLast}`.trim()
-                    || (((_f = order === null || order === void 0 ? void 0 : order.buyer) === null || _f === void 0 ? void 0 : _f.nickname) || '').toString().trim()
+                    || (((_164 = order === null || order === void 0 ? void 0 : order.buyer) === null || _164 === void 0 ? void 0 : _164.nickname) || '').toString().trim()
                     || 'Consumidor Final';
                 payableOrders.push({
                     orderId: String(order.id),
                     total,
                     date: String((order === null || order === void 0 ? void 0 : order.date_created) || new Date().toISOString().slice(0, 10)),
-                    customerId: `ML-${((_g = order === null || order === void 0 ? void 0 : order.buyer) === null || _g === void 0 ? void 0 : _g.id) || order.id}`,
+                    customerId: `ML-${((_165 = order === null || order === void 0 ? void 0 : order.buyer) === null || _165 === void 0 ? void 0 : _165.id) || order.id}`,
                     customerName
                 });
             }
@@ -3315,16 +3885,16 @@ const invoiceMercadoLibreOrdersBulk = (req, res) => __awaiter(void 0, void 0, vo
 exports.invoiceMercadoLibreOrdersBulk = invoiceMercadoLibreOrdersBulk;
 /** Historial unificado de facturación masiva externa (Tienda Nube / Mercado Libre). */
 const getExternalInvoicesHistory = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _166, _167, _168;
     try {
         const authUser = req.user;
         if (!authUser || !['ADMIN', 'WAREHOUSE', 'DEPOSITO'].includes(authUser.role)) {
             return res.status(403).json({ message: 'Sin permisos para ver historial de facturación externa' });
         }
-        const sourceRaw = String(((_a = req.query) === null || _a === void 0 ? void 0 : _a.source) || '').trim().toUpperCase();
+        const sourceRaw = String(((_166 = req.query) === null || _166 === void 0 ? void 0 : _166.source) || '').trim().toUpperCase();
         const source = sourceRaw === 'TIENDANUBE' || sourceRaw === 'MERCADOLIBRE' ? sourceRaw : '';
-        const limitNum = Math.min(500, Math.max(1, parseInt(String(((_b = req.query) === null || _b === void 0 ? void 0 : _b.limit) || '50'), 10) || 50));
-        const offsetNum = Math.max(0, parseInt(String(((_c = req.query) === null || _c === void 0 ? void 0 : _c.offset) || '0'), 10) || 0);
+        const limitNum = Math.min(500, Math.max(1, parseInt(String(((_167 = req.query) === null || _167 === void 0 ? void 0 : _167.limit) || '50'), 10) || 50));
+        const offsetNum = Math.max(0, parseInt(String(((_168 = req.query) === null || _168 === void 0 ? void 0 : _168.offset) || '0'), 10) || 0);
         const where = [];
         const params = [];
         if (source) {
@@ -3444,7 +4014,7 @@ const emitirNotaCreditoExternalInvoice = (req, res) => __awaiter(void 0, void 0,
 exports.emitirNotaCreditoExternalInvoice = emitirNotaCreditoExternalInvoice;
 /** Listado de preguntas del vendedor (historial desde la API de Mercado Libre). */
 const getMercadoLibreQuestions = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _169, _170, _171;
     try {
         const mlToken = yield getValidMLToken();
         if (!mlToken) {
@@ -3487,7 +4057,7 @@ const getMercadoLibreQuestions = (req, res) => __awaiter(void 0, void 0, void 0,
             });
         }
         catch (first) {
-            if (((_a = first === null || first === void 0 ? void 0 : first.response) === null || _a === void 0 ? void 0 : _a.status) === 400 && baseQs.includes('sort_fields')) {
+            if (((_169 = first === null || first === void 0 ? void 0 : first.response) === null || _169 === void 0 ? void 0 : _169.status) === 400 && baseQs.includes('sort_fields')) {
                 const fallback = new URLSearchParams(baseQs);
                 fallback.delete('sort_fields');
                 fallback.delete('sort_types');
@@ -3529,19 +4099,19 @@ const getMercadoLibreQuestions = (req, res) => __awaiter(void 0, void 0, void 0,
         });
     }
     catch (error) {
-        const errData = (_b = error.response) === null || _b === void 0 ? void 0 : _b.data;
+        const errData = (_170 = error.response) === null || _170 === void 0 ? void 0 : _170.data;
         console.error('[ML Questions]', errData || error.message);
         const msg = (typeof (errData === null || errData === void 0 ? void 0 : errData.message) === 'string' && errData.message) ||
             (typeof (errData === null || errData === void 0 ? void 0 : errData.error) === 'string' && errData.error) ||
             error.message ||
             'Error al obtener preguntas de Mercado Libre';
-        res.status(((_c = error.response) === null || _c === void 0 ? void 0 : _c.status) || 500).json({ message: msg });
+        res.status(((_171 = error.response) === null || _171 === void 0 ? void 0 : _171.status) || 500).json({ message: msg });
     }
 });
 exports.getMercadoLibreQuestions = getMercadoLibreQuestions;
 // Obtener órdenes de Mercado Libre
 const getMercadoLibreOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _172;
     try {
         const mlToken = yield getValidMLToken();
         if (!mlToken) {
@@ -3639,7 +4209,7 @@ const getMercadoLibreOrders = (req, res) => __awaiter(void 0, void 0, void 0, fu
             const POR_ENVIAR_STATUSES = ['handling', 'ready_to_ship'];
             const authHeader = { 'Authorization': `Bearer ${mlToken.access_token}`, 'x-format-new': 'true' };
             const getShipmentId = (order) => __awaiter(void 0, void 0, void 0, function* () {
-                var _a, _b, _c;
+                var _173, _174, _175;
                 const ship = order.shipping || order.shipment;
                 if (ship === null || ship === void 0 ? void 0 : ship.id)
                     return ship.id;
@@ -3647,33 +4217,33 @@ const getMercadoLibreOrders = (req, res) => __awaiter(void 0, void 0, void 0, fu
                     const det = yield axios_1.default.get(`https://api.mercadolibre.com/orders/${order.id}`, {
                         headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
                     });
-                    const s = ((_a = det.data) === null || _a === void 0 ? void 0 : _a.shipping) || ((_b = det.data) === null || _b === void 0 ? void 0 : _b.shipment);
-                    return (_c = s === null || s === void 0 ? void 0 : s.id) !== null && _c !== void 0 ? _c : null;
+                    const s = ((_173 = det.data) === null || _173 === void 0 ? void 0 : _173.shipping) || ((_174 = det.data) === null || _174 === void 0 ? void 0 : _174.shipment);
+                    return (_175 = s === null || s === void 0 ? void 0 : s.id) !== null && _175 !== void 0 ? _175 : null;
                 }
-                catch (_d) {
+                catch (_176) {
                     return null;
                 }
             });
             const getShipmentStatus = (shipmentId) => __awaiter(void 0, void 0, void 0, function* () {
-                var _a, _b, _c, _d;
+                var _177, _178, _179, _180;
                 try {
                     const res = yield axios_1.default.get(`https://api.mercadolibre.com/shipments/${shipmentId}`, {
                         headers: authHeader
                     });
                     const data = res.data || {};
-                    const st = ((_b = (_a = data.status) !== null && _a !== void 0 ? _a : data.substatus) !== null && _b !== void 0 ? _b : '').toString().trim().toLowerCase();
+                    const st = ((_178 = (_177 = data.status) !== null && _177 !== void 0 ? _177 : data.substatus) !== null && _178 !== void 0 ? _178 : '').toString().trim().toLowerCase();
                     return st || null;
                 }
-                catch (_e) {
+                catch (_181) {
                     try {
                         const res = yield axios_1.default.get(`https://api.mercadolibre.com/marketplace/shipments/${shipmentId}`, {
                             headers: authHeader
                         });
                         const data = res.data || {};
-                        const st = ((_d = (_c = data.status) !== null && _c !== void 0 ? _c : data.substatus) !== null && _d !== void 0 ? _d : '').toString().trim().toLowerCase();
+                        const st = ((_180 = (_179 = data.status) !== null && _179 !== void 0 ? _179 : data.substatus) !== null && _180 !== void 0 ? _180 : '').toString().trim().toLowerCase();
                         return st || null;
                     }
-                    catch (_f) {
+                    catch (_182) {
                         return null;
                     }
                 }
@@ -3771,14 +4341,14 @@ const getMercadoLibreOrders = (req, res) => __awaiter(void 0, void 0, void 0, fu
         });
     }
     catch (error) {
-        console.error('Error fetching ML orders:', ((_a = error.response) === null || _a === void 0 ? void 0 : _a.data) || error.message);
+        console.error('Error fetching ML orders:', ((_172 = error.response) === null || _172 === void 0 ? void 0 : _172.data) || error.message);
         res.status(500).json({ message: 'Error obteniendo órdenes de Mercado Libre', error: error.message });
     }
 });
 exports.getMercadoLibreOrders = getMercadoLibreOrders;
 // Totales de stock Mercado Libre (todas las publicaciones, para las cards)
 const getMercadoLibreStockTotals = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _183, _184;
     try {
         const mlToken = yield getValidMLToken();
         if (!mlToken) {
@@ -3803,7 +4373,7 @@ const getMercadoLibreStockTotals = (req, res) => __awaiter(void 0, void 0, void 
                     if (!item)
                         continue;
                     let productStock = 0;
-                    if ((_a = item.variations) === null || _a === void 0 ? void 0 : _a.length) {
+                    if ((_183 = item.variations) === null || _183 === void 0 ? void 0 : _183.length) {
                         productStock = item.variations.reduce((s, v) => s + (v.available_quantity || 0), 0);
                     }
                     else {
@@ -3826,7 +4396,7 @@ const getMercadoLibreStockTotals = (req, res) => __awaiter(void 0, void 0, void 
         res.json({ totalProducts, totalStock, lowStockCount, noStockCount });
     }
     catch (error) {
-        console.error('Error fetching ML stock totals:', ((_b = error.response) === null || _b === void 0 ? void 0 : _b.data) || error.message);
+        console.error('Error fetching ML stock totals:', ((_184 = error.response) === null || _184 === void 0 ? void 0 : _184.data) || error.message);
         res.status(500).json({ message: 'Error obteniendo totales de Mercado Libre', error: error.message });
     }
 });
@@ -3837,8 +4407,8 @@ function mlNormalizeTitle(title) {
     return (title || '').trim().replace(/\s+/g, ' ');
 }
 /** Registra una publicación ML en variant_publications (sincronización de stock). */
-function registerMercadoLibrePublication(variantId_1, mlItemId_1) {
-    return __awaiter(this, arguments, void 0, function* (variantId, mlItemId, mlVariationId = null, mlPack = 1) {
+function registerMercadoLibrePublication(variantId, mlItemId, mlVariationId = null, mlPack = 1) {
+    return __awaiter(this, void 0, void 0, function* () {
         const productId = String(mlItemId || '').trim();
         if (!productId || !variantId)
             return;
@@ -3850,8 +4420,8 @@ function registerMercadoLibrePublication(variantId_1, mlItemId_1) {
 }
 /** Crea o reutiliza variante local y vincula una o más publicaciones ML del mismo color/talle. */
 function upsertLocalVariantFromMlEntries(productId, baseSku, entries) {
+    var _a;
     return __awaiter(this, void 0, void 0, function* () {
-        var _a;
         const v = entries[0];
         const sizeCode = (v.size || 'U').toString().trim() || 'U';
         const colorCode = (v.color || 'Único').toString().trim() || 'Único';
@@ -3914,12 +4484,14 @@ function mlBaseTitle(title) {
         return words.slice(0, -1).join(' ');
     return t;
 }
+exports.mlBaseTitle = mlBaseTitle;
 /** Quita sufijos de numeración de publicación (ej. "... Negro 1", "... #2", "... N° 3"). */
 function mlStripTrailingPublicationIndex(title) {
     return (title || '')
         .replace(/\s*(?:#|N°|Nº)?\s*\d{1,2}\s*$/i, '')
         .trim();
 }
+exports.mlStripTrailingPublicationIndex = mlStripTrailingPublicationIndex;
 /** Extrae color y talle del final del título (ej. "... Blanco G" -> color: Blanco, size: G). */
 function mlColorSizeFromTitle(title) {
     let t = mlStripTrailingPublicationIndex(mlNormalizeTitle(title));
@@ -3944,8 +4516,9 @@ function mlColorSizeFromTitle(title) {
         return { color: '', size: words[words.length - 1] || '' };
     return { color: '', size: '' };
 }
+exports.mlColorSizeFromTitle = mlColorSizeFromTitle;
 const getMercadoLibreStock = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
+    var _185, _186, _187, _188, _189, _190, _191, _192, _193, _194, _195;
     try {
         const mlToken = yield getValidMLToken();
         if (!mlToken) {
@@ -4027,16 +4600,16 @@ const getMercadoLibreStock = (req, res) => __awaiter(void 0, void 0, void 0, fun
                 }
                 else {
                     // Sin variaciones en la API: puede ser una publicación por variante (mismo producto, varios ítems). Se agrupa después.
-                    let itemSku = ((_b = (_a = item.seller_sku) !== null && _a !== void 0 ? _a : item.seller_custom_field) !== null && _b !== void 0 ? _b : '').toString().trim();
+                    let itemSku = ((_186 = (_185 = item.seller_sku) !== null && _185 !== void 0 ? _185 : item.seller_custom_field) !== null && _186 !== void 0 ? _186 : '').toString().trim();
                     if (!itemSku && Array.isArray(item.attributes)) {
                         const skuAttr = item.attributes.find((a) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
                         if (skuAttr)
-                            itemSku = ((_d = (_c = skuAttr.value_name) !== null && _c !== void 0 ? _c : skuAttr.value) !== null && _d !== void 0 ? _d : '').toString().trim();
+                            itemSku = ((_188 = (_187 = skuAttr.value_name) !== null && _187 !== void 0 ? _187 : skuAttr.value) !== null && _188 !== void 0 ? _188 : '').toString().trim();
                     }
                     if (!itemSku && item.variations && item.variations.length === 1) {
                         const v0 = item.variations[0];
                         const skuAttr = Array.isArray(v0.attributes) && v0.attributes.find((a) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
-                        itemSku = (skuAttr ? ((_f = (_e = skuAttr.value_name) !== null && _e !== void 0 ? _e : skuAttr.value) !== null && _f !== void 0 ? _f : '') : ((_h = (_g = v0.seller_sku) !== null && _g !== void 0 ? _g : v0.seller_custom_field) !== null && _h !== void 0 ? _h : '')).toString().trim();
+                        itemSku = (skuAttr ? ((_190 = (_189 = skuAttr.value_name) !== null && _189 !== void 0 ? _189 : skuAttr.value) !== null && _190 !== void 0 ? _190 : '') : ((_192 = (_191 = v0.seller_sku) !== null && _191 !== void 0 ? _191 : v0.seller_custom_field) !== null && _192 !== void 0 ? _192 : '')).toString().trim();
                     }
                     items.push({
                         id: item.id,
@@ -4107,20 +4680,20 @@ const getMercadoLibreStock = (req, res) => __awaiter(void 0, void 0, void 0, fun
         items = [...withVariations, ...grouped];
         res.json({
             items,
-            total: (_k = (_j = itemsRes.data.paging) === null || _j === void 0 ? void 0 : _j.total) !== null && _k !== void 0 ? _k : items.length,
+            total: (_194 = (_193 = itemsRes.data.paging) === null || _193 === void 0 ? void 0 : _193.total) !== null && _194 !== void 0 ? _194 : items.length,
             offset: parseInt(offset),
             limit: parseInt(limit)
         });
     }
     catch (error) {
-        console.error('Error fetching ML stock:', ((_l = error.response) === null || _l === void 0 ? void 0 : _l.data) || error.message);
+        console.error('Error fetching ML stock:', ((_195 = error.response) === null || _195 === void 0 ? void 0 : _195.data) || error.message);
         res.status(500).json({ message: 'Error obteniendo stock de Mercado Libre', error: error.message });
     }
 });
 exports.getMercadoLibreStock = getMercadoLibreStock;
 // Obtener variaciones de un ítem de Mercado Libre por ID (para vincular por ID padre)
 const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v;
+    var _196, _197, _198, _199, _200, _201, _202, _203;
     try {
         let { itemId } = req.params;
         if (!itemId) {
@@ -4152,13 +4725,13 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
                     break;
                 }
             }
-            catch (_w) {
+            catch (_204) {
                 // probar siguiente candidato
             }
         }
-        // Si no se encontró como item directo, intentar tratarlo como product/catalog ID (/p/MLA...).
+        // Catálogo /p/MLA...: siempre intentar listar todas las publicaciones hijas (cada color suele ser un ítem).
+        catalogItemCandidates = yield resolveMercadoLibreCatalogProductItems(String(req.params.itemId || ''), mlToken.access_token);
         if (!item || item.error) {
-            catalogItemCandidates = yield resolveMercadoLibreCatalogProductItems(String(req.params.itemId || ''), mlToken.access_token);
             for (const candidate of catalogItemCandidates) {
                 if (!triedCandidates.includes(candidate))
                     triedCandidates.push(candidate);
@@ -4172,7 +4745,7 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
                         break;
                     }
                 }
-                catch (_x) {
+                catch (_205) {
                     // probar siguiente candidato
                 }
             }
@@ -4197,7 +4770,7 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
                         break;
                     }
                 }
-                catch (_y) {
+                catch (_206) {
                     // probar siguiente candidato
                 }
             }
@@ -4209,103 +4782,105 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
                 debug: shouldResolveAsUserProduct ? { userProduct: userProductResolveDebug } : undefined
             });
         }
-        // Caso UP (MLAU...): devolver TODAS las variantes de todos los items del user_product_id.
-        if ((shouldResolveAsUserProduct && userProductItemCandidates.length > 0) || userProductItemCandidates.length > 1) {
-            const byVariationId = {};
-            for (const candidate of userProductItemCandidates.slice(0, 120)) {
-                try {
-                    const itemRes = yield axios_1.default.get(`https://api.mercadolibre.com/items/${candidate}?include_attributes=all`, {
-                        headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
-                    });
-                    const it = itemRes === null || itemRes === void 0 ? void 0 : itemRes.data;
-                    if (!it || it.error)
-                        continue;
-                    if (Array.isArray(it.variations) && it.variations.length > 0) {
-                        for (const v of it.variations) {
-                            const skuAttr = Array.isArray(v.attributes) && v.attributes.find((a) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
-                            const skuFromAttr = skuAttr ? ((_b = (_a = skuAttr.value_name) !== null && _a !== void 0 ? _a : skuAttr.value) !== null && _b !== void 0 ? _b : '').toString().trim() : '';
-                            const sku = skuFromAttr || ((_d = (_c = v.seller_sku) !== null && _c !== void 0 ? _c : v.seller_custom_field) !== null && _d !== void 0 ? _d : '').toString().trim();
-                            let color = '';
-                            let size = '';
-                            (v.attribute_combinations || []).forEach((attr) => {
-                                const id = (attr.id || '').toString().toUpperCase();
-                                const name = (attr.value_name || attr.name || '').toString().trim();
-                                if (id === 'COLOR' || id === 'COLOUR' || id === 'COR')
-                                    color = name;
-                                if (id === 'SIZE' || id === 'SIZE_TYPE' || id === 'TALLE' || id === 'Talla')
-                                    size = name;
-                            });
-                            byVariationId[String(v.id)] = {
-                                variationId: String(v.id),
-                                sku,
-                                color,
-                                size,
-                                stock: v.available_quantity || 0
-                            };
-                        }
-                    }
-                    else {
-                        const attrs = Array.isArray(it.attributes) ? it.attributes : [];
-                        const skuAttr = attrs.find((a) => ((a === null || a === void 0 ? void 0 : a.id) || '').toString().toUpperCase() === 'SELLER_SKU');
-                        const sku = ((_f = (_e = it.seller_sku) !== null && _e !== void 0 ? _e : it.seller_custom_field) !== null && _f !== void 0 ? _f : (skuAttr ? ((_h = (_g = skuAttr.value_name) !== null && _g !== void 0 ? _g : skuAttr.value) !== null && _h !== void 0 ? _h : '') : '')).toString().trim();
-                        const colorAttr = attrs.find((a) => ['COLOR', 'COLOUR', 'COR'].includes(((a === null || a === void 0 ? void 0 : a.id) || '').toString().toUpperCase()));
-                        const sizeAttr = attrs.find((a) => ['SIZE', 'SIZE_TYPE', 'TALLE', 'TALLA'].includes(((a === null || a === void 0 ? void 0 : a.id) || '').toString().toUpperCase()));
-                        const parsed = mlColorSizeFromTitle((it.title || '').toString().trim());
-                        byVariationId[String(it.id)] = {
-                            variationId: String(it.id),
-                            sku,
-                            color: (colorAttr ? ((_k = (_j = colorAttr.value_name) !== null && _j !== void 0 ? _j : colorAttr.value) !== null && _k !== void 0 ? _k : '') : parsed.color).toString().trim(),
-                            size: (sizeAttr ? ((_m = (_l = sizeAttr.value_name) !== null && _l !== void 0 ? _l : sizeAttr.value) !== null && _m !== void 0 ? _m : '') : parsed.size).toString().trim(),
-                            stock: it.available_quantity || 0
-                        };
+        const catalogFromPermalink = catalogProductIdFromMercadoLibreItem(item);
+        const itemUserProductId = ((_196 = item === null || item === void 0 ? void 0 : item.user_product_id) !== null && _196 !== void 0 ? _196 : '').toString().trim();
+        if (catalogFromPermalink && catalogItemCandidates.length === 0) {
+            catalogItemCandidates = yield resolveMercadoLibreCatalogProductItems(catalogFromPermalink, mlToken.access_token);
+        }
+        if (/^MLAU\d+$/i.test(itemUserProductId) && userProductItemCandidates.length === 0) {
+            const upResolved = yield resolveMercadoLibreUserProductItems(itemUserProductId, mlToken.user_id, mlToken.access_token);
+            userProductItemCandidates = upResolved.itemCandidates;
+            userProductResolveDebug = upResolved.debug;
+        }
+        const singleItemVariations = extractMlVariationsFromItemData(item);
+        const allItemIds = yield gatherMercadoLibreItemIdsForAllVariations({
+            requestedRaw: String(req.params.itemId || ''),
+            requestedNormalized,
+            shouldResolveAsUserProduct,
+            resolvedItemId,
+            item,
+            sellerId: mlToken.user_id,
+            accessToken: mlToken.access_token,
+            preloadedCatalogIds: catalogItemCandidates,
+            preloadedUserProductIds: userProductItemCandidates
+        });
+        const distinctItemIds = new Set(allItemIds.map((id) => normalizeMercadoLibreItemId(id)));
+        const familyNameOnItem = mlFamilyNameFromItem(item);
+        const shouldAggregateMulti = shouldResolveAsUserProduct ||
+            Boolean(catalogFromPermalink) ||
+            /^MLAU\d+$/i.test(itemUserProductId) ||
+            Boolean(familyNameOnItem) ||
+            (item === null || item === void 0 ? void 0 : item.catalog_listing) === true ||
+            distinctItemIds.size > 1 ||
+            catalogItemCandidates.length > 1 ||
+            userProductItemCandidates.length > 1;
+        const buildAggregatedResponse = (aggregated, extraDebug = {}) => {
+            const distinctColors = new Set(aggregated.map((v) => v.color.toLowerCase().trim()).filter(Boolean));
+            return res.json({
+                variations: aggregated,
+                singleProduct: false,
+                itemId: item.id,
+                requestedItemId: String(req.params.itemId || ''),
+                resolvedItemId,
+                resolvedFromMultiListing: true,
+                debug: Object.assign({ userProduct: userProductResolveDebug, itemIdsCount: distinctItemIds.size, variationCount: aggregated.length, colorCount: distinctColors.size, familyName: familyNameOnItem || undefined }, extraDebug)
+            });
+        };
+        if (shouldAggregateMulti && allItemIds.length > 0) {
+            let aggregated = yield aggregateMercadoLibreVariationsFromItemIds(allItemIds, mlToken.access_token);
+            const distinctColors = new Set(aggregated.map((v) => v.color.toLowerCase().trim()).filter(Boolean));
+            const distinctSizes = new Set(aggregated.map((v) => v.size.toLowerCase().trim()).filter(Boolean));
+            // Si solo aparece un color, ampliar por family_name o prefijo SKU del artículo.
+            if (distinctColors.size <= 1) {
+                const extraIds = new Set(allItemIds.map((id) => normalizeMercadoLibreItemId(id)));
+                if (familyNameOnItem) {
+                    for (const id of yield resolveMercadoLibreItemsByFamilyName(familyNameOnItem, mlToken.user_id, mlToken.access_token)) {
+                        extraIds.add(normalizeMercadoLibreItemId(id));
                     }
                 }
-                catch (_z) {
-                    // ignorar ítem inválido y continuar
+                const skuPrefixes = new Set();
+                for (const sku of collectMercadoLibreItemSkus(item)) {
+                    const prefix = extractArticlePrefixFromMlSku(sku);
+                    if (prefix)
+                        skuPrefixes.add(prefix);
+                }
+                for (const row of aggregated) {
+                    const prefix = extractArticlePrefixFromMlSku(row.sku);
+                    if (prefix)
+                        skuPrefixes.add(prefix);
+                }
+                for (const prefix of skuPrefixes) {
+                    for (const id of yield resolveMercadoLibreItemsByArticlePrefix(prefix, mlToken.user_id, mlToken.access_token)) {
+                        extraIds.add(normalizeMercadoLibreItemId(id));
+                    }
+                }
+                if (extraIds.size > distinctItemIds.size) {
+                    aggregated = yield aggregateMercadoLibreVariationsFromItemIds(Array.from(extraIds), mlToken.access_token);
                 }
             }
-            const upVariations = Object.values(byVariationId);
-            if (upVariations.length > 1) {
-                return res.json({
-                    variations: upVariations,
-                    singleProduct: false,
-                    itemId: item.id,
-                    requestedItemId: String(req.params.itemId || ''),
-                    resolvedItemId,
-                    resolvedFromUserProduct: true,
-                    debug: {
-                        userProduct: userProductResolveDebug,
-                        upCandidatesCount: userProductItemCandidates.length,
-                        upVariationCount: upVariations.length
-                    }
-                });
+            const finalColors = new Set(aggregated.map((v) => v.color.toLowerCase().trim()).filter(Boolean));
+            const finalSizes = new Set(aggregated.map((v) => v.size.toLowerCase().trim()).filter(Boolean));
+            const moreThanSingleItem = aggregated.length > singleItemVariations.length ||
+                finalColors.size > 1 ||
+                finalSizes.size > 1;
+            if (aggregated.length > 0 && (moreThanSingleItem || distinctItemIds.size > 1 || finalColors.size > 1)) {
+                return buildAggregatedResponse(aggregated);
             }
         }
-        if (item.variations && item.variations.length > 0) {
-            const variations = item.variations.map((v) => {
-                var _a, _b, _c, _d;
-                const skuAttr = Array.isArray(v.attributes) && v.attributes.find((a) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
-                const skuFromAttr = skuAttr ? ((_b = (_a = skuAttr.value_name) !== null && _a !== void 0 ? _a : skuAttr.value) !== null && _b !== void 0 ? _b : '').toString().trim() : '';
-                const sku = skuFromAttr || ((_d = (_c = v.seller_sku) !== null && _c !== void 0 ? _c : v.seller_custom_field) !== null && _d !== void 0 ? _d : '').toString().trim();
-                let color = '';
-                let size = '';
-                (v.attribute_combinations || []).forEach((attr) => {
-                    const id = (attr.id || '').toString().toUpperCase();
-                    const name = (attr.value_name || attr.name || '').toString().trim();
-                    if (id === 'COLOR' || id === 'COLOUR' || id === 'COR')
-                        color = name;
-                    if (id === 'SIZE' || id === 'SIZE_TYPE' || id === 'TALLE' || id === 'Talla')
-                        size = name;
-                });
-                return {
-                    variationId: v.id,
-                    sku,
-                    color,
-                    size,
-                    stock: v.available_quantity || 0
-                };
+        if (singleItemVariations.length > 0 &&
+            distinctItemIds.size <= 1 &&
+            catalogItemCandidates.length <= 1 &&
+            !catalogFromPermalink &&
+            !/^MLAU\d+$/i.test(itemUserProductId) &&
+            !familyNameOnItem &&
+            (item === null || item === void 0 ? void 0 : item.catalog_listing) !== true) {
+            return res.json({
+                variations: singleItemVariations,
+                singleProduct: singleItemVariations.length === 1,
+                itemId: item.id,
+                requestedItemId: String(req.params.itemId || ''),
+                resolvedItemId
             });
-            return res.json({ variations, singleProduct: false, itemId: item.id, requestedItemId: String(req.params.itemId || ''), resolvedItemId });
         }
         // Caso catálogo: no hay item.variations pero sí múltiples items hijos (cada uno una "variante").
         if (catalogItemCandidates.length > 1) {
@@ -4326,7 +4901,7 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
                     if ((d === null || d === void 0 ? void 0 : d.id) && !byItemId[d.id])
                         byItemId[d.id] = d;
                 }
-                catch (_0) {
+                catch (_207) {
                     // ignorar item inválido y seguir
                 }
             }
@@ -4358,75 +4933,59 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
                 });
             }
         }
-        // Caso "una publicación por variante" sin catálogo explícito:
-        // buscar publicaciones hermanas del mismo vendedor por título base.
-        if (!item.variations || item.variations.length === 0) {
+        // Fallback: publicaciones hermanas por título (cada talle/color en su propia MLA).
+        {
             const baseTitle = mlBaseTitle((item.title || '').toString().trim());
             const baseTitleLoose = mlStripTrailingPublicationIndex(baseTitle);
-            if (baseTitle) {
-                const searchRes = yield axios_1.default.get(`https://api.mercadolibre.com/users/${mlToken.user_id}/items/search`, {
-                    headers: { 'Authorization': `Bearer ${mlToken.access_token}` },
-                    params: { q: baseTitleLoose || baseTitle, limit: 50, offset: 0 },
-                    validateStatus: () => true
-                });
-                const siblingIds = searchRes.status === 200 && Array.isArray((_o = searchRes.data) === null || _o === void 0 ? void 0 : _o.results)
-                    ? searchRes.data.results.map((x) => String(x || '').trim()).filter(Boolean)
-                    : [];
-                const uniqueSiblingIds = Array.from(new Set(siblingIds)).slice(0, 50);
-                if (uniqueSiblingIds.length > 1) {
-                    const siblings = yield Promise.all(uniqueSiblingIds.map((sid) => __awaiter(void 0, void 0, void 0, function* () {
-                        try {
-                            const r = yield axios_1.default.get(`https://api.mercadolibre.com/items/${sid}?include_attributes=all`, {
-                                headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
-                            });
-                            return r.data;
-                        }
-                        catch (_a) {
-                            return null;
-                        }
-                    })));
-                    const siblingVariations = (siblings || [])
-                        .filter((it) => it && !it.error && (!it.variations || it.variations.length === 0))
-                        .filter((it) => {
-                        const siblingBase = mlBaseTitle((it.title || '').toString().trim());
-                        const siblingLoose = mlStripTrailingPublicationIndex(siblingBase);
-                        return siblingBase === baseTitle || (baseTitleLoose && siblingLoose === baseTitleLoose);
-                    })
-                        .map((it) => {
-                        var _a, _b, _c, _d, _e, _f, _g, _h;
-                        const attrs = Array.isArray(it.attributes) ? it.attributes : [];
-                        const skuAttr = attrs.find((a) => ((a === null || a === void 0 ? void 0 : a.id) || '').toString().toUpperCase() === 'SELLER_SKU');
-                        const sku = ((_b = (_a = it.seller_sku) !== null && _a !== void 0 ? _a : it.seller_custom_field) !== null && _b !== void 0 ? _b : (skuAttr ? ((_d = (_c = skuAttr.value_name) !== null && _c !== void 0 ? _c : skuAttr.value) !== null && _d !== void 0 ? _d : '') : '')).toString().trim();
-                        const colorAttr = attrs.find((a) => ['COLOR', 'COLOUR', 'COR'].includes(((a === null || a === void 0 ? void 0 : a.id) || '').toString().toUpperCase()));
-                        const sizeAttr = attrs.find((a) => ['SIZE', 'SIZE_TYPE', 'TALLE', 'TALLA'].includes(((a === null || a === void 0 ? void 0 : a.id) || '').toString().toUpperCase()));
-                        const parsed = mlColorSizeFromTitle((it.title || '').toString().trim());
-                        return {
-                            variationId: it.id,
-                            sku,
-                            color: (colorAttr ? ((_f = (_e = colorAttr.value_name) !== null && _e !== void 0 ? _e : colorAttr.value) !== null && _f !== void 0 ? _f : '') : parsed.color).toString().trim(),
-                            size: (sizeAttr ? ((_h = (_g = sizeAttr.value_name) !== null && _g !== void 0 ? _g : sizeAttr.value) !== null && _h !== void 0 ? _h : '') : parsed.size).toString().trim(),
-                            stock: it.available_quantity || 0
-                        };
-                    });
-                    if (siblingVariations.length > 1) {
-                        return res.json({
-                            variations: siblingVariations,
-                            singleProduct: false,
-                            itemId: item.id,
-                            requestedItemId: String(req.params.itemId || ''),
-                            resolvedItemId,
-                            resolvedFromSiblingSearch: true
+            const siblingIds = yield findMercadoLibreSiblingListingIds(item, mlToken.user_id, mlToken.access_token);
+            if (siblingIds.length > 0) {
+                const siblingRows = [];
+                const siblings = yield Promise.all(siblingIds.map((sid) => __awaiter(void 0, void 0, void 0, function* () {
+                    try {
+                        const r = yield axios_1.default.get(`https://api.mercadolibre.com/items/${sid}?include_attributes=all`, {
+                            headers: { Authorization: `Bearer ${mlToken.access_token}` }
                         });
+                        return r.data;
                     }
+                    catch (_208) {
+                        return null;
+                    }
+                })));
+                for (const it of siblings) {
+                    if (!it || it.error)
+                        continue;
+                    const siblingBase = mlBaseTitle((it.title || '').toString().trim());
+                    const siblingLoose = mlStripTrailingPublicationIndex(siblingBase);
+                    if (baseTitle && siblingBase !== baseTitle && baseTitleLoose && siblingLoose !== baseTitleLoose)
+                        continue;
+                    siblingRows.push(...extractMlVariationsFromItemData(it));
+                }
+                const merged = [...singleItemVariations];
+                const seenVid = new Set(merged.map((v) => v.variationId));
+                for (const row of siblingRows) {
+                    if (!seenVid.has(row.variationId)) {
+                        seenVid.add(row.variationId);
+                        merged.push(row);
+                    }
+                }
+                if (merged.length > singleItemVariations.length) {
+                    return res.json({
+                        variations: merged,
+                        singleProduct: false,
+                        itemId: item.id,
+                        requestedItemId: String(req.params.itemId || ''),
+                        resolvedItemId,
+                        resolvedFromSiblingSearch: true
+                    });
                 }
             }
         }
         // Sin variaciones: producto único
         const parsed = mlColorSizeFromTitle((item.title || '').toString().trim());
-        let singleSku = ((_q = (_p = item.seller_sku) !== null && _p !== void 0 ? _p : item.seller_custom_field) !== null && _q !== void 0 ? _q : '').toString().trim();
+        let singleSku = ((_198 = (_197 = item.seller_sku) !== null && _197 !== void 0 ? _197 : item.seller_custom_field) !== null && _198 !== void 0 ? _198 : '').toString().trim();
         if (!singleSku && Array.isArray(item.attributes)) {
             const skuAttr = item.attributes.find((a) => ((a === null || a === void 0 ? void 0 : a.id) || '').toString().toUpperCase() === 'SELLER_SKU');
-            singleSku = (skuAttr ? ((_s = (_r = skuAttr.value_name) !== null && _r !== void 0 ? _r : skuAttr.value) !== null && _s !== void 0 ? _s : '') : '').toString().trim();
+            singleSku = (skuAttr ? ((_200 = (_199 = skuAttr.value_name) !== null && _199 !== void 0 ? _199 : skuAttr.value) !== null && _200 !== void 0 ? _200 : '') : '').toString().trim();
         }
         return res.json({
             variations: [{
@@ -4443,8 +5002,8 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
         });
     }
     catch (error) {
-        const status = (_t = error.response) === null || _t === void 0 ? void 0 : _t.status;
-        const detail = ((_v = (_u = error.response) === null || _u === void 0 ? void 0 : _u.data) === null || _v === void 0 ? void 0 : _v.message) || error.message;
+        const status = (_201 = error.response) === null || _201 === void 0 ? void 0 : _201.status;
+        const detail = ((_203 = (_202 = error.response) === null || _202 === void 0 ? void 0 : _202.data) === null || _203 === void 0 ? void 0 : _203.message) || error.message;
         console.error('Error fetching ML item variations:', detail);
         res.status(status === 404 ? 404 : 500).json({ message: 'Error obteniendo variaciones de Mercado Libre', detail });
     }
@@ -4452,7 +5011,7 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
 exports.getMercadoLibreItemVariations = getMercadoLibreItemVariations;
 // Obtener variantes de un producto de Tienda Nube por ID (para vincular por ID padre)
 const getTiendaNubeProductVariants = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d;
+    var _209, _210, _211, _212;
     try {
         const { productId } = req.params;
         if (!productId) {
@@ -4524,7 +5083,7 @@ const getTiendaNubeProductVariants = (req, res) => __awaiter(void 0, void 0, voi
         return res.json({ variants, productId: p.id });
     }
     catch (error) {
-        const detail = ((_b = (_a = error.response) === null || _a === void 0 ? void 0 : _a.data) === null || _b === void 0 ? void 0 : _b.description) || ((_d = (_c = error.response) === null || _c === void 0 ? void 0 : _c.data) === null || _d === void 0 ? void 0 : _d.message) || error.message;
+        const detail = ((_210 = (_209 = error.response) === null || _209 === void 0 ? void 0 : _209.data) === null || _210 === void 0 ? void 0 : _210.description) || ((_212 = (_211 = error.response) === null || _211 === void 0 ? void 0 : _211.data) === null || _212 === void 0 ? void 0 : _212.message) || error.message;
         console.error('Error fetching TN product variants:', detail);
         res.status(500).json({ message: 'Error obteniendo variantes de Tienda Nube', detail });
     }
@@ -4583,12 +5142,14 @@ function tiendaNubeCategoryIdsOnly(raw) {
         .filter((n) => Number.isFinite(n));
 }
 function stripVariantForTiendaNubeCreate(v, skuSuffix, idx) {
-    const baseSku = (v === null || v === void 0 ? void 0 : v.sku) != null && String(v.sku).trim() !== '' ? String(v.sku).trim() : `VAR-${idx + 1}`;
+    const baseSku = (v === null || v === void 0 ? void 0 : v.sku) != null && String(v.sku).trim() !== ''
+        ? (0, skuString_1.skuToCanonicalString)(v.sku)
+        : `VAR-${idx + 1}`;
     const out = {
         price: v.price != null ? String(v.price) : '0',
         stock_management: v.stock_management !== false,
         stock: Number(v.stock) || 0,
-        sku: `${baseSku}${skuSuffix}`,
+        sku: (0, skuString_1.skuToCanonicalString)(`${baseSku}${skuSuffix}`),
         values: Array.isArray(v.values) ? v.values : []
     };
     if (v.promotional_price != null && String(v.promotional_price).trim() !== '') {
@@ -4645,7 +5206,7 @@ function buildTiendaNubeDuplicateCreateBody(product, variantsList, opts) {
 }
 /** Crea un producto en Tienda Nube (payload según documentación POST /products). */
 const createTiendaNubeProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _213, _214, _215, _216, _217, _218, _219;
     try {
         const body = req.body;
         if (!body || typeof body !== 'object') {
@@ -4672,18 +5233,18 @@ const createTiendaNubeProduct = (req, res) => __awaiter(void 0, void 0, void 0, 
         if (r.status === 201) {
             return res.status(201).json({
                 product: r.data,
-                id: (_a = r.data) === null || _a === void 0 ? void 0 : _a.id,
+                id: (_213 = r.data) === null || _213 === void 0 ? void 0 : _213.id,
                 message: 'Producto creado en Tienda Nube'
             });
         }
-        const detail = ((_b = r.data) === null || _b === void 0 ? void 0 : _b.description) || ((_c = r.data) === null || _c === void 0 ? void 0 : _c.message) || r.statusText;
+        const detail = ((_214 = r.data) === null || _214 === void 0 ? void 0 : _214.description) || ((_215 = r.data) === null || _215 === void 0 ? void 0 : _215.message) || r.statusText;
         return res.status(r.status >= 400 ? r.status : 502).json({
             message: ['Tienda Nube rechazó la creación del producto', detail].filter(Boolean).join(' — '),
             errors: r.data
         });
     }
     catch (error) {
-        const detail = ((_e = (_d = error.response) === null || _d === void 0 ? void 0 : _d.data) === null || _e === void 0 ? void 0 : _e.description) || ((_g = (_f = error.response) === null || _f === void 0 ? void 0 : _f.data) === null || _g === void 0 ? void 0 : _g.message) || error.message;
+        const detail = ((_217 = (_216 = error.response) === null || _216 === void 0 ? void 0 : _216.data) === null || _217 === void 0 ? void 0 : _217.description) || ((_219 = (_218 = error.response) === null || _218 === void 0 ? void 0 : _218.data) === null || _219 === void 0 ? void 0 : _219.message) || error.message;
         console.error('createTiendaNubeProduct:', detail);
         res.status(500).json({ message: 'Error creando producto en Tienda Nube', detail });
     }
@@ -4694,14 +5255,14 @@ exports.createTiendaNubeProduct = createTiendaNubeProduct;
  * Útil para packs: mismo contenido con otro título y SKU (sufijos configurables).
  */
 const duplicateTiendaNubeProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
+    var _220, _221, _222, _223, _224, _225, _226, _227, _228, _229, _230, _231;
     try {
         const { productId } = req.params;
         if (!productId)
             return res.status(400).json({ message: 'Falta productId' });
-        const titleSuffix = ((_b = (_a = req.body) === null || _a === void 0 ? void 0 : _a.titleSuffix) !== null && _b !== void 0 ? _b : ' (pack)').toString();
-        const skuSuffix = ((_d = (_c = req.body) === null || _c === void 0 ? void 0 : _c.skuSuffix) !== null && _d !== void 0 ? _d : '-PACK').toString();
-        const published = ((_e = req.body) === null || _e === void 0 ? void 0 : _e.published) !== false;
+        const titleSuffix = ((_221 = (_220 = req.body) === null || _220 === void 0 ? void 0 : _220.titleSuffix) !== null && _221 !== void 0 ? _221 : ' (pack)').toString();
+        const skuSuffix = ((_223 = (_222 = req.body) === null || _222 === void 0 ? void 0 : _222.skuSuffix) !== null && _223 !== void 0 ? _223 : '-PACK').toString();
+        const published = ((_224 = req.body) === null || _224 === void 0 ? void 0 : _224.published) !== false;
         const integration = yield (0, db_1.get)(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
         if (!(integration === null || integration === void 0 ? void 0 : integration.access_token))
             return res.status(400).json({ message: 'No hay integración con Tienda Nube' });
@@ -4729,19 +5290,19 @@ const duplicateTiendaNubeProduct = (req, res) => __awaiter(void 0, void 0, void 
         if (r.status === 201) {
             return res.status(201).json({
                 sourceProductId: productId,
-                newProductId: (_f = r.data) === null || _f === void 0 ? void 0 : _f.id,
+                newProductId: (_225 = r.data) === null || _225 === void 0 ? void 0 : _225.id,
                 product: r.data,
                 message: 'Publicación duplicada en Tienda Nube'
             });
         }
-        const detail = ((_g = r.data) === null || _g === void 0 ? void 0 : _g.description) || ((_h = r.data) === null || _h === void 0 ? void 0 : _h.message) || r.statusText;
+        const detail = ((_226 = r.data) === null || _226 === void 0 ? void 0 : _226.description) || ((_227 = r.data) === null || _227 === void 0 ? void 0 : _227.message) || r.statusText;
         return res.status(r.status >= 400 ? r.status : 502).json({
             message: ['Tienda Nube rechazó la duplicación', detail].filter(Boolean).join(' — '),
             errors: r.data
         });
     }
     catch (error) {
-        const detail = ((_k = (_j = error.response) === null || _j === void 0 ? void 0 : _j.data) === null || _k === void 0 ? void 0 : _k.description) || ((_m = (_l = error.response) === null || _l === void 0 ? void 0 : _l.data) === null || _m === void 0 ? void 0 : _m.message) || error.message;
+        const detail = ((_229 = (_228 = error.response) === null || _228 === void 0 ? void 0 : _228.data) === null || _229 === void 0 ? void 0 : _229.description) || ((_231 = (_230 = error.response) === null || _230 === void 0 ? void 0 : _230.data) === null || _231 === void 0 ? void 0 : _231.message) || error.message;
         console.error('duplicateTiendaNubeProduct:', detail);
         res.status(500).json({ message: 'Error duplicando producto en Tienda Nube', detail });
     }
@@ -4777,7 +5338,7 @@ function ensureColor(codeOrName) {
 }
 /** Importar un producto de Mercado Libre al inventario local: crea producto + variantes y vincula ML. Acepta itemId (una publicación) o itemIds (varias publicaciones agrupadas = una por variante). */
 const importProductFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0;
+    var _232, _233, _234, _235, _236, _237, _238, _239, _240, _241, _242, _243, _244, _245, _246, _247, _248, _249, _250, _251, _252, _253, _254, _255, _256;
     try {
         const { itemId, itemIds } = req.body || {};
         const idsToImport = Array.isArray(itemIds) && itemIds.length > 0
@@ -4820,11 +5381,11 @@ const importProductFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, vo
             const variations = [];
             for (const item of validItems) {
                 const mlItemId = (item.id || '').toString().trim();
-                let sku = ((_b = (_a = item.seller_sku) !== null && _a !== void 0 ? _a : item.seller_custom_field) !== null && _b !== void 0 ? _b : '').toString().trim();
+                let sku = ((_233 = (_232 = item.seller_sku) !== null && _232 !== void 0 ? _232 : item.seller_custom_field) !== null && _233 !== void 0 ? _233 : '').toString().trim();
                 if (!sku && item.variations && item.variations.length === 1) {
                     const v0 = item.variations[0];
                     const skuAttr = Array.isArray(v0.attributes) && v0.attributes.find((a) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
-                    sku = (skuAttr ? ((_d = (_c = skuAttr.value_name) !== null && _c !== void 0 ? _c : skuAttr.value) !== null && _d !== void 0 ? _d : '') : ((_f = (_e = v0.seller_sku) !== null && _e !== void 0 ? _e : v0.seller_custom_field) !== null && _f !== void 0 ? _f : '')).toString().trim();
+                    sku = (skuAttr ? ((_235 = (_234 = skuAttr.value_name) !== null && _234 !== void 0 ? _234 : skuAttr.value) !== null && _235 !== void 0 ? _235 : '') : ((_237 = (_236 = v0.seller_sku) !== null && _236 !== void 0 ? _236 : v0.seller_custom_field) !== null && _237 !== void 0 ? _237 : '')).toString().trim();
                 }
                 if (!sku)
                     sku = `ML-${mlItemId}`;
@@ -4834,11 +5395,11 @@ const importProductFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, vo
                     sku,
                     color: color || 'Único',
                     size: size || 'U',
-                    stock: (_g = item.available_quantity) !== null && _g !== void 0 ? _g : ((_k = (_j = (_h = item.variations) === null || _h === void 0 ? void 0 : _h[0]) === null || _j === void 0 ? void 0 : _j.available_quantity) !== null && _k !== void 0 ? _k : 0),
+                    stock: (_238 = item.available_quantity) !== null && _238 !== void 0 ? _238 : ((_241 = (_240 = (_239 = item.variations) === null || _239 === void 0 ? void 0 : _239[0]) === null || _240 === void 0 ? void 0 : _240.available_quantity) !== null && _241 !== void 0 ? _241 : 0),
                     mlItemId
                 });
             }
-            const firstSku = ((_l = variations[0]) === null || _l === void 0 ? void 0 : _l.sku) || '';
+            const firstSku = ((_242 = variations[0]) === null || _242 === void 0 ? void 0 : _242.sku) || '';
             const baseSku = firstSku.includes('-') ? firstSku.split('-').slice(0, -2).join('-') || firstSku : (firstSku || `ML-${validItems[0].id}`);
             const existingBySku = yield (0, db_1.get)(`SELECT id FROM products WHERE sku = ?`, [baseSku]);
             if (existingBySku) {
@@ -4848,7 +5409,7 @@ const importProductFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, vo
                 }
             }
             const productId = (0, uuid_1.v4)();
-            yield (0, db_1.execute)(`INSERT INTO products (id, sku, name, category, base_price, description, mercado_libre_id) VALUES (?, ?, ?, ?, ?, ?, ?)`, [productId, baseSku, title, 'General', first.price || 0, ((_m = first.description) === null || _m === void 0 ? void 0 : _m.plain_text) || null, null]);
+            yield (0, db_1.execute)(`INSERT INTO products (id, sku, name, category, base_price, description, mercado_libre_id) VALUES (?, ?, ?, ?, ?, ?, ?)`, [productId, baseSku, title, 'General', first.price || 0, ((_243 = first.description) === null || _243 === void 0 ? void 0 : _243.plain_text) || null, null]);
             const byVariantKey = new Map();
             for (const v of variations) {
                 const colorKey = (v.color || 'Único').toString().trim().toLowerCase() || 'único';
@@ -4914,14 +5475,14 @@ const importProductFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, vo
             });
         }
         if (variations.length === 0) {
-            let sku = ((_p = (_o = item.seller_sku) !== null && _o !== void 0 ? _o : item.seller_custom_field) !== null && _p !== void 0 ? _p : '').toString().trim();
+            let sku = ((_245 = (_244 = item.seller_sku) !== null && _244 !== void 0 ? _244 : item.seller_custom_field) !== null && _245 !== void 0 ? _245 : '').toString().trim();
             if (!sku && item.variations && item.variations.length === 1) {
                 const v0 = item.variations[0];
                 const skuAttr = Array.isArray(v0.attributes) && v0.attributes.find((a) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
-                sku = (skuAttr ? ((_r = (_q = skuAttr.value_name) !== null && _q !== void 0 ? _q : skuAttr.value) !== null && _r !== void 0 ? _r : '') : ((_t = (_s = v0.seller_sku) !== null && _s !== void 0 ? _s : v0.seller_custom_field) !== null && _t !== void 0 ? _t : '')).toString().trim();
+                sku = (skuAttr ? ((_247 = (_246 = skuAttr.value_name) !== null && _246 !== void 0 ? _246 : skuAttr.value) !== null && _247 !== void 0 ? _247 : '') : ((_249 = (_248 = v0.seller_sku) !== null && _248 !== void 0 ? _248 : v0.seller_custom_field) !== null && _249 !== void 0 ? _249 : '')).toString().trim();
             }
             if (!sku)
-                sku = ((_u = item.id) !== null && _u !== void 0 ? _u : itemIdToFetch).toString();
+                sku = ((_250 = item.id) !== null && _250 !== void 0 ? _250 : itemIdToFetch).toString();
             const parsed = mlColorSizeFromTitle(title);
             variations = [{
                     variationId: item.id,
@@ -4932,7 +5493,7 @@ const importProductFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, vo
                     mlItemId: (item.id || '').toString()
                 }];
         }
-        const firstSku = ((_v = variations[0]) === null || _v === void 0 ? void 0 : _v.sku) || '';
+        const firstSku = ((_251 = variations[0]) === null || _251 === void 0 ? void 0 : _251.sku) || '';
         const baseSku = firstSku.includes('-') ? firstSku.split('-').slice(0, -2).join('-') || firstSku : (firstSku || `ML-${itemIdToFetch}`);
         let productId;
         const existingBySku = yield (0, db_1.get)(`SELECT id FROM products WHERE sku = ?`, [baseSku]);
@@ -4944,7 +5505,7 @@ const importProductFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, vo
         }
         productId = (0, uuid_1.v4)();
         const displayName = mlBaseTitle(title) || title;
-        yield (0, db_1.execute)(`INSERT INTO products (id, sku, name, category, base_price, description, mercado_libre_id) VALUES (?, ?, ?, ?, ?, ?, ?)`, [productId, baseSku, displayName, 'General', item.price || 0, ((_w = item.description) === null || _w === void 0 ? void 0 : _w.plain_text) || null, itemIdToFetch]);
+        yield (0, db_1.execute)(`INSERT INTO products (id, sku, name, category, base_price, description, mercado_libre_id) VALUES (?, ?, ?, ?, ?, ?, ?)`, [productId, baseSku, displayName, 'General', item.price || 0, ((_252 = item.description) === null || _252 === void 0 ? void 0 : _252.plain_text) || null, itemIdToFetch]);
         const byVariantKey = new Map();
         for (const v of variations) {
             const colorKey = (v.color || 'Único').toString().trim().toLowerCase() || 'único';
@@ -4952,7 +5513,7 @@ const importProductFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, vo
             const key = `${colorKey}|${sizeKey}`;
             if (!byVariantKey.has(key))
                 byVariantKey.set(key, []);
-            byVariantKey.get(key).push(Object.assign(Object.assign({}, v), { mlItemId: (_x = v.mlItemId) !== null && _x !== void 0 ? _x : itemIdToFetch }));
+            byVariantKey.get(key).push(Object.assign(Object.assign({}, v), { mlItemId: (_253 = v.mlItemId) !== null && _253 !== void 0 ? _253 : itemIdToFetch }));
         }
         let variantsCreated = 0;
         for (const group of byVariantKey.values()) {
@@ -4980,9 +5541,9 @@ const importProductFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, vo
         });
     }
     catch (error) {
-        const status = (_y = error.response) === null || _y === void 0 ? void 0 : _y.status;
+        const status = (_254 = error.response) === null || _254 === void 0 ? void 0 : _254.status;
         const code = error.code;
-        const detail = ((_0 = (_z = error.response) === null || _z === void 0 ? void 0 : _z.data) === null || _0 === void 0 ? void 0 : _0.message) || error.message;
+        const detail = ((_256 = (_255 = error.response) === null || _255 === void 0 ? void 0 : _255.data) === null || _256 === void 0 ? void 0 : _256.message) || error.message;
         console.error('Error importing product from ML:', code || status, detail);
         if (code === 'ER_DUP_ENTRY' || (detail && String(detail).includes('Duplicate entry'))) {
             return res.status(409).json({ message: 'Ya existe un artículo con ese código (SKU). Editá el existente en Mi inventario para vincularlo con ML.', detail: String(detail) });
@@ -4993,7 +5554,7 @@ const importProductFromMercadoLibre = (req, res) => __awaiter(void 0, void 0, vo
 exports.importProductFromMercadoLibre = importProductFromMercadoLibre;
 /** Importar un producto de Tienda Nube al inventario local: crea producto + variantes y vincula TN. */
 const importProductFromTiendaNube = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q;
+    var _257, _258, _259, _260, _261, _262, _263, _264, _265, _266, _267, _268, _269, _270, _271;
     try {
         const { productId: tnProductId } = req.body || {};
         if (tnProductId == null || tnProductId === '')
@@ -5017,7 +5578,7 @@ const importProductFromTiendaNube = (req, res) => __awaiter(void 0, void 0, void
             return res.status(productRes.status >= 400 ? 404 : 502).json({ message: 'Producto no encontrado en Tienda Nube', detail: errMsg });
         }
         const p = productRes.data;
-        const title = ((_g = (_f = (_d = (_b = (_a = p.name) === null || _a === void 0 ? void 0 : _a.es) !== null && _b !== void 0 ? _b : (_c = p.name) === null || _c === void 0 ? void 0 : _c.pt) !== null && _d !== void 0 ? _d : (_e = p.name) === null || _e === void 0 ? void 0 : _e.en) !== null && _f !== void 0 ? _f : p.name) !== null && _g !== void 0 ? _g : '').toString().trim() || 'Sin título';
+        const title = ((_263 = (_262 = (_260 = (_258 = (_257 = p.name) === null || _257 === void 0 ? void 0 : _257.es) !== null && _258 !== void 0 ? _258 : (_259 = p.name) === null || _259 === void 0 ? void 0 : _259.pt) !== null && _260 !== void 0 ? _260 : (_261 = p.name) === null || _261 === void 0 ? void 0 : _261.en) !== null && _262 !== void 0 ? _262 : p.name) !== null && _263 !== void 0 ? _263 : '').toString().trim() || 'Sin título';
         const attrs = Array.isArray(p === null || p === void 0 ? void 0 : p.attributes) ? p.attributes : [];
         const isSizeAttr = (n) => /talle|talla|size|tamano|tamaño/i.test(n);
         const isColorAttr = (n) => /color|colour|cor/i.test(n);
@@ -5053,14 +5614,14 @@ const importProductFromTiendaNube = (req, res) => __awaiter(void 0, void 0, void
                 stock: 0
             });
         }
-        const baseSku = ((_j = (_h = variations[0]) === null || _h === void 0 ? void 0 : _h.sku) === null || _j === void 0 ? void 0 : _j.replace(/-[^-]+-[^-]+$/, '')) || `TN-${tnProductId}`;
+        const baseSku = ((_265 = (_264 = variations[0]) === null || _264 === void 0 ? void 0 : _264.sku) === null || _265 === void 0 ? void 0 : _265.replace(/-[^-]+-[^-]+$/, '')) || `TN-${tnProductId}`;
         const productId = (0, uuid_1.v4)();
-        yield (0, db_1.execute)(`INSERT INTO products (id, sku, name, category, base_price, description, tienda_nube_id) VALUES (?, ?, ?, ?, ?, ?, ?)`, [productId, baseSku, title, 'General', ((_k = variations[0]) === null || _k === void 0 ? void 0 : _k.stock) ? 0 : 0, null, String(tnProductId)]);
+        yield (0, db_1.execute)(`INSERT INTO products (id, sku, name, category, base_price, description, tienda_nube_id) VALUES (?, ?, ?, ?, ?, ?, ?)`, [productId, baseSku, title, 'General', ((_266 = variations[0]) === null || _266 === void 0 ? void 0 : _266.stock) ? 0 : 0, null, String(tnProductId)]);
         let variantsCreated = 0;
         for (const v of variations) {
             const sizeId = yield ensureSize(v.size);
             const colorId = yield ensureColor(v.color);
-            let productColorId = (_l = (yield (0, db_1.get)(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]))) === null || _l === void 0 ? void 0 : _l.id;
+            let productColorId = (_267 = (yield (0, db_1.get)(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]))) === null || _267 === void 0 ? void 0 : _267.id;
             if (!productColorId) {
                 productColorId = (0, uuid_1.v4)();
                 yield (0, db_1.execute)(`INSERT INTO product_colors (id, product_id, color_id) VALUES (?, ?, ?)`, [productColorId, productId, colorId]);
@@ -5082,7 +5643,7 @@ const importProductFromTiendaNube = (req, res) => __awaiter(void 0, void 0, void
         });
     }
     catch (error) {
-        const detail = ((_o = (_m = error.response) === null || _m === void 0 ? void 0 : _m.data) === null || _o === void 0 ? void 0 : _o.description) || ((_q = (_p = error.response) === null || _p === void 0 ? void 0 : _p.data) === null || _q === void 0 ? void 0 : _q.message) || error.message;
+        const detail = ((_269 = (_268 = error.response) === null || _268 === void 0 ? void 0 : _268.data) === null || _269 === void 0 ? void 0 : _269.description) || ((_271 = (_270 = error.response) === null || _270 === void 0 ? void 0 : _270.data) === null || _271 === void 0 ? void 0 : _271.message) || error.message;
         console.error('Error importing product from TN:', detail);
         res.status(500).json({ message: 'Error importando producto de Tienda Nube', detail });
     }
@@ -5187,7 +5748,7 @@ const saveMLQuestionsAiConfig = (req, res) => __awaiter(void 0, void 0, void 0, 
 exports.saveMLQuestionsAiConfig = saveMLQuestionsAiConfig;
 /** Procesa preguntas sin responder (manual). Requiere ML + clave IA (Gemini/Groq/OpenAI). */
 const processMLQuestionsAi = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _272, _273, _274, _275, _276;
     try {
         const user = req.user;
         if (!user || !['ADMIN', 'WAREHOUSE', 'DEPOSITO'].includes(user.role)) {
@@ -5198,7 +5759,7 @@ const processMLQuestionsAi = (req, res) => __awaiter(void 0, void 0, void 0, fun
                 message: 'Configurá una clave de IA en el servidor: GEMINI_API_KEY (gratis en Google AI Studio), GROQ_API_KEY (gratis) u OPENAI_API_KEY (de pago).'
             });
         }
-        const rawLimit = (_b = (_a = req.body) === null || _a === void 0 ? void 0 : _a.limit) !== null && _b !== void 0 ? _b : (_c = req.query) === null || _c === void 0 ? void 0 : _c.limit;
+        const rawLimit = (_273 = (_272 = req.body) === null || _272 === void 0 ? void 0 : _272.limit) !== null && _273 !== void 0 ? _273 : (_274 = req.query) === null || _274 === void 0 ? void 0 : _274.limit;
         const limit = Math.min(Math.max(parseInt(String(rawLimit !== null && rawLimit !== void 0 ? rawLimit : '10'), 10) || 10, 1), 25);
         const token = yield getValidMLToken();
         if (!token)
@@ -5211,7 +5772,7 @@ const processMLQuestionsAi = (req, res) => __awaiter(void 0, void 0, void 0, fun
         res.json({ processed, results });
     }
     catch (error) {
-        const detail = (_e = (_d = error === null || error === void 0 ? void 0 : error.response) === null || _d === void 0 ? void 0 : _d.data) !== null && _e !== void 0 ? _e : error === null || error === void 0 ? void 0 : error.message;
+        const detail = (_276 = (_275 = error === null || error === void 0 ? void 0 : error.response) === null || _275 === void 0 ? void 0 : _275.data) !== null && _276 !== void 0 ? _276 : error === null || error === void 0 ? void 0 : error.message;
         console.error('processMLQuestionsAi:', detail);
         res.status(500).json({ message: (error === null || error === void 0 ? void 0 : error.message) || 'Error procesando preguntas', detail });
     }
@@ -5221,7 +5782,7 @@ exports.processMLQuestionsAi = processMLQuestionsAi;
 const ML_PADS_METRICS_DEFAULT = 'clicks,prints,ctr,cost,cpc,acos,cvr,roas,sov,direct_amount,indirect_amount,total_amount,units_quantity,direct_units_quantity,indirect_units_quantity,advertising_items_quantity,direct_items_quantity,indirect_items_quantity';
 /** Listado de anunciantes con acceso a Product Ads (PADS). */
 const getMercadoLibreProductAdsAdvertisers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _277, _278, _279, _280, _281;
     try {
         const mlToken = yield getValidMLToken();
         if (!mlToken) {
@@ -5237,7 +5798,7 @@ const getMercadoLibreProductAdsAdvertisers = (req, res) => __awaiter(void 0, voi
             validateStatus: () => true
         });
         if (r.status !== 200) {
-            const detail = ((_a = r.data) === null || _a === void 0 ? void 0 : _a.message) || ((_c = (_b = r.data) === null || _b === void 0 ? void 0 : _b.cause) === null || _c === void 0 ? void 0 : _c.message) || ((_d = r.data) === null || _d === void 0 ? void 0 : _d.error) || r.statusText;
+            const detail = ((_277 = r.data) === null || _277 === void 0 ? void 0 : _277.message) || ((_279 = (_278 = r.data) === null || _278 === void 0 ? void 0 : _278.cause) === null || _279 === void 0 ? void 0 : _279.message) || ((_280 = r.data) === null || _280 === void 0 ? void 0 : _280.error) || r.statusText;
             return res.status(r.status >= 400 && r.status < 500 ? r.status : 502).json({
                 message: r.status === 404
                     ? 'No hay permisos para Product Ads o no está activado. En Mercado Libre: Publicaciones → Campaña de publicidad (Product Ads).'
@@ -5248,7 +5809,7 @@ const getMercadoLibreProductAdsAdvertisers = (req, res) => __awaiter(void 0, voi
         res.json(r.data);
     }
     catch (error) {
-        console.error('getMercadoLibreProductAdsAdvertisers:', ((_e = error.response) === null || _e === void 0 ? void 0 : _e.data) || error.message);
+        console.error('getMercadoLibreProductAdsAdvertisers:', ((_281 = error.response) === null || _281 === void 0 ? void 0 : _281.data) || error.message);
         res.status(500).json({ message: 'Error consultando Product Ads', error: error.message });
     }
 });
@@ -5279,14 +5840,14 @@ function mlProductAdsForwardQuery(req) {
 }
 /** Campañas de Product Ads con métricas (proxy a API oficial). Requiere site_id y advertiser_id. */
 const getMercadoLibreProductAdsCampaigns = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _282, _283, _284, _285, _286, _287, _288;
     try {
         const mlToken = yield getValidMLToken();
         if (!mlToken) {
             return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
         }
-        const siteId = (_a = req.query.site_id) === null || _a === void 0 ? void 0 : _a.trim();
-        const advertiserId = (_b = req.query.advertiser_id) === null || _b === void 0 ? void 0 : _b.trim();
+        const siteId = (_282 = req.query.site_id) === null || _282 === void 0 ? void 0 : _282.trim();
+        const advertiserId = (_283 = req.query.advertiser_id) === null || _283 === void 0 ? void 0 : _283.trim();
         if (!siteId || !advertiserId) {
             return res.status(400).json({ message: 'Parámetros requeridos: site_id y advertiser_id (desde el listado de anunciantes).' });
         }
@@ -5301,7 +5862,7 @@ const getMercadoLibreProductAdsCampaigns = (req, res) => __awaiter(void 0, void 
             validateStatus: () => true
         });
         if (r.status !== 200) {
-            const detail = ((_c = r.data) === null || _c === void 0 ? void 0 : _c.message) || ((_e = (_d = r.data) === null || _d === void 0 ? void 0 : _d.cause) === null || _e === void 0 ? void 0 : _e.message) || ((_f = r.data) === null || _f === void 0 ? void 0 : _f.error) || r.statusText;
+            const detail = ((_284 = r.data) === null || _284 === void 0 ? void 0 : _284.message) || ((_286 = (_285 = r.data) === null || _285 === void 0 ? void 0 : _285.cause) === null || _286 === void 0 ? void 0 : _286.message) || ((_287 = r.data) === null || _287 === void 0 ? void 0 : _287.error) || r.statusText;
             return res.status(r.status >= 400 && r.status < 500 ? r.status : 502).json({
                 message: 'Error obteniendo campañas de Product Ads',
                 detail
@@ -5310,21 +5871,21 @@ const getMercadoLibreProductAdsCampaigns = (req, res) => __awaiter(void 0, void 
         res.json(r.data);
     }
     catch (error) {
-        console.error('getMercadoLibreProductAdsCampaigns:', ((_g = error.response) === null || _g === void 0 ? void 0 : _g.data) || error.message);
+        console.error('getMercadoLibreProductAdsCampaigns:', ((_288 = error.response) === null || _288 === void 0 ? void 0 : _288.data) || error.message);
         res.status(500).json({ message: 'Error obteniendo campañas de Product Ads', error: error.message });
     }
 });
 exports.getMercadoLibreProductAdsCampaigns = getMercadoLibreProductAdsCampaigns;
 /** Anuncios por publicación con métricas (proxy). Requiere site_id y advertiser_id. */
 const getMercadoLibreProductAdsAds = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _289, _290, _291, _292, _293, _294, _295;
     try {
         const mlToken = yield getValidMLToken();
         if (!mlToken) {
             return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
         }
-        const siteId = (_a = req.query.site_id) === null || _a === void 0 ? void 0 : _a.trim();
-        const advertiserId = (_b = req.query.advertiser_id) === null || _b === void 0 ? void 0 : _b.trim();
+        const siteId = (_289 = req.query.site_id) === null || _289 === void 0 ? void 0 : _289.trim();
+        const advertiserId = (_290 = req.query.advertiser_id) === null || _290 === void 0 ? void 0 : _290.trim();
         if (!siteId || !advertiserId) {
             return res.status(400).json({ message: 'Parámetros requeridos: site_id y advertiser_id.' });
         }
@@ -5349,7 +5910,7 @@ const getMercadoLibreProductAdsAds = (req, res) => __awaiter(void 0, void 0, voi
             validateStatus: () => true
         });
         if (r.status !== 200) {
-            const detail = ((_c = r.data) === null || _c === void 0 ? void 0 : _c.message) || ((_e = (_d = r.data) === null || _d === void 0 ? void 0 : _d.cause) === null || _e === void 0 ? void 0 : _e.message) || ((_f = r.data) === null || _f === void 0 ? void 0 : _f.error) || r.statusText;
+            const detail = ((_291 = r.data) === null || _291 === void 0 ? void 0 : _291.message) || ((_293 = (_292 = r.data) === null || _292 === void 0 ? void 0 : _292.cause) === null || _293 === void 0 ? void 0 : _293.message) || ((_294 = r.data) === null || _294 === void 0 ? void 0 : _294.error) || r.statusText;
             return res.status(r.status >= 400 && r.status < 500 ? r.status : 502).json({
                 message: 'Error obteniendo anuncios de Product Ads',
                 detail
@@ -5358,7 +5919,7 @@ const getMercadoLibreProductAdsAds = (req, res) => __awaiter(void 0, void 0, voi
         res.json(r.data);
     }
     catch (error) {
-        console.error('getMercadoLibreProductAdsAds:', ((_g = error.response) === null || _g === void 0 ? void 0 : _g.data) || error.message);
+        console.error('getMercadoLibreProductAdsAds:', ((_295 = error.response) === null || _295 === void 0 ? void 0 : _295.data) || error.message);
         res.status(500).json({ message: 'Error obteniendo anuncios de Product Ads', error: error.message });
     }
 });
@@ -5432,8 +5993,8 @@ function mergeSummaries(rows) {
     return sums;
 }
 function fetchBrandAdvertiserMetricsSummary(accessToken, advertiserId, dateFrom, dateTo) {
+    var _a;
     return __awaiter(this, void 0, void 0, function* () {
-        var _a;
         try {
             const r = yield axios_1.default.get(`https://api.mercadolibre.com/advertising/advertisers/${encodeURIComponent(advertiserId)}/brand_ads/campaigns/metrics`, {
                 headers: ML_ADS_V1_HEADERS(accessToken),
@@ -5450,8 +6011,8 @@ function fetchBrandAdvertiserMetricsSummary(accessToken, advertiserId, dateFrom,
     });
 }
 function fetchBrandCampaignMetricsRaw(accessToken, advertiserId, campaignId, dateFrom, dateTo) {
+    var _a;
     return __awaiter(this, void 0, void 0, function* () {
-        var _a;
         try {
             const r = yield axios_1.default.get(`https://api.mercadolibre.com/advertising/advertisers/${encodeURIComponent(String(advertiserId))}/brand_ads/campaigns/${encodeURIComponent(String(campaignId))}/metrics`, {
                 headers: ML_ADS_V1_HEADERS(accessToken),
@@ -5469,7 +6030,7 @@ function fetchBrandCampaignMetricsRaw(accessToken, advertiserId, campaignId, dat
 }
 /** Anunciantes con acceso a Brand Ads (BADS). */
 const getMercadoLibreBrandAdsAdvertisers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _296, _297, _298, _299, _300;
     try {
         const mlToken = yield getValidMLToken();
         if (!mlToken) {
@@ -5481,7 +6042,7 @@ const getMercadoLibreBrandAdsAdvertisers = (req, res) => __awaiter(void 0, void 
             validateStatus: () => true
         });
         if (r.status !== 200) {
-            const detail = ((_a = r.data) === null || _a === void 0 ? void 0 : _a.message) || ((_c = (_b = r.data) === null || _b === void 0 ? void 0 : _b.cause) === null || _c === void 0 ? void 0 : _c.message) || ((_d = r.data) === null || _d === void 0 ? void 0 : _d.error) || r.statusText;
+            const detail = ((_296 = r.data) === null || _296 === void 0 ? void 0 : _296.message) || ((_298 = (_297 = r.data) === null || _297 === void 0 ? void 0 : _297.cause) === null || _298 === void 0 ? void 0 : _298.message) || ((_299 = r.data) === null || _299 === void 0 ? void 0 : _299.error) || r.statusText;
             return res.status(r.status >= 400 && r.status < 500 ? r.status : 502).json({
                 message: r.status === 404
                     ? 'No hay permisos para Brand Ads o no está activado. Consultá con tu asesor comercial de Mercado Libre.'
@@ -5492,7 +6053,7 @@ const getMercadoLibreBrandAdsAdvertisers = (req, res) => __awaiter(void 0, void 
         res.json(r.data);
     }
     catch (error) {
-        console.error('getMercadoLibreBrandAdsAdvertisers:', ((_e = error.response) === null || _e === void 0 ? void 0 : _e.data) || error.message);
+        console.error('getMercadoLibreBrandAdsAdvertisers:', ((_300 = error.response) === null || _300 === void 0 ? void 0 : _300.data) || error.message);
         res.status(500).json({ message: 'Error consultando Brand Ads', error: error.message });
     }
 });
@@ -5502,17 +6063,17 @@ exports.getMercadoLibreBrandAdsAdvertisers = getMercadoLibreBrandAdsAdvertisers;
  * Query: advertiser_id, date_from, date_to, limit, offset
  */
 const getMercadoLibreBrandAdsCampaigns = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q;
+    var _301, _302, _303, _304, _305, _306, _307, _308, _309, _310, _311, _312, _313, _314, _315;
     try {
         const mlToken = yield getValidMLToken();
         if (!mlToken) {
             return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
         }
-        const advertiserId = (_a = req.query.advertiser_id) === null || _a === void 0 ? void 0 : _a.trim();
-        const dateFrom = (_b = req.query.date_from) === null || _b === void 0 ? void 0 : _b.trim();
-        const dateTo = (_c = req.query.date_to) === null || _c === void 0 ? void 0 : _c.trim();
-        const limit = Math.min(Math.max(parseInt(String((_d = req.query.limit) !== null && _d !== void 0 ? _d : '50'), 10) || 50, 1), 100);
-        const offset = Math.max(parseInt(String((_e = req.query.offset) !== null && _e !== void 0 ? _e : '0'), 10) || 0, 0);
+        const advertiserId = (_301 = req.query.advertiser_id) === null || _301 === void 0 ? void 0 : _301.trim();
+        const dateFrom = (_302 = req.query.date_from) === null || _302 === void 0 ? void 0 : _302.trim();
+        const dateTo = (_303 = req.query.date_to) === null || _303 === void 0 ? void 0 : _303.trim();
+        const limit = Math.min(Math.max(parseInt(String((_304 = req.query.limit) !== null && _304 !== void 0 ? _304 : '50'), 10) || 50, 1), 100);
+        const offset = Math.max(parseInt(String((_305 = req.query.offset) !== null && _305 !== void 0 ? _305 : '0'), 10) || 0, 0);
         if (!advertiserId || !dateFrom || !dateTo) {
             return res.status(400).json({ message: 'Parámetros requeridos: advertiser_id, date_from, date_to' });
         }
@@ -5523,14 +6084,14 @@ const getMercadoLibreBrandAdsCampaigns = (req, res) => __awaiter(void 0, void 0,
             validateStatus: () => true
         });
         if (listR.status !== 200) {
-            const detail = ((_f = listR.data) === null || _f === void 0 ? void 0 : _f.message) || ((_h = (_g = listR.data) === null || _g === void 0 ? void 0 : _g.cause) === null || _h === void 0 ? void 0 : _h.message) || ((_j = listR.data) === null || _j === void 0 ? void 0 : _j.error) || listR.statusText;
+            const detail = ((_306 = listR.data) === null || _306 === void 0 ? void 0 : _306.message) || ((_308 = (_307 = listR.data) === null || _307 === void 0 ? void 0 : _307.cause) === null || _308 === void 0 ? void 0 : _308.message) || ((_309 = listR.data) === null || _309 === void 0 ? void 0 : _309.error) || listR.statusText;
             return res.status(listR.status >= 400 && listR.status < 500 ? listR.status : 502).json({
                 message: 'Error obteniendo campañas Brand Ads',
                 detail
             });
         }
-        const rawCampaigns = Array.isArray((_k = listR.data) === null || _k === void 0 ? void 0 : _k.campaigns) ? listR.data.campaigns : [];
-        const paging = ((_l = listR.data) === null || _l === void 0 ? void 0 : _l.paging) || { total: rawCampaigns.length, offset, limit };
+        const rawCampaigns = Array.isArray((_310 = listR.data) === null || _310 === void 0 ? void 0 : _310.campaigns) ? listR.data.campaigns : [];
+        const paging = ((_311 = listR.data) === null || _311 === void 0 ? void 0 : _311.paging) || { total: rawCampaigns.length, offset, limit };
         const [metricsSummary, ...metricsRows] = yield Promise.all([
             fetchBrandAdvertiserMetricsSummary(mlToken.access_token, advertiserId, dateFrom, dateTo),
             ...rawCampaigns.map((c) => fetchBrandCampaignMetricsRaw(mlToken.access_token, advertiserId, c.campaign_id, dateFrom, dateTo))
@@ -5551,20 +6112,20 @@ const getMercadoLibreBrandAdsCampaigns = (req, res) => __awaiter(void 0, void 0,
             };
         });
         res.json({
-            paging: { total: (_m = paging.total) !== null && _m !== void 0 ? _m : results.length, offset: (_o = paging.offset) !== null && _o !== void 0 ? _o : offset, limit: (_p = paging.limit) !== null && _p !== void 0 ? _p : limit },
+            paging: { total: (_312 = paging.total) !== null && _312 !== void 0 ? _312 : results.length, offset: (_313 = paging.offset) !== null && _313 !== void 0 ? _313 : offset, limit: (_314 = paging.limit) !== null && _314 !== void 0 ? _314 : limit },
             results,
             metrics_summary: metricsSummary
         });
     }
     catch (error) {
-        console.error('getMercadoLibreBrandAdsCampaigns:', ((_q = error.response) === null || _q === void 0 ? void 0 : _q.data) || error.message);
+        console.error('getMercadoLibreBrandAdsCampaigns:', ((_315 = error.response) === null || _315 === void 0 ? void 0 : _315.data) || error.message);
         res.status(500).json({ message: 'Error obteniendo campañas Brand Ads', error: error.message });
     }
 });
 exports.getMercadoLibreBrandAdsCampaigns = getMercadoLibreBrandAdsCampaigns;
 /** Anunciantes con acceso a Display Ads (DISPLAY). */
 const getMercadoLibreDisplayAdsAdvertisers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _316, _317, _318, _319, _320;
     try {
         const mlToken = yield getValidMLToken();
         if (!mlToken) {
@@ -5576,7 +6137,7 @@ const getMercadoLibreDisplayAdsAdvertisers = (req, res) => __awaiter(void 0, voi
             validateStatus: () => true
         });
         if (r.status !== 200) {
-            const detail = ((_a = r.data) === null || _a === void 0 ? void 0 : _a.message) || ((_c = (_b = r.data) === null || _b === void 0 ? void 0 : _b.cause) === null || _c === void 0 ? void 0 : _c.message) || ((_d = r.data) === null || _d === void 0 ? void 0 : _d.error) || r.statusText;
+            const detail = ((_316 = r.data) === null || _316 === void 0 ? void 0 : _316.message) || ((_318 = (_317 = r.data) === null || _317 === void 0 ? void 0 : _317.cause) === null || _318 === void 0 ? void 0 : _318.message) || ((_319 = r.data) === null || _319 === void 0 ? void 0 : _319.error) || r.statusText;
             return res.status(r.status >= 400 && r.status < 500 ? r.status : 502).json({
                 message: r.status === 404
                     ? 'No hay permisos para Display Ads o no está activado. Display se habilita vía asesor comercial de Mercado Libre.'
@@ -5587,14 +6148,14 @@ const getMercadoLibreDisplayAdsAdvertisers = (req, res) => __awaiter(void 0, voi
         res.json(r.data);
     }
     catch (error) {
-        console.error('getMercadoLibreDisplayAdsAdvertisers:', ((_e = error.response) === null || _e === void 0 ? void 0 : _e.data) || error.message);
+        console.error('getMercadoLibreDisplayAdsAdvertisers:', ((_320 = error.response) === null || _320 === void 0 ? void 0 : _320.data) || error.message);
         res.status(500).json({ message: 'Error consultando Display Ads', error: error.message });
     }
 });
 exports.getMercadoLibreDisplayAdsAdvertisers = getMercadoLibreDisplayAdsAdvertisers;
 function fetchDisplayCampaignMetricsRaw(accessToken, advertiserId, campaignId, dateFrom, dateTo) {
+    var _a;
     return __awaiter(this, void 0, void 0, function* () {
-        var _a;
         try {
             const r = yield axios_1.default.get(`https://api.mercadolibre.com/advertising/advertisers/${encodeURIComponent(String(advertiserId))}/display/campaigns/${encodeURIComponent(String(campaignId))}/metrics`, {
                 headers: ML_ADS_V1_HEADERS(accessToken),
@@ -5617,17 +6178,17 @@ const DISPLAY_METRICS_CONCURRENCY = 8;
  * El resumen global suma todas las campañas del anunciante (hasta 200 campañas por petición).
  */
 const getMercadoLibreDisplayAdsCampaigns = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r;
+    var _321, _322, _323, _324, _325, _326, _327, _328, _329, _330, _331, _332, _333, _334, _335, _336;
     try {
         const mlToken = yield getValidMLToken();
         if (!mlToken) {
             return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
         }
-        const advertiserId = (_a = req.query.advertiser_id) === null || _a === void 0 ? void 0 : _a.trim();
-        const dateFrom = (_b = req.query.date_from) === null || _b === void 0 ? void 0 : _b.trim();
-        const dateTo = (_c = req.query.date_to) === null || _c === void 0 ? void 0 : _c.trim();
-        const limit = Math.min(Math.max(parseInt(String((_d = req.query.limit) !== null && _d !== void 0 ? _d : '50'), 10) || 50, 1), 100);
-        const offset = Math.max(parseInt(String((_e = req.query.offset) !== null && _e !== void 0 ? _e : '0'), 10) || 0, 0);
+        const advertiserId = (_321 = req.query.advertiser_id) === null || _321 === void 0 ? void 0 : _321.trim();
+        const dateFrom = (_322 = req.query.date_from) === null || _322 === void 0 ? void 0 : _322.trim();
+        const dateTo = (_323 = req.query.date_to) === null || _323 === void 0 ? void 0 : _323.trim();
+        const limit = Math.min(Math.max(parseInt(String((_324 = req.query.limit) !== null && _324 !== void 0 ? _324 : '50'), 10) || 50, 1), 100);
+        const offset = Math.max(parseInt(String((_325 = req.query.offset) !== null && _325 !== void 0 ? _325 : '0'), 10) || 0, 0);
         if (!advertiserId || !dateFrom || !dateTo) {
             return res.status(400).json({ message: 'Parámetros requeridos: advertiser_id, date_from, date_to' });
         }
@@ -5641,14 +6202,14 @@ const getMercadoLibreDisplayAdsCampaigns = (req, res) => __awaiter(void 0, void 
                 validateStatus: () => true
             });
             if (listR.status !== 200) {
-                const detail = ((_f = listR.data) === null || _f === void 0 ? void 0 : _f.message) || ((_h = (_g = listR.data) === null || _g === void 0 ? void 0 : _g.cause) === null || _h === void 0 ? void 0 : _h.message) || ((_j = listR.data) === null || _j === void 0 ? void 0 : _j.error) || listR.statusText;
+                const detail = ((_326 = listR.data) === null || _326 === void 0 ? void 0 : _326.message) || ((_328 = (_327 = listR.data) === null || _327 === void 0 ? void 0 : _327.cause) === null || _328 === void 0 ? void 0 : _328.message) || ((_329 = listR.data) === null || _329 === void 0 ? void 0 : _329.error) || listR.statusText;
                 return res.status(listR.status >= 400 && listR.status < 500 ? listR.status : 502).json({
                     message: 'Error obteniendo campañas Display Ads',
                     detail
                 });
             }
-            const batch = Array.isArray((_k = listR.data) === null || _k === void 0 ? void 0 : _k.results) ? listR.data.results : [];
-            totalFromApi = (_q = (_o = (_m = (_l = listR.data) === null || _l === void 0 ? void 0 : _l.paging) === null || _m === void 0 ? void 0 : _m.total) !== null && _o !== void 0 ? _o : (_p = listR.data) === null || _p === void 0 ? void 0 : _p.total) !== null && _q !== void 0 ? _q : batch.length + listOffset;
+            const batch = Array.isArray((_330 = listR.data) === null || _330 === void 0 ? void 0 : _330.results) ? listR.data.results : [];
+            totalFromApi = (_335 = (_333 = (_332 = (_331 = listR.data) === null || _331 === void 0 ? void 0 : _331.paging) === null || _332 === void 0 ? void 0 : _332.total) !== null && _333 !== void 0 ? _333 : (_334 = listR.data) === null || _334 === void 0 ? void 0 : _334.total) !== null && _335 !== void 0 ? _335 : batch.length + listOffset;
             allRows.push(...batch);
             if (batch.length < DISPLAY_LIST_PAGE)
                 break;
@@ -5691,7 +6252,7 @@ const getMercadoLibreDisplayAdsCampaigns = (req, res) => __awaiter(void 0, void 
         });
     }
     catch (error) {
-        console.error('getMercadoLibreDisplayAdsCampaigns:', ((_r = error.response) === null || _r === void 0 ? void 0 : _r.data) || error.message);
+        console.error('getMercadoLibreDisplayAdsCampaigns:', ((_336 = error.response) === null || _336 === void 0 ? void 0 : _336.data) || error.message);
         res.status(500).json({ message: 'Error obteniendo campañas Display Ads', error: error.message });
     }
 });

@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addCreditNotesTable = addCreditNotesTable;
+exports.addCreditNotesTable = void 0;
 const db_1 = require("./db");
 /** Tabla de notas de crédito AFIP (asociadas a una factura de un pedido). */
 function addCreditNotesTable() {
@@ -57,3 +57,4 @@ function addCreditNotesTable() {
         }
     });
 }
+exports.addCreditNotesTable = addCreditNotesTable;

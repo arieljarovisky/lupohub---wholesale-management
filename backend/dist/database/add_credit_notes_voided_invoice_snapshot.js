@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addCreditNotesVoidedInvoiceSnapshot = addCreditNotesVoidedInvoiceSnapshot;
+exports.addCreditNotesVoidedInvoiceSnapshot = void 0;
 const db_1 = require("./db");
 /**
  * Guarda en cada NC el comprobante de factura que se anuló (snapshot antes de reemplazar CAE)
@@ -55,3 +55,4 @@ function addCreditNotesVoidedInvoiceSnapshot() {
         }
     });
 }
+exports.addCreditNotesVoidedInvoiceSnapshot = addCreditNotesVoidedInvoiceSnapshot;

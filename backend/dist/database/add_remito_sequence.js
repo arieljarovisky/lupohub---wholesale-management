@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addRemitoSequence = addRemitoSequence;
+exports.addRemitoSequence = void 0;
 const db_1 = require("./db");
 /**
  * Crea la tabla `remito_sequence` (contador atómico para numerar remitos) y agrega
@@ -71,3 +71,4 @@ function addRemitoSequence() {
         }
     });
 }
+exports.addRemitoSequence = addRemitoSequence;

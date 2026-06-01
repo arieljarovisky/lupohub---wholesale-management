@@ -15,23 +15,13 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -45,14 +35,14 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.importStockGridToDespacho = exports.importStockFromExcel = exports.importSalesHistory = exports.createStockSnapshot = exports.deleteStockSnapshot = exports.updateVariantStockEndpoint = exports.forceSyncStock = exports.getStockMovements = exports.updateTiendaNubeSku = exports.updateMercadoLibreSku = exports.updateMercadoLibreStockByVariant = exports.updateMercadoLibreStockByItem = exports.updateTiendaNubeStock = exports.syncStockToExternalPlatforms = exports.restoreStockForOrderItem = exports.restoreStockForOrder = exports.deductStockForOrder = exports.isMayoristaStockDeductedForWholesale = exports.wholesaleOrderStockReference = exports.updateVariantStock = exports.logStockMovement = void 0;
-exports.resolveVariantIdForGridCell = resolveVariantIdForGridCell;
+exports.importStockGridToDespacho = exports.importStockFromExcel = exports.resolveVariantIdForGridCell = exports.importSalesHistory = exports.createStockSnapshot = exports.deleteStockSnapshot = exports.updateVariantStockEndpoint = exports.forceSyncStock = exports.getStockMovements = exports.updateTiendaNubeSku = exports.updateMercadoLibreSku = exports.updateMercadoLibreStockByVariant = exports.updateMercadoLibreStockByItem = exports.updateTiendaNubeStock = exports.syncStockToExternalPlatforms = exports.restoreStockForOrderItem = exports.restoreStockForOrder = exports.deductStockForOrder = exports.isWholesaleStockRestoredForOrder = exports.wholesaleOrderStockCancelRestoreReference = exports.wholesaleOrderStockManualRestoreReference = exports.isMayoristaStockDeductedForWholesale = exports.wholesaleOrderStockReference = exports.updateVariantStock = exports.logStockMovement = void 0;
 const db_1 = require("../database/db");
 const touchProductUpdatedAt_1 = require("../utils/touchProductUpdatedAt");
 const axios_1 = __importDefault(require("axios"));
 const uuid_1 = require("uuid");
 const integrations_controller_1 = require("./integrations.controller");
 const tiendanubeClient_1 = require("../utils/tiendanubeClient");
+const skuString_1 = require("../utils/skuString");
 const lupoStockWebhook_service_1 = require("../services/lupoStockWebhook.service");
 const talles_tango_1 = require("../talles-tango");
 const colorCodeCanonical_1 = require("../utils/colorCodeCanonical");
@@ -113,8 +103,8 @@ function mlItemIdCandidates(raw) {
     return Array.from(new Set(out.filter(Boolean)));
 }
 function resolveMlUserProductItemCandidates(rawUserProductId, headers) {
+    var _a, _b, _c, _d;
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c, _d;
         const up = mlNormalizeItemId(rawUserProductId);
         if (!/^MLAU\d+$/i.test(up))
             return [];
@@ -198,9 +188,9 @@ function resolveReachableMlItemId(rawItemId, headers, expectedVariationId) {
         return null;
     });
 }
-function withRetry429409(fn_1) {
-    return __awaiter(this, arguments, void 0, function* (fn, retries = 2) {
-        var _a;
+function withRetry429409(fn, retries = 2) {
+    var _a;
+    return __awaiter(this, void 0, void 0, function* () {
         try {
             return yield fn();
         }
@@ -228,7 +218,7 @@ const logStockMovement = (variantId, previousStock, newStock, movementType, refe
 });
 exports.logStockMovement = logStockMovement;
 // Actualizar stock de una variante
-const updateVariantStock = (variantId_1, newStock_1, movementType_1, reference_1, ...args_1) => __awaiter(void 0, [variantId_1, newStock_1, movementType_1, reference_1, ...args_1], void 0, function* (variantId, newStock, movementType, reference, syncExternal = true) {
+const updateVariantStock = (variantId, newStock, movementType, reference, syncExternal = true) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const currentStockRow = yield (0, db_1.get)(`SELECT stock FROM stocks WHERE variant_id = ?`, [variantId]);
         const previousStock = (currentStockRow === null || currentStockRow === void 0 ? void 0 : currentStockRow.stock) || 0;
@@ -273,6 +263,23 @@ const isMayoristaStockDeductedForWholesale = (orderId) => __awaiter(void 0, void
     return !!row;
 });
 exports.isMayoristaStockDeductedForWholesale = isMayoristaStockDeductedForWholesale;
+/** Referencia DEVOLUCION al restaurar stock sin cancelar el pedido. */
+const wholesaleOrderStockManualRestoreReference = (orderId) => `Restauración pedido: ${orderId}`;
+exports.wholesaleOrderStockManualRestoreReference = wholesaleOrderStockManualRestoreReference;
+/** Referencia DEVOLUCION al cancelar/eliminar pedido. */
+const wholesaleOrderStockCancelRestoreReference = (orderId) => `Cancelación pedido: ${orderId}`;
+exports.wholesaleOrderStockCancelRestoreReference = wholesaleOrderStockCancelRestoreReference;
+/** True si el stock de este pedido ya fue devuelto al inventario (manual o por cancelación). */
+const isWholesaleStockRestoredForOrder = (orderId) => __awaiter(void 0, void 0, void 0, function* () {
+    const refs = [
+        (0, exports.wholesaleOrderStockManualRestoreReference)(orderId),
+        (0, exports.wholesaleOrderStockCancelRestoreReference)(orderId),
+    ];
+    const row = yield (0, db_1.get)(`SELECT 1 AS ok FROM stock_movements
+     WHERE movement_type = 'DEVOLUCION' AND reference IN (?, ?) LIMIT 1`, refs);
+    return !!row;
+});
+exports.isWholesaleStockRestoredForOrder = isWholesaleStockRestoredForOrder;
 // Descontar stock por pedido mayorista
 const deductStockForOrder = (orderId) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
@@ -320,9 +327,10 @@ const deductStockForOrder = (orderId) => __awaiter(void 0, void 0, void 0, funct
     }
 });
 exports.deductStockForOrder = deductStockForOrder;
-// Restaurar stock cuando se cancela un pedido
-const restoreStockForOrder = (orderId) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+// Restaurar stock de un pedido mayorista (cancelación, NC o restauración manual).
+const restoreStockForOrder = (orderId, referenceNote) => __awaiter(void 0, void 0, void 0, function* () {
+    var _b;
+    const devolucionRef = (referenceNote === null || referenceNote === void 0 ? void 0 : referenceNote.trim()) || (0, exports.wholesaleOrderStockCancelRestoreReference)(orderId);
     const errors = [];
     try {
         const meta = yield (0, db_1.get)(`SELECT COALESCE(no_stock_impact, 0) AS no_stock_impact, status FROM orders WHERE id = ?`, [orderId]);
@@ -352,9 +360,9 @@ const restoreStockForOrder = (orderId) => __awaiter(void 0, void 0, void 0, func
         }
         for (const [variantId, { units, sku }] of unitsByVariant) {
             const stockRow = yield (0, db_1.get)(`SELECT stock FROM stocks WHERE variant_id = ?`, [variantId]);
-            const currentStock = (_a = stockRow === null || stockRow === void 0 ? void 0 : stockRow.stock) !== null && _a !== void 0 ? _a : 0;
+            const currentStock = (_b = stockRow === null || stockRow === void 0 ? void 0 : stockRow.stock) !== null && _b !== void 0 ? _b : 0;
             const newStock = Number(currentStock) + units;
-            const success = yield (0, exports.updateVariantStock)(variantId, newStock, 'DEVOLUCION', `Cancelación pedido: ${orderId}`);
+            const success = yield (0, exports.updateVariantStock)(variantId, newStock, 'DEVOLUCION', devolucionRef);
             if (!success) {
                 errors.push(`Error restaurando stock para variante ${sku || variantId}`);
             }
@@ -428,8 +436,8 @@ function scheduleSyncToExternalPlatforms(variantId, newStock) {
         }, SYNC_DEBOUNCE_MS)
     };
 }
-function runExternalSyncWithRetries(label_1, run_1) {
-    return __awaiter(this, arguments, void 0, function* (label, run, attempts = 3) {
+function runExternalSyncWithRetries(label, run, attempts = 3) {
+    return __awaiter(this, void 0, void 0, function* () {
         let lastOk = false;
         for (let i = 1; i <= attempts; i++) {
             try {
@@ -494,11 +502,25 @@ const syncStockToExternalPlatforms = (variantId, newStock) => __awaiter(void 0, 
             if (variant.tienda_nube_id && variant.tienda_nube_variant_id) {
                 yield runExternalSyncWithRetries(`TN legacy=${variant.tienda_nube_id}/${variant.tienda_nube_variant_id} variant=${variantId}`, () => (0, exports.updateTiendaNubeStock)(variant.tienda_nube_id, variant.tienda_nube_variant_id, stockTN));
             }
-            if (variant.mercado_libre_id && variant.mercado_libre_variant_id) {
-                yield runExternalSyncWithRetries(`ML legacy=${variant.mercado_libre_id}/${variant.mercado_libre_variant_id} variant=${variantId}`, () => (0, exports.updateMercadoLibreStockByVariant)(variant.mercado_libre_id, variant.mercado_libre_variant_id, stockML));
+            // Publicación propia por variante (mercado_libre_item_id) tiene prioridad sobre el ítem
+            // padre del producto (mercado_libre_id). Si no, una variante puede poner stock en 6 y otra
+            // pisarlo a 0 usando el mismo MLA vía variación del catálogo padre.
+            const ownMlItemId = variant.mercado_libre_item_id != null && String(variant.mercado_libre_item_id).trim() !== ''
+                ? String(variant.mercado_libre_item_id).trim()
+                : null;
+            const ownMlVarId = variant.mercado_libre_variant_id != null && String(variant.mercado_libre_variant_id).trim() !== ''
+                ? String(variant.mercado_libre_variant_id).trim()
+                : null;
+            if (ownMlItemId) {
+                if (ownMlVarId) {
+                    yield runExternalSyncWithRetries(`ML legacy item=${ownMlItemId} var=${ownMlVarId} variant=${variantId}`, () => (0, exports.updateMercadoLibreStockByVariant)(ownMlItemId, ownMlVarId, stockML));
+                }
+                else {
+                    yield runExternalSyncWithRetries(`ML legacy item=${ownMlItemId} variant=${variantId}`, () => (0, exports.updateMercadoLibreStockByItem)(ownMlItemId, stockML));
+                }
             }
-            else if (variant.mercado_libre_item_id) {
-                yield runExternalSyncWithRetries(`ML legacy item=${variant.mercado_libre_item_id} variant=${variantId}`, () => (0, exports.updateMercadoLibreStockByItem)(variant.mercado_libre_item_id, stockML));
+            else if (variant.mercado_libre_id && ownMlVarId) {
+                yield runExternalSyncWithRetries(`ML legacy=${variant.mercado_libre_id}/${ownMlVarId} variant=${variantId}`, () => (0, exports.updateMercadoLibreStockByVariant)(variant.mercado_libre_id, ownMlVarId, stockML));
             }
             else if (skuMLTN) {
                 yield runExternalSyncWithRetries(`ML legacy sku=${skuMLTN} variant=${variantId}`, () => __awaiter(void 0, void 0, void 0, function* () {
@@ -519,7 +541,7 @@ const syncStockToExternalPlatforms = (variantId, newStock) => __awaiter(void 0, 
 exports.syncStockToExternalPlatforms = syncStockToExternalPlatforms;
 // Actualizar stock en Tienda Nube
 const updateTiendaNubeStock = (productId, variantId, stock) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _c;
     try {
         const integration = yield (0, db_1.get)(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
         if (!(integration === null || integration === void 0 ? void 0 : integration.access_token) || !(integration === null || integration === void 0 ? void 0 : integration.store_id)) {
@@ -537,14 +559,14 @@ const updateTiendaNubeStock = (productId, variantId, stock) => __awaiter(void 0,
         return true;
     }
     catch (error) {
-        console.error('[TN Stock] Error:', ((_a = error.response) === null || _a === void 0 ? void 0 : _a.data) || error.message);
+        console.error('[TN Stock] Error:', ((_c = error.response) === null || _c === void 0 ? void 0 : _c.data) || error.message);
         return false;
     }
 });
 exports.updateTiendaNubeStock = updateTiendaNubeStock;
 // Actualizar stock en Mercado Libre cuando la variante tiene su propia publicación (ítem sin variaciones o con una sola).
 const updateMercadoLibreStockByItem = (itemId, stock) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _d;
     const integration = yield (0, db_1.get)(`SELECT access_token FROM integrations WHERE platform = 'mercadolibre'`);
     if (!(integration === null || integration === void 0 ? void 0 : integration.access_token)) {
         console.log('[ML Stock] No hay integración configurada');
@@ -577,7 +599,7 @@ const updateMercadoLibreStockByItem = (itemId, stock) => __awaiter(void 0, void 
         return false;
     }
     catch (e) {
-        console.error(`[ML Stock] Error actualizando publicación única ${itemId}:`, ((_a = e.response) === null || _a === void 0 ? void 0 : _a.data) || e.message);
+        console.error(`[ML Stock] Error actualizando publicación única ${itemId}:`, ((_d = e.response) === null || _d === void 0 ? void 0 : _d.data) || e.message);
         return false;
     }
 });
@@ -585,7 +607,7 @@ exports.updateMercadoLibreStockByItem = updateMercadoLibreStockByItem;
 // Actualizar stock en Mercado Libre por variante.
 // Prueba primero PUT a la subrecurso; si ML devuelve error, usa GET item + PUT item con array variations (formato que exige la API en muchos casos).
 const updateMercadoLibreStockByVariant = (itemId, variationId, stock) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _e, _f, _g;
     const integration = yield (0, db_1.get)(`SELECT access_token FROM integrations WHERE platform = 'mercadolibre'`);
     if (!(integration === null || integration === void 0 ? void 0 : integration.access_token)) {
         console.log('[ML Stock] No hay integración configurada');
@@ -607,15 +629,15 @@ const updateMercadoLibreStockByVariant = (itemId, variationId, stock) => __await
         return true;
     }
     catch (subError) {
-        const status = (_a = subError.response) === null || _a === void 0 ? void 0 : _a.status;
-        const data = (_b = subError.response) === null || _b === void 0 ? void 0 : _b.data;
+        const status = (_e = subError.response) === null || _e === void 0 ? void 0 : _e.status;
+        const data = (_f = subError.response) === null || _f === void 0 ? void 0 : _f.data;
         // Si es 400/404/405, probar método completo (GET + PUT con todas las variaciones)
         if (status === 400 || status === 404 || status === 405 || (status >= 400 && status < 500)) {
             try {
                 return yield updateMercadoLibreStockByItemUpdate(resolvedItemId, variationId, stock, integration.access_token);
             }
             catch (fullError) {
-                console.error('[ML Stock] Error método completo:', ((_c = fullError.response) === null || _c === void 0 ? void 0 : _c.data) || fullError.message);
+                console.error('[ML Stock] Error método completo:', ((_g = fullError.response) === null || _g === void 0 ? void 0 : _g.data) || fullError.message);
                 return false;
             }
         }
@@ -659,7 +681,7 @@ function getMlVariationSku(v) {
 }
 /** Enviar el SKU de tu inventario a Mercado Libre (actualiza seller_sku de la variación). */
 const updateMercadoLibreSku = (itemId, variationId, newSku) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _h;
     const integration = yield (0, db_1.get)(`SELECT access_token FROM integrations WHERE platform = 'mercadolibre'`);
     if (!(integration === null || integration === void 0 ? void 0 : integration.access_token)) {
         console.log('[ML SKU] No hay integración configurada');
@@ -689,32 +711,37 @@ const updateMercadoLibreSku = (itemId, variationId, newSku) => __awaiter(void 0,
         return true;
     }
     catch (e) {
-        console.error('[ML SKU] Error:', ((_a = e.response) === null || _a === void 0 ? void 0 : _a.data) || e.message);
+        console.error('[ML SKU] Error:', ((_h = e.response) === null || _h === void 0 ? void 0 : _h.data) || e.message);
         return false;
     }
 });
 exports.updateMercadoLibreSku = updateMercadoLibreSku;
 /** Enviar el SKU de tu inventario a Tienda Nube (actualiza sku de la variante). */
 const updateTiendaNubeSku = (productId, variantId, newSku) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _j;
     const integration = yield (0, db_1.get)(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
     if (!(integration === null || integration === void 0 ? void 0 : integration.access_token) || !(integration === null || integration === void 0 ? void 0 : integration.store_id)) {
         console.log('[TN SKU] No hay integración configurada');
         return false;
     }
+    const sku = (0, skuString_1.skuToCanonicalString)(newSku);
+    if (!sku) {
+        console.log('[TN SKU] SKU vacío, omitido');
+        return false;
+    }
     try {
-        yield (0, tiendanubeClient_1.tnPutWithRetry)(axios_1.default, `https://api.tiendanube.com/v1/${integration.store_id}/products/${productId}/variants/${variantId}`, { sku: newSku }, {
+        yield (0, tiendanubeClient_1.tnPutWithRetry)(axios_1.default, `https://api.tiendanube.com/v1/${integration.store_id}/products/${productId}/variants/${variantId}`, { sku }, {
             headers: {
                 'Authentication': `bearer ${integration.access_token}`,
                 'Content-Type': 'application/json',
                 'User-Agent': 'LupoHub (lupohub@example.com)'
             }
         }, { maxRetries: 4 });
-        console.log(`[TN SKU] Actualizado producto ${productId} variante ${variantId} sku a "${newSku}"`);
+        console.log(`[TN SKU] Actualizado producto ${productId} variante ${variantId} sku a "${sku}"`);
         return true;
     }
     catch (e) {
-        console.error('[TN SKU] Error:', ((_a = e.response) === null || _a === void 0 ? void 0 : _a.data) || e.message);
+        console.error('[TN SKU] Error:', ((_j = e.response) === null || _j === void 0 ? void 0 : _j.data) || e.message);
         return false;
     }
 });
@@ -882,7 +909,7 @@ const createStockSnapshot = (req, res) => __awaiter(void 0, void 0, void 0, func
 exports.createStockSnapshot = createStockSnapshot;
 // Endpoint: Importar historial de ventas de TN y ML
 const importSalesHistory = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _k, _l;
     try {
         const { days = 60 } = req.body;
         const logs = [];
@@ -967,9 +994,9 @@ const importSalesHistory = (req, res) => __awaiter(void 0, void 0, void 0, funct
                         if (exists)
                             continue;
                         for (const item of order.order_items || []) {
-                            const mlVariationId = (_a = item.item) === null || _a === void 0 ? void 0 : _a.variation_id;
+                            const mlVariationId = (_k = item.item) === null || _k === void 0 ? void 0 : _k.variation_id;
                             const qty = item.quantity || 1;
-                            const itemSku = (((_b = item.item) === null || _b === void 0 ? void 0 : _b.sku) || item.sku || '').toString().trim();
+                            const itemSku = (((_l = item.item) === null || _l === void 0 ? void 0 : _l.sku) || item.sku || '').toString().trim();
                             let variant = null;
                             if (mlVariationId) {
                                 variant = yield (0, db_1.get)(`SELECT pv.id FROM product_variants pv WHERE pv.mercado_libre_variant_id = ?`, [mlVariationId]);
@@ -1278,6 +1305,7 @@ function resolveVariantIdForGridCell(codigo, colorStr, gridSizeKey) {
         return null;
     });
 }
+exports.resolveVariantIdForGridCell = resolveVariantIdForGridCell;
 const GRID_RESERVED_KEYS = new Set([
     'codigo',
     'código',
@@ -1334,7 +1362,7 @@ function parseStockValue(v) {
     return Number.isNaN(n) ? 0 : Math.max(0, Math.floor(n));
 }
 const importStockFromExcel = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f;
+    var _m, _o, _p, _q, _r, _s;
     try {
         const { rows: rawRows } = req.body;
         if (!Array.isArray(rawRows) || rawRows.length === 0) {
@@ -1346,13 +1374,13 @@ const importStockFromExcel = (req, res) => __awaiter(void 0, void 0, void 0, fun
         const errors = [];
         let updated = 0;
         for (const row of rawRows) {
-            const codigo = ((_c = (_b = (_a = row.codigo) !== null && _a !== void 0 ? _a : row.CODIGO) !== null && _b !== void 0 ? _b : row.Codigo) !== null && _c !== void 0 ? _c : '').toString().trim();
-            const colorRaw = (_e = (_d = row.color) !== null && _d !== void 0 ? _d : row.COLOR) !== null && _e !== void 0 ? _e : row.Color;
+            const codigo = ((_p = (_o = (_m = row.codigo) !== null && _m !== void 0 ? _m : row.CODIGO) !== null && _o !== void 0 ? _o : row.Codigo) !== null && _p !== void 0 ? _p : '').toString().trim();
+            const colorRaw = (_r = (_q = row.color) !== null && _q !== void 0 ? _q : row.COLOR) !== null && _r !== void 0 ? _r : row.Color;
             const colorStr = colorRaw != null ? String(colorRaw).trim() : '';
             if (!codigo || !colorStr)
                 continue;
             for (const sizeCode of EXCEL_SIZE_COLUMNS) {
-                const rawVal = (_f = row[sizeCode]) !== null && _f !== void 0 ? _f : row[sizeCode.toLowerCase()];
+                const rawVal = (_s = row[sizeCode]) !== null && _s !== void 0 ? _s : row[sizeCode.toLowerCase()];
                 const stock = parseStockValue(rawVal);
                 const variantId = yield getVariantIdByCodigoColorSize(codigo, colorStr, sizeCode);
                 if (!variantId) {
@@ -1387,7 +1415,7 @@ exports.importStockFromExcel = importStockFromExcel;
  * actualiza stock del depósito y vincula ítems al despacho indicado.
  */
 const importStockGridToDespacho = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
+    var _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5;
     try {
         const { despachoId, rows: rawRows, updateDepotStock = true } = req.body;
         const despId = despachoId != null ? String(despachoId).trim() : '';
@@ -1415,10 +1443,10 @@ const importStockGridToDespacho = (req, res) => __awaiter(void 0, void 0, void 0
         const taggedProducts = new Set();
         const doStock = updateDepotStock !== false;
         for (const row of rawRows) {
-            const codigoRaw = ((_g = (_f = (_e = (_d = (_c = (_b = (_a = row.codigo) !== null && _a !== void 0 ? _a : row.CODIGO) !== null && _b !== void 0 ? _b : row.Codigo) !== null && _c !== void 0 ? _c : row.articulo) !== null && _d !== void 0 ? _d : row.ARTICULO) !== null && _e !== void 0 ? _e : row.MODELO) !== null && _f !== void 0 ? _f : row.modelo) !== null && _g !== void 0 ? _g : '')
+            const codigoRaw = ((_z = (_y = (_x = (_w = (_v = (_u = (_t = row.codigo) !== null && _t !== void 0 ? _t : row.CODIGO) !== null && _u !== void 0 ? _u : row.Codigo) !== null && _v !== void 0 ? _v : row.articulo) !== null && _w !== void 0 ? _w : row.ARTICULO) !== null && _x !== void 0 ? _x : row.MODELO) !== null && _y !== void 0 ? _y : row.modelo) !== null && _z !== void 0 ? _z : '')
                 .toString()
                 .trim();
-            const colorRaw = (_l = (_k = (_j = (_h = row.color) !== null && _h !== void 0 ? _h : row.COLOR) !== null && _j !== void 0 ? _j : row.Color) !== null && _k !== void 0 ? _k : row['CODIGO COLOR']) !== null && _l !== void 0 ? _l : row['COD. COLOR'];
+            const colorRaw = (_3 = (_2 = (_1 = (_0 = row.color) !== null && _0 !== void 0 ? _0 : row.COLOR) !== null && _1 !== void 0 ? _1 : row.Color) !== null && _2 !== void 0 ? _2 : row['CODIGO COLOR']) !== null && _3 !== void 0 ? _3 : row['COD. COLOR'];
             const colorStr = colorRaw != null ? String(colorRaw).trim() : '';
             const codigo = padArticleCodeTo7(codigoRaw) || codigoRaw;
             if (!codigo || !colorStr)
@@ -1444,8 +1472,8 @@ const importStockGridToDespacho = (req, res) => __awaiter(void 0, void 0, void 0
                     errors.push(`Sin producto para variante ${variantId}`);
                     continue;
                 }
-                const prodName = String((_m = productRow === null || productRow === void 0 ? void 0 : productRow.name) !== null && _m !== void 0 ? _m : '').trim();
-                const varSku = String((_o = productRow === null || productRow === void 0 ? void 0 : productRow.sku) !== null && _o !== void 0 ? _o : '').trim();
+                const prodName = String((_4 = productRow === null || productRow === void 0 ? void 0 : productRow.name) !== null && _4 !== void 0 ? _4 : '').trim();
+                const varSku = String((_5 = productRow === null || productRow === void 0 ? void 0 : productRow.sku) !== null && _5 !== void 0 ? _5 : '').trim();
                 const descripcionItem = `${prodName || codigo} - ${varSku || gridKey}`.trim();
                 if (doStock) {
                     const ok = yield (0, exports.updateVariantStock)(variantId, qty, 'IMPORTACION_DESPACHO_GRID', ref, true);

@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addCustomerCuit = addCustomerCuit;
+exports.addCustomerCuit = void 0;
 const db_1 = require("./db");
 /** Agrega CUIT/CUIL a clientes para facturación (Argentina). */
 function addCustomerCuit() {
@@ -31,3 +31,4 @@ function addCustomerCuit() {
         }
     });
 }
+exports.addCustomerCuit = addCustomerCuit;

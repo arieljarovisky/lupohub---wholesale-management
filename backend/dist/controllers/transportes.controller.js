@@ -47,7 +47,7 @@ const createTransporte = (req, res) => __awaiter(void 0, void 0, void 0, functio
 exports.createTransporte = createTransporte;
 /** Actualizar transporte. */
 const updateTransporte = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _b;
     try {
         const { id } = req.params;
         const { name, address } = req.body;
@@ -61,7 +61,7 @@ const updateTransporte = (req, res) => __awaiter(void 0, void 0, void 0, functio
         const addressVal = (address !== null && address !== void 0 ? address : '').toString().trim() || null;
         yield (0, db_1.execute)(`UPDATE transportes SET name = ?, address = ? WHERE id = ?`, [trimmed, addressVal, id]);
         const updated = yield (0, db_1.get)(`SELECT id, name, address FROM transportes WHERE id = ?`, [id]);
-        res.json({ id: updated.id, name: updated.name, address: (_a = updated.address) !== null && _a !== void 0 ? _a : undefined });
+        res.json({ id: updated.id, name: updated.name, address: (_b = updated.address) !== null && _b !== void 0 ? _b : undefined });
     }
     catch (error) {
         console.error('updateTransporte:', error);

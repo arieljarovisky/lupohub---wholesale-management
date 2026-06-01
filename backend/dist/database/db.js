@@ -56,7 +56,7 @@ function getPoolConfig() {
 }
 exports.pool = promise_1.default.createPool(getPoolConfig());
 // Wrapper para consultas que retornan filas (SELECT)
-const query = (sql_1, ...args_1) => __awaiter(void 0, [sql_1, ...args_1], void 0, function* (sql, params = []) {
+const query = (sql, params = []) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const [rows] = yield exports.pool.query(sql, params);
         return rows;
@@ -69,7 +69,7 @@ const query = (sql_1, ...args_1) => __awaiter(void 0, [sql_1, ...args_1], void 0
 exports.query = query;
 // Wrapper para ejecuciones que modifican datos (INSERT, UPDATE, DELETE)
 // Retorna el ResultSetHeader (affectedRows, insertId, etc.) para poder comprobar filas afectadas
-const execute = (sql_1, ...args_1) => __awaiter(void 0, [sql_1, ...args_1], void 0, function* (sql, params = []) {
+const execute = (sql, params = []) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const [rows] = yield exports.pool.execute(sql, params);
         return rows;
@@ -81,7 +81,7 @@ const execute = (sql_1, ...args_1) => __awaiter(void 0, [sql_1, ...args_1], void
 });
 exports.execute = execute;
 // Wrapper para obtener un solo registro
-const get = (sql_1, ...args_1) => __awaiter(void 0, [sql_1, ...args_1], void 0, function* (sql, params = []) {
+const get = (sql, params = []) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const [rows] = yield exports.pool.query(sql, params);
         const result = rows;

@@ -15,23 +15,13 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -51,8 +41,11 @@ const exceljs_1 = __importDefault(require("exceljs"));
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 const multimediaHistorialExcel_1 = require("../utils/multimediaHistorialExcel");
+const cityNormalize_1 = require("../utils/cityNormalize");
+const orderPaymentBalance_service_1 = require("../services/orderPaymentBalance.service");
+const carteraImportedSql_1 = require("../sql/carteraImportedSql");
 function parseDeliveryAddressesFromRow(raw) {
-    var _a, _b, _c, _d;
+    var _a, _b, _c;
     if (raw == null || raw === '')
         return [];
     try {
@@ -71,18 +64,18 @@ function parseDeliveryAddressesFromRow(raw) {
                 id,
                 label: (String((_c = it.label) !== null && _c !== void 0 ? _c : 'Sucursal').trim() || 'Sucursal'),
                 address,
-                city: String((_d = it.city) !== null && _d !== void 0 ? _d : '').trim(),
+                city: (0, cityNormalize_1.canonicalizeCityInput)(it.city) || '',
             });
         }
         return out;
     }
-    catch (_e) {
+    catch (_d) {
         return [];
     }
 }
 /** Serializa direcciones de sucursal para `customers.delivery_addresses` (TEXT JSON). */
 function normalizeDeliveryAddressesForDb(input) {
-    var _a, _b, _c, _d;
+    var _a, _b, _c;
     if (input === undefined || input === null)
         return null;
     if (!Array.isArray(input))
@@ -99,7 +92,7 @@ function normalizeDeliveryAddressesForDb(input) {
             id,
             label: (String((_c = raw.label) !== null && _c !== void 0 ? _c : 'Sucursal').trim() || 'Sucursal'),
             address,
-            city: String((_d = raw.city) !== null && _d !== void 0 ? _d : '').trim(),
+            city: (0, cityNormalize_1.canonicalizeCityInput)(raw.city) || '',
         });
     }
     return cleaned.length ? JSON.stringify(cleaned) : null;
@@ -259,7 +252,7 @@ const getCustomers = (req, res) => __awaiter(void 0, void 0, void 0, function* (
 exports.getCustomers = getCustomers;
 /** Exportar clientes individuales (1 fila por cliente) en Excel (.xlsx). */
 const exportCustomersIndividualXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s;
+    var _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u;
     try {
         const authUser = req.user;
         const sellerFilter = (authUser === null || authUser === void 0 ? void 0 : authUser.role) === 'SELLER' ? ' WHERE c.seller_id = ?' : '';
@@ -313,23 +306,23 @@ const exportCustomersIndividualXlsx = (req, res) => __awaiter(void 0, void 0, vo
         ws.views = [{ state: 'frozen', ySplit: 1 }];
         for (const r of rows) {
             ws.addRow({
-                id: (_a = r.id) !== null && _a !== void 0 ? _a : '',
-                legacy_code: (_b = r.legacy_code) !== null && _b !== void 0 ? _b : '',
-                business_name: (_c = r.business_name) !== null && _c !== void 0 ? _c : '',
-                name: (_d = r.name) !== null && _d !== void 0 ? _d : '',
-                email: (_e = r.email) !== null && _e !== void 0 ? _e : '',
-                phone: (_f = r.phone) !== null && _f !== void 0 ? _f : '',
-                cuit: (_g = r.cuit) !== null && _g !== void 0 ? _g : '',
-                city: (_h = r.city) !== null && _h !== void 0 ? _h : '',
-                address: (_j = r.address) !== null && _j !== void 0 ? _j : '',
-                sale_condition: (_k = r.sale_condition) !== null && _k !== void 0 ? _k : '',
-                condicion_iva: (_l = r.condicion_iva) !== null && _l !== void 0 ? _l : '',
-                transport_number: (_m = r.transport_number) !== null && _m !== void 0 ? _m : '',
-                remito_number: (_o = r.remito_number) !== null && _o !== void 0 ? _o : '',
-                account_zone: (_p = r.account_zone) !== null && _p !== void 0 ? _p : '',
-                account_seller_label: (_q = r.account_seller_label) !== null && _q !== void 0 ? _q : '',
-                seller_id: (_r = r.seller_id) !== null && _r !== void 0 ? _r : '',
-                seller_name: (_s = r.seller_name) !== null && _s !== void 0 ? _s : ''
+                id: (_c = r.id) !== null && _c !== void 0 ? _c : '',
+                legacy_code: (_d = r.legacy_code) !== null && _d !== void 0 ? _d : '',
+                business_name: (_e = r.business_name) !== null && _e !== void 0 ? _e : '',
+                name: (_f = r.name) !== null && _f !== void 0 ? _f : '',
+                email: (_g = r.email) !== null && _g !== void 0 ? _g : '',
+                phone: (_h = r.phone) !== null && _h !== void 0 ? _h : '',
+                cuit: (_j = r.cuit) !== null && _j !== void 0 ? _j : '',
+                city: (_k = r.city) !== null && _k !== void 0 ? _k : '',
+                address: (_l = r.address) !== null && _l !== void 0 ? _l : '',
+                sale_condition: (_m = r.sale_condition) !== null && _m !== void 0 ? _m : '',
+                condicion_iva: (_o = r.condicion_iva) !== null && _o !== void 0 ? _o : '',
+                transport_number: (_p = r.transport_number) !== null && _p !== void 0 ? _p : '',
+                remito_number: (_q = r.remito_number) !== null && _q !== void 0 ? _q : '',
+                account_zone: (_r = r.account_zone) !== null && _r !== void 0 ? _r : '',
+                account_seller_label: (_s = r.account_seller_label) !== null && _s !== void 0 ? _s : '',
+                seller_id: (_t = r.seller_id) !== null && _t !== void 0 ? _t : '',
+                seller_name: (_u = r.seller_name) !== null && _u !== void 0 ? _u : ''
             });
         }
         const out = yield workbook.xlsx.writeBuffer();
@@ -347,10 +340,10 @@ const exportCustomersIndividualXlsx = (req, res) => __awaiter(void 0, void 0, vo
 exports.exportCustomersIndividualXlsx = exportCustomersIndividualXlsx;
 /** Exportar clientes en un Excel con una hoja por cliente. */
 const exportCustomersBySheetsXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7, _8, _9;
+    var _v, _w, _x, _y, _z, _0, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, _17, _18, _19, _20, _21, _22, _23, _24, _25, _26, _27, _28;
     try {
         const authUser = req.user;
-        const requestedIds = Array.isArray((_a = req.body) === null || _a === void 0 ? void 0 : _a.customerIds)
+        const requestedIds = Array.isArray((_v = req.body) === null || _v === void 0 ? void 0 : _v.customerIds)
             ? req.body.customerIds
                 .filter((x) => typeof x === 'string' && x.trim().length > 0)
                 .map((x) => String(x).trim())
@@ -426,13 +419,13 @@ const exportCustomersBySheetsXlsx = (req, res) => __awaiter(void 0, void 0, void
             return name;
         };
         for (const r of rows) {
-            const customerName = String((_c = (_b = r.business_name) !== null && _b !== void 0 ? _b : r.name) !== null && _c !== void 0 ? _c : 'Cliente');
+            const customerName = String((_x = (_w = r.business_name) !== null && _w !== void 0 ? _w : r.name) !== null && _x !== void 0 ? _x : 'Cliente');
             wsSummary.addRow({
                 cliente: customerName,
-                contacto: (_d = r.name) !== null && _d !== void 0 ? _d : '',
-                cuit: (_e = r.cuit) !== null && _e !== void 0 ? _e : '',
-                email: (_f = r.email) !== null && _f !== void 0 ? _f : '',
-                vendedor: (_h = (_g = r.seller_name) !== null && _g !== void 0 ? _g : r.seller_id) !== null && _h !== void 0 ? _h : ''
+                contacto: (_y = r.name) !== null && _y !== void 0 ? _y : '',
+                cuit: (_z = r.cuit) !== null && _z !== void 0 ? _z : '',
+                email: (_0 = r.email) !== null && _0 !== void 0 ? _0 : '',
+                vendedor: (_2 = (_1 = r.seller_name) !== null && _1 !== void 0 ? _1 : r.seller_id) !== null && _2 !== void 0 ? _2 : ''
             });
             const ws = workbook.addWorksheet(uniqueSheetName(customerName, String(r.id)));
             ws.columns = [
@@ -442,24 +435,24 @@ const exportCustomersBySheetsXlsx = (req, res) => __awaiter(void 0, void 0, void
             ws.getRow(1).font = { bold: true };
             ws.views = [{ state: 'frozen', ySplit: 1 }];
             ws.addRows([
-                { campo: 'ID', valor: (_j = r.id) !== null && _j !== void 0 ? _j : '' },
-                { campo: 'Código legacy', valor: (_k = r.legacy_code) !== null && _k !== void 0 ? _k : '' },
-                { campo: 'Razón social', valor: (_l = r.business_name) !== null && _l !== void 0 ? _l : '' },
-                { campo: 'Contacto', valor: (_m = r.name) !== null && _m !== void 0 ? _m : '' },
-                { campo: 'Email', valor: (_o = r.email) !== null && _o !== void 0 ? _o : '' },
-                { campo: 'Teléfono', valor: (_p = r.phone) !== null && _p !== void 0 ? _p : '' },
-                { campo: 'CUIT', valor: (_q = r.cuit) !== null && _q !== void 0 ? _q : '' },
-                { campo: 'Ciudad', valor: (_r = r.city) !== null && _r !== void 0 ? _r : '' },
-                { campo: 'Dirección', valor: (_s = r.address) !== null && _s !== void 0 ? _s : '' },
-                { campo: 'Condición de venta', valor: (_t = r.sale_condition) !== null && _t !== void 0 ? _t : '' },
-                { campo: 'Condición IVA', valor: (_u = r.condicion_iva) !== null && _u !== void 0 ? _u : '' },
-                { campo: 'N° transporte', valor: (_v = r.transport_number) !== null && _v !== void 0 ? _v : '' },
-                { campo: 'N° remito', valor: (_w = r.remito_number) !== null && _w !== void 0 ? _w : '' },
-                { campo: 'Transportes', valor: (_x = r.transportes) !== null && _x !== void 0 ? _x : '' },
-                { campo: 'Zona', valor: (_y = r.account_zone) !== null && _y !== void 0 ? _y : '' },
-                { campo: 'Vendedor habitual', valor: (_z = r.account_seller_label) !== null && _z !== void 0 ? _z : '' },
-                { campo: 'Seller ID', valor: (_0 = r.seller_id) !== null && _0 !== void 0 ? _0 : '' },
-                { campo: 'Seller Name', valor: (_1 = r.seller_name) !== null && _1 !== void 0 ? _1 : '' }
+                { campo: 'ID', valor: (_3 = r.id) !== null && _3 !== void 0 ? _3 : '' },
+                { campo: 'Código legacy', valor: (_4 = r.legacy_code) !== null && _4 !== void 0 ? _4 : '' },
+                { campo: 'Razón social', valor: (_5 = r.business_name) !== null && _5 !== void 0 ? _5 : '' },
+                { campo: 'Contacto', valor: (_6 = r.name) !== null && _6 !== void 0 ? _6 : '' },
+                { campo: 'Email', valor: (_7 = r.email) !== null && _7 !== void 0 ? _7 : '' },
+                { campo: 'Teléfono', valor: (_8 = r.phone) !== null && _8 !== void 0 ? _8 : '' },
+                { campo: 'CUIT', valor: (_9 = r.cuit) !== null && _9 !== void 0 ? _9 : '' },
+                { campo: 'Ciudad', valor: (_10 = r.city) !== null && _10 !== void 0 ? _10 : '' },
+                { campo: 'Dirección', valor: (_11 = r.address) !== null && _11 !== void 0 ? _11 : '' },
+                { campo: 'Condición de venta', valor: (_12 = r.sale_condition) !== null && _12 !== void 0 ? _12 : '' },
+                { campo: 'Condición IVA', valor: (_13 = r.condicion_iva) !== null && _13 !== void 0 ? _13 : '' },
+                { campo: 'N° transporte', valor: (_14 = r.transport_number) !== null && _14 !== void 0 ? _14 : '' },
+                { campo: 'N° remito', valor: (_15 = r.remito_number) !== null && _15 !== void 0 ? _15 : '' },
+                { campo: 'Transportes', valor: (_16 = r.transportes) !== null && _16 !== void 0 ? _16 : '' },
+                { campo: 'Zona', valor: (_17 = r.account_zone) !== null && _17 !== void 0 ? _17 : '' },
+                { campo: 'Vendedor habitual', valor: (_18 = r.account_seller_label) !== null && _18 !== void 0 ? _18 : '' },
+                { campo: 'Seller ID', valor: (_19 = r.seller_id) !== null && _19 !== void 0 ? _19 : '' },
+                { campo: 'Seller Name', valor: (_20 = r.seller_name) !== null && _20 !== void 0 ? _20 : '' }
             ]);
             const customerOrders = yield (0, db_1.query)(`SELECT id, date, status, total, payment_status
          FROM orders
@@ -516,10 +509,10 @@ const exportCustomersBySheetsXlsx = (req, res) => __awaiter(void 0, void 0, void
             ws.getRow(rowCursor).font = { bold: true };
             rowCursor += 1;
             for (const o of customerOrders) {
-                ws.getCell(`A${rowCursor}`).value = (_2 = o.id) !== null && _2 !== void 0 ? _2 : '';
+                ws.getCell(`A${rowCursor}`).value = (_21 = o.id) !== null && _21 !== void 0 ? _21 : '';
                 ws.getCell(`B${rowCursor}`).value = o.date ? new Date(o.date) : null;
-                ws.getCell(`C${rowCursor}`).value = (_3 = o.status) !== null && _3 !== void 0 ? _3 : '';
-                ws.getCell(`D${rowCursor}`).value = (_4 = o.payment_status) !== null && _4 !== void 0 ? _4 : '';
+                ws.getCell(`C${rowCursor}`).value = (_22 = o.status) !== null && _22 !== void 0 ? _22 : '';
+                ws.getCell(`D${rowCursor}`).value = (_23 = o.payment_status) !== null && _23 !== void 0 ? _23 : '';
                 ws.getCell(`E${rowCursor}`).value = Number(o.total || 0);
                 rowCursor += 1;
             }
@@ -536,9 +529,9 @@ const exportCustomersBySheetsXlsx = (req, res) => __awaiter(void 0, void 0, void
             rowCursor += 1;
             for (const b of customerBilling) {
                 ws.getCell(`A${rowCursor}`).value = b.fecha ? new Date(b.fecha) : null;
-                ws.getCell(`B${rowCursor}`).value = (_5 = b.tipo) !== null && _5 !== void 0 ? _5 : '';
-                ws.getCell(`C${rowCursor}`).value = (_6 = b.comprobante) !== null && _6 !== void 0 ? _6 : '';
-                ws.getCell(`D${rowCursor}`).value = (_7 = b.order_id) !== null && _7 !== void 0 ? _7 : '';
+                ws.getCell(`B${rowCursor}`).value = (_24 = b.tipo) !== null && _24 !== void 0 ? _24 : '';
+                ws.getCell(`C${rowCursor}`).value = (_25 = b.comprobante) !== null && _25 !== void 0 ? _25 : '';
+                ws.getCell(`D${rowCursor}`).value = (_26 = b.order_id) !== null && _26 !== void 0 ? _26 : '';
                 ws.getCell(`E${rowCursor}`).value = Number(b.importe || 0);
                 rowCursor += 1;
             }
@@ -554,9 +547,9 @@ const exportCustomersBySheetsXlsx = (req, res) => __awaiter(void 0, void 0, void
             rowCursor += 1;
             for (const p of customerPayments) {
                 ws.getCell(`A${rowCursor}`).value = p.date ? new Date(p.date) : null;
-                ws.getCell(`B${rowCursor}`).value = (_8 = p.receipt_number) !== null && _8 !== void 0 ? _8 : '';
+                ws.getCell(`B${rowCursor}`).value = (_27 = p.receipt_number) !== null && _27 !== void 0 ? _27 : '';
                 ws.getCell(`C${rowCursor}`).value = Number(p.amount || 0);
-                ws.getCell(`D${rowCursor}`).value = (_9 = p.notes) !== null && _9 !== void 0 ? _9 : '';
+                ws.getCell(`D${rowCursor}`).value = (_28 = p.notes) !== null && _28 !== void 0 ? _28 : '';
                 rowCursor += 1;
             }
             ws.getColumn('B').numFmt = 'dd/mm/yyyy';
@@ -578,12 +571,12 @@ const exportCustomersBySheetsXlsx = (req, res) => __awaiter(void 0, void 0, void
 exports.exportCustomersBySheetsXlsx = exportCustomersBySheetsXlsx;
 /** Crear cliente. */
 const createCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r;
+    var _29, _30, _31, _32, _33, _34, _35, _36, _37, _38, _39, _40, _41, _42, _43;
     try {
         const body = req.body;
-        const name = ((_a = body.name) !== null && _a !== void 0 ? _a : '').toString().trim();
-        const businessName = ((_b = body.businessName) !== null && _b !== void 0 ? _b : '').toString().trim();
-        const email = ((_c = body.email) !== null && _c !== void 0 ? _c : '').toString().trim();
+        const name = ((_29 = body.name) !== null && _29 !== void 0 ? _29 : '').toString().trim();
+        const businessName = ((_30 = body.businessName) !== null && _30 !== void 0 ? _30 : '').toString().trim();
+        const email = ((_31 = body.email) !== null && _31 !== void 0 ? _31 : '').toString().trim();
         if (!businessName && !name) {
             return res.status(400).json({ message: 'Razón social o nombre de contacto es requerido' });
         }
@@ -591,19 +584,19 @@ const createCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
             return res.status(400).json({ message: 'El email es requerido' });
         }
         const id = body.id && body.id.trim() ? body.id.trim() : (0, uuid_1.v4)();
-        const sellerId = ((_d = body.sellerId) === null || _d === void 0 ? void 0 : _d.trim()) || null;
-        const address = ((_e = body.address) !== null && _e !== void 0 ? _e : '').toString().trim() || null;
-        const city = ((_f = body.city) !== null && _f !== void 0 ? _f : '').toString().trim() || null;
-        const cuit = ((_g = body.cuit) !== null && _g !== void 0 ? _g : '').toString().trim() || null;
-        const phone = ((_h = body.phone) !== null && _h !== void 0 ? _h : '').toString().trim() || null;
-        const transportNumber = ((_j = body.transportNumber) !== null && _j !== void 0 ? _j : '').toString().trim() || null;
-        const remitoNumber = ((_k = body.remitoNumber) !== null && _k !== void 0 ? _k : '').toString().trim() || null;
-        const saleCondition = ((_l = body.saleCondition) !== null && _l !== void 0 ? _l : '').toString().trim() || null;
-        const condicionIva = ((_m = body.condicionIva) !== null && _m !== void 0 ? _m : '').toString().trim() || null;
-        const priceListId = ((_o = body.priceListId) === null || _o === void 0 ? void 0 : _o.trim()) || null;
-        const legacyCode = ((_p = body.legacyCode) !== null && _p !== void 0 ? _p : '').toString().trim() || null;
-        const accountZone = ((_q = body.accountZone) !== null && _q !== void 0 ? _q : '').toString().trim() || null;
-        const accountSellerLabel = ((_r = body.accountSellerLabel) !== null && _r !== void 0 ? _r : '').toString().trim() || null;
+        const sellerId = ((_32 = body.sellerId) === null || _32 === void 0 ? void 0 : _32.trim()) || null;
+        const address = ((_33 = body.address) !== null && _33 !== void 0 ? _33 : '').toString().trim() || null;
+        const city = (0, cityNormalize_1.canonicalizeCityInput)(body.city);
+        const cuit = ((_34 = body.cuit) !== null && _34 !== void 0 ? _34 : '').toString().trim() || null;
+        const phone = ((_35 = body.phone) !== null && _35 !== void 0 ? _35 : '').toString().trim() || null;
+        const transportNumber = ((_36 = body.transportNumber) !== null && _36 !== void 0 ? _36 : '').toString().trim() || null;
+        const remitoNumber = ((_37 = body.remitoNumber) !== null && _37 !== void 0 ? _37 : '').toString().trim() || null;
+        const saleCondition = ((_38 = body.saleCondition) !== null && _38 !== void 0 ? _38 : '').toString().trim() || null;
+        const condicionIva = ((_39 = body.condicionIva) !== null && _39 !== void 0 ? _39 : '').toString().trim() || null;
+        const priceListId = ((_40 = body.priceListId) === null || _40 === void 0 ? void 0 : _40.trim()) || null;
+        const legacyCode = ((_41 = body.legacyCode) !== null && _41 !== void 0 ? _41 : '').toString().trim() || null;
+        const accountZone = ((_42 = body.accountZone) !== null && _42 !== void 0 ? _42 : '').toString().trim() || null;
+        const accountSellerLabel = ((_43 = body.accountSellerLabel) !== null && _43 !== void 0 ? _43 : '').toString().trim() || null;
         const deliveryJson = normalizeDeliveryAddressesForDb(body.deliveryAddresses);
         // Guardar nombre de contacto y razón social en columnas separadas:
         // - Si solo se carga razón social, "name" queda NULL y "business_name" tiene el valor.
@@ -635,7 +628,7 @@ const createCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
 exports.createCustomer = createCustomer;
 /** Actualizar cliente (ej. vendedor, razón social, price_list_id, etc.). */
 const updateCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p;
+    var _44, _45, _46, _47, _48, _49, _50, _51, _52, _53, _54, _55, _56;
     try {
         const { id } = req.params;
         const body = req.body;
@@ -650,47 +643,47 @@ const updateCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
         }
         if (body.businessName !== undefined) {
             updates.push('business_name = ?');
-            params.push(((_a = body.businessName) === null || _a === void 0 ? void 0 : _a.trim()) || null);
+            params.push(((_44 = body.businessName) === null || _44 === void 0 ? void 0 : _44.trim()) || null);
         }
         if (body.email !== undefined) {
             updates.push('email = ?');
-            params.push(((_b = body.email) === null || _b === void 0 ? void 0 : _b.trim()) || null);
+            params.push(((_45 = body.email) === null || _45 === void 0 ? void 0 : _45.trim()) || null);
         }
         if (body.address !== undefined) {
             updates.push('address = ?');
-            params.push(((_c = body.address) === null || _c === void 0 ? void 0 : _c.trim()) || null);
+            params.push(((_46 = body.address) === null || _46 === void 0 ? void 0 : _46.trim()) || null);
         }
         if (body.city !== undefined) {
             updates.push('city = ?');
-            params.push(((_d = body.city) === null || _d === void 0 ? void 0 : _d.trim()) || null);
+            params.push(body.city != null && String(body.city).trim() ? (0, cityNormalize_1.canonicalizeCityInput)(body.city) : null);
         }
         if (body.cuit !== undefined) {
             updates.push('cuit = ?');
-            params.push(((_e = body.cuit) === null || _e === void 0 ? void 0 : _e.trim()) || null);
+            params.push(((_47 = body.cuit) === null || _47 === void 0 ? void 0 : _47.trim()) || null);
         }
         if (body.phone !== undefined) {
             updates.push('phone = ?');
-            params.push(((_f = body.phone) === null || _f === void 0 ? void 0 : _f.trim()) || null);
+            params.push(((_48 = body.phone) === null || _48 === void 0 ? void 0 : _48.trim()) || null);
         }
         if (body.transportNumber !== undefined) {
             updates.push('transport_number = ?');
-            params.push(((_g = body.transportNumber) === null || _g === void 0 ? void 0 : _g.trim()) || null);
+            params.push(((_49 = body.transportNumber) === null || _49 === void 0 ? void 0 : _49.trim()) || null);
         }
         if (body.remitoNumber !== undefined) {
             updates.push('remito_number = ?');
-            params.push(((_h = body.remitoNumber) === null || _h === void 0 ? void 0 : _h.trim()) || null);
+            params.push(((_50 = body.remitoNumber) === null || _50 === void 0 ? void 0 : _50.trim()) || null);
         }
         if (body.saleCondition !== undefined) {
             updates.push('sale_condition = ?');
-            params.push(((_j = body.saleCondition) === null || _j === void 0 ? void 0 : _j.trim()) || null);
+            params.push(((_51 = body.saleCondition) === null || _51 === void 0 ? void 0 : _51.trim()) || null);
         }
         if (body.condicionIva !== undefined) {
             updates.push('condicion_iva = ?');
-            params.push(((_k = body.condicionIva) === null || _k === void 0 ? void 0 : _k.trim()) || null);
+            params.push(((_52 = body.condicionIva) === null || _52 === void 0 ? void 0 : _52.trim()) || null);
         }
         if (body.sellerId !== undefined) {
             updates.push('seller_id = ?');
-            params.push(((_l = body.sellerId) === null || _l === void 0 ? void 0 : _l.trim()) || null);
+            params.push(((_53 = body.sellerId) === null || _53 === void 0 ? void 0 : _53.trim()) || null);
         }
         if (body.sellerCommissionPercentage !== undefined) {
             const pct = parseSellerCommissionPercentage(body.sellerCommissionPercentage);
@@ -706,15 +699,15 @@ const updateCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
         }
         if (body.legacyCode !== undefined) {
             updates.push('legacy_code = ?');
-            params.push(((_m = body.legacyCode) === null || _m === void 0 ? void 0 : _m.trim()) || null);
+            params.push(((_54 = body.legacyCode) === null || _54 === void 0 ? void 0 : _54.trim()) || null);
         }
         if (body.accountZone !== undefined) {
             updates.push('account_zone = ?');
-            params.push(((_o = body.accountZone) === null || _o === void 0 ? void 0 : _o.trim()) || null);
+            params.push(((_55 = body.accountZone) === null || _55 === void 0 ? void 0 : _55.trim()) || null);
         }
         if (body.accountSellerLabel !== undefined) {
             updates.push('account_seller_label = ?');
-            params.push(((_p = body.accountSellerLabel) === null || _p === void 0 ? void 0 : _p.trim()) || null);
+            params.push(((_56 = body.accountSellerLabel) === null || _56 === void 0 ? void 0 : _56.trim()) || null);
         }
         if (body.deliveryAddresses !== undefined) {
             updates.push('delivery_addresses = ?');
@@ -744,7 +737,7 @@ const updateCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
 exports.updateCustomer = updateCustomer;
 /** Crear o vincular usuario de acceso directo a un cliente (rol CUSTOMER). Solo ADMIN. */
 const attachUserToCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _57, _58, _59;
     try {
         const authUser = req.user;
         if (!authUser || authUser.role !== 'ADMIN') {
@@ -754,9 +747,9 @@ const attachUserToCustomer = (req, res) => __awaiter(void 0, void 0, void 0, fun
         if (!id)
             return res.status(400).json({ message: 'ID de cliente requerido' });
         const body = req.body;
-        const name = ((_a = body.name) !== null && _a !== void 0 ? _a : '').toString().trim();
-        const email = ((_b = body.email) !== null && _b !== void 0 ? _b : '').toString().trim();
-        const password = ((_c = body.password) !== null && _c !== void 0 ? _c : '').toString();
+        const name = ((_57 = body.name) !== null && _57 !== void 0 ? _57 : '').toString().trim();
+        const email = ((_58 = body.email) !== null && _58 !== void 0 ? _58 : '').toString().trim();
+        const password = ((_59 = body.password) !== null && _59 !== void 0 ? _59 : '').toString();
         if (!email || !password) {
             return res.status(400).json({ message: 'Email y contraseña son requeridos para crear el usuario del cliente' });
         }
@@ -831,25 +824,25 @@ const deleteCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function*
 exports.deleteCustomer = deleteCustomer;
 /** Importar clientes en lote. Se exige razón social y CUIT. No duplica por CUIT ni por email. */
 const importCustomers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
+    var _60, _61, _62, _63, _64, _65, _66, _67;
     try {
         const body = req.body;
         const rows = Array.isArray(body.customers) ? body.customers : [];
-        const sellerId = ((_a = body.sellerId) === null || _a === void 0 ? void 0 : _a.trim()) || null;
+        const sellerId = ((_60 = body.sellerId) === null || _60 === void 0 ? void 0 : _60.trim()) || null;
         let created = 0;
         let skipped = 0;
         const errors = [];
         for (let i = 0; i < rows.length; i++) {
             const r = rows[i];
-            const name = ((_b = r.name) !== null && _b !== void 0 ? _b : '').toString().trim();
-            const businessName = ((_c = r.businessName) !== null && _c !== void 0 ? _c : '').toString().trim();
-            let email = ((_d = r.email) !== null && _d !== void 0 ? _d : '').toString().trim();
-            const address = ((_e = r.address) !== null && _e !== void 0 ? _e : '').toString().trim() || null;
-            const city = ((_f = r.city) !== null && _f !== void 0 ? _f : '').toString().trim() || null;
-            const cuit = ((_g = r.cuit) !== null && _g !== void 0 ? _g : '').toString().trim() || null;
+            const name = ((_61 = r.name) !== null && _61 !== void 0 ? _61 : '').toString().trim();
+            const businessName = ((_62 = r.businessName) !== null && _62 !== void 0 ? _62 : '').toString().trim();
+            let email = ((_63 = r.email) !== null && _63 !== void 0 ? _63 : '').toString().trim();
+            const address = ((_64 = r.address) !== null && _64 !== void 0 ? _64 : '').toString().trim() || null;
+            const city = (0, cityNormalize_1.canonicalizeCityInput)(r.city);
+            const cuit = ((_65 = r.cuit) !== null && _65 !== void 0 ? _65 : '').toString().trim() || null;
             const cuitSolo = (cuit || '').replace(/\D/g, '');
-            const phone = ((_h = r.phone) !== null && _h !== void 0 ? _h : '').toString().trim() || null;
-            const condicionIva = ((_j = r.condicionIva) !== null && _j !== void 0 ? _j : '').toString().trim() || null;
+            const phone = ((_66 = r.phone) !== null && _66 !== void 0 ? _66 : '').toString().trim() || null;
+            const condicionIva = ((_67 = r.condicionIva) !== null && _67 !== void 0 ? _67 : '').toString().trim() || null;
             const rowNum = i + 1;
             if (!businessName && !name) {
                 errors.push({ row: rowNum, message: 'Falta razón social' });
@@ -899,7 +892,7 @@ const importCustomers = (req, res) => __awaiter(void 0, void 0, void 0, function
 exports.importCustomers = importCustomers;
 /** Actualizar CUIT en lote. Recibe lista con identificador (email o razón social) + CUIT; actualiza solo el campo cuit. */
 const bulkUpdateCuit = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _68, _69, _70, _71, _72;
     try {
         const body = req.body;
         const updates = Array.isArray(body.updates) ? body.updates : [];
@@ -908,11 +901,11 @@ const bulkUpdateCuit = (req, res) => __awaiter(void 0, void 0, void 0, function*
         const errors = [];
         for (let i = 0; i < updates.length; i++) {
             const u = updates[i];
-            const cuit = ((_a = u.cuit) !== null && _a !== void 0 ? _a : '').toString().trim().replace(/\D/g, '').slice(0, 11);
-            const email = ((_b = u.email) !== null && _b !== void 0 ? _b : '').toString().trim() || null;
-            const businessName = ((_c = u.businessName) !== null && _c !== void 0 ? _c : '').toString().trim() || null;
-            const newBusinessName = ((_d = u.newBusinessName) !== null && _d !== void 0 ? _d : '').toString().trim() || null;
-            const condicionIva = ((_e = u.condicionIva) !== null && _e !== void 0 ? _e : '').toString().trim() || null;
+            const cuit = ((_68 = u.cuit) !== null && _68 !== void 0 ? _68 : '').toString().trim().replace(/\D/g, '').slice(0, 11);
+            const email = ((_69 = u.email) !== null && _69 !== void 0 ? _69 : '').toString().trim() || null;
+            const businessName = ((_70 = u.businessName) !== null && _70 !== void 0 ? _70 : '').toString().trim() || null;
+            const newBusinessName = ((_71 = u.newBusinessName) !== null && _71 !== void 0 ? _71 : '').toString().trim() || null;
+            const condicionIva = ((_72 = u.condicionIva) !== null && _72 !== void 0 ? _72 : '').toString().trim() || null;
             if (!cuit) {
                 errors.push({ row: i + 1, message: 'CUIT vacío' });
                 continue;
@@ -962,6 +955,18 @@ function parseSaldoNumero(v) {
     return Number.isFinite(n) ? n : 0;
 }
 /** Último saldo de columna en import Multimedia/Tango (arrastre de cuenta). */
+/**
+ * Pagos cargados por import-seller-commissions (PDF de comisiones): no son cobranza del cliente.
+ * Si entran en el saldo, el cliente figura con saldo a favor erróneo.
+ */
+const SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT = `(
+  COALESCE(p.notes, '') NOT LIKE '%comisión vendedor%'
+  AND COALESCE(p.notes, '') NOT LIKE '%comision vendedor%'
+)`;
+const SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT_PLAIN = `(
+  COALESCE(notes, '') NOT LIKE '%comisión vendedor%'
+  AND COALESCE(notes, '') NOT LIKE '%comision vendedor%'
+)`;
 const CARTERA_MM_LAST_SALDO_SUBQUERY = `
   SELECT
     agg.customer_id,
@@ -1026,6 +1031,7 @@ function sqlCarteraPagosMatchedImportSubquery(sellerScoped) {
          )
        END
       WHERE 1=1${sellerWhere}
+        AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
       GROUP BY
         p.customer_id,
         DATE(p.date),
@@ -1051,6 +1057,7 @@ const SQL_CARTERA_MM_REC_SIN_PAGO = `
       WHERE p.customer_id = e.customer_id
         AND DATE(p.date) = DATE(e.line_date)
         AND ROUND(COALESCE(p.amount, 0), 2) = ROUND(ABS(COALESCE(e.importe, 0)), 2)
+        AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
         AND UPPER(
           REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
         ) = CASE
@@ -1061,20 +1068,73 @@ const SQL_CARTERA_MM_REC_SIN_PAGO = `
         END
     )
   GROUP BY e.customer_id`;
-/** Saldo unificado: pedidos pendientes + arrastre importado − NC − pagos (dedupe) − recibos huérfanos si arrastre = 0. */
+/**
+ * Neto gravado del pedido (alias `o`): usa `orders.total` o suma de ítems si el total quedó en 0.
+ * Tras picking: pickeado si hay; si no, cantidad pedida (alineado con factura AFIP / NC).
+ */
+const SQL_ORDER_NETO_GRAVADO = `GREATEST(
+  COALESCE(o.total, 0),
+  COALESCE((
+    SELECT SUM(
+      ROUND(
+        (
+          CASE
+            WHEN NOT COALESCE(o.no_stock_impact, 0)
+              AND o.status IN ('Falta controlar', 'Controlado', 'Despachado')
+            THEN
+              CASE
+                WHEN COALESCE(oi.picked, 0) > 0 THEN LEAST(COALESCE(oi.quantity, 0), COALESCE(oi.picked, 0))
+                ELSE COALESCE(oi.quantity, 0)
+              END
+            ELSE COALESCE(oi.quantity, 0)
+          END
+        ) * COALESCE(oi.price_at_moment, 0),
+        2
+      )
+    )
+    FROM order_items oi
+    WHERE oi.order_id = o.id
+  ), 0)
+)`;
+const SQL_ORDER_CARGO_CON_IVA = `ROUND((${SQL_ORDER_NETO_GRAVADO}) * 1.21, 2)`;
+const SQL_ORDER_ACTIVE_COND = `o.status NOT IN ('Cancelado', 'Borrador') AND (o.archived = 0 OR o.archived IS NULL)`;
+/** Recibos sin imputar a factura/pedido (el resto se descuenta del cargo de cada pedido). */
+const SQL_PAYMENT_UNALLOCATED_COND = `NOT EXISTS (
+  SELECT 1 FROM payment_invoices pi WHERE pi.payment_id = p.id
+)
+AND NOT EXISTS (
+  SELECT 1 FROM payment_orders po WHERE po.payment_id = p.id
+)
+AND TRIM(COALESCE(p.invoice_id, '')) = ''
+AND TRIM(COALESCE(p.order_id, '')) = ''`;
+/** Saldo = facturas/pedidos (LupoHub + import Tango) − NC − recibos. */
 function carteraSaldoSqlExpr() {
     return `ROUND(
     COALESCE(ob.facturas_bruto, 0)
-    + COALESCE(mm.last_saldo, 0)
+    + COALESCE(mfac.manual_fac, 0)
+    + COALESCE(imp.import_debe, 0)
     - COALESCE(ncv.nc_iva, 0)
+    - COALESCE(mnc.manual_nc, 0)
+    - COALESCE(imp.import_nc, 0)
     - COALESCE(pay.total_pagos, 0)
-    - CASE
-        WHEN ABS(COALESCE(mm.last_saldo, 0)) < 0.005 THEN
-          COALESCE(pay_mm.total_matched, 0) + COALESCE(mm_orphan.total_orphan, 0)
-        ELSE 0
-      END,
+    - COALESCE(imp.import_rec, 0),
     2
   )`;
+}
+function carteraTotalFacturasSql() {
+    return `ROUND(
+    COALESCE(ob.facturas_bruto, 0) + COALESCE(mfac.manual_fac, 0) + COALESCE(imp.import_debe, 0),
+    2
+  )`;
+}
+function carteraTotalNcSql() {
+    return `ROUND(
+    COALESCE(ncv.nc_iva, 0) + COALESCE(mnc.manual_nc, 0) + COALESCE(imp.import_nc, 0),
+    2
+  )`;
+}
+function carteraTotalRecibosSql() {
+    return `ROUND(COALESCE(pay.total_pagos, 0) + COALESCE(imp.import_rec, 0), 2)`;
 }
 /** Saldos: pedidos con cobro pendiente (IVA 21% sobre neto, neto de NC) menos pagos/recibos en `payments`. */
 const getSaldosPendientes = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
@@ -1135,7 +1195,7 @@ const getSaldosPendientes = (req, res) => __awaiter(void 0, void 0, void 0, func
         c.cuit,
         c.city,
         c.email,
-        SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargosPendientes,
+        SUM(ROUND(GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargosPendientes,
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
@@ -1144,9 +1204,9 @@ const getSaldosPendientes = (req, res) => __awaiter(void 0, void 0, void 0, func
         FROM credit_notes
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
-      WHERE o.payment_status = 'pendiente'
-        AND o.status NOT IN ('Cancelado', 'Borrador')
-        AND (o.archived = 0 OR o.archived IS NULL)
+      WHERE ${SQL_ORDER_ACTIVE_COND}
+        AND ${orderPaymentBalance_service_1.SQL_ORDER_IN_SALDO_SCOPE}
+        AND ${SQL_ORDER_ACTIVE_COND}
         ${sellerFilter}
       GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
     ) t
@@ -1174,13 +1234,13 @@ const getSaldosPendientes = (req, res) => __awaiter(void 0, void 0, void 0, func
         c.cuit,
         c.city,
         c.email,
-        SUM(ROUND(o.total * 1.21, 2)) AS cargosPendientes,
+        SUM(${SQL_ORDER_CARGO_CON_IVA}) AS cargosPendientes,
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
-      WHERE o.payment_status = 'pendiente'
-        AND o.status NOT IN ('Cancelado', 'Borrador')
-        AND (o.archived = 0 OR o.archived IS NULL)
+      WHERE ${SQL_ORDER_ACTIVE_COND}
+        AND ${orderPaymentBalance_service_1.SQL_ORDER_IN_SALDO_SCOPE}
+        AND ${SQL_ORDER_ACTIVE_COND}
         ${sellerFilter}
       GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
     ) t
@@ -1217,6 +1277,7 @@ const getCarteraTotals = (req, res) => __awaiter(void 0, void 0, void 0, functio
     if (!user || !roleCanViewSaldos(user.role)) {
         return res.status(403).json({ message: 'Sin permiso para ver saldos' });
     }
+    yield (0, orderPaymentBalance_service_1.backfillPaymentOrdersFromLegacy)();
     const sellerFilter = user.role === 'SELLER' ? ' AND c.seller_id = ?' : '';
     const baseParams = user.role === 'SELLER' ? [user.id] : [];
     const paymentsSubquery = user.role === 'SELLER'
@@ -1263,6 +1324,8 @@ const getCarteraTotals = (req, res) => __awaiter(void 0, void 0, void 0, functio
             END
            WHERE (p.seller_id = ? OR c2.seller_id = ?)
              AND me_rec.customer_id IS NULL
+             AND ${SQL_PAYMENT_UNALLOCATED_COND}
+             AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
            GROUP BY
              p.customer_id,
              DATE(p.date),
@@ -1316,6 +1379,8 @@ const getCarteraTotals = (req, res) => __awaiter(void 0, void 0, void 0, functio
               )
             END
            WHERE me_rec.customer_id IS NULL
+             AND ${SQL_PAYMENT_UNALLOCATED_COND}
+             AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
            GROUP BY
              p.customer_id,
              DATE(p.date),
@@ -1328,50 +1393,61 @@ const getCarteraTotals = (req, res) => __awaiter(void 0, void 0, void 0, functio
              END
          ) d
          GROUP BY d.customer_id`;
-    const payMatchedSubquery = sqlCarteraPagosMatchedImportSubquery(user.role === 'SELLER');
     const payParams = user.role === 'SELLER' ? [user.id, user.id] : [];
-    const payMatchedParams = user.role === 'SELLER' ? [user.id, user.id] : [];
-    const paramsWithNc = [...baseParams, ...payParams, ...payMatchedParams];
-    const paramsSimple = [...baseParams, ...payParams, ...payMatchedParams];
+    const paramsWithNc = [...baseParams, ...payParams];
+    const paramsSimple = [...baseParams, ...payParams];
     const saldoExpr = carteraSaldoSqlExpr();
     const sqlWithNc = `
     SELECT
       c.id AS customerId,
-      ROUND(COALESCE(ob.facturas_bruto, 0), 2) AS orderCargosPendientes,
-      ROUND(COALESCE(ncv.nc_iva, 0), 2) AS totalNotasCredito,
-      ROUND(COALESCE(mm.last_saldo, 0), 2) AS multimediaSaldo,
-      ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
+      ${carteraTotalFacturasSql()} AS orderCargosPendientes,
+      ${carteraTotalNcSql()} AS totalNotasCredito,
+      ROUND(COALESCE(imp.import_debe, 0) - COALESCE(imp.import_nc, 0) - COALESCE(imp.import_rec, 0), 2) AS multimediaSaldo,
+      ${carteraTotalRecibosSql()} AS totalPagos,
       ${saldoExpr} AS saldoPendienteUnificado
     FROM customers c
     LEFT JOIN (
       SELECT
         o.customer_id,
-        SUM(ROUND(o.total * 1.21, 2)) AS facturas_bruto
-      FROM orders o
-      WHERE o.payment_status = 'pendiente'
-        AND o.status NOT IN ('Cancelado', 'Borrador')
-        AND (o.archived = 0 OR o.archived IS NULL)
-      GROUP BY o.customer_id
-    ) ob ON ob.customer_id = c.id
-    LEFT JOIN (
-      SELECT
-        o.customer_id,
-        SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), o.total) * 1.21, 2)) AS nc_iva
+        SUM(${orderPaymentBalance_service_1.SQL_ORDER_SALDO_RESIDUAL}) AS facturas_bruto
       FROM orders o
       LEFT JOIN (
         SELECT order_id, SUM(amount_credited) AS cn_total
         FROM credit_notes
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
-      WHERE o.payment_status = 'pendiente'
-        AND o.status NOT IN ('Cancelado', 'Borrador')
-        AND (o.archived = 0 OR o.archived IS NULL)
+      WHERE ${SQL_ORDER_ACTIVE_COND}
+        AND ${orderPaymentBalance_service_1.SQL_ORDER_IN_SALDO_SCOPE}
+      GROUP BY o.customer_id
+    ) ob ON ob.customer_id = c.id
+    LEFT JOIN (
+      SELECT customer_id, SUM(ROUND(importe_neto + COALESCE(agip_ret_per, 0), 2)) AS manual_fac
+      FROM customer_manual_comprobantes
+      WHERE tipo = 'FACTURA'
+      GROUP BY customer_id
+    ) mfac ON mfac.customer_id = c.id
+    LEFT JOIN (
+      SELECT customer_id, SUM(ROUND(importe_neto, 2)) AS manual_nc
+      FROM customer_manual_comprobantes
+      WHERE tipo = 'NC'
+      GROUP BY customer_id
+    ) mnc ON mnc.customer_id = c.id
+    LEFT JOIN (
+      SELECT
+        o.customer_id,
+        SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), (${SQL_ORDER_NETO_GRAVADO})) * 1.21, 2)) AS nc_iva
+      FROM orders o
+      LEFT JOIN (
+        SELECT order_id, SUM(amount_credited) AS cn_total
+        FROM credit_notes
+        GROUP BY order_id
+      ) cn ON cn.order_id = o.id
+      WHERE ${SQL_ORDER_ACTIVE_COND}
+        AND ${orderPaymentBalance_service_1.SQL_ORDER_IN_SALDO_SCOPE}
       GROUP BY o.customer_id
     ) ncv ON ncv.customer_id = c.id
-    LEFT JOIN (${CARTERA_MM_LAST_SALDO_SUBQUERY}) mm ON mm.customer_id = c.id
+    LEFT JOIN (${carteraImportedSql_1.CARTERA_IMPORTED_MOVEMENTS_AGG_SUBQUERY}) imp ON imp.customer_id = c.id
     LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
-    LEFT JOIN (${payMatchedSubquery}) pay_mm ON pay_mm.customer_id = c.id
-    LEFT JOIN (${SQL_CARTERA_MM_REC_SIN_PAGO}) mm_orphan ON mm_orphan.customer_id = c.id
     WHERE 1=1 ${sellerFilter}
       AND ABS(${saldoExpr}) > 0.005
     ORDER BY c.business_name ASC, c.name ASC
@@ -1380,41 +1456,54 @@ const getCarteraTotals = (req, res) => __awaiter(void 0, void 0, void 0, functio
     const sqlSimple = `
     SELECT
       c.id AS customerId,
-      ROUND(COALESCE(ob.facturas_bruto, 0), 2) AS orderCargosPendientes,
-      ROUND(COALESCE(ncv.nc_iva, 0), 2) AS totalNotasCredito,
-      ROUND(COALESCE(mm.last_saldo, 0), 2) AS multimediaSaldo,
-      ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
+      ${carteraTotalFacturasSql()} AS orderCargosPendientes,
+      ${carteraTotalNcSql()} AS totalNotasCredito,
+      ROUND(COALESCE(imp.import_debe, 0) - COALESCE(imp.import_nc, 0) - COALESCE(imp.import_rec, 0), 2) AS multimediaSaldo,
+      ${carteraTotalRecibosSql()} AS totalPagos,
       ${saldoExpr} AS saldoPendienteUnificado
     FROM customers c
     LEFT JOIN (
       SELECT
         o.customer_id,
-        SUM(ROUND(o.total * 1.21, 2)) AS facturas_bruto
-      FROM orders o
-      WHERE o.payment_status = 'pendiente'
-        AND o.status NOT IN ('Cancelado', 'Borrador')
-        AND (o.archived = 0 OR o.archived IS NULL)
-      GROUP BY o.customer_id
-    ) ob ON ob.customer_id = c.id
-    LEFT JOIN (
-      SELECT
-        o.customer_id,
-        SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), o.total) * 1.21, 2)) AS nc_iva
+        SUM(${orderPaymentBalance_service_1.SQL_ORDER_SALDO_RESIDUAL}) AS facturas_bruto
       FROM orders o
       LEFT JOIN (
         SELECT order_id, SUM(amount_credited) AS cn_total
         FROM credit_notes
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
-      WHERE o.payment_status = 'pendiente'
-        AND o.status NOT IN ('Cancelado', 'Borrador')
-        AND (o.archived = 0 OR o.archived IS NULL)
+      WHERE ${SQL_ORDER_ACTIVE_COND}
+        AND ${orderPaymentBalance_service_1.SQL_ORDER_IN_SALDO_SCOPE}
+      GROUP BY o.customer_id
+    ) ob ON ob.customer_id = c.id
+    LEFT JOIN (
+      SELECT customer_id, SUM(ROUND(importe_neto + COALESCE(agip_ret_per, 0), 2)) AS manual_fac
+      FROM customer_manual_comprobantes
+      WHERE tipo = 'FACTURA'
+      GROUP BY customer_id
+    ) mfac ON mfac.customer_id = c.id
+    LEFT JOIN (
+      SELECT customer_id, SUM(ROUND(importe_neto, 2)) AS manual_nc
+      FROM customer_manual_comprobantes
+      WHERE tipo = 'NC'
+      GROUP BY customer_id
+    ) mnc ON mnc.customer_id = c.id
+    LEFT JOIN (
+      SELECT
+        o.customer_id,
+        SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), (${SQL_ORDER_NETO_GRAVADO})) * 1.21, 2)) AS nc_iva
+      FROM orders o
+      LEFT JOIN (
+        SELECT order_id, SUM(amount_credited) AS cn_total
+        FROM credit_notes
+        GROUP BY order_id
+      ) cn ON cn.order_id = o.id
+      WHERE ${SQL_ORDER_ACTIVE_COND}
+        AND ${orderPaymentBalance_service_1.SQL_ORDER_IN_SALDO_SCOPE}
       GROUP BY o.customer_id
     ) ncv ON ncv.customer_id = c.id
-    LEFT JOIN (${CARTERA_MM_LAST_SALDO_SUBQUERY}) mm ON mm.customer_id = c.id
+    LEFT JOIN (${carteraImportedSql_1.CARTERA_IMPORTED_MOVEMENTS_AGG_SUBQUERY}) imp ON imp.customer_id = c.id
     LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
-    LEFT JOIN (${payMatchedSubquery}) pay_mm ON pay_mm.customer_id = c.id
-    LEFT JOIN (${SQL_CARTERA_MM_REC_SIN_PAGO}) mm_orphan ON mm_orphan.customer_id = c.id
     WHERE 1=1 ${sellerFilter}
       AND ABS(${saldoExpr}) > 0.005
     ORDER BY c.business_name ASC, c.name ASC
@@ -1450,9 +1539,104 @@ const getCarteraTotals = (req, res) => __awaiter(void 0, void 0, void 0, functio
     }
 });
 exports.getCarteraTotals = getCarteraTotals;
+/** Saldo unificado por cliente (misma fórmula que getCarteraTotals), sin filtrar por saldo > 0. */
+function fetchCarteraSaldoUnificadoMap(sellerIdFilter, user) {
+    return __awaiter(this, void 0, void 0, function* () {
+        yield (0, orderPaymentBalance_service_1.backfillPaymentOrdersFromLegacy)();
+        const sellerFilter = sellerIdFilter ? ' AND c.seller_id = ?' : user.role === 'SELLER' ? ' AND c.seller_id = ?' : '';
+        const baseParams = sellerIdFilter ? [sellerIdFilter] : user.role === 'SELLER' ? [user.id] : [];
+        const sellerScoped = !!sellerIdFilter || user.role === 'SELLER';
+        const paymentsSubquery = sellerScoped
+            ? `SELECT d.customer_id, SUM(d.amount) AS total_pagos
+         FROM (
+           SELECT p.customer_id, ROUND(COALESCE(p.amount, 0), 2) AS amount,
+             CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+             ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END AS receipt_norm
+           FROM payments p
+           INNER JOIN customers c2 ON c2.id = p.customer_id
+           LEFT JOIN (
+             SELECT e.customer_id, DATE(e.line_date) AS line_date, ROUND(COALESCE(e.importe, 0), 2) AS amount,
+               UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) AS receipt_norm
+             FROM customer_multimedia_entries e
+             WHERE UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO') AND TRIM(COALESCE(e.numero, '')) <> ''
+             GROUP BY e.customer_id, DATE(e.line_date), ROUND(COALESCE(e.importe, 0), 2),
+               UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', ''))
+           ) me_rec ON me_rec.customer_id = p.customer_id AND me_rec.line_date = DATE(p.date)
+             AND me_rec.amount = ROUND(COALESCE(p.amount, 0), 2)
+             AND me_rec.receipt_norm = CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+             ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END
+           WHERE (p.seller_id = ? OR c2.seller_id = ?) AND me_rec.customer_id IS NULL
+             AND ${SQL_PAYMENT_UNALLOCATED_COND} AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
+           GROUP BY p.customer_id, DATE(p.date), ROUND(COALESCE(p.amount, 0), 2),
+             CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+             ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END
+         ) d GROUP BY d.customer_id`
+            : `SELECT d.customer_id, SUM(d.amount) AS total_pagos
+         FROM (
+           SELECT p.customer_id, ROUND(COALESCE(p.amount, 0), 2) AS amount,
+             CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+             ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END AS receipt_norm
+           FROM payments p
+           LEFT JOIN (
+             SELECT e.customer_id, DATE(e.line_date) AS line_date, ROUND(COALESCE(e.importe, 0), 2) AS amount,
+               UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) AS receipt_norm
+             FROM customer_multimedia_entries e
+             WHERE UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO') AND TRIM(COALESCE(e.numero, '')) <> ''
+             GROUP BY e.customer_id, DATE(e.line_date), ROUND(COALESCE(e.importe, 0), 2),
+               UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', ''))
+           ) me_rec ON me_rec.customer_id = p.customer_id AND me_rec.line_date = DATE(p.date)
+             AND me_rec.amount = ROUND(COALESCE(p.amount, 0), 2)
+             AND me_rec.receipt_norm = CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+             ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END
+           WHERE me_rec.customer_id IS NULL AND ${SQL_PAYMENT_UNALLOCATED_COND} AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
+           GROUP BY p.customer_id, DATE(p.date), ROUND(COALESCE(p.amount, 0), 2),
+             CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+             ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END
+         ) d GROUP BY d.customer_id`;
+        const paySellerId = sellerIdFilter || (user.role === 'SELLER' ? user.id : '');
+        const payParams = sellerScoped ? [paySellerId, paySellerId] : [];
+        const params = [...baseParams, ...payParams];
+        const saldoExpr = carteraSaldoSqlExpr();
+        const sql = `
+    SELECT c.id AS customerId, ${saldoExpr} AS saldoPendienteUnificado
+    FROM customers c
+    LEFT JOIN (
+      SELECT o.customer_id, SUM(${orderPaymentBalance_service_1.SQL_ORDER_SALDO_RESIDUAL}) AS facturas_bruto
+      FROM orders o
+      LEFT JOIN (SELECT order_id, SUM(amount_credited) AS cn_total FROM credit_notes GROUP BY order_id) cn ON cn.order_id = o.id
+      WHERE ${SQL_ORDER_ACTIVE_COND} AND ${orderPaymentBalance_service_1.SQL_ORDER_IN_SALDO_SCOPE}
+      GROUP BY o.customer_id
+    ) ob ON ob.customer_id = c.id
+    LEFT JOIN (
+      SELECT customer_id, SUM(ROUND(importe_neto + COALESCE(agip_ret_per, 0), 2)) AS manual_fac
+      FROM customer_manual_comprobantes WHERE tipo = 'FACTURA' GROUP BY customer_id
+    ) mfac ON mfac.customer_id = c.id
+    LEFT JOIN (
+      SELECT customer_id, SUM(ROUND(importe_neto, 2)) AS manual_nc
+      FROM customer_manual_comprobantes WHERE tipo = 'NC' GROUP BY customer_id
+    ) mnc ON mnc.customer_id = c.id
+    LEFT JOIN (
+      SELECT o.customer_id,
+        SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), (${SQL_ORDER_NETO_GRAVADO})) * 1.21, 2)) AS nc_iva
+      FROM orders o
+      LEFT JOIN (SELECT order_id, SUM(amount_credited) AS cn_total FROM credit_notes GROUP BY order_id) cn ON cn.order_id = o.id
+      WHERE ${SQL_ORDER_ACTIVE_COND} AND ${orderPaymentBalance_service_1.SQL_ORDER_IN_SALDO_SCOPE}
+      GROUP BY o.customer_id
+    ) ncv ON ncv.customer_id = c.id
+    LEFT JOIN (${carteraImportedSql_1.CARTERA_IMPORTED_MOVEMENTS_AGG_SUBQUERY}) imp ON imp.customer_id = c.id
+    LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
+    WHERE 1=1 ${sellerFilter}
+  `;
+        const rows = (yield (0, db_1.query)(sql, params));
+        const map = new Map();
+        for (const r of rows)
+            map.set(r.customerId, parseSaldoNumero(r.saldoPendienteUnificado));
+        return map;
+    });
+}
 /** Exporta saldos pendientes en CSV (UTF-8 con BOM para Excel). */
 const exportSaldosPendientesCsv = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _73, _74, _75, _76, _77;
     const user = req.user;
     if (!user || !roleCanViewSaldos(user.role)) {
         return res.status(403).json({ message: 'Sin permiso para exportar saldos' });
@@ -1539,7 +1723,7 @@ const exportSaldosPendientesCsv = (req, res) => __awaiter(void 0, void 0, void 0
         c.cuit,
         c.city,
         c.email,
-        SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargosPendientes,
+        SUM(ROUND(GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargosPendientes,
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
@@ -1548,9 +1732,9 @@ const exportSaldosPendientesCsv = (req, res) => __awaiter(void 0, void 0, void 0
         FROM credit_notes
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
-      WHERE o.payment_status = 'pendiente'
-        AND o.status NOT IN ('Cancelado', 'Borrador')
-        AND (o.archived = 0 OR o.archived IS NULL)
+      WHERE ${SQL_ORDER_ACTIVE_COND}
+        AND ${orderPaymentBalance_service_1.SQL_ORDER_IN_SALDO_SCOPE}
+        AND ${SQL_ORDER_ACTIVE_COND}
         ${sellerFilter}
       GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
     ) t
@@ -1578,13 +1762,13 @@ const exportSaldosPendientesCsv = (req, res) => __awaiter(void 0, void 0, void 0
         c.cuit,
         c.city,
         c.email,
-        SUM(ROUND(o.total * 1.21, 2)) AS cargosPendientes,
+        SUM(${SQL_ORDER_CARGO_CON_IVA}) AS cargosPendientes,
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
-      WHERE o.payment_status = 'pendiente'
-        AND o.status NOT IN ('Cancelado', 'Borrador')
-        AND (o.archived = 0 OR o.archived IS NULL)
+      WHERE ${SQL_ORDER_ACTIVE_COND}
+        AND ${orderPaymentBalance_service_1.SQL_ORDER_IN_SALDO_SCOPE}
+        AND ${SQL_ORDER_ACTIVE_COND}
         ${sellerFilter}
       GROUP BY c.id, c.business_name, c.name, c.cuit, c.city, c.email
     ) t
@@ -1596,7 +1780,7 @@ const exportSaldosPendientesCsv = (req, res) => __awaiter(void 0, void 0, void 0
     try {
         rows = (yield (0, db_1.query)(sqlWithNc, paramsWithNc));
     }
-    catch (_f) {
+    catch (_78) {
         rows = (yield (0, db_1.query)(sqlSimple, paramsSimple));
     }
     const header = [
@@ -1616,11 +1800,11 @@ const exportSaldosPendientesCsv = (req, res) => __awaiter(void 0, void 0, void 0
         const esc = (s) => `"${String(s !== null && s !== void 0 ? s : '').replace(/"/g, '""')}"`;
         lines.push([
             r.customerId,
-            esc((_a = r.businessName) !== null && _a !== void 0 ? _a : ''),
-            esc((_b = r.contactName) !== null && _b !== void 0 ? _b : ''),
-            (_c = r.cuit) !== null && _c !== void 0 ? _c : '',
-            esc((_d = r.city) !== null && _d !== void 0 ? _d : ''),
-            esc((_e = r.email) !== null && _e !== void 0 ? _e : ''),
+            esc((_73 = r.businessName) !== null && _73 !== void 0 ? _73 : ''),
+            esc((_74 = r.contactName) !== null && _74 !== void 0 ? _74 : ''),
+            (_75 = r.cuit) !== null && _75 !== void 0 ? _75 : '',
+            esc((_76 = r.city) !== null && _76 !== void 0 ? _76 : ''),
+            esc((_77 = r.email) !== null && _77 !== void 0 ? _77 : ''),
             Number(r.pedidosPendientes) || 0,
             (Number(r.totalCargosPendiente) || 0).toFixed(2).replace('.', ','),
             (Number(r.totalPagos) || 0).toFixed(2).replace('.', ','),
@@ -1640,7 +1824,7 @@ exports.exportSaldosPendientesCsv = exportSaldosPendientesCsv;
  * Hoja 2: detalle de comprobantes y recibos por cliente.
  */
 const exportSaldosPendientesDetalleXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f;
+    var _79, _80, _81, _82, _83, _84;
     const user = req.user;
     if (!user || !roleCanViewSaldos(user.role)) {
         return res.status(403).json({ message: 'Sin permiso para exportar saldos' });
@@ -1838,7 +2022,7 @@ const exportSaldosPendientesDetalleXlsx = (req, res) => __awaiter(void 0, void 0
                     totalFacturas += debe;
                 else if (m.tipo === 'NOTA_CREDITO' || m.tipo === 'NOTA_CREDITO_IMPORTADA')
                     totalNc += haber;
-                else if (comprobanteIndicaNotaCredito(String((_a = m.comprobante) !== null && _a !== void 0 ? _a : '')) &&
+                else if (comprobanteIndicaNotaCredito(String((_79 = m.comprobante) !== null && _79 !== void 0 ? _79 : '')) &&
                     Number(m.haber || 0) > 0.001 &&
                     Number(m.debe || 0) <= 0.001) {
                     totalNc += haber;
@@ -1847,11 +2031,11 @@ const exportSaldosPendientesDetalleXlsx = (req, res) => __awaiter(void 0, void 0
                     totalRecibos += haber;
                 wsDetail.addRow({
                     cliente: c.customer_name,
-                    vendedor: (_c = (_b = c.seller_name) !== null && _b !== void 0 ? _b : c.seller_id) !== null && _c !== void 0 ? _c : '',
+                    vendedor: (_81 = (_80 = c.seller_name) !== null && _80 !== void 0 ? _80 : c.seller_id) !== null && _81 !== void 0 ? _81 : '',
                     fecha: m.fecha ? new Date(m.fecha) : null,
                     tipo: labelTipoSaldoExporter(m),
                     comprobante: m.comprobante,
-                    pedido: (_d = m.order_id) !== null && _d !== void 0 ? _d : '',
+                    pedido: (_82 = m.order_id) !== null && _82 !== void 0 ? _82 : '',
                     debe,
                     haber,
                     saldo: running
@@ -1861,7 +2045,7 @@ const exportSaldosPendientesDetalleXlsx = (req, res) => __awaiter(void 0, void 0
             if (Math.abs(saldoPendiente) > 0.01) {
                 wsSummary.addRow({
                     cliente: c.customer_name,
-                    vendedor: (_f = (_e = c.seller_name) !== null && _e !== void 0 ? _e : c.seller_id) !== null && _f !== void 0 ? _f : '',
+                    vendedor: (_84 = (_83 = c.seller_name) !== null && _83 !== void 0 ? _83 : c.seller_id) !== null && _84 !== void 0 ? _84 : '',
                     facturas: totalFacturas,
                     nc: totalNc,
                     recibos: totalRecibos,
@@ -1898,7 +2082,7 @@ exports.exportSaldosPendientesDetalleXlsx = exportSaldosPendientesDetalleXlsx;
  * Excluye importaciones Multimedia/Tango y comprobantes externos por CUIT.
  */
 const exportSaldosMovimientosSistemaXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f;
+    var _85, _86, _87, _88, _89, _90;
     const user = req.user;
     if (!user || !roleCanViewSaldos(user.role)) {
         return res.status(403).json({ message: 'Sin permiso para exportar saldos' });
@@ -2042,7 +2226,7 @@ const exportSaldosMovimientosSistemaXlsx = (req, res) => __awaiter(void 0, void 
                     totalFacturas += debe;
                 else if (m.tipo === 'NOTA_CREDITO')
                     totalNc += haber;
-                else if (comprobanteIndicaNotaCredito(String((_a = m.comprobante) !== null && _a !== void 0 ? _a : '')) &&
+                else if (comprobanteIndicaNotaCredito(String((_85 = m.comprobante) !== null && _85 !== void 0 ? _85 : '')) &&
                     Number(m.haber || 0) > 0.001 &&
                     Number(m.debe || 0) <= 0.001) {
                     totalNc += haber;
@@ -2051,11 +2235,11 @@ const exportSaldosMovimientosSistemaXlsx = (req, res) => __awaiter(void 0, void 
                     totalRecibos += haber;
                 wsDetail.addRow({
                     cliente: c.customer_name,
-                    vendedor: (_c = (_b = c.seller_name) !== null && _b !== void 0 ? _b : c.seller_id) !== null && _c !== void 0 ? _c : '',
+                    vendedor: (_87 = (_86 = c.seller_name) !== null && _86 !== void 0 ? _86 : c.seller_id) !== null && _87 !== void 0 ? _87 : '',
                     fecha: m.fecha ? new Date(m.fecha) : null,
                     tipo: labelTipoSaldoExporter(m),
                     comprobante: m.comprobante,
-                    pedido: (_d = m.order_id) !== null && _d !== void 0 ? _d : '',
+                    pedido: (_88 = m.order_id) !== null && _88 !== void 0 ? _88 : '',
                     debe,
                     haber,
                     saldo: running
@@ -2065,7 +2249,7 @@ const exportSaldosMovimientosSistemaXlsx = (req, res) => __awaiter(void 0, void 
             if (Math.abs(saldoPendiente) > 0.01) {
                 wsSummary.addRow({
                     cliente: c.customer_name,
-                    vendedor: (_f = (_e = c.seller_name) !== null && _e !== void 0 ? _e : c.seller_id) !== null && _f !== void 0 ? _f : '',
+                    vendedor: (_90 = (_89 = c.seller_name) !== null && _89 !== void 0 ? _89 : c.seller_id) !== null && _90 !== void 0 ? _90 : '',
                     facturas: totalFacturas,
                     nc: totalNc,
                     recibos: totalRecibos,
@@ -2102,7 +2286,7 @@ exports.exportSaldosMovimientosSistemaXlsx = exportSaldosMovimientosSistemaXlsx;
  * Opcional: ?sellerId=... para ADMIN/WAREHOUSE (filtra por vendedor específico).
  */
 const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f;
+    var _91, _92, _93, _94, _95, _96, _97;
     const user = req.user;
     if (!user || !roleCanViewSaldos(user.role)) {
         return res.status(403).json({ message: 'Sin permiso para exportar saldos' });
@@ -2575,172 +2759,7 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
        LEFT JOIN users u ON u.id = c.seller_id
        ${sellerWhere}
        ORDER BY customer_name ASC`, sellerParams);
-        // Saldo unificado (exactamente la misma base que getCarteraTotals, incluyendo dedupe de recibos importados).
-        const carteraSellerFilter = sellerIdFilter ? ' AND c.seller_id = ?' : '';
-        const carteraBaseParams = sellerIdFilter ? [sellerIdFilter] : [];
-        const paymentsSubquery = sellerIdFilter
-            ? `SELECT d.customer_id, SUM(d.amount) AS total_pagos
-           FROM (
-             SELECT
-               p.customer_id,
-               ROUND(COALESCE(p.amount, 0), 2) AS amount,
-               CASE
-                 WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
-                 ELSE UPPER(
-                   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
-                 )
-               END AS receipt_norm
-             FROM payments p
-             INNER JOIN customers c2 ON c2.id = p.customer_id
-             LEFT JOIN (
-               SELECT
-                 e.customer_id,
-                 DATE(e.line_date) AS line_date,
-                 ROUND(COALESCE(e.importe, 0), 2) AS amount,
-                 UPPER(
-                   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
-                 ) AS receipt_norm
-               FROM customer_multimedia_entries e
-               WHERE UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
-                 AND TRIM(COALESCE(e.numero, '')) <> ''
-               GROUP BY
-                 e.customer_id,
-                 DATE(e.line_date),
-                 ROUND(COALESCE(e.importe, 0), 2),
-                 UPPER(
-                   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
-                 )
-             ) me_rec
-               ON me_rec.customer_id = p.customer_id
-              AND me_rec.line_date = DATE(p.date)
-              AND me_rec.amount = ROUND(COALESCE(p.amount, 0), 2)
-              AND me_rec.receipt_norm = CASE
-                WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
-                ELSE UPPER(
-                  REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
-                )
-              END
-             WHERE (p.seller_id = ? OR c2.seller_id = ?)
-               AND me_rec.customer_id IS NULL
-             GROUP BY
-               p.customer_id,
-               DATE(p.date),
-               ROUND(COALESCE(p.amount, 0), 2),
-               CASE
-                 WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
-                 ELSE UPPER(
-                   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
-                 )
-               END
-           ) d
-           GROUP BY d.customer_id`
-            : `SELECT d.customer_id, SUM(d.amount) AS total_pagos
-           FROM (
-             SELECT
-               p.customer_id,
-               ROUND(COALESCE(p.amount, 0), 2) AS amount,
-               CASE
-                 WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
-                 ELSE UPPER(
-                   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
-                 )
-               END AS receipt_norm
-             FROM payments p
-             LEFT JOIN (
-               SELECT
-                 e.customer_id,
-                 DATE(e.line_date) AS line_date,
-                 ROUND(COALESCE(e.importe, 0), 2) AS amount,
-                 UPPER(
-                   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
-                 ) AS receipt_norm
-               FROM customer_multimedia_entries e
-               WHERE UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO')
-                 AND TRIM(COALESCE(e.numero, '')) <> ''
-               GROUP BY
-                 e.customer_id,
-                 DATE(e.line_date),
-                 ROUND(COALESCE(e.importe, 0), 2),
-                 UPPER(
-                   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
-                 )
-             ) me_rec
-               ON me_rec.customer_id = p.customer_id
-              AND me_rec.line_date = DATE(p.date)
-              AND me_rec.amount = ROUND(COALESCE(p.amount, 0), 2)
-              AND me_rec.receipt_norm = CASE
-                WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
-                ELSE UPPER(
-                  REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
-                )
-              END
-             WHERE me_rec.customer_id IS NULL
-             GROUP BY
-               p.customer_id,
-               DATE(p.date),
-               ROUND(COALESCE(p.amount, 0), 2),
-               CASE
-                 WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
-                 ELSE UPPER(
-                   REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
-                 )
-               END
-           ) d
-           GROUP BY d.customer_id`;
-        const carteraPayMatchedSubquery = sqlCarteraPagosMatchedImportSubquery(!!sellerIdFilter);
-        const carteraPayParams = sellerIdFilter ? [sellerIdFilter, sellerIdFilter] : [];
-        const carteraPayMatchedParams = sellerIdFilter ? [sellerIdFilter, sellerIdFilter] : [];
-        const carteraParamsWithNc = [...carteraBaseParams, ...carteraPayParams, ...carteraPayMatchedParams];
-        const carteraParamsSimple = [...carteraBaseParams, ...carteraPayParams, ...carteraPayMatchedParams];
-        const carteraSaldoExpr = carteraSaldoSqlExpr();
-        const carteraSqlWithNc = `
-      SELECT
-        c.id AS customerId,
-        ${carteraSaldoExpr} AS saldoPendienteUnificado
-      FROM customers c
-      LEFT JOIN (
-        SELECT
-          o.customer_id,
-          SUM(ROUND(o.total * 1.21, 2)) AS facturas_bruto
-        FROM orders o
-        WHERE o.payment_status = 'pendiente'
-          AND o.status NOT IN ('Cancelado', 'Borrador')
-          AND (o.archived = 0 OR o.archived IS NULL)
-        GROUP BY o.customer_id
-      ) ob ON ob.customer_id = c.id
-      LEFT JOIN (
-        SELECT
-          o.customer_id,
-          SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), o.total) * 1.21, 2)) AS nc_iva
-        FROM orders o
-        LEFT JOIN (
-          SELECT order_id, SUM(amount_credited) AS cn_total
-          FROM credit_notes
-          GROUP BY order_id
-        ) cn ON cn.order_id = o.id
-        WHERE o.payment_status = 'pendiente'
-          AND o.status NOT IN ('Cancelado', 'Borrador')
-          AND (o.archived = 0 OR o.archived IS NULL)
-        GROUP BY o.customer_id
-      ) ncv ON ncv.customer_id = c.id
-      LEFT JOIN (${CARTERA_MM_LAST_SALDO_SUBQUERY}) mm ON mm.customer_id = c.id
-      LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
-      LEFT JOIN (${carteraPayMatchedSubquery}) pay_mm ON pay_mm.customer_id = c.id
-      LEFT JOIN (${SQL_CARTERA_MM_REC_SIN_PAGO}) mm_orphan ON mm_orphan.customer_id = c.id
-      WHERE 1=1 ${carteraSellerFilter}
-    `;
-        const carteraSqlSimple = carteraSqlWithNc;
-        let carteraRows = [];
-        try {
-            carteraRows = (yield (0, db_1.query)(carteraSqlWithNc, carteraParamsWithNc));
-        }
-        catch (_g) {
-            carteraRows = (yield (0, db_1.query)(carteraSqlSimple, carteraParamsSimple));
-        }
-        const saldoUnificadoByCustomer = new Map();
-        for (const r of carteraRows) {
-            saldoUnificadoByCustomer.set(r.customerId, parseSaldoNumero(r.saldoPendienteUnificado));
-        }
+        const carteraByCustomerId = yield fetchCarteraSaldoUnificadoMap(sellerIdFilter, user);
         const byCustomer = new Map();
         for (const m of movements) {
             if (!byCustomer.has(m.customer_id))
@@ -2787,13 +2806,13 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
             for (const m of movs) {
                 running = Math.round((running + Number(m.debe || 0) - Number(m.haber || 0)) * 100) / 100;
             }
-            // Saldo final = mismo criterio que historial (debe/haber acumulados), con arrastre previo al "desde".
-            const saldoPendiente = Math.round(running * 100) / 100;
-            if (Math.abs(saldoPendiente) > 0.01) {
+            const saldoPeriodo = Math.round(running * 100) / 100;
+            const saldoCartera = (_91 = carteraByCustomerId.get(c.id)) !== null && _91 !== void 0 ? _91 : saldoPeriodo;
+            if (Math.abs(saldoCartera) > 0.01 || Math.abs(saldoPeriodo) > 0.01) {
                 wsSummary.addRow({
                     cliente: c.customer_name,
-                    vendedor: (_b = (_a = c.seller_name) !== null && _a !== void 0 ? _a : c.seller_id) !== null && _b !== void 0 ? _b : '',
-                    saldo: saldoPendiente
+                    vendedor: (_93 = (_92 = c.seller_name) !== null && _92 !== void 0 ? _92 : c.seller_id) !== null && _93 !== void 0 ? _93 : '',
+                    saldo: saldoCartera
                 });
             }
             // Bloque por cliente dentro de una sola hoja para ahorrar páginas al imprimir.
@@ -2809,7 +2828,16 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
                     lastSellerGroup = sellerGroup;
                 }
             }
-            const titleRow = wsDetalle.addRow([`CLIENTE: ${c.customer_name}`, `VENDEDOR: ${(_d = (_c = c.seller_name) !== null && _c !== void 0 ? _c : c.seller_id) !== null && _d !== void 0 ? _d : '-'}`, '', '', '', '', `SALDO: ${saldoPendiente.toFixed(2)}`]);
+            const saldoCarteraLabel = saldoCartera.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const titleRow = wsDetalle.addRow([
+                `CLIENTE: ${c.customer_name}`,
+                `VENDEDOR: ${(_95 = (_94 = c.seller_name) !== null && _94 !== void 0 ? _94 : c.seller_id) !== null && _95 !== void 0 ? _95 : '-'}`,
+                '',
+                '',
+                '',
+                '',
+                `SALDO A COBRAR: ${saldoCarteraLabel}`,
+            ]);
             wsDetalle.mergeCells(titleRow.number, 1, titleRow.number, 3);
             wsDetalle.mergeCells(titleRow.number, 4, titleRow.number, 6);
             titleRow.font = { bold: true, color: { argb: 'FF0F172A' } };
@@ -2836,37 +2864,60 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
                     fecha: m.fecha ? new Date(m.fecha) : null,
                     tipo: labelTipoSaldoExporter(m),
                     comprobante: m.comprobante,
-                    pedido: (_e = m.order_id) !== null && _e !== void 0 ? _e : '',
+                    pedido: (_96 = m.order_id) !== null && _96 !== void 0 ? _96 : '',
                     debe,
                     haber,
                     saldo
                 });
             }
-            // Bloque de conciliación para mostrar cómo se llega al saldo final.
+            const netoPeriodo = Math.round((totalDebeMovs - totalHaberMovs) * 100) / 100;
             const concStartRow = wsDetalle.rowCount + 1;
-            wsDetalle.addRow(['RESUMEN DE CONCILIACION', '', '', '', '', '', '']);
-            if (from) {
+            wsDetalle.addRow(['RESUMEN', '', '', '', '', '', '']);
+            const mainSaldoRow = wsDetalle.addRow([
+                'Saldo pendiente (deuda actual — mismo número que la ficha del cliente en LupoHub)',
+                '',
+                '',
+                '',
+                '',
+                '',
+                saldoCartera,
+            ]);
+            mainSaldoRow.getCell(1).font = { bold: true, size: 11 };
+            mainSaldoRow.getCell(7).font = { bold: true, size: 12 };
+            mainSaldoRow.getCell(7).fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: 'FFD1FAE5' },
+            };
+            if (movs.length > 0) {
                 wsDetalle.addRow([
-                    'Saldo arrastrado (movimientos con fecha anterior al período; no se listan arriba)',
+                    `Solo en las filas de arriba (rango de fechas del export): facturas/pedidos ${totalDebeMovs.toLocaleString('es-AR', { minimumFractionDigits: 2 })} − NC/recibos ${totalHaberMovs.toLocaleString('es-AR', { minimumFractionDigits: 2 })} = ${netoPeriodo.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`,
                     '',
                     '',
                     '',
                     '',
                     '',
-                    openingBalance
+                    '',
                 ]);
             }
-            wsDetalle.addRow(['Total debe (movimientos del período)', '', '', '', totalDebeMovs, '', '']);
-            wsDetalle.addRow(['Total haber (movimientos del período)', '', '', '', '', totalHaberMovs, '']);
-            const netoPeriodo = Math.round((totalDebeMovs - totalHaberMovs) * 100) / 100;
-            wsDetalle.addRow(['Saldo neto del período (debe − haber)', '', '', '', '', '', netoPeriodo]);
-            wsDetalle.addRow(['Saldo acumulado al cierre del período (arrastre + período)', '', '', '', '', '', saldo]);
-            wsDetalle.addRow(['Saldo pendiente (debe − haber)', '', '', '', '', '', saldoPendiente]);
+            if (from && Math.abs(saldoCartera - saldoPeriodo) > 1) {
+                wsDetalle.addRow([
+                    `El saldo del período con arrastre (${saldoPeriodo.toLocaleString('es-AR', { minimumFractionDigits: 2 })}) incluye movimientos anteriores al «desde» (arrastre ${openingBalance.toLocaleString('es-AR', { minimumFractionDigits: 2 })}). Para cobrar al cliente, usá siempre el saldo pendiente de arriba.`,
+                    '',
+                    '',
+                    '',
+                    '',
+                    '',
+                    saldoPeriodo,
+                ]);
+            }
             for (let r = concStartRow; r <= wsDetalle.rowCount; r += 1) {
-                wsDetalle.mergeCells(r, 1, r, 4);
+                wsDetalle.mergeCells(r, 1, r, 6);
                 const row = wsDetalle.getRow(r);
-                row.getCell(1).font = { bold: true };
-                row.getCell(1).alignment = { horizontal: 'left', vertical: 'middle' };
+                row.getCell(1).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+                if (r === mainSaldoRow.number)
+                    continue;
+                row.getCell(1).font = { italic: true, size: 10, color: { argb: 'FF475569' } };
             }
             wsDetalle.addRow(['', '', '', '', '', '', '']);
         }
@@ -2874,7 +2925,7 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
         const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out));
         const datePart = new Date().toISOString().slice(0, 10);
         const sellerNameFromFilter = sellerIdFilter && customers.length > 0
-            ? String(((_f = customers.find((x) => String(x.seller_id || '') === sellerIdFilter)) === null || _f === void 0 ? void 0 : _f.seller_name) || '').trim()
+            ? String(((_97 = customers.find((x) => String(x.seller_id || '') === sellerIdFilter)) === null || _97 === void 0 ? void 0 : _97.seller_name) || '').trim()
             : '';
         const sellerLabelRaw = (user.role === 'SELLER' ? String(user.name || '').trim() : '') ||
             sellerNameFromFilter ||
@@ -2890,8 +2941,11 @@ const exportSaldosPendientesByCustomerSheetsXlsx = (req, res) => __awaiter(void 
         return res.send(buf);
     }
     catch (error) {
-        console.error('exportSaldosPendientesByCustomerSheetsXlsx:', error);
-        return res.status(500).json({ message: 'Error exportando saldos pendientes por cliente' });
+        console.error('exportSaldosPendientesByCustomerSheetsXlsx:', (error === null || error === void 0 ? void 0 : error.message) || error, error === null || error === void 0 ? void 0 : error.sqlMessage);
+        return res.status(500).json({
+            message: 'Error exportando saldos pendientes por cliente',
+            detail: process.env.NODE_ENV === 'production' ? undefined : String((error === null || error === void 0 ? void 0 : error.sqlMessage) || (error === null || error === void 0 ? void 0 : error.message) || error)
+        });
     }
 });
 exports.exportSaldosPendientesByCustomerSheetsXlsx = exportSaldosPendientesByCustomerSheetsXlsx;
@@ -2902,7 +2956,7 @@ exports.exportSaldosPendientesByCustomerSheetsXlsx = exportSaldosPendientesByCus
  * Incluye clientes con saldo solo en cuenta importada aunque no tengan pedidos pendientes en LupoHub.
  */
 const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
+    var _98, _99, _100, _101, _102, _103, _104, _105;
     const user = req.user;
     if (!user || !roleCanViewSaldos(user.role)) {
         return res.status(403).json({ message: 'Sin permiso para exportar saldos' });
@@ -2964,7 +3018,7 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
         c.business_name AS businessName,
         c.name AS contactName,
         c.cuit,
-        SUM(ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargosPendientes,
+        SUM(ROUND(GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargosPendientes,
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
@@ -2973,9 +3027,9 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
         FROM credit_notes
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
-      WHERE o.payment_status = 'pendiente'
-        AND o.status NOT IN ('Cancelado', 'Borrador')
-        AND (o.archived = 0 OR o.archived IS NULL)
+      WHERE ${SQL_ORDER_ACTIVE_COND}
+        AND ${orderPaymentBalance_service_1.SQL_ORDER_IN_SALDO_SCOPE}
+        AND ${SQL_ORDER_ACTIVE_COND}
         ${sellerFilter}
       GROUP BY c.id, c.legacy_code, c.account_zone, c.account_seller_label, c.seller_id, c.business_name, c.name, c.cuit
     ) t
@@ -3008,13 +3062,13 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
         c.business_name AS businessName,
         c.name AS contactName,
         c.cuit,
-        SUM(ROUND(o.total * 1.21, 2)) AS cargosPendientes,
+        SUM(${SQL_ORDER_CARGO_CON_IVA}) AS cargosPendientes,
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
-      WHERE o.payment_status = 'pendiente'
-        AND o.status NOT IN ('Cancelado', 'Borrador')
-        AND (o.archived = 0 OR o.archived IS NULL)
+      WHERE ${SQL_ORDER_ACTIVE_COND}
+        AND ${orderPaymentBalance_service_1.SQL_ORDER_IN_SALDO_SCOPE}
+        AND ${SQL_ORDER_ACTIVE_COND}
         ${sellerFilter}
       GROUP BY c.id, c.legacy_code, c.account_zone, c.account_seller_label, c.seller_id, c.business_name, c.name, c.cuit
     ) t
@@ -3026,7 +3080,7 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
     try {
         rows = (yield (0, db_1.query)(sqlWithNc, paramsWithNc));
     }
-    catch (_j) {
+    catch (_106) {
         rows = (yield (0, db_1.query)(sqlSimple, paramsSimple));
     }
     const sqlMultimediaSaldos = `
@@ -3069,7 +3123,7 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
     try {
         mmRows = (yield (0, db_1.query)(sqlMultimediaSaldos, mmParams));
     }
-    catch (_k) {
+    catch (_107) {
         mmRows = [];
     }
     const byId = new Map();
@@ -3083,9 +3137,9 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
             account_zone: r.account_zone,
             account_seller_label: r.account_seller_label,
             seller_id: r.seller_id,
-            businessName: String((_a = r.businessName) !== null && _a !== void 0 ? _a : ''),
-            contactName: String((_b = r.contactName) !== null && _b !== void 0 ? _b : ''),
-            cuit: String((_c = r.cuit) !== null && _c !== void 0 ? _c : ''),
+            businessName: String((_98 = r.businessName) !== null && _98 !== void 0 ? _98 : ''),
+            contactName: String((_99 = r.contactName) !== null && _99 !== void 0 ? _99 : ''),
+            cuit: String((_100 = r.cuit) !== null && _100 !== void 0 ? _100 : ''),
             totalCargosPendiente: C,
             totalPagos: P,
             multimediaSaldo: 0,
@@ -3101,8 +3155,8 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
         const mmCnt = Number(m.movementCount) || 0;
         const Pmm = Number(m.totalPagos) || 0;
         const existing = byId.get(id);
-        const C = (_d = existing === null || existing === void 0 ? void 0 : existing.totalCargosPendiente) !== null && _d !== void 0 ? _d : 0;
-        const P = (_e = existing === null || existing === void 0 ? void 0 : existing.totalPagos) !== null && _e !== void 0 ? _e : Pmm;
+        const C = (_101 = existing === null || existing === void 0 ? void 0 : existing.totalCargosPendiente) !== null && _101 !== void 0 ? _101 : 0;
+        const P = (_102 = existing === null || existing === void 0 ? void 0 : existing.totalPagos) !== null && _102 !== void 0 ? _102 : Pmm;
         const unified = Math.round((C + excelSaldo - P) * 100) / 100;
         if (existing) {
             existing.multimediaSaldo = excelSaldo;
@@ -3117,9 +3171,9 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
                 account_zone: m.account_zone,
                 account_seller_label: m.account_seller_label,
                 seller_id: m.seller_id,
-                businessName: String((_f = m.businessName) !== null && _f !== void 0 ? _f : ''),
-                contactName: String((_g = m.contactName) !== null && _g !== void 0 ? _g : ''),
-                cuit: String((_h = m.cuit) !== null && _h !== void 0 ? _h : ''),
+                businessName: String((_103 = m.businessName) !== null && _103 !== void 0 ? _103 : ''),
+                contactName: String((_104 = m.contactName) !== null && _104 !== void 0 ? _104 : ''),
+                cuit: String((_105 = m.cuit) !== null && _105 !== void 0 ? _105 : ''),
                 totalCargosPendiente: 0,
                 totalPagos: Pmm,
                 multimediaSaldo: excelSaldo,
@@ -3568,8 +3622,9 @@ const assignCustomerSellersFromResumen = (req, res) => __awaiter(void 0, void 0,
 });
 exports.assignCustomerSellersFromResumen = assignCustomerSellersFromResumen;
 /** Quita pendientes de pedidos ya despachados para un cliente:
- *  - Si quantity > picked, deja quantity = picked (solo lo enviado)
- *  - Elimina renglones con quantity <= 0
+ *  - Si quantity > picked y picked > 0, deja quantity = picked (solo lo enviado)
+ *  - Elimina solo renglones que ya estaban en 0 (nunca pedidos)
+ *  - No toca pedidos ya facturados en AFIP
  *  - Recalcula total del pedido
  */
 const clearDispatchedPendingsForCustomer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
@@ -3587,9 +3642,10 @@ const clearDispatchedPendingsForCustomer = (req, res) => __awaiter(void 0, void 
         if (authUser.role === 'SELLER' && customer.seller_id && customer.seller_id !== authUser.id) {
             return res.status(403).json({ message: 'Solo podés operar sobre tus clientes' });
         }
-        const dispatchedOrders = yield (0, db_1.query)(`SELECT id FROM orders
-       WHERE customer_id = ?
-         AND status IN ('Despachado', 'DISPATCHED')`, [customerId]);
+        const dispatchedOrders = yield (0, db_1.query)(`SELECT o.id FROM orders o
+       WHERE o.customer_id = ?
+         AND o.status IN ('Despachado', 'DISPATCHED')
+         AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)`, [customerId]);
         const orderIds = (dispatchedOrders || []).map((o) => o.id).filter(Boolean);
         if (orderIds.length === 0) {
             return res.json({ message: 'No hay pedidos despachados para ajustar', ordersUpdated: 0, itemsAdjusted: 0, itemsRemoved: 0 });
@@ -3605,13 +3661,22 @@ const clearDispatchedPendingsForCustomer = (req, res) => __awaiter(void 0, void 
             if (toAdjust > 0) {
                 yield (0, db_1.execute)(`UPDATE order_items
            SET quantity = COALESCE(picked, 0)
-           WHERE order_id = ? AND quantity > COALESCE(picked, 0)`, [orderId]);
+           WHERE order_id = ?
+             AND COALESCE(picked, 0) > 0
+             AND quantity > COALESCE(picked, 0)`, [orderId]);
                 itemsAdjusted += toAdjust;
             }
-            const beforeDelete = yield (0, db_1.get)(`SELECT COUNT(*) AS cnt FROM order_items WHERE order_id = ? AND quantity <= 0`, [orderId]);
+            const beforeDelete = yield (0, db_1.get)(`SELECT COUNT(*) AS cnt
+         FROM order_items
+         WHERE order_id = ?
+           AND COALESCE(quantity, 0) <= 0
+           AND COALESCE(picked, 0) <= 0`, [orderId]);
             const toDelete = Number((beforeDelete === null || beforeDelete === void 0 ? void 0 : beforeDelete.cnt) || 0);
             if (toDelete > 0) {
-                yield (0, db_1.execute)(`DELETE FROM order_items WHERE order_id = ? AND quantity <= 0`, [orderId]);
+                yield (0, db_1.execute)(`DELETE FROM order_items
+           WHERE order_id = ?
+             AND COALESCE(quantity, 0) <= 0
+             AND COALESCE(picked, 0) <= 0`, [orderId]);
                 itemsRemoved += toDelete;
             }
             const totalRow = yield (0, db_1.get)(`SELECT COALESCE(SUM(quantity * price_at_moment), 0) AS total
@@ -3635,8 +3700,8 @@ const clearDispatchedPendingsForCustomer = (req, res) => __awaiter(void 0, void 
 });
 exports.clearDispatchedPendingsForCustomer = clearDispatchedPendingsForCustomer;
 function buildCustomerFinancialSummary(customerId) {
+    var _a;
     return __awaiter(this, void 0, void 0, function* () {
-        var _a;
         const movements = (yield (0, db_1.query)(`
     SELECT
       m.fecha,
@@ -3661,7 +3726,7 @@ function buildCustomerFinancialSummary(customerId) {
           LPAD(COALESCE(i.cbte_desde, 0), 8, '0')
         ) AS comprobante,
         o.id AS order_id,
-        ROUND(COALESCE(o.total, 0), 2) AS debe,
+        ROUND(COALESCE(o.total, 0) * 1.21 + COALESCE(i.agip_ret_per, 0), 2) AS debe,
         0 AS haber,
         CONCAT('Pedido ', COALESCE(o.id, '')) AS detalle
       FROM invoices i
@@ -3685,11 +3750,54 @@ function buildCustomerFinancialSummary(customerId) {
         ) AS comprobante,
         cn.order_id AS order_id,
         0 AS debe,
-        ROUND(COALESCE(cn.amount_credited, 0), 2) AS haber,
+        ROUND(COALESCE(cn.amount_credited, 0) * 1.21, 2) AS haber,
         CONCAT('NC sobre pedido ', COALESCE(cn.order_id, '')) AS detalle
       FROM credit_notes cn
       JOIN orders o ON o.id = cn.order_id
       WHERE o.customer_id = ?
+
+      UNION ALL
+
+      SELECT
+        m.fecha AS fecha,
+        m.tipo AS tipo,
+        CONCAT(
+          CASE
+            WHEN m.cbte_tipo IN (1, 3) THEN CASE WHEN m.tipo = 'NC' THEN 'NC A ' ELSE 'A ' END
+            WHEN m.cbte_tipo IN (6, 8) THEN CASE WHEN m.tipo = 'NC' THEN 'NC B ' ELSE 'B ' END
+            ELSE ''
+          END,
+          LPAD(COALESCE(m.punto_venta, 0), 5, '0'),
+          '-',
+          LPAD(COALESCE(m.cbte_desde, 0), 8, '0')
+        ) AS comprobante,
+        m.ref_order_id AS order_id,
+        CASE WHEN m.tipo = 'FACTURA' THEN ROUND(m.importe_neto + COALESCE(m.agip_ret_per, 0), 2) ELSE 0 END AS debe,
+        CASE WHEN m.tipo = 'NC' THEN ROUND(m.importe_neto, 2) ELSE 0 END AS haber,
+        CONCAT('Comprobante manual', COALESCE(CONCAT(' · ', m.notes), '')) AS detalle
+      FROM customer_manual_comprobantes m
+      WHERE m.customer_id = ?
+
+      UNION ALL
+
+      SELECT
+        o.date AS fecha,
+        'PEDIDO' AS tipo,
+        o.id AS comprobante,
+        o.id AS order_id,
+        (${orderPaymentBalance_service_1.SQL_ORDER_SALDO_RESIDUAL}) AS debe,
+        0 AS haber,
+        'Saldo pendiente del pedido' AS detalle
+      FROM orders o
+      LEFT JOIN (
+        SELECT order_id, SUM(amount_credited) AS cn_total
+        FROM credit_notes
+        GROUP BY order_id
+      ) cn ON cn.order_id = o.id
+      WHERE o.customer_id = ?
+        AND ${SQL_ORDER_ACTIVE_COND}
+        AND ${orderPaymentBalance_service_1.SQL_ORDER_IN_SALDO_SCOPE}
+        AND (${orderPaymentBalance_service_1.SQL_ORDER_SALDO_RESIDUAL}) > 0.005
 
       UNION ALL
 
@@ -3732,9 +3840,10 @@ function buildCustomerFinancialSummary(customerId) {
        END
       WHERE p.customer_id = ?
         AND me_rec.customer_id IS NULL
+        AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
     ) m
     ORDER BY m.fecha ASC, m.tipo ASC, m.comprobante ASC
-    `, [customerId, customerId, customerId]));
+    `, [customerId, customerId, customerId, customerId, customerId]));
         const importedEntries = (yield (0, db_1.query)(`
     SELECT
       e.line_date AS fecha,
@@ -3786,12 +3895,14 @@ function buildCustomerFinancialSummary(customerId) {
         };
         const normalizeDoc = (v) => String(v || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
         const classifyImportedEntry = (tipoRaw, detalleRaw) => {
-            const tipo = String(tipoRaw || '').toUpperCase();
+            const tipo = String(tipoRaw || '').toUpperCase().trim();
             const detalle = String(detalleRaw || '').toUpperCase();
             const raw = `${tipo} ${detalle}`;
-            if (/RECIBO|COBRO|PAGO|INGRESO|REC\b|^RC\b|NC\s*A/.test(raw))
+            if (tipo === 'N/C' || tipo === 'NC' || /NOTA\s*CRED|N\/C\b/.test(raw))
+                return 'NC';
+            if (tipo === 'REC' || /RECIBO|COBRO|PAGO|INGRESO|^REC$|^RC\b/.test(raw))
                 return 'RECIBO';
-            if (/FACT|FCA|FCE|DEBITO|COMPROBANTE|NC\s*D|FAC\b/.test(raw))
+            if (tipo === 'FAC' || /FACT|FCA|FCE|DEBITO|COMPROBANTE|^FAC\b/.test(raw))
                 return 'FACTURA';
             return null;
         };
@@ -3815,7 +3926,7 @@ function buildCustomerFinancialSummary(customerId) {
             if (importe <= 0)
                 continue;
             const debe = tipo === 'FACTURA' ? importe : 0;
-            const haber = tipo === 'RECIBO' ? importe : 0;
+            const haber = tipo === 'RECIBO' || tipo === 'NC' ? importe : 0;
             const key = toKey(tipo, e.fecha, e.comprobante, debe, haber);
             if (existingKeys.has(key))
                 continue;
@@ -3837,7 +3948,7 @@ function buildCustomerFinancialSummary(customerId) {
             var _a, _b, _c, _d;
             const debe = Number(m.debe || 0);
             const haber = Number(m.haber || 0);
-            if (m.tipo === 'FACTURA')
+            if (m.tipo === 'FACTURA' || m.tipo === 'PEDIDO')
                 totalFacturas += debe;
             if (m.tipo === 'NC')
                 totalNc += haber;
@@ -3873,15 +3984,15 @@ function buildCustomerFinancialSummary(customerId) {
         };
     });
 }
-/** Saldo por cliente desde facturas/NC y recibos (sin cuenta importada). */
+/** Detalle por comprobante: LupoHub + líneas FAC/REC/N/C importadas (deduplicadas). El saldo de cartera usa además el último saldo de cuenta importada. */
 const getCustomerFinancialSummary = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _108, _109, _110, _111, _112;
     try {
         const authUser = req.user;
         if (!authUser || !roleCanViewSaldos(authUser.role)) {
             return res.status(403).json({ message: 'Sin permiso para ver saldos del cliente' });
         }
-        const customerId = String(((_a = req.params) === null || _a === void 0 ? void 0 : _a.id) || '').trim();
+        const customerId = String(((_108 = req.params) === null || _108 === void 0 ? void 0 : _108.id) || '').trim();
         if (!customerId)
             return res.status(400).json({ message: 'ID de cliente requerido' });
         const customer = yield (0, db_1.get)(`SELECT c.id, c.business_name, c.name, c.seller_id, u.name AS seller_name
@@ -3894,7 +4005,7 @@ const getCustomerFinancialSummary = (req, res) => __awaiter(void 0, void 0, void
             return res.status(403).json({ message: 'Solo podés ver clientes asignados a tu usuario' });
         }
         const summary = yield buildCustomerFinancialSummary(customerId);
-        return res.json(Object.assign({ customerId: customer.id, customerName: (_c = (_b = customer.business_name) !== null && _b !== void 0 ? _b : customer.name) !== null && _c !== void 0 ? _c : 'Cliente', sellerName: (_e = (_d = customer.seller_name) !== null && _d !== void 0 ? _d : customer.seller_id) !== null && _e !== void 0 ? _e : null }, summary));
+        return res.json(Object.assign({ customerId: customer.id, customerName: (_110 = (_109 = customer.business_name) !== null && _109 !== void 0 ? _109 : customer.name) !== null && _110 !== void 0 ? _110 : 'Cliente', sellerName: (_112 = (_111 = customer.seller_name) !== null && _111 !== void 0 ? _111 : customer.seller_id) !== null && _112 !== void 0 ? _112 : null }, summary));
     }
     catch (error) {
         console.error('getCustomerFinancialSummary:', error);
@@ -3904,13 +4015,13 @@ const getCustomerFinancialSummary = (req, res) => __awaiter(void 0, void 0, void
 exports.getCustomerFinancialSummary = getCustomerFinancialSummary;
 /** Exporta Excel del saldo por facturas/NC/recibos para un cliente. */
 const exportCustomerFinancialSummaryXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _113, _114;
     try {
         const authUser = req.user;
         if (!authUser || !roleCanViewSaldos(authUser.role)) {
             return res.status(403).json({ message: 'Sin permiso para exportar saldo del cliente' });
         }
-        const customerId = String(((_a = req.params) === null || _a === void 0 ? void 0 : _a.id) || '').trim();
+        const customerId = String(((_113 = req.params) === null || _113 === void 0 ? void 0 : _113.id) || '').trim();
         if (!customerId)
             return res.status(400).json({ message: 'ID de cliente requerido' });
         const customer = yield (0, db_1.get)(`SELECT c.id, c.business_name, c.name, c.seller_id, u.name AS seller_name
@@ -3962,7 +4073,7 @@ const exportCustomerFinancialSummaryXlsx = (req, res) => __awaiter(void 0, void 
                 fecha: m.fecha ? new Date(m.fecha) : null,
                 tipo: m.tipo,
                 comprobante: m.comprobante,
-                orderId: (_b = m.orderId) !== null && _b !== void 0 ? _b : '',
+                orderId: (_114 = m.orderId) !== null && _114 !== void 0 ? _114 : '',
                 debe: m.debe,
                 haber: m.haber,
                 saldo: running,
@@ -3988,13 +4099,13 @@ const exportCustomerFinancialSummaryXlsx = (req, res) => __awaiter(void 0, void 
 exports.exportCustomerFinancialSummaryXlsx = exportCustomerFinancialSummaryXlsx;
 /** Exporta en Excel el detalle del cliente como un único sistema de movimientos, filtrable por fecha. */
 const exportCustomerDetailXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
+    var _115, _116, _117, _118, _119, _120, _121, _122, _123;
     try {
         const authUser = req.user;
         if (!authUser || !roleCanViewSaldos(authUser.role)) {
             return res.status(403).json({ message: 'Sin permiso para exportar detalle de cliente' });
         }
-        const customerId = String(((_a = req.params) === null || _a === void 0 ? void 0 : _a.id) || '').trim();
+        const customerId = String(((_115 = req.params) === null || _115 === void 0 ? void 0 : _115.id) || '').trim();
         if (!customerId)
             return res.status(400).json({ message: 'ID de cliente requerido' });
         const customer = yield (0, db_1.get)(`SELECT c.id, c.business_name, c.name, c.seller_id, u.name AS seller_name
@@ -4006,8 +4117,8 @@ const exportCustomerDetailXlsx = (req, res) => __awaiter(void 0, void 0, void 0,
         if (authUser.role === 'SELLER' && customer.seller_id !== authUser.id) {
             return res.status(403).json({ message: 'Solo podés exportar clientes asignados a tu usuario' });
         }
-        const from = (_c = (_b = req.query) === null || _b === void 0 ? void 0 : _b.from) === null || _c === void 0 ? void 0 : _c.trim();
-        const to = (_e = (_d = req.query) === null || _d === void 0 ? void 0 : _d.to) === null || _e === void 0 ? void 0 : _e.trim();
+        const from = (_117 = (_116 = req.query) === null || _116 === void 0 ? void 0 : _116.from) === null || _117 === void 0 ? void 0 : _117.trim();
+        const to = (_119 = (_118 = req.query) === null || _118 === void 0 ? void 0 : _118.to) === null || _119 === void 0 ? void 0 : _119.trim();
         const entriesWhere = ['e.customer_id = ?'];
         const entriesParams = [customerId];
         if (from) {
@@ -4066,8 +4177,8 @@ const exportCustomerDetailXlsx = (req, res) => __awaiter(void 0, void 0, void 0,
        ORDER BY p.created_at DESC, p.date DESC`, paymentsParams);
         // Mismo criterio de la tarjeta "Saldo pendiente unificado" (sin filtro por fecha).
         const orderAgg = yield (0, db_1.get)(`SELECT
-         ROUND(COALESCE(SUM(ROUND(o.total * 1.21, 2)), 0), 2) AS facturas_bruto,
-         ROUND(COALESCE(SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), o.total) * 1.21, 2)), 0), 2) AS nc_iva
+         ROUND(COALESCE(SUM(${orderPaymentBalance_service_1.SQL_ORDER_SALDO_RESIDUAL}), 0), 2) AS facturas_bruto,
+         ROUND(COALESCE(SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), (${SQL_ORDER_NETO_GRAVADO})) * 1.21, 2)), 0), 2) AS nc_iva
        FROM orders o
        LEFT JOIN (
          SELECT order_id, SUM(amount_credited) AS cn_total
@@ -4075,9 +4186,8 @@ const exportCustomerDetailXlsx = (req, res) => __awaiter(void 0, void 0, void 0,
          GROUP BY order_id
        ) cn ON cn.order_id = o.id
        WHERE o.customer_id = ?
-         AND o.payment_status = 'pendiente'
-         AND o.status NOT IN ('Cancelado', 'Borrador')
-         AND (o.archived = 0 OR o.archived IS NULL)`, [customerId]);
+         AND ${SQL_ORDER_ACTIVE_COND}
+         AND ${orderPaymentBalance_service_1.SQL_ORDER_IN_SALDO_SCOPE}`, [customerId]);
         const multimediaAgg = yield (0, db_1.get)(`SELECT CAST(COALESCE(
          (SELECT CAST(e_lo.saldo AS DECIMAL(16,2))
           FROM customer_multimedia_entries e_lo
@@ -4134,6 +4244,8 @@ const exportCustomerDetailXlsx = (req, res) => __awaiter(void 0, void 0, void 0,
           END
          WHERE p.customer_id = ?
            AND me_rec.customer_id IS NULL
+           AND ${SQL_PAYMENT_UNALLOCATED_COND}
+           AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
          GROUP BY
            p.customer_id,
            DATE(p.date),
@@ -4145,8 +4257,13 @@ const exportCustomerDetailXlsx = (req, res) => __awaiter(void 0, void 0, void 0,
              )
            END
        ) d`, [customerId]);
-        const facturasBruto = Number((orderAgg === null || orderAgg === void 0 ? void 0 : orderAgg.facturas_bruto) || 0);
-        const ncIva = Number((orderAgg === null || orderAgg === void 0 ? void 0 : orderAgg.nc_iva) || 0);
+        const manualAgg = yield (0, db_1.get)(`SELECT
+         ROUND(COALESCE(SUM(CASE WHEN tipo = 'FACTURA' THEN importe_neto + COALESCE(agip_ret_per, 0) ELSE 0 END), 0), 2) AS manual_fac,
+         ROUND(COALESCE(SUM(CASE WHEN tipo = 'NC' THEN importe_neto ELSE 0 END), 0), 2) AS manual_nc
+       FROM customer_manual_comprobantes
+       WHERE customer_id = ?`, [customerId]);
+        const facturasBruto = Number((orderAgg === null || orderAgg === void 0 ? void 0 : orderAgg.facturas_bruto) || 0) + Number((manualAgg === null || manualAgg === void 0 ? void 0 : manualAgg.manual_fac) || 0);
+        const ncIva = Number((orderAgg === null || orderAgg === void 0 ? void 0 : orderAgg.nc_iva) || 0) + Number((manualAgg === null || manualAgg === void 0 ? void 0 : manualAgg.manual_nc) || 0);
         const multimediaSaldo = Number((multimediaAgg === null || multimediaAgg === void 0 ? void 0 : multimediaAgg.multimediaSaldo) || 0);
         const totalPagos = Number((paymentsAgg === null || paymentsAgg === void 0 ? void 0 : paymentsAgg.totalPagos) || 0);
         const saldoUnificado = Math.round((multimediaSaldo + facturasBruto - ncIva - totalPagos) * 100) / 100;
@@ -4207,11 +4324,11 @@ const exportCustomerDetailXlsx = (req, res) => __awaiter(void 0, void 0, void 0,
                 section: 'SISTEMA',
                 fecha,
                 tipo: normalizeUnifiedType(e.tipo),
-                numero: (_f = e.numero) !== null && _f !== void 0 ? _f : '',
+                numero: (_120 = e.numero) !== null && _120 !== void 0 ? _120 : '',
                 importe: e.importe != null ? Number(e.importe) : null,
                 // En modo unificado no mostramos saldo histórico por línea importada.
                 saldo: null,
-                detalle: (_g = e.detalle) !== null && _g !== void 0 ? _g : '',
+                detalle: (_121 = e.detalle) !== null && _121 !== void 0 ? _121 : '',
                 sortTs: ts,
                 sortSeq: Number(e.line_order || 0),
                 sortNumero: String(e.numero || '')
@@ -4224,7 +4341,7 @@ const exportCustomerDetailXlsx = (req, res) => __awaiter(void 0, void 0, void 0,
                 section: 'SISTEMA',
                 fecha,
                 tipo: 'FAC',
-                numero: (_h = o.id) !== null && _h !== void 0 ? _h : '',
+                numero: (_122 = o.id) !== null && _122 !== void 0 ? _122 : '',
                 importe: Number(o.total || 0),
                 saldo: null,
                 detalle: `Cobro: ${o.payment_status || 'pendiente'}`,
@@ -4242,7 +4359,7 @@ const exportCustomerDetailXlsx = (req, res) => __awaiter(void 0, void 0, void 0,
                 section: 'SISTEMA',
                 fecha,
                 tipo: 'REC',
-                numero: (_j = p.receipt_number) !== null && _j !== void 0 ? _j : '',
+                numero: (_123 = p.receipt_number) !== null && _123 !== void 0 ? _123 : '',
                 importe: Number(p.amount || 0),
                 saldo: null,
                 detalle: `Factura (CAE): ${caeFromNumero || (caes.length ? caes.join(' | ') : '-')}${p.notes ? ` | ${p.notes}` : ''}`,

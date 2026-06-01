@@ -78,6 +78,8 @@ router.post('/tiendanube/sync-stock', integrations_controller_1.syncAllStockToTi
 router.post('/tiendanube/sync-stock-selected', integrations_controller_1.syncSelectedStockToTiendaNube);
 router.post('/tiendanube/import-product', integrations_controller_1.importProductFromTiendaNube);
 router.post('/tiendanube/normalize-sizes', integrations_controller_1.normalizeSizesInTiendaNube);
+router.post('/tiendanube/normalize-colors', integrations_controller_1.normalizeColorsInTiendaNube);
+router.post('/tiendanube/sync-skus', integrations_controller_1.syncSkusToTiendaNube);
 router.post('/tiendanube/webhook', integrations_controller_1.handleTiendaNubeWebhook);
 /** Probar descuento de stock por una orden TN: POST { "orderId": "123" } o GET ?orderId=123 (requiere login) */
 router.post('/tiendanube/test-order', auth_1.authMiddleware, integrations_controller_1.testTiendaNubeOrder);

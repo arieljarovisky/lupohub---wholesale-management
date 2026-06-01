@@ -12,11 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getTiendaNubeIntegration = getTiendaNubeIntegration;
-exports.fetchAllTnCategories = fetchAllTnCategories;
-exports.resolveCategoryIds = resolveCategoryIds;
-exports.fetchProductsForCategories = fetchProductsForCategories;
-exports.downloadCategoryImages = downloadCategoryImages;
+exports.downloadCategoryImages = exports.fetchProductsForCategories = exports.resolveCategoryIds = exports.fetchAllTnCategories = exports.getTiendaNubeIntegration = void 0;
 const axios_1 = __importDefault(require("axios"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
@@ -102,6 +98,7 @@ function getTiendaNubeIntegration() {
         return { accessToken: String(row.access_token), storeId };
     });
 }
+exports.getTiendaNubeIntegration = getTiendaNubeIntegration;
 function fetchAllTnCategories(storeId, accessToken) {
     return __awaiter(this, void 0, void 0, function* () {
         const headers = {
@@ -128,6 +125,7 @@ function fetchAllTnCategories(storeId, accessToken) {
         return all;
     });
 }
+exports.fetchAllTnCategories = fetchAllTnCategories;
 function resolveCategoryIds(allCategories, query, explicitId, includeSubcategories = true) {
     if (explicitId != null && Number.isFinite(explicitId)) {
         const cat = allCategories.find((c) => c.id === explicitId);
@@ -163,6 +161,7 @@ function resolveCategoryIds(allCategories, query, explicitId, includeSubcategori
     }
     return { ids: Array.from(ids), names };
 }
+exports.resolveCategoryIds = resolveCategoryIds;
 function collectDescendants(cat, all, out) {
     for (const subId of cat.subcategories || []) {
         if (out.has(subId))
@@ -207,13 +206,14 @@ function fetchProductsForCategories(storeId, accessToken, categoryIds, onLog) {
         return Array.from(byId.values());
     });
 }
+exports.fetchProductsForCategories = fetchProductsForCategories;
 function sleepTn() {
     const ms = Math.max(0, parseInt(process.env.TN_RATE_LIMIT_DELAY_MS || '400', 10));
     return new Promise((r) => setTimeout(r, ms));
 }
 function downloadCategoryImages(opts) {
+    var _a;
     return __awaiter(this, void 0, void 0, function* () {
-        var _a;
         const log = logFn(opts);
         const { accessToken, storeId } = yield getTiendaNubeIntegration();
         const includeSub = opts.includeSubcategories !== false;
@@ -233,7 +233,7 @@ function downloadCategoryImages(opts) {
         if (withoutImages.length > 0) {
             log(`Completando imágenes de ${withoutImages.length} productos…`);
             yield (0, channelMarginFetch_2.runPool)(withoutImages, 4, (p) => __awaiter(this, void 0, void 0, function* () {
-                var _a;
+                var _b;
                 try {
                     const res = yield axios_1.default.get(`${TN_BASE}/${storeId}/products/${p.id}`, {
                         headers: {
@@ -242,11 +242,11 @@ function downloadCategoryImages(opts) {
                         },
                         validateStatus: () => true,
                     });
-                    if (res.status === 200 && Array.isArray((_a = res.data) === null || _a === void 0 ? void 0 : _a.images)) {
+                    if (res.status === 200 && Array.isArray((_b = res.data) === null || _b === void 0 ? void 0 : _b.images)) {
                         p.images = res.data.images;
                     }
                 }
-                catch (_b) {
+                catch (_c) {
                     /* ignore */
                 }
                 yield sleepTn();
@@ -325,3 +325,4 @@ function downloadCategoryImages(opts) {
         };
     });
 }
+exports.downloadCategoryImages = downloadCategoryImages;

@@ -22,6 +22,7 @@ import {
 import { normalizeLedgerDocType } from '../utils/ledgerDocType';
 import {
   applyLedgerRunningSaldo,
+  applyLedgerRunningSaldoSimple,
   filterSystemDuplicatesAgainstImport,
   ledgerMovementDedupeKey,
 } from '../utils/ledgerRunningSaldo';
@@ -661,7 +662,8 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
       if (da !== db) return da - db;
       return Number(a.lineOrder || 0) - Number(b.lineOrder || 0);
     });
-    const lastSaldo = applyLedgerRunningSaldo(unified);
+    applyLedgerRunningSaldo(unified);
+    const lastSaldo = applyLedgerRunningSaldoSimple(unified);
     for (const row of unified) {
       row.saldo = row.saldoCorrido ?? null;
     }

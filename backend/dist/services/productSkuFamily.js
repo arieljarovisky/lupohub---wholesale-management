@@ -9,9 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.skuLookupCandidates = skuLookupCandidates;
-exports.resolveProductByArticleSku = resolveProductByArticleSku;
-exports.findRelatedProductIdsForArticleSku = findRelatedProductIdsForArticleSku;
+exports.findRelatedProductIdsForArticleSku = exports.resolveProductByArticleSku = exports.skuLookupCandidates = void 0;
 const db_1 = require("../database/db");
 const mergeDuplicateProductsBySku_1 = require("./mergeDuplicateProductsBySku");
 const PRODUCT_SELECT = `p.id, p.sku, p.name, p.category, p.base_price, p.tienda_nube_id, p.mercado_libre_id,
@@ -36,7 +34,8 @@ function skuLookupCandidates(sku) {
             out.add(base);
     }
     const digits = digitsOnly(t);
-    if (digits) {
+    const looksNumericOnly = digits.length > 0 && !/[A-Za-z]/.test(t);
+    if (digits && looksNumericOnly) {
         out.add(digits);
         const stripped = digits.replace(/^0+/, '') || '0';
         out.add(stripped);
@@ -47,6 +46,7 @@ function skuLookupCandidates(sku) {
     }
     return [...out];
 }
+exports.skuLookupCandidates = skuLookupCandidates;
 function findProductExact(sku) {
     return __awaiter(this, void 0, void 0, function* () {
         return (yield (0, db_1.get)(`SELECT ${PRODUCT_SELECT} FROM products p WHERE p.sku = ?`, [sku]));
@@ -107,6 +107,7 @@ function resolveProductByArticleSku(skuInput) {
         return findProductByArticleDigits(trimmed);
     });
 }
+exports.resolveProductByArticleSku = resolveProductByArticleSku;
 /** Productos relacionados (duplicados / variantes con el mismo artículo en el SKU). */
 function findRelatedProductIdsForArticleSku(requestedSku, primaryProductId) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -153,3 +154,4 @@ function findRelatedProductIdsForArticleSku(requestedSku, primaryProductId) {
         return [...ids];
     });
 }
+exports.findRelatedProductIdsForArticleSku = findRelatedProductIdsForArticleSku;

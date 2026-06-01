@@ -65,8 +65,39 @@ export function filterSystemDuplicatesAgainstImport<T extends LedgerRunningRow>(
   });
 }
 
+/** Saldo = Σ facturas/pedidos − Σ NC − Σ recibos (sin usar el saldo del Excel como cierre). */
+export function applyLedgerRunningSaldoSimple(rows: LedgerRunningRow[]): number {
+  const sorted = [...rows].sort((a, b) => {
+    const da = new Date(a.lineDate || 0).getTime() || 0;
+    const db = new Date(b.lineDate || 0).getTime() || 0;
+    if (da !== db) return da - db;
+    return Number(a.lineOrder || 0) - Number(b.lineOrder || 0);
+  });
+
+  let running = 0;
+  let hasRunning = false;
+
+  for (const row of sorted) {
+    if (row.importe != null && Number.isFinite(Number(row.importe))) {
+      const tipoNorm = normalizeLedgerDocType(row.tipo, row.detalle);
+      const amount = Math.abs(Number(row.importe)) || 0;
+      const side = ledgerDocTypeAffectsSaldo(tipoNorm);
+      if (side === 'haber') {
+        running = Math.round((running - amount) * 100) / 100;
+        hasRunning = true;
+      } else if (side === 'debe') {
+        running = Math.round((running + amount) * 100) / 100;
+        hasRunning = true;
+      }
+    }
+    row.saldoCorrido = hasRunning ? running : null;
+  }
+
+  return hasRunning ? running : 0;
+}
+
 /**
- * Saldo corrido: en filas importadas con saldo del Excel usa ese cierre;
+ * Saldo corrido en tabla: en filas importadas con saldo del Excel usa ese cierre;
  * el resto suma debe/haber sin duplicar lo ya importado.
  */
 export function applyLedgerRunningSaldo(rows: LedgerRunningRow[]): number {

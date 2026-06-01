@@ -9,12 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.syncAllMercadoLibreLinkedStockToLupoShop = syncAllMercadoLibreLinkedStockToLupoShop;
-exports.sendStockWebhookPayload = sendStockWebhookPayload;
-exports.getLupoWebhookConfigForUi = getLupoWebhookConfigForUi;
-exports.saveLupoWebhookConfig = saveLupoWebhookConfig;
-exports.buildStockWebhookUpdateByVariantId = buildStockWebhookUpdateByVariantId;
-exports.enqueueStockWebhookForVariant = enqueueStockWebhookForVariant;
+exports.enqueueStockWebhookForVariant = exports.buildStockWebhookUpdateByVariantId = exports.saveLupoWebhookConfig = exports.getLupoWebhookConfigForUi = exports.sendStockWebhookPayload = exports.syncAllMercadoLibreLinkedStockToLupoShop = void 0;
 const uuid_1 = require("uuid");
 const db_1 = require("../database/db");
 const lupoStockWebhook_client_1 = require("./lupoStockWebhook.client");
@@ -69,8 +64,8 @@ function getDbWebhookConfig() {
     });
 }
 function resolveRuntimeWebhookConfig() {
+    var _a, _b, _c;
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c;
         const envCfg = (0, lupoStockWebhook_client_1.getLupoStockWebhookConfigFromEnv)();
         const dbCfg = yield getDbWebhookConfig();
         if (!dbCfg)
@@ -103,8 +98,8 @@ const ML_TO_SHOP_BATCH_DELAY_MS = 250;
  * La cantidad enviada es el stock del depósito en LupoHub, no la lectura en vivo desde la API de ML.
  */
 function syncAllMercadoLibreLinkedStockToLupoShop() {
+    var _a;
     return __awaiter(this, void 0, void 0, function* () {
-        var _a;
         const cfg = yield resolveRuntimeWebhookConfig();
         if (!cfg.enabled) {
             return {
@@ -226,6 +221,7 @@ function syncAllMercadoLibreLinkedStockToLupoShop() {
         };
     });
 }
+exports.syncAllMercadoLibreLinkedStockToLupoShop = syncAllMercadoLibreLinkedStockToLupoShop;
 function sendStockWebhookPayload(payload, webhookId, options) {
     return __awaiter(this, void 0, void 0, function* () {
         const baseConfig = yield resolveRuntimeWebhookConfig();
@@ -235,9 +231,10 @@ function sendStockWebhookPayload(payload, webhookId, options) {
         return client.enqueue(payload, webhookId);
     });
 }
+exports.sendStockWebhookPayload = sendStockWebhookPayload;
 function getLupoWebhookConfigForUi() {
+    var _a, _b, _c;
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c;
         const envCfg = (0, lupoStockWebhook_client_1.getLupoStockWebhookConfigFromEnv)();
         const dbCfg = yield getDbWebhookConfig();
         if (!dbCfg) {
@@ -277,6 +274,7 @@ function getLupoWebhookConfigForUi() {
         };
     });
 }
+exports.getLupoWebhookConfigForUi = getLupoWebhookConfigForUi;
 function saveLupoWebhookConfig(input) {
     return __awaiter(this, void 0, void 0, function* () {
         const current = yield getDbWebhookConfig();
@@ -307,6 +305,7 @@ function saveLupoWebhookConfig(input) {
         return getLupoWebhookConfigForUi();
     });
 }
+exports.saveLupoWebhookConfig = saveLupoWebhookConfig;
 function buildStockWebhookUpdateByVariantId(variantId, newStock) {
     return __awaiter(this, void 0, void 0, function* () {
         const row = yield (0, db_1.get)(`SELECT pv.id AS variant_id,
@@ -353,9 +352,10 @@ function buildStockWebhookUpdateByVariantId(variantId, newStock) {
         };
     });
 }
+exports.buildStockWebhookUpdateByVariantId = buildStockWebhookUpdateByVariantId;
 function enqueueStockWebhookForVariant(variantId, newStock) {
+    var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b;
         try {
             const update = yield buildStockWebhookUpdateByVariantId(variantId, newStock);
             if (!update) {
@@ -381,3 +381,4 @@ function enqueueStockWebhookForVariant(variantId, newStock) {
         }
     });
 }
+exports.enqueueStockWebhookForVariant = enqueueStockWebhookForVariant;

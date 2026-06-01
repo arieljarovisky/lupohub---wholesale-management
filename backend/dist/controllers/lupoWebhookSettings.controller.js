@@ -78,12 +78,12 @@ const testLupoWebhookEndpoint = (req, res) => __awaiter(void 0, void 0, void 0, 
 exports.testLupoWebhookEndpoint = testLupoWebhookEndpoint;
 /** Stock LupoHub de todas las variantes vinculadas a ML → webhook tienda online (lotes). */
 const syncLupoShopMlStockBulkEndpoint = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _c;
     if (!isAdmin(req))
         return unauthorized(res);
     try {
         const result = yield (0, lupoStockWebhook_service_1.syncAllMercadoLibreLinkedStockToLupoShop)();
-        if (!result.ok && ((_a = result.message) === null || _a === void 0 ? void 0 : _a.includes('deshabilitado'))) {
+        if (!result.ok && ((_c = result.message) === null || _c === void 0 ? void 0 : _c.includes('deshabilitado'))) {
             return res.status(400).json(result);
         }
         res.json(result);

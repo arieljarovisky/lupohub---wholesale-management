@@ -15,23 +15,13 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -42,9 +32,10 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.exportBillingByCustomersFile = exports.importAgipPadron = exports.importAgipPadronChunk = exports.importAgipPadronStart = exports.exportRetPerTxt = exports.exportVentasJurisdiccionXlsx = exports.exportBilling = exports.listBilling = void 0;
+exports.exportBillingByCustomersFile = exports.importAgipPadron = exports.importAgipPadronChunk = exports.importAgipPadronStart = exports.exportRetPerTxt = exports.exportVentasJurisdiccionXlsx = exports.printBilling = exports.exportBilling = exports.listBilling = void 0;
 const db_1 = require("../database/db");
 const XLSX = __importStar(require("xlsx"));
+const cityNormalize_1 = require("../utils/cityNormalize");
 function parseMoney(value) {
     if (value == null)
         return 0;
@@ -91,6 +82,59 @@ function ddmmyyyy(value) {
     const yy = String(d.getFullYear());
     return `${dd}${mm}${yy}`;
 }
+const MESES_ES = [
+    'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+    'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'
+];
+const DIAS_ES = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+/** Parsea `YYYY-MM-DD` o Date sin sufrir corrimiento de zona horaria. */
+function dateFromYmd(value) {
+    if (typeof value === 'string') {
+        const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (m)
+            return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+    }
+    if (value instanceof Date && !Number.isNaN(value.getTime()))
+        return value;
+    const ymd = normalizeDate(value);
+    const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (m)
+        return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+    return null;
+}
+/** "20/05/2026" */
+function formatDateEsShort(value) {
+    const d = dateFromYmd(value);
+    if (!d)
+        return String(value !== null && value !== void 0 ? value : '');
+    const dd = String(d.getUTCDate()).padStart(2, '0');
+    const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const yy = d.getUTCFullYear();
+    return `${dd}/${mm}/${yy}`;
+}
+/** "Miércoles 20 de mayo de 2026" */
+function formatDateEsLong(value) {
+    const d = dateFromYmd(value);
+    if (!d)
+        return String(value !== null && value !== void 0 ? value : '');
+    const diaSemana = DIAS_ES[d.getUTCDay()];
+    const dia = d.getUTCDate();
+    const mes = MESES_ES[d.getUTCMonth()];
+    const yy = d.getUTCFullYear();
+    return `${diaSemana.charAt(0).toUpperCase()}${diaSemana.slice(1)} ${dia} de ${mes} de ${yy}`;
+}
+function escapeHtml(value) {
+    return String(value !== null && value !== void 0 ? value : '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+function fmtMoneyArs(amount) {
+    const n = Number(amount) || 0;
+    return n.toLocaleString('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 2 });
+}
 function formatAmountFixed(amount, intLen = 13) {
     const n = Math.round((Number(amount) || 0) * 100) / 100;
     const [ints, decs] = n.toFixed(2).split('.');
@@ -98,6 +142,13 @@ function formatAmountFixed(amount, intLen = 13) {
 }
 function round2(n) {
     return Math.round((Number(n) || 0) * 100) / 100;
+}
+/** Filtro ciudad para export RetPer (alineado con Facturación: CABA = Capital Federal). */
+function customerMatchesProvinceFilter(city, province) {
+    const p = String(province || '').trim();
+    if (!p || p === 'ALL')
+        return true;
+    return (0, cityNormalize_1.cityMatchesFilter)(String(city || ''), p);
 }
 function onlyDigits(v) {
     return String(v || '').replace(/\D/g, '');
@@ -109,6 +160,137 @@ function txt(v, len) {
         .replace(/[^\x20-\x7E]/g, ' ')
         .toUpperCase();
     return ascii.slice(0, len).padEnd(len, ' ');
+}
+/** Longitud de registro e-Arciba (AGIP, vigente 01/2022+). */
+const ARCIBA_RECORD_LEN = 226;
+/** Código de norma para percepciones (3 dígitos). Configurable por env. */
+const AGIP_PERCEPCION_CODIGO_NORMA = (process.env.AGIP_PERCEPCION_CODIGO_NORMA || '029').padStart(3, '0').slice(-3);
+function mapCondicionIvaArciba(condicion) {
+    const c = String(condicion || '').toLowerCase();
+    if (c.includes('monotribut'))
+        return '4';
+    if (c.includes('exento'))
+        return '3';
+    if (c.includes('consumidor final'))
+        return '4';
+    if (c.includes('responsable inscripto'))
+        return '1';
+    return '1';
+}
+/** Letra según comprobante AFIP emitido (alineado al TXT histórico importado en Arciba). */
+function letraComprobanteArciba(cbteTipo) {
+    return Number(cbteTipo) === 1 || Number(cbteTipo) === 3 ? 'A' : 'B';
+}
+/** Monto numérico Arciba: alineado a la derecha, coma decimal, ancho fijo. */
+function formatArcibaNumber(amount, width) {
+    const capped = Math.min(9999999999999.99, Math.max(0, round2(amount)));
+    const body = capped.toFixed(2).replace('.', ',');
+    return body.length > width ? body.slice(-width) : body.padStart(width, '0');
+}
+function formatArcibaAlicuota(alicuota) {
+    const n = Math.min(99.99, Math.max(0, Number(alicuota) || 0));
+    const intPart = Math.floor(n);
+    const dec = Math.round((n - intPart) * 100);
+    return `${String(intPart).padStart(2, '0')},${String(dec).padStart(2, '0')}`;
+}
+function formatArcibaComprobanteNumero(puntoVta, cbteDesde) {
+    const pv = String(Number(puntoVta) || 0).padStart(5, '0');
+    const num = String(Number(cbteDesde) || 0).padStart(8, '0');
+    return (pv + num).padStart(16, '0');
+}
+/** Arma un registro de percepción (tipo op. 2) según diseño AGIP e-Arciba. */
+function buildArcibaPerceptionRecord(row) {
+    const rec = Array(ARCIBA_RECORD_LEN).fill(' ');
+    const put = (from, to, val, align = 'left') => {
+        const len = to - from + 1;
+        let v = String(val).slice(0, len);
+        v = align === 'right' ? v.padStart(len, '0') : v.padEnd(len, ' ');
+        for (let i = 0; i < len; i++)
+            rec[from - 1 + i] = v[i];
+    };
+    const fecha = formatDateEsShort(row.fecha);
+    const letra = letraComprobanteArciba(Number(row.cbte_tipo));
+    const cuit = onlyDigits(row.cuit).slice(0, 11);
+    const neto = round2(Math.abs(Number(row.neto) || 0));
+    const iva = letra === 'A' || letra === 'M' ? round2(neto * 0.21) : 0;
+    const alicuota = Math.max(0, Number(row.alicuota) || 0);
+    const retPercStored = Math.abs(Number(row.agip_ret_per) || 0);
+    const retPerc = retPercStored > 0.005 ? round2(retPercStored) : alicuota > 0 ? round2(neto * (alicuota / 100)) : 0;
+    // Misma lógica que RetPer_202604 histórico: otros = IIBB; monto comp = neto + IVA + IIBB; sujeto = neto.
+    const otros = retPerc;
+    const montoComprobante = round2(neto + iva + otros);
+    const montoSujeto = round2(montoComprobante - iva - otros);
+    const situacionIva = mapCondicionIvaArciba(row.condicion_iva);
+    const nroComprobante = formatArcibaComprobanteNumero(row.punto_venta, row.cbte_desde);
+    put(1, 1, '2');
+    put(2, 4, AGIP_PERCEPCION_CODIGO_NORMA, 'right');
+    put(5, 14, fecha);
+    put(15, 16, '01');
+    put(17, 17, letra);
+    put(18, 33, nroComprobante, 'right');
+    put(34, 43, fecha);
+    put(44, 59, formatArcibaNumber(montoComprobante, 16), 'right');
+    put(60, 75, '');
+    put(76, 76, '3');
+    put(77, 87, cuit, 'right');
+    put(88, 88, '4');
+    put(89, 99, '00000000000', 'right');
+    put(100, 100, situacionIva);
+    put(101, 130, txt(row.razon_social, 30));
+    put(131, 146, formatArcibaNumber(otros, 16), 'right');
+    put(147, 162, formatArcibaNumber(iva, 16), 'right');
+    put(163, 178, formatArcibaNumber(montoSujeto, 16), 'right');
+    put(179, 183, formatArcibaAlicuota(alicuota), 'right');
+    put(184, 199, formatArcibaNumber(retPerc, 16), 'right');
+    put(200, 215, formatArcibaNumber(retPerc, 16), 'right');
+    put(216, 226, ' '.repeat(11));
+    return rec.join('');
+}
+/** NC de reemisión (mayo u otro mes de emisión): tipo 09, sin percepción en la NC. */
+function buildArcibaPerceptionNcReemitRecord(row) {
+    const rec = Array(ARCIBA_RECORD_LEN).fill(' ');
+    const put = (from, to, val, align = 'left') => {
+        const len = to - from + 1;
+        let v = String(val).slice(0, len);
+        v = align === 'right' ? v.padStart(len, '0') : v.padEnd(len, ' ');
+        for (let i = 0; i < len; i++)
+            rec[from - 1 + i] = v[i];
+    };
+    const fecha = formatDateEsShort(row.fecha);
+    const letraAfip = letraComprobanteArciba(Number(row.cbte_tipo));
+    const cuit = onlyDigits(row.cuit).slice(0, 11);
+    const neto = round2(Math.abs(Number(row.neto) || 0));
+    const ivaEnComprobante = letraAfip === 'A' || letraAfip === 'M' ? round2(neto * 0.21) : 0;
+    const otros = 0;
+    const montoComprobante = round2(neto + ivaEnComprobante);
+    // Tipo 09: letra en blanco (pos. 17); columna IVA en 0 según diseño AGIP.
+    const ivaColumna = 0;
+    const montoSujeto = round2(montoComprobante - ivaColumna - otros);
+    const situacionIva = mapCondicionIvaArciba(row.condicion_iva);
+    const nroComprobante = formatArcibaComprobanteNumero(row.punto_venta, row.cbte_desde);
+    put(1, 1, '2');
+    put(2, 4, AGIP_PERCEPCION_CODIGO_NORMA, 'right');
+    put(5, 14, fecha);
+    put(15, 16, '09');
+    put(17, 17, ' ');
+    put(18, 33, nroComprobante, 'right');
+    put(34, 43, fecha);
+    put(44, 59, formatArcibaNumber(montoComprobante, 16), 'right');
+    put(60, 75, '');
+    put(76, 76, '3');
+    put(77, 87, cuit, 'right');
+    put(88, 88, '4');
+    put(89, 99, '00000000000', 'right');
+    put(100, 100, situacionIva);
+    put(101, 130, txt(row.razon_social, 30));
+    put(131, 146, formatArcibaNumber(otros, 16), 'right');
+    put(147, 162, formatArcibaNumber(ivaColumna, 16), 'right');
+    put(163, 178, formatArcibaNumber(montoSujeto, 16), 'right');
+    put(179, 183, formatArcibaAlicuota(0), 'right');
+    put(184, 199, formatArcibaNumber(0, 16), 'right');
+    put(200, 215, formatArcibaNumber(0, 16), 'right');
+    put(216, 226, ' '.repeat(11));
+    return rec.join('');
 }
 function normalizeNameForMatch(v) {
     return String(v || '')
@@ -218,8 +400,8 @@ const listBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
           i.cbte_desde AS numero_desde,
           i.cbte_hasta AS numero_hasta,
           o.id AS order_id,
-          o.date AS fecha,
-          o.total AS importe,
+          COALESCE(DATE(i.created_at), o.date) AS fecha,
+          ROUND(o.total * 1.21 + COALESCE(i.agip_ret_per, 0), 2) AS importe,
           c.id AS customer_id,
           c.business_name AS customer_business_name,
           c.name AS customer_name,
@@ -228,7 +410,10 @@ const listBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
           i.created_at,
           i.agip_alicuota,
           i.agip_ret_per,
-          (SELECT COUNT(*) FROM credit_notes cn_cnt WHERE cn_cnt.order_id = o.id) AS credit_notes_count
+          (SELECT COUNT(*) FROM credit_notes cn_cnt WHERE cn_cnt.order_id = o.id) AS credit_notes_count,
+          0 AS es_manual,
+          0 AS sin_detalle,
+          0 AS has_pdf
         FROM invoices i
         JOIN orders o ON o.id = i.order_id
         JOIN customers c ON c.id = o.customer_id
@@ -246,8 +431,8 @@ const listBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
           cn.cbte_desde AS numero_desde,
           cn.cbte_hasta AS numero_hasta,
           cn.order_id AS order_id,
-          MAX(o.date) AS fecha,
-          SUM(cn.amount_credited) AS importe,
+          COALESCE(DATE(MIN(cn.created_at)), MAX(o.date)) AS fecha,
+          ROUND(SUM(cn.amount_credited) * 1.21, 2) AS importe,
           c.id AS customer_id,
           c.business_name AS customer_business_name,
           c.name AS customer_name,
@@ -256,12 +441,46 @@ const listBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
           MIN(cn.created_at) AS created_at,
           0 AS agip_alicuota,
           0 AS agip_ret_per,
-          (SELECT COUNT(*) FROM credit_notes cn_tot WHERE cn_tot.order_id = cn.order_id) AS credit_notes_count
+          (SELECT COUNT(*) FROM credit_notes cn_tot WHERE cn_tot.order_id = cn.order_id) AS credit_notes_count,
+          0 AS es_manual,
+          0 AS sin_detalle,
+          0 AS has_pdf
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
         JOIN customers c ON c.id = o.customer_id
+        WHERE COALESCE(cn.superseded_by_reinvoice, 0) = 0
         GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
                  cn.cae_fch_vto, cn.order_id, c.id, c.business_name, c.name
+
+        UNION ALL
+
+        SELECT
+          m.id,
+          m.tipo,
+          m.cbte_tipo,
+          m.punto_venta,
+          m.cbte_desde AS numero_desde,
+          m.cbte_hasta AS numero_hasta,
+          m.ref_order_id AS order_id,
+          m.fecha,
+          CASE
+            WHEN m.tipo = 'FACTURA' THEN ROUND(m.importe_neto + COALESCE(m.agip_ret_per, 0), 2)
+            ELSE ROUND(m.importe_neto, 2)
+          END AS importe,
+          m.customer_id,
+          c.business_name AS customer_business_name,
+          c.name AS customer_name,
+          m.cae,
+          m.cae_fch_vto AS cae_fch_vto,
+          m.created_at,
+          0 AS agip_alicuota,
+          CASE WHEN m.tipo = 'FACTURA' THEN COALESCE(m.agip_ret_per, 0) ELSE 0 END AS agip_ret_per,
+          0 AS credit_notes_count,
+          1 AS es_manual,
+          COALESCE(m.sin_detalle, 0) AS sin_detalle,
+          CASE WHEN m.pdf_path IS NOT NULL AND TRIM(m.pdf_path) != '' THEN 1 ELSE 0 END AS has_pdf
+        FROM customer_manual_comprobantes m
+        JOIN customers c ON c.id = m.customer_id
       ) AS b
       ${whereSql}
       ORDER BY b.fecha DESC, b.created_at DESC
@@ -286,7 +505,10 @@ const listBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 createdAt: r.created_at,
                 creditNotesCount: Number(r.credit_notes_count) || 0,
                 agipAlicuota: Number(r.agip_alicuota) || 0,
-                agipRetPer: Number(r.agip_ret_per) || 0
+                agipRetPer: Number(r.agip_ret_per) || 0,
+                manual: !!Number(r.es_manual),
+                sinDetalle: !!Number(r.sin_detalle),
+                hasPdf: !!Number(r.has_pdf)
             });
         });
         // Integrar facturas importadas desde Tango/Multimedias en la misma vista de facturación.
@@ -363,7 +585,10 @@ const listBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                         createdAt: null,
                         creditNotesCount: 0,
                         agipAlicuota: 0,
-                        agipRetPer: 0
+                        agipRetPer: 0,
+                        manual: false,
+                        sinDetalle: false,
+                        hasPdf: false
                     }
                 };
             })
@@ -442,8 +667,8 @@ const exportBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* 
           i.cbte_desde AS numero_desde,
           i.cbte_hasta AS numero_hasta,
           o.id AS order_id,
-          o.date AS fecha,
-          o.total AS importe,
+          COALESCE(DATE(i.created_at), o.date) AS fecha,
+          ROUND(o.total * 1.21 + COALESCE(i.agip_ret_per, 0), 2) AS importe,
           c.id AS customer_id,
           c.business_name AS customer_business_name,
           c.cuit AS customer_cuit,
@@ -466,8 +691,8 @@ const exportBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* 
           cn.cbte_desde AS numero_desde,
           cn.cbte_hasta AS numero_hasta,
           cn.order_id AS order_id,
-          MAX(o.date) AS fecha,
-          SUM(cn.amount_credited) AS importe,
+          COALESCE(DATE(MIN(cn.created_at)), MAX(o.date)) AS fecha,
+          ROUND(SUM(cn.amount_credited) * 1.21, 2) AS importe,
           c.id AS customer_id,
           c.business_name AS customer_business_name,
           c.cuit AS customer_cuit,
@@ -477,6 +702,7 @@ const exportBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
         JOIN customers c ON c.id = o.customer_id
+        WHERE COALESCE(cn.superseded_by_reinvoice, 0) = 0
         GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
                  cn.cae_fch_vto, cn.order_id, c.id, c.business_name, c.name, c.cuit
       ) AS b
@@ -502,7 +728,7 @@ const exportBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const lines = [header.join(',')];
         for (const r of rows) {
             const line = [
-                r.fecha,
+                formatDateEsShort(r.fecha),
                 r.tipo,
                 r.cbte_tipo,
                 r.punto_venta,
@@ -514,7 +740,7 @@ const exportBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 '"Sistema (AFIP)"',
                 Number(r.importe) || 0,
                 r.cae,
-                r.cae_fch_vto || ''
+                r.cae_fch_vto ? formatDateEsShort(r.cae_fch_vto) : ''
             ].join(',');
             lines.push(line);
         }
@@ -572,7 +798,7 @@ const exportBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                     continue;
                 existingKeys.add(key);
                 const line = [
-                    fecha,
+                    formatDateEsShort(fecha),
                     'FACTURA',
                     '',
                     '',
@@ -601,6 +827,263 @@ const exportBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     }
 });
 exports.exportBilling = exportBilling;
+/**
+ * Devuelve una vista HTML imprimible con el listado de facturas y NC del rango.
+ * Pensada para abrir en una pestaña nueva y disparar `window.print()` automáticamente.
+ * Fechas en español (corto en la tabla, largo en el encabezado del período).
+ */
+const printBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const { desde, hasta, customerId, province, tipo } = req.query;
+        const whereParts = [];
+        const params = [];
+        if (desde) {
+            whereParts.push('b.fecha >= ?');
+            params.push(desde);
+        }
+        if (hasta) {
+            whereParts.push('b.fecha <= ?');
+            params.push(hasta);
+        }
+        if (customerId) {
+            whereParts.push('b.customer_id = ?');
+            params.push(customerId);
+        }
+        if (province && String(province).trim()) {
+            whereParts.push("b.customer_id IN (SELECT id FROM customers WHERE LOWER(COALESCE(city, '')) LIKE ?)");
+            params.push(`%${String(province).trim().toLowerCase()}%`);
+        }
+        if (tipo === 'FACTURA' || tipo === 'NC') {
+            whereParts.push('b.tipo = ?');
+            params.push(tipo);
+        }
+        const authUser = req.user;
+        if ((authUser === null || authUser === void 0 ? void 0 : authUser.role) === 'SELLER') {
+            whereParts.push('b.customer_id IN (SELECT id FROM customers WHERE seller_id = ?)');
+            params.push(authUser.id);
+        }
+        const whereSql = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
+        const sql = `
+      SELECT *
+      FROM (
+        SELECT
+          i.id,
+          'FACTURA' AS tipo,
+          i.cbte_tipo,
+          i.punto_venta,
+          i.cbte_desde AS numero_desde,
+          i.cbte_hasta AS numero_hasta,
+          COALESCE(DATE(i.created_at), o.date) AS fecha,
+          ROUND(o.total * 1.21 + COALESCE(i.agip_ret_per, 0), 2) AS importe,
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, '') AS cliente,
+          c.cuit AS cuit,
+          i.cae,
+          i.created_at
+        FROM invoices i
+        JOIN orders o ON o.id = i.order_id
+        JOIN customers c ON c.id = o.customer_id
+
+        UNION ALL
+
+        SELECT
+          MIN(cn.id) AS id,
+          'NC' AS tipo,
+          cn.cbte_tipo,
+          cn.punto_venta,
+          cn.cbte_desde AS numero_desde,
+          cn.cbte_hasta AS numero_hasta,
+          COALESCE(DATE(MIN(cn.created_at)), MAX(o.date)) AS fecha,
+          ROUND(SUM(cn.amount_credited) * 1.21, 2) AS importe,
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, '') AS cliente,
+          c.cuit AS cuit,
+          cn.cae,
+          MIN(cn.created_at) AS created_at
+        FROM credit_notes cn
+        JOIN orders o ON o.id = cn.order_id
+        JOIN customers c ON c.id = o.customer_id
+        WHERE COALESCE(cn.superseded_by_reinvoice, 0) = 0
+        GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
+                 cn.order_id, c.id, c.business_name, c.name, c.cuit
+      ) AS b
+      ${whereSql}
+      ORDER BY b.fecha ASC, b.created_at ASC
+    `;
+        const rows = (yield (0, db_1.query)(sql, params));
+        let totalFacturas = 0;
+        let totalNC = 0;
+        let countFacturas = 0;
+        let countNC = 0;
+        const tableRows = (rows || [])
+            .map((r) => {
+            const importe = Number(r.importe) || 0;
+            const esNC = String(r.tipo) === 'NC';
+            if (esNC) {
+                totalNC += importe;
+                countNC += 1;
+            }
+            else {
+                totalFacturas += importe;
+                countFacturas += 1;
+            }
+            const letra = letraFromCbteTipo(r.cbte_tipo);
+            const pv = String(Number(r.punto_venta) || 0).padStart(4, '0');
+            const nro = String(Number(r.numero_desde) || 0).padStart(8, '0');
+            const comprobante = letra && r.punto_venta ? `${letra}${pv}-${nro}` : '—';
+            const importeStr = fmtMoneyArs(esNC ? -importe : importe);
+            const tipoChip = esNC
+                ? '<span class="chip chip-nc">NC</span>'
+                : '<span class="chip chip-fac">FACTURA</span>';
+            return `
+          <tr class="${esNC ? 'row-nc' : ''}">
+            <td class="col-fecha">${escapeHtml(formatDateEsShort(r.fecha))}</td>
+            <td>${tipoChip}</td>
+            <td class="mono">${escapeHtml(comprobante)}</td>
+            <td>${escapeHtml(r.cliente || '')}</td>
+            <td class="mono">${escapeHtml(r.cuit || '')}</td>
+            <td class="mono num">${escapeHtml(importeStr)}</td>
+            <td class="mono small">${escapeHtml(r.cae || '')}</td>
+          </tr>
+        `;
+        })
+            .join('');
+        const periodoTexto = (() => {
+            if (desde && hasta) {
+                return `Del ${formatDateEsLong(desde)} al ${formatDateEsLong(hasta)}`;
+            }
+            if (desde)
+                return `Desde ${formatDateEsLong(desde)}`;
+            if (hasta)
+                return `Hasta ${formatDateEsLong(hasta)}`;
+            return 'Período: todos los comprobantes';
+        })();
+        const tipoFiltroTexto = tipo === 'FACTURA' ? 'Solo facturas' : tipo === 'NC' ? 'Solo notas de crédito' : null;
+        const totalNeto = totalFacturas - totalNC;
+        const emitidoEn = formatDateEsLong(new Date().toISOString().slice(0, 10));
+        const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Listado de facturación · ${escapeHtml(periodoTexto)}</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: #1a202c;
+    margin: 24px 32px;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+  header { border-bottom: 2px solid #2d3748; padding-bottom: 12px; margin-bottom: 18px; }
+  h1 { margin: 0 0 4px; font-size: 20px; font-weight: 800; }
+  .periodo { font-size: 14px; color: #2d3748; font-weight: 600; }
+  .meta { color: #4a5568; font-size: 11px; margin-top: 6px; }
+  .filtros { color: #2c5282; font-size: 11px; margin-top: 4px; font-style: italic; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  thead th {
+    background: #edf2f7;
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 2px solid #2d3748;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #2d3748;
+  }
+  tbody td { padding: 5px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+  tbody tr:nth-child(even) { background: #f7fafc; }
+  tbody tr.row-nc { background: #fffaf0; }
+  .mono { font-family: "SFMono-Regular", Menlo, Consolas, monospace; font-size: 11px; }
+  .small { font-size: 10px; color: #4a5568; }
+  .num { text-align: right; white-space: nowrap; }
+  .col-fecha { white-space: nowrap; }
+  .chip { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.02em; }
+  .chip-fac { background: #c6f6d5; color: #22543d; }
+  .chip-nc { background: #fed7d7; color: #742a2a; }
+  .totales { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 12px; }
+  .total-card { border: 1px solid #cbd5e0; border-radius: 8px; padding: 10px 14px; flex: 1; min-width: 180px; background: #f7fafc; }
+  .total-card .label { font-size: 10px; text-transform: uppercase; color: #4a5568; font-weight: 700; }
+  .total-card .value { font-size: 16px; font-weight: 800; margin-top: 2px; color: #1a202c; font-family: "SFMono-Regular", Menlo, Consolas, monospace; }
+  .total-card.neto { border-color: #2b6cb0; background: #ebf8ff; }
+  .total-card.neto .value { color: #2b6cb0; }
+  .footer { margin-top: 18px; color: #718096; font-size: 10px; text-align: right; }
+  .actions { margin-bottom: 14px; }
+  .actions button {
+    padding: 8px 14px; font-size: 12px; font-weight: 700;
+    background: #2b6cb0; color: white; border: none; border-radius: 6px;
+    cursor: pointer; margin-right: 8px;
+  }
+  .actions button.secondary { background: #718096; }
+  .empty { padding: 32px; text-align: center; color: #718096; font-style: italic; }
+  @media print {
+    body { margin: 12mm; font-size: 10px; }
+    .actions { display: none; }
+    thead { display: table-header-group; }
+    tr { page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+  <div class="actions">
+    <button onclick="window.print()">Imprimir</button>
+    <button class="secondary" onclick="window.close()">Cerrar</button>
+  </div>
+  <header>
+    <h1>Listado de facturación</h1>
+    <div class="periodo">${escapeHtml(periodoTexto)}</div>
+    <div class="meta">Emitido el ${escapeHtml(emitidoEn)}${(authUser === null || authUser === void 0 ? void 0 : authUser.email) ? ` · ${escapeHtml(authUser.email)}` : ''}</div>
+    ${tipoFiltroTexto ? `<div class="filtros">${escapeHtml(tipoFiltroTexto)}</div>` : ''}
+  </header>
+  ${rows.length === 0
+            ? '<div class="empty">No hay comprobantes para los filtros seleccionados.</div>'
+            : `<table>
+        <thead>
+          <tr>
+            <th class="col-fecha">Fecha</th>
+            <th>Tipo</th>
+            <th>Comprobante</th>
+            <th>Cliente</th>
+            <th>CUIT</th>
+            <th class="num">Importe</th>
+            <th>CAE</th>
+          </tr>
+        </thead>
+        <tbody>${tableRows}</tbody>
+      </table>`}
+  <div class="totales">
+    <div class="total-card">
+      <div class="label">Facturas (${countFacturas})</div>
+      <div class="value">${escapeHtml(fmtMoneyArs(totalFacturas))}</div>
+    </div>
+    <div class="total-card">
+      <div class="label">Notas de crédito (${countNC})</div>
+      <div class="value">- ${escapeHtml(fmtMoneyArs(totalNC))}</div>
+    </div>
+    <div class="total-card neto">
+      <div class="label">Neto facturado</div>
+      <div class="value">${escapeHtml(fmtMoneyArs(totalNeto))}</div>
+    </div>
+  </div>
+  <div class="footer">LupoHub · Facturación AFIP</div>
+  <script>
+    window.addEventListener('load', function () {
+      if (!window.location.hash.includes('noprint')) {
+        setTimeout(function () { window.print(); }, 300);
+      }
+    });
+  </script>
+</body>
+</html>`;
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.send(html);
+    }
+    catch (error) {
+        console.error('printBilling:', error);
+        res.status(500).send(`<!doctype html><meta charset="utf-8"><body style="font-family:sans-serif;padding:24px"><h1>Error generando el listado</h1><p>${escapeHtml((error === null || error === void 0 ? void 0 : error.message) || 'Error desconocido')}</p></body>`);
+    }
+});
+exports.printBilling = printBilling;
 /** Detecta provincia a partir del campo `city` (y opcionalmente `address`) del cliente. */
 function detectProvincia(city, address = '') {
     const haystack = `${city || ''} ${address || ''}`
@@ -689,7 +1172,7 @@ const exportVentasJurisdiccionXlsx = (req, res) => __awaiter(void 0, void 0, voi
       FROM (
         SELECT
           'FAC' AS tipo,
-          o.date AS fecha,
+          COALESCE(DATE(i.created_at), o.date) AS fecha,
           i.cbte_tipo,
           i.punto_venta,
           i.cbte_desde,
@@ -838,120 +1321,142 @@ const exportRetPerTxt = (req, res) => __awaiter(void 0, void 0, void 0, function
             fromDate = `${monthMatch[1]}-${monthMatch[2]}-01`;
             toDate = `${monthMatch[1]}-${monthMatch[2]}-${String(lastDay).padStart(2, '0')}`;
         }
-        const where = [];
-        const params = [];
-        if (fromDate) {
-            where.push('o.date >= ?');
-            params.push(fromDate);
+        const whereFac = [];
+        const paramsFac = [];
+        if (fromDate && toDate) {
+            // Pedido del mes, emisión FA/NC del mes, o reemisión (NC+FA) emitida en el mes.
+            whereFac.push(`(
+        (o.date >= ? AND o.date <= ?)
+        OR (COALESCE(DATE(i.created_at), o.date) >= ? AND COALESCE(DATE(i.created_at), o.date) <= ?)
+        OR EXISTS (
+          SELECT 1 FROM credit_notes cn_m
+          WHERE cn_m.order_id = o.id
+            AND COALESCE(cn_m.superseded_by_reinvoice, 0) = 1
+            AND COALESCE(DATE(cn_m.created_at), DATE(i.created_at), o.date) >= ?
+            AND COALESCE(DATE(cn_m.created_at), DATE(i.created_at), o.date) <= ?
+        )
+      )`);
+            paramsFac.push(fromDate, toDate, fromDate, toDate, fromDate, toDate);
         }
-        if (toDate) {
-            where.push('o.date <= ?');
-            params.push(toDate);
+        else {
+            if (fromDate) {
+                whereFac.push('COALESCE(DATE(i.created_at), o.date) >= ?');
+                paramsFac.push(fromDate);
+            }
+            if (toDate) {
+                whereFac.push('COALESCE(DATE(i.created_at), o.date) <= ?');
+                paramsFac.push(toDate);
+            }
         }
         if (customerId) {
-            where.push('o.customer_id = ?');
-            params.push(customerId);
+            whereFac.push('o.customer_id = ?');
+            paramsFac.push(customerId);
         }
-        if (province && String(province).trim()) {
-            where.push('LOWER(COALESCE(c.city, \'\')) LIKE ?');
-            params.push(`%${String(province).trim().toLowerCase()}%`);
-        }
-        // Ret/Per AGIP: aplicar solo a CUIT presentes en padrón AGIP del período seleccionado.
-        where.push('ap.cuit IS NOT NULL');
         const authUser = req.user;
         if ((authUser === null || authUser === void 0 ? void 0 : authUser.role) === 'SELLER') {
-            where.push('c.seller_id = ?');
-            params.push(authUser.id);
+            whereFac.push('c.seller_id = ?');
+            paramsFac.push(authUser.id);
         }
-        const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+        // Facturas con IIBB guardado en LupoHub o alícuota en padrón del período.
+        whereFac.push('(COALESCE(i.agip_ret_per, 0) > 0.005 OR COALESCE(i.agip_alicuota, 0) > 0 OR COALESCE(ap.alicuota, 0) > 0)');
+        const whereFacSql = whereFac.length ? `WHERE ${whereFac.join(' AND ')}` : '';
         yield ensureAgipPadronTable();
         const period = String((toDate || fromDate || new Date().toISOString().slice(0, 10)).replace(/-/g, '')).slice(0, 6);
-        const rows = yield (0, db_1.query)(`
+        const ncWhere = [
+            'COALESCE(cn.superseded_by_reinvoice, 0) = 1',
+            'COALESCE(i.agip_ret_per, 0) > 0.005'
+        ];
+        const ncParams = [];
+        if (fromDate && toDate) {
+            ncWhere.push('COALESCE(DATE(cn.created_at), DATE(i.created_at), o.date) >= ?');
+            ncWhere.push('COALESCE(DATE(cn.created_at), DATE(i.created_at), o.date) <= ?');
+            ncParams.push(fromDate, toDate);
+        }
+        else {
+            if (fromDate) {
+                ncWhere.push('COALESCE(DATE(cn.created_at), DATE(i.created_at), o.date) >= ?');
+                ncParams.push(fromDate);
+            }
+            if (toDate) {
+                ncWhere.push('COALESCE(DATE(cn.created_at), DATE(i.created_at), o.date) <= ?');
+                ncParams.push(toDate);
+            }
+        }
+        if (customerId) {
+            ncWhere.push('o.customer_id = ?');
+            ncParams.push(customerId);
+        }
+        if ((authUser === null || authUser === void 0 ? void 0 : authUser.role) === 'SELLER') {
+            ncWhere.push('c.seller_id = ?');
+            ncParams.push(authUser.id);
+        }
+        const ncWhereSql = ncWhere.length ? `WHERE ${ncWhere.join(' AND ')}` : '';
+        const rowsRaw = yield (0, db_1.query)(`
       SELECT
-        o.date AS fecha,
+        CASE
+          WHEN cn_reemit.id IS NOT NULL THEN COALESCE(DATE(i.created_at), DATE(cn_reemit.created_at), o.date)
+          ELSE o.date
+        END AS fecha,
         i.cbte_tipo,
         i.punto_venta,
         i.cbte_desde,
-        o.total AS importe,
+        o.total AS neto,
+        COALESCE(i.agip_ret_per, 0) AS agip_ret_per,
         c.cuit,
+        c.city AS customer_city,
+        c.condicion_iva,
         COALESCE(c.business_name, c.name, '') AS razon_social,
-        COALESCE(ap.alicuota, 0) AS alicuota
+        COALESCE(NULLIF(i.agip_alicuota, 0), ap.alicuota, 0) AS alicuota,
+        '1' AS line_kind
       FROM invoices i
       JOIN orders o ON o.id = i.order_id
       JOIN customers c ON c.id = o.customer_id
+      LEFT JOIN credit_notes cn_reemit
+        ON cn_reemit.order_id = o.id AND COALESCE(cn_reemit.superseded_by_reinvoice, 0) = 1
       LEFT JOIN agip_padron_alicuotas ap ON ap.period_yyyymm = ? AND ap.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit,''),'-',''),'.',''),' ','')
-      ${whereSql}
+      ${whereFacSql}
+
       UNION ALL
-      -- Agrupamos por comprobante AFIP: una NC parcial por ítems = 1 sola fila para AGIP.
+
       SELECT
-        MAX(o.date) AS fecha,
+        COALESCE(DATE(cn.created_at), DATE(i.created_at), o.date) AS fecha,
         cn.cbte_tipo,
         cn.punto_venta,
         cn.cbte_desde,
-        SUM(cn.amount_credited) AS importe,
+        cn.amount_credited AS neto,
+        0 AS agip_ret_per,
         c.cuit,
+        c.city AS customer_city,
+        c.condicion_iva,
         COALESCE(c.business_name, c.name, '') AS razon_social,
-        COALESCE(ap.alicuota, 0) AS alicuota
+        COALESCE(NULLIF(i.agip_alicuota, 0), ap.alicuota, 0) AS alicuota,
+        '0' AS line_kind
       FROM credit_notes cn
       JOIN orders o ON o.id = cn.order_id
+      JOIN invoices i ON i.order_id = o.id
       JOIN customers c ON c.id = o.customer_id
       LEFT JOIN agip_padron_alicuotas ap ON ap.period_yyyymm = ? AND ap.cuit = REPLACE(REPLACE(REPLACE(COALESCE(c.cuit,''),'-',''),'.',''),' ','')
-      ${whereSql}
-      GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde,
-               c.cuit, c.business_name, c.name, ap.alicuota
-      ORDER BY fecha ASC, punto_venta ASC, cbte_desde ASC
-      `, [period, ...params, period, ...params]);
-        const lines = rows
-            .filter((r) => onlyDigits(r.cuit).length === 11)
-            .map((r) => {
-            const fecha = ddmmyyyy(r.fecha);
-            const letraComp = Number(r.cbte_tipo) === 1 || Number(r.cbte_tipo) === 3 ? 'A' : 'B';
-            const pv = String(Number(r.punto_venta) || 0).padStart(5, '0');
-            const nro = String(Number(r.cbte_desde) || 0).padStart(8, '0');
-            const comprobante = `${letraComp}${pv}${nro}`;
-            const importe = formatAmountFixed(Math.abs(Number(r.importe) || 0));
-            const cuit = onlyDigits(r.cuit).slice(0, 11);
-            const razon = txt(r.razon_social, 30);
-            const alicuota = Math.max(0, Number(r.alicuota || 0));
-            const aliInt = String(Math.floor(alicuota)).padStart(2, '0');
-            const aliDec = String(Math.round((alicuota % 1) * 100)).padStart(2, '0');
-            const total = Math.abs(Number(r.importe) || 0);
-            const divisor = 1 + 0.21 + (alicuota / 100);
-            const neto = divisor > 0 ? round2(total / divisor) : 0;
-            const iva = round2(neto * 0.21);
-            const otros = round2(total - neto - iva);
-            const retPerc = round2(neto * (alicuota / 100));
-            // Layout fijo (alineado con muestra): campos no modelados quedan con defaults.
-            return [
-                '2029', // tipo/agente (fijo por layout legacy)
-                `${fecha.slice(0, 2)}/${fecha.slice(2, 4)}/${fecha.slice(4, 8)}`,
-                '01', // campo fijo requerido por layout AGIP entre fecha y tipo/comprobante
-                comprobante,
-                `${fecha.slice(0, 2)}/${fecha.slice(2, 4)}/${fecha.slice(4, 8)}`,
-                importe,
-                ' '.repeat(16),
-                '3',
-                cuit,
-                '4000000000001', // condición por defecto legacy
-                razon,
-                formatAmountFixed(otros, 13), // otros conceptos (ajusta para que total = neto + iva + otros)
-                formatAmountFixed(iva, 13), // IVA 21%
-                formatAmountFixed(neto, 13), // monto sujeto
-                `3301${aliInt},${aliDec}`, // formato observado válido: 3301xx,xx
-                formatAmountFixed(retPerc, 13), // ret/perc calculada
-                formatAmountFixed(retPerc, 13),
-                ' '.repeat(11)
-            ].join('');
+      ${ncWhereSql}
+
+      ORDER BY fecha ASC, line_kind ASC, punto_venta ASC, cbte_desde ASC
+      `, [period, ...paramsFac, period, ...ncParams]);
+        const provinceKey = String(province || '').trim();
+        const rows = rowsRaw.filter((r) => {
+            if (!customerMatchesProvinceFilter(r.customer_city, provinceKey))
+                return false;
+            return onlyDigits(r.cuit).length === 11;
         });
+        const lines = rows.map((r) => r.line_kind === '0' ? buildArcibaPerceptionNcReemitRecord(r) : buildArcibaPerceptionRecord(r));
         if (!lines.length) {
+            const periodHint = period ? ` (${period})` : '';
             return res.status(400).json({
-                message: 'No hay registros para exportar en el período seleccionado. Verificá rango de fechas, cliente y padrón AGIP importado.'
+                message: `No hay comprobantes con IIBB para exportar${periodHint}. ` +
+                    'Verificá Mes RetPer, que las facturas tengan percepción guardada o CUIT en el padrón AGIP, y el filtro de ciudad/cliente.'
             });
         }
         const monthTag = (toDate || fromDate || new Date().toISOString().slice(0, 10)).replace(/-/g, '').slice(0, 6);
         const filename = `RetPer_${monthTag}.txt`;
-        // AGIP suele validar por posiciones de byte (estilo ANSI). Enviamos ASCII para evitar corrimientos.
-        res.setHeader('Content-Type', 'text/plain; charset=us-ascii');
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         // Compatibilidad e-Arciba: CRLF entre registros y un único salto final, sin línea vacía extra.
         res.send(`${lines.join('\r\n')}\r\n`);
@@ -964,9 +1469,9 @@ const exportRetPerTxt = (req, res) => __awaiter(void 0, void 0, void 0, function
 exports.exportRetPerTxt = exportRetPerTxt;
 /** Importa padrón AGIP resumido (CUIT + alícuota) para un período YYYYMM. */
 const importAgipPadronStart = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _c;
     try {
-        const period = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.period) || '').trim();
+        const period = String(((_c = req.body) === null || _c === void 0 ? void 0 : _c.period) || '').trim();
         if (!/^\d{6}$/.test(period)) {
             return res.status(400).json({ message: 'period inválido (usar YYYYMM)' });
         }
@@ -984,10 +1489,10 @@ const importAgipPadronStart = (req, res) => __awaiter(void 0, void 0, void 0, fu
 });
 exports.importAgipPadronStart = importAgipPadronStart;
 const importAgipPadronChunk = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _d, _e;
     try {
-        const period = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.period) || '').trim();
-        const rows = Array.isArray((_b = req.body) === null || _b === void 0 ? void 0 : _b.rows) ? req.body.rows : [];
+        const period = String(((_d = req.body) === null || _d === void 0 ? void 0 : _d.period) || '').trim();
+        const rows = Array.isArray((_e = req.body) === null || _e === void 0 ? void 0 : _e.rows) ? req.body.rows : [];
         if (!/^\d{6}$/.test(period)) {
             return res.status(400).json({ message: 'period inválido (usar YYYYMM)' });
         }
@@ -1029,7 +1534,7 @@ const importAgipPadronChunk = (req, res) => __awaiter(void 0, void 0, void 0, fu
 });
 exports.importAgipPadronChunk = importAgipPadronChunk;
 const importAgipPadron = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _f, _g;
     try {
         const parsePeriodFromFilename = (nameRaw) => {
             const name = String(nameRaw || '');
@@ -1042,8 +1547,8 @@ const importAgipPadron = (req, res) => __awaiter(void 0, void 0, void 0, functio
             return '';
         };
         const file = req.file;
-        const period = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.period) || parsePeriodFromFilename((file === null || file === void 0 ? void 0 : file.originalname) || '')).trim();
-        let rows = Array.isArray((_b = req.body) === null || _b === void 0 ? void 0 : _b.rows) ? req.body.rows : [];
+        const period = String(((_f = req.body) === null || _f === void 0 ? void 0 : _f.period) || parsePeriodFromFilename((file === null || file === void 0 ? void 0 : file.originalname) || '')).trim();
+        let rows = Array.isArray((_g = req.body) === null || _g === void 0 ? void 0 : _g.rows) ? req.body.rows : [];
         if ((!rows || rows.length === 0) && (file === null || file === void 0 ? void 0 : file.buffer)) {
             const content = file.buffer.toString('utf8');
             const parsed = [];
@@ -1080,9 +1585,15 @@ const importAgipPadron = (req, res) => __awaiter(void 0, void 0, void 0, functio
             byCuit.set(cuit, alicuota);
         }
         const entries = Array.from(byCuit.entries());
-        yield (0, db_1.execute)('START TRANSACTION');
+        /*
+         * IMPORTANTE: el pool puede asignar conexiones distintas entre llamadas, así que `START TRANSACTION`
+         * por `execute()` (a) falla con ER_UNSUPPORTED_PS porque execute usa prepared statements y
+         * (b) aunque funcionara, no garantizaría atomicidad. Tomamos una conexión dedicada.
+         */
+        const conn = yield db_1.pool.getConnection();
         try {
-            yield (0, db_1.execute)(`DELETE FROM agip_padron_alicuotas WHERE period_yyyymm = ?`, [period]);
+            yield conn.beginTransaction();
+            yield conn.query(`DELETE FROM agip_padron_alicuotas WHERE period_yyyymm = ?`, [period]);
             const CHUNK = 1000;
             for (let i = 0; i < entries.length; i += CHUNK) {
                 const slice = entries.slice(i, i + CHUNK);
@@ -1091,14 +1602,20 @@ const importAgipPadron = (req, res) => __awaiter(void 0, void 0, void 0, functio
                 for (const [cuit, alicuota] of slice) {
                     params.push(period, cuit, alicuota);
                 }
-                yield (0, db_1.execute)(`INSERT INTO agip_padron_alicuotas (id, period_yyyymm, cuit, alicuota)
+                yield conn.query(`INSERT INTO agip_padron_alicuotas (id, period_yyyymm, cuit, alicuota)
            VALUES ${placeholders}`, params);
             }
-            yield (0, db_1.execute)('COMMIT');
+            yield conn.commit();
         }
         catch (e) {
-            yield (0, db_1.execute)('ROLLBACK');
+            try {
+                yield conn.rollback();
+            }
+            catch ( /* ignore */_h) { /* ignore */ }
             throw e;
+        }
+        finally {
+            conn.release();
         }
         res.json({ message: 'Padrón AGIP importado', period, imported: entries.length });
     }
@@ -1113,11 +1630,11 @@ const importAgipPadron = (req, res) => __awaiter(void 0, void 0, void 0, functio
 exports.importAgipPadron = importAgipPadron;
 /** Exporta comprobantes (facturas + NC) de un mes para clientes en Excel y/o lista pegada de CUIT (campo `cuitsList`). */
 const exportBillingByCustomersFile = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _j, _k, _l;
     try {
         const file = req.file;
-        const month = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.month) || ((_b = req.query) === null || _b === void 0 ? void 0 : _b.month) || '').trim();
-        const cuitsListRaw = String(((_c = req.body) === null || _c === void 0 ? void 0 : _c.cuitsList) || '').trim();
+        const month = String(((_j = req.body) === null || _j === void 0 ? void 0 : _j.month) || ((_k = req.query) === null || _k === void 0 ? void 0 : _k.month) || '').trim();
+        const cuitsListRaw = String(((_l = req.body) === null || _l === void 0 ? void 0 : _l.cuitsList) || '').trim();
         if (!file && !cuitsListRaw) {
             return res.status(400).json({ message: 'Enviá un archivo Excel (campo file) y/o una lista de CUIT (campo cuitsList).' });
         }
@@ -1335,7 +1852,7 @@ const exportBillingByCustomersFile = (req, res) => __awaiter(void 0, void 0, voi
       FROM (
         SELECT
           'FACTURA' AS tipo,
-          o.date AS fecha,
+          COALESCE(DATE(i.created_at), o.date) AS fecha,
           c.business_name AS cliente,
           c.name AS cliente_contacto,
           c.cuit,
@@ -1343,7 +1860,7 @@ const exportBillingByCustomersFile = (req, res) => __awaiter(void 0, void 0, voi
           i.punto_venta,
           i.cbte_desde,
           i.cbte_hasta,
-          o.total AS importe,
+          ROUND(o.total * 1.21 + COALESCE(i.agip_ret_per, 0), 2) AS importe,
           o.id AS order_id,
           i.cae,
           i.cae_fch_vto,
@@ -1360,7 +1877,7 @@ const exportBillingByCustomersFile = (req, res) => __awaiter(void 0, void 0, voi
         -- Agrupamos por comprobante AFIP: una NC parcial por ítems = 1 sola fila para el export por cliente.
         SELECT
           'NC' AS tipo,
-          MAX(o.date) AS fecha,
+          COALESCE(DATE(MIN(cn.created_at)), MAX(o.date)) AS fecha,
           c.business_name AS cliente,
           c.name AS cliente_contacto,
           c.cuit,
@@ -1368,7 +1885,7 @@ const exportBillingByCustomersFile = (req, res) => __awaiter(void 0, void 0, voi
           cn.punto_venta,
           cn.cbte_desde,
           cn.cbte_hasta,
-          SUM(cn.amount_credited) AS importe,
+          ROUND(SUM(cn.amount_credited) * 1.21, 2) AS importe,
           cn.order_id AS order_id,
           cn.cae,
           cn.cae_fch_vto,
@@ -1379,6 +1896,7 @@ const exportBillingByCustomersFile = (req, res) => __awaiter(void 0, void 0, voi
         WHERE o.date >= ? AND o.date <= ?
           AND o.customer_id IN (${ids.map(() => '?').join(',')})
           ${sellerSql}
+          AND COALESCE(cn.superseded_by_reinvoice, 0) = 0
         GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
                  cn.cae_fch_vto, cn.order_id, c.id, c.business_name, c.name, c.cuit
       ) x

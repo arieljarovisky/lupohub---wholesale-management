@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addTransportesTables = addTransportesTables;
+exports.addTransportesTables = void 0;
 const db_1 = require("./db");
 /** Crea tablas de transportes (express) y asignación a clientes. */
 function addTransportesTables() {
@@ -58,3 +58,4 @@ function addTransportesTables() {
         }
     });
 }
+exports.addTransportesTables = addTransportesTables;

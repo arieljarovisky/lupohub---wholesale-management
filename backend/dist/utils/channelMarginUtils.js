@@ -12,20 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.TN_FEE_PRESETS = void 0;
-exports.resolveFobPriceList = resolveFobPriceList;
-exports.getIvaMultiplier = getIvaMultiplier;
-exports.listTnFeePresets = listTnFeePresets;
-exports.getTnFeeConfig = getTnFeeConfig;
-exports.resolveTnFeePreset = resolveTnFeePreset;
-exports.calcTnSaleFeeFromPreset = calcTnSaleFeeFromPreset;
-exports.calcTnSaleFee = calcTnSaleFee;
-exports.getMlPaymentCptPercent = getMlPaymentCptPercent;
-exports.calcMlPaymentCpt = calcMlPaymentCpt;
-exports.calcMargin = calcMargin;
-exports.calcMarginPercent = calcMarginPercent;
-exports.parseListingPricesSaleFee = parseListingPricesSaleFee;
-exports.fetchListingSaleFeeAmount = fetchListingSaleFeeAmount;
+exports.fetchListingSaleFeeAmount = exports.parseListingPricesSaleFee = exports.calcMarginPercent = exports.calcMargin = exports.calcMlPaymentCpt = exports.getMlPaymentCptPercent = exports.calcTnSaleFee = exports.calcTnSaleFeeFromPreset = exports.resolveTnFeePreset = exports.getTnFeeConfig = exports.listTnFeePresets = exports.TN_FEE_PRESETS = exports.getIvaMultiplier = exports.resolveFobPriceList = void 0;
 const axios_1 = __importDefault(require("axios"));
 const db_1 = require("../database/db");
 /** Lista FOB: env LUPOHUB_FOB_PRICE_LIST_ID o nombre que contenga "fob". */
@@ -61,6 +48,7 @@ function resolveFobPriceList() {
         return { id, name, byProductId };
     });
 }
+exports.resolveFobPriceList = resolveFobPriceList;
 /** IVA sobre tasas (ej. 21% → multiplicador 1.21). Las tasas TN suelen mostrarse como «X% + IVA». */
 function getIvaMultiplier() {
     var _a;
@@ -68,6 +56,7 @@ function getIvaMultiplier() {
     const n = Number.isFinite(pct) && pct >= 0 ? pct : 21;
     return 1 + n / 100;
 }
+exports.getIvaMultiplier = getIvaMultiplier;
 /** Tasas según panel de pagos Tienda Nube (Pago Nube / Mercado Pago en TN). */
 exports.TN_FEE_PRESETS = {
     pago_nube_14d: {
@@ -116,6 +105,7 @@ exports.TN_FEE_PRESETS = {
 function listTnFeePresets() {
     return Object.entries(exports.TN_FEE_PRESETS).map(([id, def]) => (Object.assign({ id }, def)));
 }
+exports.listTnFeePresets = listTnFeePresets;
 /** @deprecated Usar preset; se mantiene por compatibilidad con LUPOHUB_TN_SALE_FEE_PERCENT. */
 function getTnFeeConfig() {
     var _a, _b;
@@ -126,6 +116,7 @@ function getTnFeeConfig() {
         fixed: Number.isFinite(fixed) && fixed >= 0 ? fixed : 0,
     };
 }
+exports.getTnFeeConfig = getTnFeeConfig;
 function resolveTnFeePreset(presetId) {
     const envDefault = (process.env.LUPOHUB_TN_FEE_PRESET || 'tn_mp_instant').trim();
     const id = (presetId || envDefault).trim();
@@ -144,6 +135,7 @@ function resolveTnFeePreset(presetId) {
         return Object.assign({ id }, def);
     return Object.assign({ id: 'tn_mp_instant' }, exports.TN_FEE_PRESETS.tn_mp_instant);
 }
+exports.resolveTnFeePreset = resolveTnFeePreset;
 function calcTnSaleFeeFromPreset(price, preset, fixed = 0) {
     const p = Math.max(0, Number(price) || 0);
     const iva = preset.appliesIva ? getIvaMultiplier() : 1;
@@ -156,30 +148,36 @@ function calcTnSaleFeeFromPreset(price, preset, fixed = 0) {
         cptPart: Math.round(cptPart * 100) / 100,
     };
 }
+exports.calcTnSaleFeeFromPreset = calcTnSaleFeeFromPreset;
 function calcTnSaleFee(price, config = getTnFeeConfig()) {
     return calcTnSaleFeeFromPreset(price, { ratePercent: config.percent, cptPercent: 0, appliesIva: true }, config.fixed).total;
 }
+exports.calcTnSaleFee = calcTnSaleFee;
 /** CPT cobro personalizado / transferencia en ML (panel «Personalizado», típ. 1%). */
 function getMlPaymentCptPercent() {
     var _a;
     const n = Number((_a = process.env.LUPOHUB_ML_PAYMENT_CPT_PERCENT) !== null && _a !== void 0 ? _a : '1');
     return Number.isFinite(n) && n >= 0 ? n : 0;
 }
+exports.getMlPaymentCptPercent = getMlPaymentCptPercent;
 function calcMlPaymentCpt(price, percent = getMlPaymentCptPercent()) {
     const p = Math.max(0, Number(price) || 0);
     return Math.round(p * (percent / 100) * 100) / 100;
 }
+exports.calcMlPaymentCpt = calcMlPaymentCpt;
 function calcMargin(price, fee, fob) {
     if (fob == null || !Number.isFinite(fob))
         return null;
     const m = Number(price) - Number(fee) - Number(fob);
     return Number.isFinite(m) ? Math.round(m * 100) / 100 : null;
 }
+exports.calcMargin = calcMargin;
 function calcMarginPercent(margin, price) {
     if (margin == null || !Number.isFinite(price) || price <= 0)
         return null;
     return Math.round((margin / price) * 10000) / 100;
 }
+exports.calcMarginPercent = calcMarginPercent;
 /** Comisión ML (`sale_fee_amount`) desde GET /sites/{SITE}/listing_prices. */
 function parseListingPricesSaleFee(data, listingTypeId) {
     const lt = (listingTypeId || '').trim();
@@ -189,6 +187,7 @@ function parseListingPricesSaleFee(data, listingTypeId) {
     const n = Number(row === null || row === void 0 ? void 0 : row.sale_fee_amount);
     return Number.isFinite(n) && n >= 0 ? n : 0;
 }
+exports.parseListingPricesSaleFee = parseListingPricesSaleFee;
 function fetchListingSaleFeeAmount(accessToken, item, price, cache) {
     return __awaiter(this, void 0, void 0, function* () {
         const siteId = String((item === null || item === void 0 ? void 0 : item.site_id) || '').trim();
@@ -232,3 +231,4 @@ function fetchListingSaleFeeAmount(accessToken, item, price, cache) {
         }
     });
 }
+exports.fetchListingSaleFeeAmount = fetchListingSaleFeeAmount;

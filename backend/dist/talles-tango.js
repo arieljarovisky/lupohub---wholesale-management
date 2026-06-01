@@ -1,8 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.TALLE_LETRAS_EQUIVALENTES = exports.TALLE_CODIGO_A_RANGO_ML = exports.TALLE_CODIGO_A_NOMBRE = void 0;
-exports.nombreTalleDesdeCodigo = nombreTalleDesdeCodigo;
-exports.codigoTalleParaSku = codigoTalleParaSku;
+exports.codigoTalleParaSku = exports.TALLE_LETRAS_EQUIVALENTES = exports.nombreTalleDesdeCodigo = exports.TALLE_CODIGO_A_RANGO_ML = exports.TALLE_CODIGO_A_NOMBRE = void 0;
 /**
  * Mapeo código de talle Tango (3 dígitos) → nombre real del talle.
  * Usado en importación Tango y al listar talles para mostrar el talle verdadero.
@@ -37,6 +35,7 @@ function nombreTalleDesdeCodigo(codigo) {
     const c = (codigo || '').trim();
     return (_a = exports.TALLE_CODIGO_A_NOMBRE[c]) !== null && _a !== void 0 ? _a : c;
 }
+exports.nombreTalleDesdeCodigo = nombreTalleDesdeCodigo;
 /** Letra o código numérico → código Tango de 3 dígitos (para SKU / sizes). */
 const TALLE_NOMBRE_A_CODIGO = {
     P: '130',
@@ -83,3 +82,4 @@ function codigoTalleParaSku(nameOrCode) {
         return s;
     return (_a = TALLE_NOMBRE_A_CODIGO[s]) !== null && _a !== void 0 ? _a : s;
 }
+exports.codigoTalleParaSku = codigoTalleParaSku;

@@ -1487,18 +1487,11 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   <span className="text-sm font-black uppercase tracking-[0.22em]">Saldo pendiente</span>
                 </div>
                 <p className="text-[11px] text-slate-400 leading-relaxed max-w-xl">
-                  Es la <span className="text-slate-300">deuda actual</span>: cierre Tango + pedidos LupoHub pendientes − recibos.
-                  La tabla de abajo es el historial; el número grande de arriba es el que importa para cobrar.
+                  Es la <span className="text-slate-300">deuda actual</span>: suma de facturas y pedidos (Tango + LupoHub) − notas de
+                  crédito − recibos. La tabla de abajo es el historial; el número grande de arriba es el que importa para cobrar.
                 </p>
                 {carteraById[selectedCustomer.id] && (
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500 font-mono tabular-nums pt-1">
-                    <span>
-                      Cuenta importada: $
-                      {carteraById[selectedCustomer.id].multimediaSaldo.toLocaleString('es-AR', {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2
-                      })}
-                    </span>
                     <span>
                       + Facturas/pedidos: $
                       {carteraById[selectedCustomer.id].orderCargosPendientes.toLocaleString('es-AR', {
@@ -1506,8 +1499,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                         maximumFractionDigits: 2
                       })}
                     </span>
-                    <span className="text-violet-400/90" title="Solo NC de pedidos LupoHub; las NC importadas (CDE) ya están en cuenta importada">
-                      − NC LupoHub (IVA): $
+                    <span className="text-violet-400/90">
+                      − Notas de crédito: $
                       {carteraById[selectedCustomer.id].totalNotasCredito.toLocaleString('es-AR', {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2
@@ -2557,7 +2550,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 {canViewSaldos && (
                   <div
                     className="mb-2 rounded-xl border border-slate-600/35 bg-slate-900/55 px-2.5 py-2 text-[11px]"
-                    title="Suma del saldo de cuenta importada (Excel) y del saldo pendiente de pedidos en LupoHub. Tocá el cliente para ver números de facturas y recibos."
+                    title="Facturas/pedidos − notas de crédito − recibos (Tango importado + LupoHub). Tocá el cliente para el desglose."
                   >
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="flex items-center gap-1.5 text-slate-400 font-bold uppercase text-[10px] tracking-wide">
