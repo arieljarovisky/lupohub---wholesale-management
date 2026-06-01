@@ -440,7 +440,6 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
       `SELECT
          o.id AS order_id,
          o.date AS order_date,
-         o.created_at,
          o.remito_number,
          (${SQL_ORDER_SALDO_RESIDUAL}) AS residual,
          i.cbte_tipo,
@@ -458,7 +457,7 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
          AND ${SQL_ORDER_ACTIVE_COND}
          AND ${SQL_ORDER_IN_SALDO_SCOPE}
          AND (${SQL_ORDER_SALDO_RESIDUAL}) > 0.005
-       ORDER BY COALESCE(o.date, o.created_at) ASC, o.id ASC`,
+       ORDER BY o.date ASC, o.id ASC`,
       [id]
     )) as any[];
     const creditNoteRows = (await query(
@@ -525,7 +524,7 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
           : String(ord.order_id || '').slice(0, 12);
       return {
         lineOrder: maxLineOrder + 50000 + idx,
-        lineDate: ord.order_date || ord.created_at,
+        lineDate: ord.order_date,
         tipo: hasInvoice ? 'FAC' : 'PED',
         numero,
         edc: null,
