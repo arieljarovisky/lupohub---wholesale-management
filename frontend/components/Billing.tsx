@@ -485,10 +485,6 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   };
 
   const openLinkPaymentModal = (p: Payment) => {
-    if (p.source === 'imported' || String(p.id || '').startsWith('mm-')) {
-      showToast('error', 'Los recibos importados de Multimedias no se asocian acá. Cargá un recibo en el sistema.');
-      return;
-    }
     setPaymentModalMode('link');
     setLinkTargetPayment(p);
     setPayReceipt(p.receiptNumber || '');
@@ -1483,15 +1479,13 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                   )}
                 </div>
                 <div className="flex items-center gap-2 flex-wrap justify-end">
-                  {p.source !== 'imported' && !String(p.id || '').startsWith('mm-') && (
-                    <button
-                      type="button"
-                      className="px-2 py-1 rounded-lg bg-emerald-900/40 border border-emerald-700/50 text-[11px] font-bold text-emerald-200 hover:bg-emerald-900/60 touch-manipulation"
-                      onClick={() => openLinkPaymentModal(p)}
-                    >
-                      Asociar comprobantes
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className="px-2 py-1 rounded-lg bg-emerald-900/40 border border-emerald-700/50 text-[11px] font-bold text-emerald-200 hover:bg-emerald-900/60 touch-manipulation"
+                    onClick={() => openLinkPaymentModal(p)}
+                  >
+                    Asociar comprobantes
+                  </button>
                   {!isSeller && (
                   <button
                     type="button"
@@ -1833,10 +1827,19 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                   try {
                     setPaySubmitting(true);
                     if (paymentModalMode === 'link' && linkTargetPayment) {
+                      const isImportedTango =
+                        linkTargetPayment.source === 'imported' ||
+                        String(linkTargetPayment.id || '').startsWith('mm-');
                       const updated = await api.patchPaymentInvoices(
                         linkTargetPayment.id,
                         payInvoiceIds,
-                        payOrderIds
+                        payOrderIds,
+                        isImportedTango && linkTargetPayment.customerId && linkTargetPayment.importedLineOrder != null
+                          ? {
+                              customerId: linkTargetPayment.customerId,
+                              importedLineOrder: linkTargetPayment.importedLineOrder
+                            }
+                          : undefined
                       );
                       showToast('success', updated.allocationNote || 'Comprobantes asociados al recibo.');
                       setShowPaymentModal(false);

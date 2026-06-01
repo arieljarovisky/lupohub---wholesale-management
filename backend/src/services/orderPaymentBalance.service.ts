@@ -25,9 +25,16 @@ export const SQL_ORDER_NETO_GRAVADO = `GREATEST(
   ), 0)
 )`;
 
+/** Comisión importada: no es cobranza hasta que se imputa a facturas/pedidos. */
 export const SQL_PAYMENT_EXCLUDE_COMMISSION_P = `(
-  COALESCE(p.notes, '') NOT LIKE '%comisión vendedor%'
-  AND COALESCE(p.notes, '') NOT LIKE '%comision vendedor%'
+  (
+    COALESCE(p.notes, '') NOT LIKE '%comisión vendedor%'
+    AND COALESCE(p.notes, '') NOT LIKE '%comision vendedor%'
+  )
+  OR EXISTS (SELECT 1 FROM payment_invoices pi_comm WHERE pi_comm.payment_id = p.id)
+  OR EXISTS (SELECT 1 FROM payment_orders po_comm WHERE po_comm.payment_id = p.id)
+  OR (p.invoice_id IS NOT NULL AND TRIM(COALESCE(p.invoice_id, '')) <> '')
+  OR (p.order_id IS NOT NULL AND TRIM(COALESCE(p.order_id, '')) <> '')
 )`;
 
 /** Pagos imputados a este pedido: payment_orders, payment_invoices, o legacy order_id/invoice_id. */
@@ -489,13 +496,6 @@ export async function relinkPaymentToInvoices(
     err.statusCode = 404;
     throw err;
   }
-  const notes = String(payment.notes || '');
-  if (notes.includes('comisión vendedor') || notes.includes('comision vendedor')) {
-    const err: any = new Error('Este recibo es una comisión de vendedor y no se puede asociar a facturas');
-    err.statusCode = 400;
-    throw err;
-  }
-
   const amount = round2(Number(payment.amount) || 0);
   const systemInvoiceIds = invoiceIds.filter((id) => id && !id.startsWith('mm-'));
   const systemOrderIds = orderIds.filter((id) => id && !id.startsWith('mm-'));

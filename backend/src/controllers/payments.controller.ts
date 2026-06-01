@@ -156,6 +156,99 @@ async function ensurePaymentInvoiceRefsTable(): Promise<boolean> {
   }
 }
 
+function parsePaymentMoney(v: unknown): number {
+  if (v == null) return 0;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  const s = String(v).trim().replace(/\s/g, '').replace(/\$/g, '');
+  if (!s) return 0;
+  const hasComma = s.includes(',');
+  const hasDot = s.includes('.');
+  if (hasComma && hasDot) {
+    const n = Number(s.replace(/\./g, '').replace(',', '.'));
+    return Number.isFinite(n) ? n : 0;
+  }
+  if (hasComma) {
+    const n = Number(s.replace(',', '.'));
+    return Number.isFinite(n) ? n : 0;
+  }
+  const n = Number(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function normalizePaymentDate(v: unknown): string {
+  if (typeof v === 'string') {
+    const raw = v.trim();
+    const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) {
+      return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+    }
+  }
+  const d = new Date(v as string | number | Date);
+  if (Number.isNaN(d.getTime())) return String(v || '').slice(0, 10);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Crea o reutiliza un pago en `payments` para un REC importado de Tango/Multimedias. */
+async function ensurePaymentFromMultimediaEntry(
+  customerId: string,
+  lineOrder: number
+): Promise<string> {
+  const entry = (await get(
+    `SELECT e.numero, e.line_date, e.importe, e.detalle, c.seller_id
+     FROM customer_multimedia_entries e
+     JOIN customers c ON c.id = e.customer_id
+     WHERE e.customer_id = ? AND e.line_order = ?
+       AND UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'REC%'
+     LIMIT 1`,
+    [customerId, lineOrder]
+  )) as
+    | {
+        numero?: string;
+        line_date?: string;
+        importe?: unknown;
+        detalle?: string;
+        seller_id?: string | null;
+      }
+    | undefined;
+  if (!entry) {
+    const err: any = new Error('Recibo importado de Tango no encontrado');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const receiptNumber = String(entry.numero || '').trim();
+  const date = normalizePaymentDate(entry.line_date);
+  const amount = parsePaymentMoney(entry.importe);
+  const receiptStrict = normalizeReceiptNumberStrict(receiptNumber);
+  const notes = entry.detalle ? `Importado Tango: ${entry.detalle}` : 'Importado Tango';
+
+  const existing = (await get(
+    `SELECT id FROM payments
+     WHERE customer_id = ?
+       AND ABS(amount - ?) < 0.01
+       AND (
+         (receipt_number = ? AND date = ?)
+         OR (
+           UPPER(
+             REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(receipt_number, '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+           ) = ?
+           AND ABS(DATEDIFF(date, ?)) <= 1
+         )
+       )
+     LIMIT 1`,
+    [customerId, amount, receiptNumber, date, receiptStrict, date]
+  )) as { id: string } | undefined;
+  if (existing?.id) return existing.id;
+
+  const id = uuidv4();
+  await execute(
+    `INSERT INTO payments (id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes)
+     VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?)`,
+    [id, customerId, entry.seller_id ?? null, receiptNumber, date, amount, notes]
+  );
+  return id;
+}
+
 /** Listar pagos con filtros opcionales (cliente, factura, pedido, desde/hasta). */
 export const listPayments = async (req: any, res: Response) => {
   try {
@@ -774,13 +867,8 @@ export const patchPaymentInvoices = async (req: any, res: Response) => {
     if (!user || !canManagePayments(user.role)) {
       return res.status(403).json({ message: 'No autorizado' });
     }
-    const paymentId = String(req.params?.id || '').trim();
-    if (!paymentId) return res.status(400).json({ message: 'ID de recibo requerido' });
-    if (paymentId.startsWith('mm-')) {
-      return res.status(400).json({
-        message: 'Los recibos importados de Multimedias no se asocian desde acá; cargá un recibo en el sistema.'
-      });
-    }
+    const routePaymentId = String(req.params?.id || '').trim();
+    if (!routePaymentId) return res.status(400).json({ message: 'ID de recibo requerido' });
 
     const invoiceIds = Array.isArray(req.body?.invoiceIds)
       ? req.body.invoiceIds.map((x: unknown) => String(x || '').trim()).filter(Boolean)
@@ -788,8 +876,24 @@ export const patchPaymentInvoices = async (req: any, res: Response) => {
     const orderIds = Array.isArray(req.body?.orderIds)
       ? req.body.orderIds.map((x: unknown) => String(x || '').trim()).filter(Boolean)
       : [];
+    const importedInvoiceRefs = invoiceIds.filter((id) => id.startsWith('mm-fac-'));
+    const systemInvoiceIds = invoiceIds.filter((id) => id && !id.startsWith('mm-'));
+    const systemOrderIds = orderIds.filter((id) => id && !id.startsWith('mm-'));
 
     const paymentOrdersEnabled = await ensurePaymentOrdersTable();
+    const paymentInvoiceRefsEnabled = await ensurePaymentInvoiceRefsTable();
+
+    let paymentId = routePaymentId;
+    if (routePaymentId.startsWith('mm-')) {
+      const customerId = String(req.body?.customerId || '').trim();
+      const lineOrder = Number(req.body?.importedLineOrder);
+      if (!customerId || !Number.isFinite(lineOrder)) {
+        return res.status(400).json({
+          message: 'Para recibos importados de Tango indicá customerId e importedLineOrder'
+        });
+      }
+      paymentId = await ensurePaymentFromMultimediaEntry(customerId, lineOrder);
+    }
 
     const payment = (await get(
       `SELECT p.id, p.customer_id, c.seller_id
@@ -803,17 +907,31 @@ export const patchPaymentInvoices = async (req: any, res: Response) => {
       return res.status(403).json({ message: 'Solo podés modificar recibos de tus clientes' });
     }
 
-    const result = await relinkPaymentToInvoices(paymentId, invoiceIds, orderIds);
+    const result = await relinkPaymentToInvoices(paymentId, systemInvoiceIds, systemOrderIds);
+
+    if (paymentInvoiceRefsEnabled) {
+      await execute('DELETE FROM payment_invoice_refs WHERE payment_id = ?', [paymentId]);
+      if (importedInvoiceRefs.length > 0) {
+        for (const invRef of importedInvoiceRefs) {
+          await execute(
+            `INSERT IGNORE INTO payment_invoice_refs (payment_id, invoice_ref, source) VALUES (?, ?, 'IMPORTED')`,
+            [paymentId, invRef]
+          );
+        }
+      }
+    }
 
     const row = (await get(
       `SELECT
          p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id,
          p.receipt_number, p.date, p.amount, p.notes, p.created_at,
          GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids,
-         ${paymentOrdersEnabled ? `GROUP_CONCAT(DISTINCT po.order_id) AS order_ids` : `NULL AS order_ids`}
+         ${paymentOrdersEnabled ? `GROUP_CONCAT(DISTINCT po.order_id) AS order_ids` : `NULL AS order_ids`},
+         ${paymentInvoiceRefsEnabled ? `GROUP_CONCAT(DISTINCT pir.invoice_ref) AS invoice_refs` : `NULL AS invoice_refs`}
        FROM payments p
        LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
        ${paymentOrdersEnabled ? `LEFT JOIN payment_orders po ON po.payment_id = p.id` : ``}
+       ${paymentInvoiceRefsEnabled ? `LEFT JOIN payment_invoice_refs pir ON pir.payment_id = p.id` : ``}
        WHERE p.id = ?
        GROUP BY p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id,
          p.receipt_number, p.date, p.amount, p.notes, p.created_at`,
@@ -831,10 +949,16 @@ export const patchPaymentInvoices = async (req: any, res: Response) => {
         .map((x: string) => x.trim())
         .filter(Boolean),
       invoiceId: row.invoice_id ?? undefined,
-      invoiceIds: String(row.invoice_ids || row.invoice_id || '')
-        .split(',')
-        .map((x: string) => x.trim())
-        .filter(Boolean),
+      invoiceIds: [
+        ...String(row.invoice_ids || row.invoice_id || '')
+          .split(',')
+          .map((x: string) => x.trim())
+          .filter(Boolean),
+        ...String(row.invoice_refs || '')
+          .split(',')
+          .map((x: string) => x.trim())
+          .filter(Boolean)
+      ],
       receiptNumber: row.receipt_number,
       date: row.date,
       amount: Number(row.amount) || 0,

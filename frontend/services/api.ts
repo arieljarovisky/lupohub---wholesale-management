@@ -3246,7 +3246,8 @@ export const api = {
   patchPaymentInvoices: async (
     paymentId: string,
     invoiceIds: string[],
-    orderIds: string[] = []
+    orderIds: string[] = [],
+    opts?: { customerId?: string; importedLineOrder?: number }
   ): Promise<{
     id: string;
     invoiceIds: string[];
@@ -3267,7 +3268,9 @@ export const api = {
   }> => {
     return await request(`/payments/${encodeURIComponent(paymentId)}/invoices`, 'PATCH', {
       invoiceIds,
-      orderIds
+      orderIds,
+      ...(opts?.customerId ? { customerId: opts.customerId } : {}),
+      ...(opts?.importedLineOrder != null ? { importedLineOrder: opts.importedLineOrder } : {})
     });
   },
   updatePaymentDate: async (paymentId: string, date: string): Promise<import('../types').Payment> => {

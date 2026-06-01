@@ -990,13 +990,16 @@ function parseSaldoNumero(v: unknown): number {
  * Si entran en el saldo, el cliente figura con saldo a favor erróneo.
  */
 const SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT = `(
-  COALESCE(p.notes, '') NOT LIKE '%comisión vendedor%'
-  AND COALESCE(p.notes, '') NOT LIKE '%comision vendedor%'
+  (
+    COALESCE(p.notes, '') NOT LIKE '%comisión vendedor%'
+    AND COALESCE(p.notes, '') NOT LIKE '%comision vendedor%'
+  )
+  OR EXISTS (SELECT 1 FROM payment_invoices pi_comm WHERE pi_comm.payment_id = p.id)
+  OR EXISTS (SELECT 1 FROM payment_orders po_comm WHERE po_comm.payment_id = p.id)
+  OR (p.invoice_id IS NOT NULL AND TRIM(COALESCE(p.invoice_id, '')) <> '')
+  OR (p.order_id IS NOT NULL AND TRIM(COALESCE(p.order_id, '')) <> '')
 )`;
-const SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT_PLAIN = `(
-  COALESCE(notes, '') NOT LIKE '%comisión vendedor%'
-  AND COALESCE(notes, '') NOT LIKE '%comision vendedor%'
-)`;
+const SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT_PLAIN = SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT;
 
 const CARTERA_MM_LAST_SALDO_SUBQUERY = `
   SELECT
