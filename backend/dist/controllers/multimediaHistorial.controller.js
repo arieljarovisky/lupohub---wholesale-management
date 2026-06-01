@@ -402,23 +402,35 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
          o.id AS order_id,
          o.date AS order_date,
          o.remito_number,
-         (${orderPaymentBalance_service_1.SQL_ORDER_SALDO_RESIDUAL}) AS residual,
-         i.cbte_tipo,
-         i.punto_venta,
-         i.cbte_desde,
-         CASE WHEN i.id IS NOT NULL THEN 1 ELSE 0 END AS has_invoice
+         (${orderPaymentBalance_service_1.SQL_ORDER_SALDO_RESIDUAL}) AS residual
        FROM orders o
        LEFT JOIN (
          SELECT order_id, SUM(amount_credited) AS cn_total
          FROM credit_notes
+         WHERE COALESCE(superseded_by_reinvoice, 0) = 0
          GROUP BY order_id
        ) cn ON cn.order_id = o.id
        LEFT JOIN invoices i ON i.order_id = o.id
        WHERE o.customer_id = ?
          AND ${SQL_ORDER_ACTIVE_COND}
          AND ${orderPaymentBalance_service_1.SQL_ORDER_IN_SALDO_SCOPE}
+         AND i.id IS NULL
          AND (${orderPaymentBalance_service_1.SQL_ORDER_SALDO_RESIDUAL}) > 0.005
        ORDER BY o.date ASC, o.id ASC`, [id]));
+        const invoiceRows = (yield (0, db_1.query)(`SELECT
+         i.id,
+         i.order_id,
+         i.cbte_tipo,
+         i.punto_venta,
+         i.cbte_desde,
+         COALESCE(DATE(i.created_at), o.date) AS line_date,
+         i.agip_ret_per,
+         o.total,
+         o.date AS order_date
+       FROM invoices i
+       JOIN orders o ON o.id = i.order_id
+       WHERE o.customer_id = ?
+       ORDER BY i.created_at ASC, i.id ASC`, [id]));
         const creditNoteRows = (yield (0, db_1.query)(`SELECT
          cn.id,
          cn.order_id,
@@ -448,22 +460,36 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
         const maxLineOrder = entries.reduce((m, e) => Math.max(m, Number(e.line_order || 0)), 0);
         const orderSaldoAsEntries = orderSaldoRows.map((ord, idx) => {
             const residual = Math.round(Number(ord.residual || 0) * 100) / 100;
-            const hasInvoice = !!Number(ord.has_invoice);
-            const numero = hasInvoice
-                ? formatLedgerAfipNumero(Number(ord.cbte_tipo || 0), Number(ord.punto_venta || 0), Number(ord.cbte_desde || 0))
-                : ord.remito_number != null && Number(ord.remito_number) > 0
-                    ? String(Number(ord.remito_number))
-                    : String(ord.order_id || '').slice(0, 12);
+            const numero = ord.remito_number != null && Number(ord.remito_number) > 0
+                ? String(Number(ord.remito_number))
+                : String(ord.order_id || '').slice(0, 12);
             return {
                 lineOrder: maxLineOrder + 50000 + idx,
                 lineDate: ord.order_date,
-                tipo: hasInvoice ? 'FAC' : 'PED',
+                tipo: 'PED',
                 numero,
                 edc: null,
                 vto: null,
                 importe: residual > 0 ? residual : null,
                 saldo: null,
-                detalle: `Pedido ${ord.order_id || ''} · Saldo pendiente${hasInvoice ? ' (facturado)' : ' (sin factura)'}`,
+                detalle: `Pedido ${ord.order_id || ''} · Saldo pendiente (sin factura)`,
+                paginaPdf: null,
+                source: 'system'
+            };
+        });
+        const invoiceAsEntries = invoiceRows.map((inv, idx) => {
+            const importe = Math.round((Number(inv.total || 0) * 1.21 + Number(inv.agip_ret_per || 0)) * 100) / 100;
+            const numero = formatLedgerAfipNumero(Number(inv.cbte_tipo || 0), Number(inv.punto_venta || 0), Number(inv.cbte_desde || 0));
+            return {
+                lineOrder: maxLineOrder + 55000 + idx,
+                lineDate: inv.line_date || inv.order_date,
+                tipo: 'FAC',
+                numero,
+                edc: null,
+                vto: null,
+                importe: importe > 0 ? importe : null,
+                saldo: null,
+                detalle: `Pedido ${inv.order_id || ''} · Factura AFIP LupoHub`,
                 paginaPdf: null,
                 source: 'system'
             };
@@ -557,6 +583,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 source: 'imported'
             })),
             ...orderSaldoAsEntries,
+            ...invoiceAsEntries,
             ...creditNoteAsEntries,
             ...manualComprobanteAsEntries,
             ...paymentAsEntries
@@ -576,7 +603,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 lineDate: row.lineDate,
                 numero: row.numero,
                 importe: row.importe,
-            });
+            }) + (String(row.detalle || '').includes('AFIP LupoHub') ? '|LH' : '');
             const prev = movementByKey.get(key);
             if (!prev) {
                 movementByKey.set(key, row);

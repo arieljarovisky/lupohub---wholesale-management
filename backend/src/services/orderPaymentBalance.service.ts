@@ -101,6 +101,22 @@ export const SQL_INVOICE_AGIP_RET_PER = `COALESCE((
   SELECT i.agip_ret_per FROM invoices i WHERE i.order_id = o.id LIMIT 1
 ), 0)`;
 
+/** Cargo neto de NC (sin IVA en pedidos sin factura; con IVA 21% + IIBB si hay factura AFIP). */
+export const SQL_ORDER_CARGO_SALDO = `CASE
+  WHEN EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
+    THEN ROUND(
+      GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21
+      + (${SQL_INVOICE_AGIP_RET_PER}),
+    2)
+  ELSE ROUND(GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)), 2)
+END`;
+
+/** Saldo pendiente del pedido menos cobros imputados (neto sin factura; con IVA si está facturado). */
+export const SQL_ORDER_SALDO_RESIDUAL = `GREATEST(0,
+  (${SQL_ORDER_CARGO_SALDO})
+  - (${SQL_ORDER_PAID_ON_ORDER})
+)`;
+
 /** Pedido con NC de reemisión (NC + factura nueva con IIBB); no se descuenta el recibo imputado al cargo viejo. */
 export const SQL_ORDER_HAS_SUPERSEDED_REINVOICE = `EXISTS (
   SELECT 1 FROM credit_notes cn_r
@@ -119,22 +135,6 @@ export const SQL_ORDER_CARTERA_NET = `CASE
     THEN (${SQL_ORDER_CARGO_REINVOICE_NET})
   ELSE (${SQL_ORDER_SALDO_RESIDUAL})
 END`;
-
-/** Cargo neto de NC (sin IVA en pedidos sin factura; con IVA 21% + IIBB si hay factura AFIP). */
-export const SQL_ORDER_CARGO_SALDO = `CASE
-  WHEN EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
-    THEN ROUND(
-      GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21
-      + (${SQL_INVOICE_AGIP_RET_PER}),
-    2)
-  ELSE ROUND(GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)), 2)
-END`;
-
-/** Saldo pendiente del pedido menos cobros imputados (neto sin factura; con IVA si está facturado). */
-export const SQL_ORDER_SALDO_RESIDUAL = `GREATEST(0,
-  (${SQL_ORDER_CARGO_SALDO})
-  - (${SQL_ORDER_PAID_ON_ORDER})
-)`;
 
 export const SQL_ORDER_IN_SALDO_SCOPE = `(
   COALESCE(o.include_in_saldo, 0) = 1

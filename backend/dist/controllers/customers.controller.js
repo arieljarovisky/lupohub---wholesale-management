@@ -1111,6 +1111,36 @@ const SQL_ORDER_NETO_GRAVADO = `GREATEST(
 )`;
 const SQL_ORDER_CARGO_CON_IVA = `ROUND((${SQL_ORDER_NETO_GRAVADO}) * 1.21, 2)`;
 const SQL_ORDER_ACTIVE_COND = `o.status NOT IN ('Cancelado', 'Borrador') AND (o.archived = 0 OR o.archived IS NULL)`;
+/** Pedidos que suman cargo bruto en cartera (incluye facturados aunque estén pagos). */
+const SQL_ORDER_CARGO_GROSS_SCOPE = `(
+  ${orderPaymentBalance_service_1.SQL_ORDER_IN_SALDO_SCOPE}
+  OR EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
+)`;
+/** Subquery agregada: cargo bruto por cliente (IVA + IIBB, neto de NC activas). */
+const SQL_CARTERA_OB_GROSS_SUBQUERY = `
+  SELECT
+    o.customer_id,
+    SUM(${orderPaymentBalance_service_1.SQL_ORDER_CARGO_SALDO}) AS facturas_bruto
+  FROM orders o
+  LEFT JOIN (${orderPaymentBalance_service_1.SQL_CN_TOTAL_SUBQUERY}) cn ON cn.order_id = o.id
+  WHERE ${SQL_ORDER_ACTIVE_COND}
+    AND ${SQL_ORDER_CARGO_GROSS_SCOPE}
+  GROUP BY o.customer_id
+`;
+/** Subquery agregada: saldo neto por cliente (reemisión = cargo factura nueva; resto = cargo − cobros). */
+const SQL_CARTERA_OB_NET_SUBQUERY = `
+  SELECT
+    o.customer_id,
+    SUM(${orderPaymentBalance_service_1.SQL_ORDER_CARTERA_NET}) AS facturas_neto
+  FROM orders o
+  LEFT JOIN (${orderPaymentBalance_service_1.SQL_CN_TOTAL_SUBQUERY}) cn ON cn.order_id = o.id
+  WHERE ${SQL_ORDER_ACTIVE_COND}
+    AND (
+      ${orderPaymentBalance_service_1.SQL_ORDER_IN_SALDO_SCOPE}
+      OR ${SQL_ORDER_CARGO_GROSS_SCOPE}
+    )
+  GROUP BY o.customer_id
+`;
 /** Recibos sin imputar a factura/pedido (el resto se descuenta del cargo de cada pedido). */
 const SQL_PAYMENT_UNALLOCATED_COND = `NOT EXISTS (
   SELECT 1 FROM payment_invoices pi WHERE pi.payment_id = p.id
@@ -1120,13 +1150,12 @@ AND NOT EXISTS (
 )
 AND TRIM(COALESCE(p.invoice_id, '')) = ''
 AND TRIM(COALESCE(p.order_id, '')) = ''`;
-/** Saldo = facturas/pedidos (LupoHub + import Tango) − NC − recibos. */
+/** Saldo = cargos netos LupoHub + import − NC/import NC − recibos (sin restar NC dos veces). */
 function carteraSaldoSqlExpr() {
     return `ROUND(
-    COALESCE(ob.facturas_bruto, 0)
+    COALESCE(obn.facturas_neto, 0)
     + COALESCE(mfac.manual_fac, 0)
     + COALESCE(imp.import_debe, 0)
-    - COALESCE(ncv.nc_iva, 0)
     - COALESCE(mnc.manual_nc, 0)
     - COALESCE(imp.import_nc, 0)
     - COALESCE(pay.total_pagos, 0)
@@ -1215,6 +1244,7 @@ const getSaldosPendientes = (req, res) => __awaiter(void 0, void 0, void 0, func
       LEFT JOIN (
         SELECT order_id, SUM(amount_credited) AS cn_total
         FROM credit_notes
+        WHERE COALESCE(superseded_by_reinvoice, 0) = 0
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
       WHERE ${SQL_ORDER_ACTIVE_COND}
@@ -1419,20 +1449,8 @@ const getCarteraTotals = (req, res) => __awaiter(void 0, void 0, void 0, functio
       ${carteraTotalRecibosSql()} AS totalPagos,
       ${saldoExpr} AS saldoPendienteUnificado
     FROM customers c
-    LEFT JOIN (
-      SELECT
-        o.customer_id,
-        SUM(${orderPaymentBalance_service_1.SQL_ORDER_SALDO_RESIDUAL}) AS facturas_bruto
-      FROM orders o
-      LEFT JOIN (
-        SELECT order_id, SUM(amount_credited) AS cn_total
-        FROM credit_notes
-        GROUP BY order_id
-      ) cn ON cn.order_id = o.id
-      WHERE ${SQL_ORDER_ACTIVE_COND}
-        AND ${orderPaymentBalance_service_1.SQL_ORDER_IN_SALDO_SCOPE}
-      GROUP BY o.customer_id
-    ) ob ON ob.customer_id = c.id
+    LEFT JOIN (${SQL_CARTERA_OB_GROSS_SUBQUERY}) ob ON ob.customer_id = c.id
+    LEFT JOIN (${SQL_CARTERA_OB_NET_SUBQUERY}) obn ON obn.customer_id = c.id
     LEFT JOIN (
       SELECT customer_id, SUM(ROUND(importe_neto + COALESCE(agip_ret_per, 0), 2)) AS manual_fac
       FROM customer_manual_comprobantes
@@ -1450,11 +1468,7 @@ const getCarteraTotals = (req, res) => __awaiter(void 0, void 0, void 0, functio
         o.customer_id,
         SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), (${SQL_ORDER_NETO_GRAVADO})) * 1.21, 2)) AS nc_iva
       FROM orders o
-      LEFT JOIN (
-        SELECT order_id, SUM(amount_credited) AS cn_total
-        FROM credit_notes
-        GROUP BY order_id
-      ) cn ON cn.order_id = o.id
+      LEFT JOIN (${orderPaymentBalance_service_1.SQL_CN_TOTAL_SUBQUERY}) cn ON cn.order_id = o.id
       WHERE ${SQL_ORDER_ACTIVE_COND}
         AND ${orderPaymentBalance_service_1.SQL_ORDER_IN_SALDO_SCOPE}
       GROUP BY o.customer_id
@@ -1475,20 +1489,8 @@ const getCarteraTotals = (req, res) => __awaiter(void 0, void 0, void 0, functio
       ${carteraTotalRecibosSql()} AS totalPagos,
       ${saldoExpr} AS saldoPendienteUnificado
     FROM customers c
-    LEFT JOIN (
-      SELECT
-        o.customer_id,
-        SUM(${orderPaymentBalance_service_1.SQL_ORDER_SALDO_RESIDUAL}) AS facturas_bruto
-      FROM orders o
-      LEFT JOIN (
-        SELECT order_id, SUM(amount_credited) AS cn_total
-        FROM credit_notes
-        GROUP BY order_id
-      ) cn ON cn.order_id = o.id
-      WHERE ${SQL_ORDER_ACTIVE_COND}
-        AND ${orderPaymentBalance_service_1.SQL_ORDER_IN_SALDO_SCOPE}
-      GROUP BY o.customer_id
-    ) ob ON ob.customer_id = c.id
+    LEFT JOIN (${SQL_CARTERA_OB_GROSS_SUBQUERY}) ob ON ob.customer_id = c.id
+    LEFT JOIN (${SQL_CARTERA_OB_NET_SUBQUERY}) obn ON obn.customer_id = c.id
     LEFT JOIN (
       SELECT customer_id, SUM(ROUND(importe_neto + COALESCE(agip_ret_per, 0), 2)) AS manual_fac
       FROM customer_manual_comprobantes
@@ -1509,6 +1511,7 @@ const getCarteraTotals = (req, res) => __awaiter(void 0, void 0, void 0, functio
       LEFT JOIN (
         SELECT order_id, SUM(amount_credited) AS cn_total
         FROM credit_notes
+        WHERE COALESCE(superseded_by_reinvoice, 0) = 0
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
       WHERE ${SQL_ORDER_ACTIVE_COND}
@@ -1613,13 +1616,8 @@ function fetchCarteraSaldoUnificadoMap(sellerIdFilter, user) {
         const sql = `
     SELECT c.id AS customerId, ${saldoExpr} AS saldoPendienteUnificado
     FROM customers c
-    LEFT JOIN (
-      SELECT o.customer_id, SUM(${orderPaymentBalance_service_1.SQL_ORDER_SALDO_RESIDUAL}) AS facturas_bruto
-      FROM orders o
-      LEFT JOIN (SELECT order_id, SUM(amount_credited) AS cn_total FROM credit_notes GROUP BY order_id) cn ON cn.order_id = o.id
-      WHERE ${SQL_ORDER_ACTIVE_COND} AND ${orderPaymentBalance_service_1.SQL_ORDER_IN_SALDO_SCOPE}
-      GROUP BY o.customer_id
-    ) ob ON ob.customer_id = c.id
+    LEFT JOIN (${SQL_CARTERA_OB_GROSS_SUBQUERY}) ob ON ob.customer_id = c.id
+    LEFT JOIN (${SQL_CARTERA_OB_NET_SUBQUERY}) obn ON obn.customer_id = c.id
     LEFT JOIN (
       SELECT customer_id, SUM(ROUND(importe_neto + COALESCE(agip_ret_per, 0), 2)) AS manual_fac
       FROM customer_manual_comprobantes WHERE tipo = 'FACTURA' GROUP BY customer_id
@@ -1628,14 +1626,6 @@ function fetchCarteraSaldoUnificadoMap(sellerIdFilter, user) {
       SELECT customer_id, SUM(ROUND(importe_neto, 2)) AS manual_nc
       FROM customer_manual_comprobantes WHERE tipo = 'NC' GROUP BY customer_id
     ) mnc ON mnc.customer_id = c.id
-    LEFT JOIN (
-      SELECT o.customer_id,
-        SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), (${SQL_ORDER_NETO_GRAVADO})) * 1.21, 2)) AS nc_iva
-      FROM orders o
-      LEFT JOIN (SELECT order_id, SUM(amount_credited) AS cn_total FROM credit_notes GROUP BY order_id) cn ON cn.order_id = o.id
-      WHERE ${SQL_ORDER_ACTIVE_COND} AND ${orderPaymentBalance_service_1.SQL_ORDER_IN_SALDO_SCOPE}
-      GROUP BY o.customer_id
-    ) ncv ON ncv.customer_id = c.id
     LEFT JOIN (${carteraImportedSql_1.CARTERA_IMPORTED_MOVEMENTS_AGG_SUBQUERY}) imp ON imp.customer_id = c.id
     LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
     WHERE 1=1 ${sellerFilter}
@@ -1743,6 +1733,7 @@ const exportSaldosPendientesCsv = (req, res) => __awaiter(void 0, void 0, void 0
       LEFT JOIN (
         SELECT order_id, SUM(amount_credited) AS cn_total
         FROM credit_notes
+        WHERE COALESCE(superseded_by_reinvoice, 0) = 0
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
       WHERE ${SQL_ORDER_ACTIVE_COND}
@@ -3099,6 +3090,7 @@ const exportSaldosPendientesMultimediasXlsx = (req, res) => __awaiter(void 0, vo
       LEFT JOIN (
         SELECT order_id, SUM(amount_credited) AS cn_total
         FROM credit_notes
+        WHERE COALESCE(superseded_by_reinvoice, 0) = 0
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
       WHERE ${SQL_ORDER_ACTIVE_COND}
@@ -3829,6 +3821,7 @@ function buildCustomerFinancialSummary(customerId) {
       FROM credit_notes cn
       JOIN orders o ON o.id = cn.order_id
       WHERE o.customer_id = ?
+        AND COALESCE(cn.superseded_by_reinvoice, 0) = 0
 
       UNION ALL
 
@@ -3866,12 +3859,14 @@ function buildCustomerFinancialSummary(customerId) {
       LEFT JOIN (
         SELECT order_id, SUM(amount_credited) AS cn_total
         FROM credit_notes
+        WHERE COALESCE(superseded_by_reinvoice, 0) = 0
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
       WHERE o.customer_id = ?
         AND ${SQL_ORDER_ACTIVE_COND}
         AND ${orderPaymentBalance_service_1.SQL_ORDER_IN_SALDO_SCOPE}
         AND (${orderPaymentBalance_service_1.SQL_ORDER_SALDO_RESIDUAL}) > 0.005
+        AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
 
       UNION ALL
 
@@ -3992,31 +3987,9 @@ function buildCustomerFinancialSummary(customerId) {
             const tipo = String(m.tipo || '').toUpperCase();
             existingKeys.add(toKey(tipo, m.fecha, m.comprobante, Number(m.debe || 0), Number(m.haber || 0)));
         }
-        const invoicedOrderTokens = new Set();
-        const orderRowsWithInvoice = (yield (0, db_1.query)(`SELECT o.id FROM orders o INNER JOIN invoices i ON i.order_id = o.id WHERE o.customer_id = ?`, [customerId]));
-        for (const row of orderRowsWithInvoice) {
-            const id = String(row.id || '').trim();
-            if (!id)
-                continue;
-            invoicedOrderTokens.add(id.toUpperCase());
-            if (id.startsWith('O-'))
-                invoicedOrderTokens.add(id.replace(/^O-/, '0-').toUpperCase());
-            if (id.startsWith('0-'))
-                invoicedOrderTokens.add(id.replace(/^0-/, 'O-').toUpperCase());
-        }
-        const detalleRefsInvoicedOrder = (detalle) => {
-            const d = String(detalle || '').toUpperCase();
-            for (const tok of invoicedOrderTokens) {
-                if (tok && d.includes(tok))
-                    return true;
-            }
-            return false;
-        };
         for (const e of importedEntries) {
             const tipo = classifyImportedEntry(String(e.tipo_raw || ''), String(e.detalle || ''));
             if (!tipo)
-                continue;
-            if (tipo === 'FACTURA' && detalleRefsInvoicedOrder(String(e.detalle || '')))
                 continue;
             const importe = Math.round(Math.abs(parseMoney(e.importe)) * 100) / 100;
             if (importe <= 0)

@@ -412,6 +412,7 @@ const getLinkableOrdersForPayment = (req, res) => __awaiter(void 0, void 0, void
        LEFT JOIN (
          SELECT order_id, SUM(amount_credited) AS cn_total
          FROM credit_notes
+         WHERE COALESCE(superseded_by_reinvoice, 0) = 0
          GROUP BY order_id
        ) cn ON cn.order_id = o.id
        WHERE o.customer_id = ?
@@ -1840,6 +1841,8 @@ const reemitirFacturaConAgip = (req, res) => __awaiter(void 0, void 0, void 0, f
                 id
             ]);
             yield (0, db_1.execute)(`UPDATE credit_notes SET superseded_by_reinvoice = 1 WHERE id = ?`, [creditNoteId]);
+            yield (0, orderPaymentBalance_service_1.syncOrderPaymentStatus)(id);
+            yield (0, orderPaymentBalance_service_1.syncAllOrderPaymentStatusForCustomer)(String(orderRow.customer_id));
             const padronHint = agip.periodUsed && agipPeriodYyyymmFromOrderDate(orderRow.date) !== agip.periodUsed
                 ? ` (padrón AGIP ${agip.periodUsed})`
                 : '';
@@ -2029,6 +2032,8 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                     (_d = agip === null || agip === void 0 ? void 0 : agip.amount) !== null && _d !== void 0 ? _d : 0
                 ]);
                 yield (0, db_1.execute)('UPDATE orders SET total = ? WHERE id = ?', [totalForAfip, id]);
+                yield (0, orderPaymentBalance_service_1.syncOrderPaymentStatus)(id);
+                yield (0, orderPaymentBalance_service_1.syncAllOrderPaymentStatusForCustomer)(String(orderRow.customer_id));
                 return {
                     id: invoiceId,
                     orderId: id,
