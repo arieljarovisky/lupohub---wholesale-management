@@ -10,7 +10,7 @@ import { getWholesaleStockImpactMeta } from '../utils/orderStockImpact';
 import { orderNetoSaldoForOrderCard, orderTotalesFacturado } from '../utils/wholesaleInvoiceHtml';
 import { canonicalizeCityInput, cityDisplayLabel, isCabaCity, normalizeCityKey } from '../utils/cityNormalize';
 import { CityInput } from './CityInput';
-import { ledgerTipoDisplay, normalizeLedgerDocType } from '../utils/ledgerDocType';
+import { ledgerTipoDisplay } from '../utils/ledgerDocType';
 
 interface CustomersProps {
   customers: Customer[];
@@ -669,38 +669,19 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
       ? multimediaLedger.entries
       : financialSummaryAsLedger;
     if (!entries?.length) return [];
-    const rows = [...entries].sort((a, b) => {
+    return [...entries].sort((a, b) => {
       const da = ledgerDateMs(a.lineDate) - ledgerDateMs(b.lineDate);
       if (da !== 0) return da;
       return Number(a.lineOrder || 0) - Number(b.lineOrder || 0);
     });
-    let runningSaldo = 0;
-    let hasRunningSaldo = false;
-    const withSaldo = rows.map((row) => {
-      const next = { ...row };
-      if (next.importe != null && Number.isFinite(Number(next.importe))) {
-        const amount = Math.abs(Number(next.importe));
-        const tipoNorm = normalizeLedgerDocType(next.tipo, next.detalle);
-        if (tipoNorm === 'REC' || tipoNorm === 'NC') {
-          runningSaldo -= amount;
-          hasRunningSaldo = true;
-        } else if (tipoNorm === 'FAC' || tipoNorm === 'ND' || tipoNorm === 'PED') {
-          runningSaldo += amount;
-          hasRunningSaldo = true;
-        }
-      }
-      next.saldo = hasRunningSaldo ? Number(runningSaldo.toFixed(2)) : null;
-      return next;
-    });
-    return withSaldo;
   }, [multimediaLedger, financialSummaryAsLedger]);
 
-  const ledgerSaldoCorridoFinal = (() => {
-    const fromApi = multimediaLedger?.lastSaldo;
-    if (fromApi != null && Number.isFinite(Number(fromApi))) return Number(fromApi);
-    if (unifiedLedgerEntries.length === 0) return null;
-    return unifiedLedgerEntries[unifiedLedgerEntries.length - 1]?.saldo ?? null;
-  })();
+  const ledgerSaldoHistorialFinal =
+    multimediaLedger?.lastSaldo != null && Number.isFinite(Number(multimediaLedger.lastSaldo))
+      ? Number(multimediaLedger.lastSaldo)
+      : unifiedLedgerEntries.length > 0
+        ? unifiedLedgerEntries[unifiedLedgerEntries.length - 1]?.saldo ?? null
+        : null;
 
   const unifiedLedgerEntriesNewestFirst = useMemo(() => {
     if (!unifiedLedgerEntries.length) return [];
@@ -1525,8 +1506,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                         maximumFractionDigits: 2
                       })}
                     </span>
-                    <span className="text-violet-400/90">
-                      − Notas de crédito (IVA): $
+                    <span className="text-violet-400/90" title="Solo NC de pedidos LupoHub; las NC importadas (CDE) ya están en cuenta importada">
+                      − NC LupoHub (IVA): $
                       {carteraById[selectedCustomer.id].totalNotasCredito.toLocaleString('es-AR', {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2
@@ -1605,19 +1586,19 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   </p>
                 ) : null}
                 {carteraById[selectedCustomer.id] &&
-                  ledgerSaldoCorridoFinal != null &&
-                  Math.abs(ledgerSaldoCorridoFinal - getSaldoPendienteTotal(selectedCustomer)) > 1 && (
+                  ledgerSaldoHistorialFinal != null &&
+                  Math.abs(ledgerSaldoHistorialFinal - getSaldoPendienteTotal(selectedCustomer)) > 1 && (
                     <div className="mb-3 rounded-xl border border-amber-600/40 bg-amber-950/30 px-3 py-2.5 text-xs text-amber-100/90 leading-relaxed">
-                      <span className="font-bold">Saldo pendiente</span> ($
+                      El <span className="font-bold">saldo pendiente</span> ($
                       {getSaldoPendienteTotal(selectedCustomer).toLocaleString('es-AR', {
                         minimumFractionDigits: 2
                       })}
-                      ): cierre Multimedias + pedidos LupoHub pendientes − recibos sin imputar (deuda actual).{' '}
-                      <span className="font-bold">Saldo corrido</span> ($
-                      {ledgerSaldoCorridoFinal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-                      ): suma de todo el historial (facturas/ND − NC incl.{' '}
-                      <span className="font-mono">CDE</span> Tango − recibos). Suele acercarse al Excel de Comisiones;
-                      no tiene por qué coincidir con el saldo pendiente si el cierre importado ya descontó cobros.
+                      ) es la deuda actual (cierre importado + pedidos LupoHub − recibos). El{' '}
+                      <span className="font-bold">saldo corrido</span> de la tabla ($
+                      {ledgerSaldoHistorialFinal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                      ) reconstruye el historial; en filas importadas usa el saldo del Excel Tango. En el export por
+                      vendedor, <span className="font-bold">CARTERA</span> coincide con este saldo pendiente;{' '}
+                      <span className="font-bold">PERÍODO</span> es solo el rango de fechas elegido.
                     </div>
                   )}
                 {renderLedgerTable(

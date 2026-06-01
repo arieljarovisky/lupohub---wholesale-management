@@ -19,7 +19,12 @@ import {
   SQL_ORDER_NETO_GRAVADO,
   SQL_ORDER_SALDO_RESIDUAL
 } from '../services/orderPaymentBalance.service';
-import { ledgerDocTypeAffectsSaldo, normalizeLedgerDocType } from '../utils/ledgerDocType';
+import { normalizeLedgerDocType } from '../utils/ledgerDocType';
+import {
+  applyLedgerRunningSaldo,
+  filterSystemDuplicatesAgainstImport,
+  ledgerMovementDedupeKey,
+} from '../utils/ledgerRunningSaldo';
 
 const SQL_ORDER_ACTIVE_COND = `o.status NOT IN ('Cancelado', 'Borrador') AND (o.archived = 0 OR o.archived IS NULL)`;
 
@@ -494,13 +499,6 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
         [id]
       )) as any[];
     }
-    const normalizeDocNumber = (value: any) => {
-      const raw = String(value || '').trim().toUpperCase();
-      if (!raw) return '';
-      const cleaned = raw.replace(/[^A-Z0-9-]/g, '');
-      const parts = cleaned.split('-').map((p) => p.replace(/^0+/, '') || '0');
-      return parts.join('-');
-    };
     const normalizeDocType = (tipo: any, detalle: any) => normalizeLedgerDocType(tipo, detalle);
     const maxLineOrder = entries.reduce((m, e) => Math.max(m, Number(e.line_order || 0)), 0);
     const orderSaldoAsEntries = orderSaldoRows.map((ord, idx) => {
@@ -638,12 +636,13 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
         deduped.push(row);
         continue;
       }
-      const key = [
-        tipoNorm,
-        String(row.lineDate || '').slice(0, 10),
-        normalizeDocNumber(row.numero),
-        Number(row.importe || 0).toFixed(2),
-      ].join('|');
+      const key = ledgerMovementDedupeKey({
+        tipo: row.tipo,
+        detalle: row.detalle,
+        lineDate: row.lineDate,
+        numero: row.numero,
+        importe: row.importe,
+      });
       const prev = movementByKey.get(key);
       if (!prev) {
         movementByKey.set(key, row);
@@ -655,40 +654,26 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
       }
     }
     deduped.push(...Array.from(movementByKey.values()));
-    deduped.sort((a, b) => {
+    const unified = filterSystemDuplicatesAgainstImport(deduped);
+    unified.sort((a, b) => {
       const da = new Date(a.lineDate || 0).getTime() || 0;
       const db = new Date(b.lineDate || 0).getTime() || 0;
       if (da !== db) return da - db;
       return Number(a.lineOrder || 0) - Number(b.lineOrder || 0);
     });
-    let runningSaldo = 0;
-    let hasRunningSaldo = false;
-    for (const row of deduped) {
-      if (row.importe != null && Number.isFinite(Number(row.importe))) {
-        const tipoNorm = normalizeDocType(row.tipo, row.detalle);
-        const amount = Math.abs(Number(row.importe)) || 0;
-        const side = ledgerDocTypeAffectsSaldo(tipoNorm);
-        if (side === 'haber') {
-          runningSaldo -= amount;
-          hasRunningSaldo = true;
-        } else if (side === 'debe') {
-          runningSaldo += amount;
-          hasRunningSaldo = true;
-        }
-      }
-      row.saldoCorrido = hasRunningSaldo ? Number(runningSaldo.toFixed(2)) : null;
-      row.saldo = row.saldoCorrido;
+    const lastSaldo = applyLedgerRunningSaldo(unified);
+    for (const row of unified) {
+      row.saldo = row.saldoCorrido ?? null;
     }
-    const lastSaldo = hasRunningSaldo ? Number(runningSaldo.toFixed(2)) : 0;
 
     res.json({
       customerId: id,
       legacyCode: cust.legacy_code ?? null,
       accountZone: cust.account_zone ?? null,
       accountSellerLabel: cust.account_seller_label ?? null,
-      movementCount: deduped.length,
+      movementCount: unified.length,
       lastSaldo,
-      entries: deduped
+      entries: unified
     });
   } catch (e: any) {
     console.error('getCustomerMultimediaLedger:', e);
