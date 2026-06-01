@@ -577,6 +577,7 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
         saldo: null,
         detalle: `${pedidoRef} · Comprobante manual${pdfNote}${detalleExtra ? ` · ${detalleExtra}` : ''}`,
         paginaPdf: null,
+        manualComprobanteId: m.id,
         source: 'system' as const
       };
     });

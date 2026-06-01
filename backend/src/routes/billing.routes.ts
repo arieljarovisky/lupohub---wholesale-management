@@ -17,6 +17,7 @@ import {
   getManualComprobantePdf,
   updateManualComprobante,
   updateManualComprobanteMultipart,
+  deleteManualComprobante,
   uploadManualComprobantePdfHandler
 } from '../controllers/manualComprobantes.controller';
 import { authMiddleware, billingAccessMiddleware } from '../middleware/auth';
@@ -51,6 +52,7 @@ router.patch(
   uploadManualComprobantePdfHandler,
   updateManualComprobanteMultipart as any
 );
+router.delete('/manual-comprobantes/:id', deleteManualComprobante as any);
 router.get('/export', exportBilling);
 router.get('/print', printBilling);
 router.get('/export-retper', exportRetPerTxt);

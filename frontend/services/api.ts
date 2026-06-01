@@ -3151,6 +3151,10 @@ export const api = {
     setTimeout(() => URL.revokeObjectURL(url), 120000);
   },
 
+  deleteManualComprobante: async (id: string): Promise<{ ok: boolean; id: string; tipo: string }> => {
+    return await request(`/billing/manual-comprobantes/${encodeURIComponent(id)}`, 'DELETE');
+  },
+
   exportBilling: async (params?: { desde?: string; hasta?: string; customerId?: string; province?: string; tipo?: 'FACTURA' | 'NC' }): Promise<void> => {
     const queryParams = new URLSearchParams();
     if (params?.desde) queryParams.append('desde', params.desde);

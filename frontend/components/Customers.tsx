@@ -10,7 +10,7 @@ import { getWholesaleStockImpactMeta } from '../utils/orderStockImpact';
 import { orderNetoSaldoForOrderCard, orderTotalesFacturado } from '../utils/wholesaleInvoiceHtml';
 import { canonicalizeCityInput, cityDisplayLabel, isCabaCity, normalizeCityKey } from '../utils/cityNormalize';
 import { CityInput } from './CityInput';
-import { ledgerTipoDisplay } from '../utils/ledgerDocType';
+import { ledgerTipoDisplay, normalizeLedgerDocType } from '../utils/ledgerDocType';
 
 interface CustomersProps {
   customers: Customer[];
@@ -53,7 +53,7 @@ const CONDICIONES_VENTA = [
 const SELECTED_CUSTOMER_STORAGE_KEY = 'lupohub_customers_selected_customer_id';
 
 const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCreateCustomer, onUpdateCustomer, onDeleteCustomer, onRefreshData, orders, products, priceLists = [], transportes = [], users = [] }) => {
-  const { showToast } = useNotification();
+  const { showToast, showConfirm } = useNotification();
   const [isCreating, setIsCreating] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -711,6 +711,39 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     return `${m[3]}/${m[2]}/${m[1]}`;
   };
 
+  const reloadSelectedCustomerLedger = async () => {
+    if (!selectedCustomer?.id) return;
+    setMultimediaLedgerLoading(true);
+    try {
+      const d = await api.getCustomerMultimediaLedger(selectedCustomer.id);
+      setMultimediaLedger(d);
+      loadCarteraTotals();
+    } catch (err: any) {
+      showToast('error', err?.message || 'No se pudo actualizar el historial');
+    } finally {
+      setMultimediaLedgerLoading(false);
+    }
+  };
+
+  const handleDeleteLedgerManualNc = (entry: LedgerEntry) => {
+    const manualId = (entry as LedgerEntry & { manualComprobanteId?: string }).manualComprobanteId;
+    if (!manualId) return;
+    showConfirm({
+      title: 'Eliminar NC manual',
+      message: `¿Eliminar ${entry.numero || 'este comprobante'}? El saldo pendiente se recalculará.`,
+      confirmLabel: 'Eliminar',
+      onConfirm: async () => {
+        try {
+          await api.deleteManualComprobante(manualId);
+          showToast('success', 'Nota de crédito eliminada');
+          await reloadSelectedCustomerLedger();
+        } catch (err: any) {
+          showToast('error', err?.message || 'No se pudo eliminar');
+        }
+      },
+    });
+  };
+
   const renderLedgerTable = (
     title: string,
     icon: React.ReactNode,
@@ -746,10 +779,17 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   Saldo corrido
                 </th>
                 <th className="px-3 py-2">Detalle</th>
+                {canViewSaldos && <th className="px-3 py-2 w-10" />}
               </tr>
             </thead>
             <tbody className="text-slate-300 divide-y divide-slate-800/80">
-              {shown.map((e, idx) => (
+              {shown.map((e, idx) => {
+                const manualId = (e as LedgerEntry & { manualComprobanteId?: string }).manualComprobanteId;
+                const isManualNc =
+                  !!manualId &&
+                  (e.detalle || '').includes('Comprobante manual') &&
+                  normalizeLedgerDocType(e.tipo, e.detalle) === 'NC';
+                return (
                 <tr key={`${e.lineOrder}-${idx}`} className="hover:bg-slate-800/30">
                   <td className="px-3 py-1.5 whitespace-nowrap tabular-nums">{formatLedgerDate(e.lineDate)}</td>
                   <td className="px-3 py-1.5" title={e.tipo}>{ledgerTipoDisplay(e.tipo)}</td>
@@ -763,8 +803,23 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   <td className="px-3 py-1.5 text-slate-400 max-w-[200px] truncate" title={e.detalle || ''}>
                     {e.detalle || '—'}
                   </td>
+                  {canViewSaldos && (
+                    <td className="px-3 py-1.5 text-right">
+                      {isManualNc && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteLedgerManualNc(e)}
+                          className="p-1.5 rounded-lg text-red-300 hover:bg-red-950/50 border border-red-900/50"
+                          title="Eliminar NC manual"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </td>
+                  )}
                 </tr>
-              ))}
+              );
+              })}
             </tbody>
           </table>
         </div>

@@ -3021,7 +3021,28 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         cell.alignment = { horizontal: 'left', vertical: 'middle' };
       });
 
-      let saldo = openingBalance;
+      let netoPeriodo = 0;
+      for (const m of movs) {
+        const debe = Number(m.debe || 0);
+        const haber = Number(m.haber || 0);
+        netoPeriodo = Math.round((netoPeriodo + debe - haber) * 100) / 100;
+      }
+      const saldoInicial = Math.round((saldoCartera - netoPeriodo) * 100) / 100;
+      let saldo = saldoInicial;
+
+      if (movs.length > 0 && Math.abs(saldoInicial) > 0.005) {
+        const saldoAntRow = wsDetalle.addRow({
+          fecha: from ? new Date(from) : null,
+          tipo: 'Saldo anterior',
+          comprobante: '',
+          pedido: '',
+          debe: 0,
+          haber: 0,
+          saldo: saldoInicial,
+        });
+        saldoAntRow.font = { italic: true, color: { argb: 'FF64748B' } };
+      }
+
       for (const m of movs) {
         const debe = Number(m.debe || 0);
         const haber = Number(m.haber || 0);

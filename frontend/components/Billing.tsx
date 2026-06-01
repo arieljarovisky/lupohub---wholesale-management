@@ -8,7 +8,7 @@ import {
   type ManualFacturaFields,
 } from '../utils/wholesaleInvoiceHtml';
 import { Customer, Order, Payment, Product, Role, User } from '../types';
-import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2, Percent, RefreshCcw, FileMinus, ExternalLink, Printer, MoreHorizontal, ChevronDown, Download, Upload, Wallet, FilePlus, FileText, Pencil } from 'lucide-react';
+import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2, Percent, RefreshCcw, FileMinus, ExternalLink, Printer, MoreHorizontal, ChevronDown, Download, Upload, Wallet, FilePlus, FileText, Pencil, Trash2 } from 'lucide-react';
 import { useNotification } from '../context/NotificationContext';
 import { formatMoneyAr } from '../utils/moneyFormat';
 import { getStoredOrdersListFilters, setStoredOrdersListFilters } from '../utils/ordersListFilters';
@@ -693,6 +693,29 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     } catch (err: any) {
       showToast('error', err?.message || 'No se pudo abrir el PDF');
     }
+  };
+
+  const handleDeleteManualComprobante = (item: any) => {
+    if (!item?.manual || !item?.id) return;
+    const label = item.tipo === 'NC' ? 'nota de crédito manual' : 'comprobante manual';
+    showConfirm({
+      title: `Eliminar ${label}`,
+      message: `¿Eliminar ${formatComprobanteNumero(item)} de ${item.customerBusinessName || 'este cliente'}? El saldo pendiente se recalculará.`,
+      confirmLabel: 'Eliminar',
+      onConfirm: async () => {
+        try {
+          await api.deleteManualComprobante(item.id);
+          showToast('success', 'Comprobante eliminado');
+          if (manualEditingId === item.id) {
+            setShowManualComprobanteModal(false);
+            resetManualComprobanteForm();
+          }
+          await load();
+        } catch (err: any) {
+          showToast('error', err?.message || 'No se pudo eliminar');
+        }
+      },
+    });
   };
 
   const handleVer = async (item: any) => {
@@ -1430,6 +1453,16 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                         PDF
                       </button>
                     )}
+                    {item.manual && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteManualComprobante(item)}
+                        className="px-3 py-2 rounded-xl bg-red-950/50 text-red-200 text-xs font-bold border border-red-800/60 touch-manipulation inline-flex items-center gap-1"
+                      >
+                        <Trash2 size={14} />
+                        Eliminar
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => handleVer(item)}
@@ -1532,6 +1565,16 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                             title="Ver PDF adjunto"
                           >
                             <FileText size={15} />
+                          </button>
+                        )}
+                        {item.manual && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteManualComprobante(item)}
+                            className="inline-flex items-center justify-center p-1.5 rounded-lg bg-red-950/40 text-red-200 hover:bg-red-900/60 border border-red-800/60"
+                            title={item.tipo === 'NC' ? 'Eliminar NC manual' : 'Eliminar comprobante manual'}
+                          >
+                            <Trash2 size={15} />
                           </button>
                         )}
                         <button

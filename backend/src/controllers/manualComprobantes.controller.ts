@@ -788,3 +788,51 @@ export const updateManualComprobanteMultipart = async (req: Request, res: Respon
     return res.status(500).json({ message: 'Error actualizando comprobante', detail: e?.message });
   }
 };
+
+/** DELETE comprobante manual (p. ej. NC cargada por error). */
+export const deleteManualComprobante = async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    if (!user || !canManage(user.role)) {
+      return res.status(403).json({ message: 'No autorizado' });
+    }
+    const id = String(req.params.id || '').trim();
+    if (!id) return res.status(400).json({ message: 'Falta id' });
+
+    const existing = (await get(
+      `SELECT m.id, m.tipo, m.pdf_path, c.seller_id
+       FROM customer_manual_comprobantes m
+       JOIN customers c ON c.id = m.customer_id
+       WHERE m.id = ?`,
+      [id]
+    )) as { id: string; tipo: string; pdf_path?: string | null; seller_id?: string } | undefined;
+    if (!existing) return res.status(404).json({ message: 'Comprobante no encontrado' });
+    if (user.role === 'SELLER' && existing.seller_id !== user.id) {
+      return res.status(403).json({ message: 'No autorizado' });
+    }
+
+    const ncRefs = (await get(
+      `SELECT id FROM customer_manual_comprobantes WHERE ref_manual_comprobante_id = ? LIMIT 1`,
+      [id]
+    )) as { id: string } | undefined;
+    if (ncRefs) {
+      return res.status(400).json({
+        message: 'No se puede eliminar: hay una nota de crédito manual que referencia este comprobante.',
+      });
+    }
+
+    await execute(`DELETE FROM customer_manual_comprobantes WHERE id = ?`, [id]);
+
+    if (existing.pdf_path) {
+      try {
+        const full = path.join(UPLOADS_ROOT, existing.pdf_path);
+        if (fs.existsSync(full)) fs.unlinkSync(full);
+      } catch (_) {}
+    }
+
+    return res.json({ ok: true, id, tipo: existing.tipo });
+  } catch (e: any) {
+    console.error('deleteManualComprobante:', e);
+    return res.status(500).json({ message: 'Error eliminando comprobante', detail: e?.message });
+  }
+};
