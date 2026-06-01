@@ -19,6 +19,7 @@ import {
   SQL_ORDER_NETO_GRAVADO,
   SQL_ORDER_SALDO_RESIDUAL
 } from '../services/orderPaymentBalance.service';
+import { ledgerDocTypeAffectsSaldo, normalizeLedgerDocType } from '../utils/ledgerDocType';
 
 const SQL_ORDER_ACTIVE_COND = `o.status NOT IN ('Cancelado', 'Borrador') AND (o.archived = 0 OR o.archived IS NULL)`;
 
@@ -500,21 +501,7 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
       const parts = cleaned.split('-').map((p) => p.replace(/^0+/, '') || '0');
       return parts.join('-');
     };
-    const normalizeDocType = (tipo: any, detalle: any) => {
-      const t0 = String(tipo || '').trim().toUpperCase();
-      if (t0 === 'NC' || t0 === 'N/C') return 'NC';
-      if (t0 === 'REC' || t0 === 'RECIBO') return 'REC';
-      if (t0 === 'PED' || t0 === 'PEDIDO') return 'PED';
-      if (t0 === 'FAC' || t0 === 'FACTURA') return 'FAC';
-      if (t0 === 'ND') return 'ND';
-      const t = `${t0} ${String(detalle || '')}`.toUpperCase();
-      if (/\bREC\b|RECIBO|COBRO|PAGO/.test(t)) return 'REC';
-      if (/\bPED\b|PEDIDO/.test(t)) return 'PED';
-      if (/NOTA\s*DE\s*CRED|CREDITO|\bNC\b|N\/C/.test(t)) return 'NC';
-      if (/NOTA\s*DE\s*DEB|DEBITO|\bND\b/.test(t)) return 'ND';
-      if (/\bFAC\b|FACTURA|FCA|FCB|FCC|FCE/.test(t)) return 'FAC';
-      return t0 || 'OTRO';
-    };
+    const normalizeDocType = (tipo: any, detalle: any) => normalizeLedgerDocType(tipo, detalle);
     const maxLineOrder = entries.reduce((m, e) => Math.max(m, Number(e.line_order || 0)), 0);
     const orderSaldoAsEntries = orderSaldoRows.map((ord, idx) => {
       const residual = Math.round(Number(ord.residual || 0) * 100) / 100;
@@ -680,10 +667,11 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
       if (row.importe != null && Number.isFinite(Number(row.importe))) {
         const tipoNorm = normalizeDocType(row.tipo, row.detalle);
         const amount = Math.abs(Number(row.importe)) || 0;
-        if (tipoNorm === 'REC' || tipoNorm === 'NC') {
+        const side = ledgerDocTypeAffectsSaldo(tipoNorm);
+        if (side === 'haber') {
           runningSaldo -= amount;
           hasRunningSaldo = true;
-        } else if (tipoNorm === 'FAC' || tipoNorm === 'ND' || tipoNorm === 'PED') {
+        } else if (side === 'debe') {
           runningSaldo += amount;
           hasRunningSaldo = true;
         }

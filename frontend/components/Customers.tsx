@@ -10,6 +10,7 @@ import { getWholesaleStockImpactMeta } from '../utils/orderStockImpact';
 import { orderNetoSaldoForOrderCard, orderTotalesFacturado } from '../utils/wholesaleInvoiceHtml';
 import { canonicalizeCityInput, cityDisplayLabel, isCabaCity, normalizeCityKey } from '../utils/cityNormalize';
 import { CityInput } from './CityInput';
+import { ledgerTipoDisplay, normalizeLedgerDocType } from '../utils/ledgerDocType';
 
 interface CustomersProps {
   customers: Customer[];
@@ -668,21 +669,6 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
       ? multimediaLedger.entries
       : financialSummaryAsLedger;
     if (!entries?.length) return [];
-    const normalizeDocType = (tipo: string, detalle?: string | null) => {
-      const t0 = String(tipo || '').trim().toUpperCase();
-      if (t0 === 'NC' || t0 === 'N/C') return 'NC';
-      if (t0 === 'REC' || t0 === 'RECIBO') return 'REC';
-      if (t0 === 'PED' || t0 === 'PEDIDO') return 'PED';
-      if (t0 === 'FAC' || t0 === 'FACTURA') return 'FAC';
-      if (t0 === 'ND') return 'ND';
-      const t = `${t0} ${detalle || ''}`.toUpperCase();
-      if (/\bREC\b|RECIBO|COBRO|PAGO/.test(t)) return 'REC';
-      if (/\bPED\b|PEDIDO/.test(t)) return 'PED';
-      if (/NOTA\s*DE\s*CRED|CREDITO|\bNC\b|N\/C/.test(t)) return 'NC';
-      if (/NOTA\s*DE\s*DEB|DEBITO|\bND\b/.test(t)) return 'ND';
-      if (/\bFAC\b|FACTURA|FCA|FCB|FCC|FCE/.test(t)) return 'FAC';
-      return t0 || 'OTRO';
-    };
     const rows = [...entries].sort((a, b) => {
       const da = ledgerDateMs(a.lineDate) - ledgerDateMs(b.lineDate);
       if (da !== 0) return da;
@@ -694,7 +680,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
       const next = { ...row };
       if (next.importe != null && Number.isFinite(Number(next.importe))) {
         const amount = Math.abs(Number(next.importe));
-        const tipoNorm = normalizeDocType(next.tipo, next.detalle);
+        const tipoNorm = normalizeLedgerDocType(next.tipo, next.detalle);
         if (tipoNorm === 'REC' || tipoNorm === 'NC') {
           runningSaldo -= amount;
           hasRunningSaldo = true;
@@ -709,10 +695,12 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     return withSaldo;
   }, [multimediaLedger, financialSummaryAsLedger]);
 
-  const ledgerSaldoCorridoFinal =
-    unifiedLedgerEntries.length > 0
-      ? unifiedLedgerEntries[unifiedLedgerEntries.length - 1]?.saldo ?? null
-      : null;
+  const ledgerSaldoCorridoFinal = (() => {
+    const fromApi = multimediaLedger?.lastSaldo;
+    if (fromApi != null && Number.isFinite(Number(fromApi))) return Number(fromApi);
+    if (unifiedLedgerEntries.length === 0) return null;
+    return unifiedLedgerEntries[unifiedLedgerEntries.length - 1]?.saldo ?? null;
+  })();
 
   const unifiedLedgerEntriesNewestFirst = useMemo(() => {
     if (!unifiedLedgerEntries.length) return [];
@@ -783,7 +771,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               {shown.map((e, idx) => (
                 <tr key={`${e.lineOrder}-${idx}`} className="hover:bg-slate-800/30">
                   <td className="px-3 py-1.5 whitespace-nowrap tabular-nums">{formatLedgerDate(e.lineDate)}</td>
-                  <td className="px-3 py-1.5">{e.tipo}</td>
+                  <td className="px-3 py-1.5" title={e.tipo}>{ledgerTipoDisplay(e.tipo)}</td>
                   <td className="px-3 py-1.5 font-mono text-[11px]">{e.numero ?? '—'}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">
                     {e.importe != null ? `$${Number(e.importe).toLocaleString('es-AR')}` : '—'}
@@ -1620,15 +1608,16 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   ledgerSaldoCorridoFinal != null &&
                   Math.abs(ledgerSaldoCorridoFinal - getSaldoPendienteTotal(selectedCustomer)) > 1 && (
                     <div className="mb-3 rounded-xl border border-amber-600/40 bg-amber-950/30 px-3 py-2.5 text-xs text-amber-100/90 leading-relaxed">
-                      El <span className="font-bold">saldo pendiente</span> arriba ($
+                      <span className="font-bold">Saldo pendiente</span> ($
                       {getSaldoPendienteTotal(selectedCustomer).toLocaleString('es-AR', {
                         minimumFractionDigits: 2
                       })}
-                      ) usa el <span className="font-bold">cierre importado de Multimedias</span> más pedidos/recibos
-                      LupoHub pendientes. La columna «Saldo corrido» reconstruye todo el historial (
-                      {ledgerSaldoCorridoFinal.toLocaleString('es-AR', { minimumFractionDigits: 2 })} al último
-                      movimiento) y puede diferir si hay comprobantes duplicados entre el Excel y LupoHub (ej. pedido con
-                      factura + NC + recibo ya imputado).
+                      ): cierre Multimedias + pedidos LupoHub pendientes − recibos sin imputar (deuda actual).{' '}
+                      <span className="font-bold">Saldo corrido</span> ($
+                      {ledgerSaldoCorridoFinal.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                      ): suma de todo el historial (facturas/ND − NC incl.{' '}
+                      <span className="font-mono">CDE</span> Tango − recibos). Suele acercarse al Excel de Comisiones;
+                      no tiene por qué coincidir con el saldo pendiente si el cierre importado ya descontó cobros.
                     </div>
                   )}
                 {renderLedgerTable(
