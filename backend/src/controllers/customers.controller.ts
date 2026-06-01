@@ -3022,13 +3022,9 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       });
 
       let saldo = openingBalance;
-      let totalDebeMovs = 0;
-      let totalHaberMovs = 0;
       for (const m of movs) {
         const debe = Number(m.debe || 0);
         const haber = Number(m.haber || 0);
-        totalDebeMovs = Math.round((totalDebeMovs + debe) * 100) / 100;
-        totalHaberMovs = Math.round((totalHaberMovs + haber) * 100) / 100;
         saldo = Math.round((saldo + debe - haber) * 100) / 100;
         wsDetalle.addRow({
           fecha: m.fecha ? new Date(m.fecha) : null,
@@ -3041,18 +3037,9 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         });
       }
 
-      const netoPeriodo = Math.round((totalDebeMovs - totalHaberMovs) * 100) / 100;
-      const concStartRow = wsDetalle.rowCount + 1;
-      wsDetalle.addRow(['RESUMEN', '', '', '', '', '', '']);
-      const mainSaldoRow = wsDetalle.addRow([
-        'Saldo pendiente (deuda actual — mismo número que la ficha del cliente en LupoHub)',
-        '',
-        '',
-        '',
-        '',
-        '',
-        saldoCartera,
-      ]);
+      const resumenLabelRow = wsDetalle.addRow(['RESUMEN', '', '', '', '', '', '']);
+      const mainSaldoRow = wsDetalle.addRow(['Saldo pendiente', '', '', '', '', '', saldoCartera]);
+      resumenLabelRow.font = { bold: true };
       mainSaldoRow.getCell(1).font = { bold: true, size: 11 };
       mainSaldoRow.getCell(7).font = { bold: true, size: 12 };
       mainSaldoRow.getCell(7).fill = {
@@ -3060,38 +3047,10 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         pattern: 'solid',
         fgColor: { argb: 'FFD1FAE5' },
       };
-
-      if (movs.length > 0) {
-        wsDetalle.addRow([
-          `Solo en las filas de arriba (rango de fechas del export): facturas/pedidos ${totalDebeMovs.toLocaleString('es-AR', { minimumFractionDigits: 2 })} − NC/recibos ${totalHaberMovs.toLocaleString('es-AR', { minimumFractionDigits: 2 })} = ${netoPeriodo.toLocaleString('es-AR', { minimumFractionDigits: 2 })}`,
-          '',
-          '',
-          '',
-          '',
-          '',
-          '',
-        ]);
-      }
-
-      if (from && Math.abs(saldoCartera - saldoPeriodo) > 1) {
-        wsDetalle.addRow([
-          `El saldo del período con arrastre (${saldoPeriodo.toLocaleString('es-AR', { minimumFractionDigits: 2 })}) incluye movimientos anteriores al «desde» (arrastre ${openingBalance.toLocaleString('es-AR', { minimumFractionDigits: 2 })}). Para cobrar al cliente, usá siempre el saldo pendiente de arriba.`,
-          '',
-          '',
-          '',
-          '',
-          '',
-          saldoPeriodo,
-        ]);
-      }
-
-      for (let r = concStartRow; r <= wsDetalle.rowCount; r += 1) {
-        wsDetalle.mergeCells(r, 1, r, 6);
-        const row = wsDetalle.getRow(r);
-        row.getCell(1).alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
-        if (r === mainSaldoRow.number) continue;
-        row.getCell(1).font = { italic: true, size: 10, color: { argb: 'FF475569' } };
-      }
+      wsDetalle.mergeCells(resumenLabelRow.number, 1, resumenLabelRow.number, 6);
+      wsDetalle.mergeCells(mainSaldoRow.number, 1, mainSaldoRow.number, 6);
+      resumenLabelRow.getCell(1).alignment = { horizontal: 'left', vertical: 'middle' };
+      mainSaldoRow.getCell(1).alignment = { horizontal: 'left', vertical: 'middle' };
 
       wsDetalle.addRow(['', '', '', '', '', '', '']);
     }
