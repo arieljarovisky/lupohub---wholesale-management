@@ -3155,6 +3155,23 @@ export const api = {
     return await request(`/billing/manual-comprobantes/${encodeURIComponent(id)}`, 'DELETE');
   },
 
+  deleteImportedBillingEntry: async (payload: {
+    customerId: string;
+    importedLineOrder: number;
+  }): Promise<{ ok: boolean; customerId: string; importedLineOrder: number }> => {
+    return await request('/billing/imported-entries', 'DELETE', payload);
+  },
+
+  deleteLocalAfipComprobante: async (
+    id: string,
+    tipo: 'FACTURA' | 'NC'
+  ): Promise<{ ok: boolean; id: string; tipo: string; orderId?: string }> => {
+    return await request(
+      `/billing/local-afip/${encodeURIComponent(id)}?tipo=${encodeURIComponent(tipo)}`,
+      'DELETE'
+    );
+  },
+
   exportBilling: async (params?: { desde?: string; hasta?: string; customerId?: string; province?: string; tipo?: 'FACTURA' | 'NC' }): Promise<void> => {
     const queryParams = new URLSearchParams();
     if (params?.desde) queryParams.append('desde', params.desde);

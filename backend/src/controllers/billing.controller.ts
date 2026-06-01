@@ -1,7 +1,8 @@
 import { Request, Response } from 'express';
-import { query, execute, pool } from '../database/db';
+import { query, execute, get, pool } from '../database/db';
 import * as XLSX from 'xlsx';
 import { cityMatchesFilter } from '../utils/cityNormalize';
+import { syncOrderPaymentStatus } from '../services/orderPaymentBalance.service';
 
 function parseMoney(value: any): number {
   if (value == null) return 0;
@@ -595,6 +596,8 @@ export const listBilling = async (req: Request, res: Response) => {
               agipAlicuota: 0,
               agipRetPer: 0,
               manual: false,
+              imported: true,
+              importedLineOrder: Number(r.line_order) || 0,
               sinDetalle: false,
               hasPdf: false
             }
@@ -624,6 +627,145 @@ export const listBilling = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('listBilling:', error);
     res.status(500).json({ message: 'Error listando facturación' });
+  }
+};
+
+const canDeleteBilling = (role?: string) =>
+  role === 'ADMIN' || role === 'DEPOSITO' || role === 'WAREHOUSE' || role === 'SELLER';
+
+const canDeleteLocalAfip = (role?: string) =>
+  role === 'ADMIN' || role === 'DEPOSITO' || role === 'WAREHOUSE';
+
+/** Elimina una línea FAC/NC del historial importado Tango (customer_multimedia_entries). */
+export const deleteImportedBillingEntry = async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    if (!user || !canDeleteBilling(user.role)) {
+      return res.status(403).json({ message: 'No autorizado' });
+    }
+    const customerId = String(req.body?.customerId || '').trim();
+    const lineOrder = Number(req.body?.importedLineOrder);
+    if (!customerId || !Number.isFinite(lineOrder) || lineOrder <= 0) {
+      return res.status(400).json({ message: 'Indicá customerId e importedLineOrder' });
+    }
+
+    const cust = (await get('SELECT id, seller_id FROM customers WHERE id = ?', [customerId])) as
+      | { id: string; seller_id?: string }
+      | undefined;
+    if (!cust) return res.status(404).json({ message: 'Cliente no encontrado' });
+    if (user.role === 'SELLER' && cust.seller_id !== user.id) {
+      return res.status(403).json({ message: 'Solo podés modificar comprobantes de tus clientes' });
+    }
+
+    const entry = (await get(
+      `SELECT line_order, tipo, numero FROM customer_multimedia_entries
+       WHERE customer_id = ? AND line_order = ?`,
+      [customerId, lineOrder]
+    )) as { line_order: number; tipo?: string; numero?: string } | undefined;
+    if (!entry) return res.status(404).json({ message: 'Comprobante importado no encontrado' });
+
+    const t = String(entry.tipo || '').trim().toUpperCase();
+    const isFacNc =
+      t.startsWith('FAC') ||
+      t.startsWith('NC') ||
+      t.includes('NOTA') ||
+      t.includes('CREDIT') ||
+      t.includes('CREDITO');
+    if (!isFacNc) {
+      return res.status(400).json({
+        message: 'Solo se pueden eliminar facturas o notas de crédito importadas (no recibos u otros movimientos).',
+      });
+    }
+
+    await execute(
+      `DELETE FROM customer_multimedia_entries WHERE customer_id = ? AND line_order = ?`,
+      [customerId, lineOrder]
+    );
+
+    return res.json({ ok: true, customerId, importedLineOrder: lineOrder });
+  } catch (e: any) {
+    console.error('deleteImportedBillingEntry:', e);
+    return res.status(500).json({ message: 'Error eliminando comprobante importado', detail: e?.message });
+  }
+};
+
+/** Elimina factura o NC emitida en LupoHub (registro local). No anula en AFIP. */
+export const deleteLocalAfipComprobante = async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    if (!user || !canDeleteLocalAfip(user.role)) {
+      return res.status(403).json({ message: 'Solo administración o depósito puede eliminar comprobantes AFIP locales' });
+    }
+
+    const id = String(req.params?.id || '').trim();
+    const tipo = String(req.query?.tipo || '').trim().toUpperCase();
+    if (!id) return res.status(400).json({ message: 'Falta id' });
+    if (tipo !== 'FACTURA' && tipo !== 'NC') {
+      return res.status(400).json({ message: 'Indicá tipo=FACTURA o tipo=NC' });
+    }
+
+    if (tipo === 'FACTURA') {
+      const inv = (await get(
+        `SELECT i.id, i.order_id, o.customer_id, c.seller_id
+         FROM invoices i
+         JOIN orders o ON o.id = i.order_id
+         JOIN customers c ON c.id = o.customer_id
+         WHERE i.id = ?`,
+        [id]
+      )) as { id: string; order_id: string; customer_id: string; seller_id?: string } | undefined;
+      if (!inv) return res.status(404).json({ message: 'Factura no encontrada' });
+
+      const linkedPay = (await get(
+        `SELECT 1 AS x FROM payment_invoices WHERE invoice_id = ? LIMIT 1`,
+        [id]
+      )) as { x?: number } | undefined;
+      if (linkedPay) {
+        return res.status(400).json({
+          message:
+            'La factura tiene recibos imputados. Desasocialos en Facturación → Recibos antes de eliminarla.',
+        });
+      }
+
+      await execute('DELETE FROM invoices WHERE id = ?', [id]);
+      await syncOrderPaymentStatus(inv.order_id);
+      return res.json({ ok: true, id, tipo: 'FACTURA', orderId: inv.order_id });
+    }
+
+    const cn = (await get(
+      `SELECT cn.id, cn.order_id, cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, o.customer_id, c.seller_id
+       FROM credit_notes cn
+       JOIN orders o ON o.id = cn.order_id
+       JOIN customers c ON c.id = o.customer_id
+       WHERE cn.id = ?
+       LIMIT 1`,
+      [id]
+    )) as {
+      id: string;
+      order_id: string;
+      cae?: string;
+      punto_venta?: number;
+      cbte_tipo?: number;
+      cbte_desde?: number;
+      customer_id: string;
+      seller_id?: string;
+    } | undefined;
+    if (!cn) return res.status(404).json({ message: 'Nota de crédito no encontrada' });
+
+    if (cn.cae && cn.punto_venta != null && cn.cbte_tipo != null && cn.cbte_desde != null) {
+      await execute(
+        `DELETE FROM credit_notes
+         WHERE order_id = ? AND cae = ? AND punto_venta = ? AND cbte_tipo = ? AND cbte_desde = ?`,
+        [cn.order_id, cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde]
+      );
+    } else {
+      await execute('DELETE FROM credit_notes WHERE id = ?', [id]);
+    }
+
+    await syncOrderPaymentStatus(cn.order_id);
+    return res.json({ ok: true, id, tipo: 'NC', orderId: cn.order_id });
+  } catch (e: any) {
+    console.error('deleteLocalAfipComprobante:', e);
+    return res.status(500).json({ message: 'Error eliminando comprobante', detail: e?.message });
   }
 };
 

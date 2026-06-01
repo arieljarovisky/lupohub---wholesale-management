@@ -716,21 +716,66 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     }
   };
 
-  const handleDeleteManualComprobante = (item: any) => {
-    if (!item?.manual || !item?.id) return;
-    const label = item.tipo === 'NC' ? 'nota de crédito manual' : 'comprobante manual';
+  const canDeleteComprobante = (item: any) => {
+    if (!item?.id) return false;
+    if (item.manual) return true;
+    const isImportedTango =
+      (item.imported && item.importedLineOrder && item.customerId) ||
+      (String(item.id || '').startsWith('mm-fac-') && item.customerId && item.importedLineOrder);
+    if (isImportedTango) return true;
+    if (
+      canAfipInvoiceActions &&
+      !item.manual &&
+      !item.imported &&
+      !String(item.id || '').startsWith('mm-')
+    ) {
+      return item.tipo === 'FACTURA' || item.tipo === 'NC';
+    }
+    return false;
+  };
+
+  const handleDeleteComprobante = (item: any) => {
+    if (!canDeleteComprobante(item)) return;
+
+    const isImported = !!(item.imported && item.importedLineOrder && item.customerId);
+    const isManual = !!item.manual;
+    const isLocalAfip = !isManual && !isImported;
+
+    const label = isManual
+      ? item.tipo === 'NC'
+        ? 'nota de crédito manual'
+        : 'comprobante manual'
+      : isImported
+        ? `comprobante Tango (${item.tipo === 'NC' ? 'NC' : 'factura'})`
+        : item.tipo === 'NC'
+          ? 'nota de crédito (LupoHub)'
+          : 'factura (LupoHub)';
+
+    const afipNote = isLocalAfip
+      ? ' Solo se borra el registro en LupoHub; el comprobante sigue vigente en AFIP si ya fue emitido.'
+      : '';
+
     showConfirm({
       title: `Eliminar ${label}`,
-      message: `¿Eliminar ${formatComprobanteNumero(item)} de ${item.customerBusinessName || 'este cliente'}? El saldo pendiente se recalculará.`,
+      message: `¿Eliminar ${formatComprobanteNumero(item)} de ${item.customerBusinessName || 'este cliente'}? El saldo pendiente se recalculará.${afipNote}`,
       confirmLabel: 'Eliminar',
       onConfirm: async () => {
         try {
-          await api.deleteManualComprobante(item.id);
-          showToast('success', 'Comprobante eliminado');
-          if (manualEditingId === item.id) {
-            setShowManualComprobanteModal(false);
-            resetManualComprobanteForm();
+          if (isManual) {
+            await api.deleteManualComprobante(item.id);
+            if (manualEditingId === item.id) {
+              setShowManualComprobanteModal(false);
+              resetManualComprobanteForm();
+            }
+          } else if (isImported) {
+            await api.deleteImportedBillingEntry({
+              customerId: item.customerId,
+              importedLineOrder: item.importedLineOrder,
+            });
+          } else {
+            await api.deleteLocalAfipComprobante(item.id, item.tipo === 'NC' ? 'NC' : 'FACTURA');
           }
+          showToast('success', 'Comprobante eliminado');
           await load();
         } catch (err: any) {
           showToast('error', err?.message || 'No se pudo eliminar');
@@ -1474,10 +1519,10 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                         PDF
                       </button>
                     )}
-                    {item.manual && (
+                    {canDeleteComprobante(item) && (
                       <button
                         type="button"
-                        onClick={() => handleDeleteManualComprobante(item)}
+                        onClick={() => handleDeleteComprobante(item)}
                         className="px-3 py-2 rounded-xl bg-red-950/50 text-red-200 text-xs font-bold border border-red-800/60 touch-manipulation inline-flex items-center gap-1"
                       >
                         <Trash2 size={14} />
@@ -1588,12 +1633,12 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                             <FileText size={15} />
                           </button>
                         )}
-                        {item.manual && (
+                        {canDeleteComprobante(item) && (
                           <button
                             type="button"
-                            onClick={() => handleDeleteManualComprobante(item)}
+                            onClick={() => handleDeleteComprobante(item)}
                             className="inline-flex items-center justify-center p-1.5 rounded-lg bg-red-950/40 text-red-200 hover:bg-red-900/60 border border-red-800/60"
-                            title={item.tipo === 'NC' ? 'Eliminar NC manual' : 'Eliminar comprobante manual'}
+                            title="Eliminar comprobante"
                           >
                             <Trash2 size={15} />
                           </button>

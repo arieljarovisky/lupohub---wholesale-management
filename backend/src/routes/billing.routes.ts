@@ -8,7 +8,9 @@ import {
   importAgipPadronChunk,
   exportBillingByCustomersFile,
   exportVentasJurisdiccionXlsx,
-  printBilling
+  printBilling,
+  deleteImportedBillingEntry,
+  deleteLocalAfipComprobante
 } from '../controllers/billing.controller';
 import {
   createManualComprobante,
@@ -53,6 +55,8 @@ router.patch(
   updateManualComprobanteMultipart as any
 );
 router.delete('/manual-comprobantes/:id', deleteManualComprobante as any);
+router.delete('/imported-entries', deleteImportedBillingEntry as any);
+router.delete('/local-afip/:id', deleteLocalAfipComprobante as any);
 router.get('/export', exportBilling);
 router.get('/print', printBilling);
 router.get('/export-retper', exportRetPerTxt);

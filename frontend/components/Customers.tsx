@@ -725,17 +725,19 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     }
   };
 
-  const handleDeleteLedgerManualNc = (entry: LedgerEntry) => {
+  const handleDeleteLedgerManualComprobante = (entry: LedgerEntry) => {
     const manualId = (entry as LedgerEntry & { manualComprobanteId?: string }).manualComprobanteId;
     if (!manualId) return;
+    const tipoNorm = normalizeLedgerDocType(entry.tipo, entry.detalle);
+    const label = tipoNorm === 'NC' ? 'nota de crédito manual' : 'comprobante manual';
     showConfirm({
-      title: 'Eliminar NC manual',
+      title: `Eliminar ${label}`,
       message: `¿Eliminar ${entry.numero || 'este comprobante'}? El saldo pendiente se recalculará.`,
       confirmLabel: 'Eliminar',
       onConfirm: async () => {
         try {
           await api.deleteManualComprobante(manualId);
-          showToast('success', 'Nota de crédito eliminada');
+          showToast('success', 'Comprobante eliminado');
           await reloadSelectedCustomerLedger();
         } catch (err: any) {
           showToast('error', err?.message || 'No se pudo eliminar');
@@ -785,10 +787,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             <tbody className="text-slate-300 divide-y divide-slate-800/80">
               {shown.map((e, idx) => {
                 const manualId = (e as LedgerEntry & { manualComprobanteId?: string }).manualComprobanteId;
-                const isManualNc =
-                  !!manualId &&
-                  (e.detalle || '').includes('Comprobante manual') &&
-                  normalizeLedgerDocType(e.tipo, e.detalle) === 'NC';
+                const isManualComprobante =
+                  !!manualId && (e.detalle || '').includes('Comprobante manual');
                 return (
                 <tr key={`${e.lineOrder}-${idx}`} className="hover:bg-slate-800/30">
                   <td className="px-3 py-1.5 whitespace-nowrap tabular-nums">{formatLedgerDate(e.lineDate)}</td>
@@ -805,12 +805,12 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   </td>
                   {canViewSaldos && (
                     <td className="px-3 py-1.5 text-right">
-                      {isManualNc && (
+                      {isManualComprobante && (
                         <button
                           type="button"
-                          onClick={() => handleDeleteLedgerManualNc(e)}
+                          onClick={() => handleDeleteLedgerManualComprobante(e)}
                           className="p-1.5 rounded-lg text-red-300 hover:bg-red-950/50 border border-red-900/50"
-                          title="Eliminar NC manual"
+                          title="Eliminar comprobante manual"
                         >
                           <Trash2 size={14} />
                         </button>
