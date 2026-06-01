@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addCatalogsTable = addCatalogsTable;
+exports.addCatalogsTable = void 0;
 const db_1 = require("./db");
 function addCatalogsTable() {
     return __awaiter(this, void 0, void 0, function* () {
@@ -25,3 +25,4 @@ function addCatalogsTable() {
   `);
     });
 }
+exports.addCatalogsTable = addCatalogsTable;

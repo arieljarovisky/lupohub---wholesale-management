@@ -10,6 +10,7 @@ import { getWholesaleStockImpactMeta } from '../utils/orderStockImpact';
 import { orderNetoSaldoForOrderCard, orderTotalesFacturado } from '../utils/wholesaleInvoiceHtml';
 import { canonicalizeCityInput, cityDisplayLabel, isCabaCity, normalizeCityKey } from '../utils/cityNormalize';
 import { CityInput } from './CityInput';
+import { ledgerTipoDisplay, normalizeLedgerDocType } from '../utils/ledgerDocType';
 
 interface CustomersProps {
   customers: Customer[];
@@ -52,7 +53,7 @@ const CONDICIONES_VENTA = [
 const SELECTED_CUSTOMER_STORAGE_KEY = 'lupohub_customers_selected_customer_id';
 
 const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCreateCustomer, onUpdateCustomer, onDeleteCustomer, onRefreshData, orders, products, priceLists = [], transportes = [], users = [] }) => {
-  const { showToast } = useNotification();
+  const { showToast, showConfirm } = useNotification();
   const [isCreating, setIsCreating] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -132,17 +133,34 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   useEffect(() => {
     if (!selectedCustomer?.id || !canViewSaldos) {
       setMultimediaLedger(null);
+      setFinancialSummaryMovements([]);
       return;
     }
     let cancelled = false;
     setMultimediaLedgerLoading(true);
+    setFinancialSummaryMovements([]);
+    const loadFinancialFallback = () =>
+      api
+        .getCustomerFinancialSummary(selectedCustomer.id)
+        .then((summary) => {
+          if (!cancelled) setFinancialSummaryMovements(summary.movements || []);
+        })
+        .catch(() => {
+          if (!cancelled) setFinancialSummaryMovements([]);
+        });
+
     api
       .getCustomerMultimediaLedger(selectedCustomer.id)
       .then((d) => {
-        if (!cancelled) setMultimediaLedger(d);
+        if (cancelled) return;
+        setMultimediaLedger(d);
+        if (!d.entries?.length) loadFinancialFallback();
       })
-      .catch(() => {
-        if (!cancelled) setMultimediaLedger(null);
+      .catch((err: any) => {
+        if (cancelled) return;
+        setMultimediaLedger(null);
+        showToast('error', err?.message || 'No se pudo cargar el detalle de movimientos');
+        loadFinancialFallback();
       })
       .finally(() => {
         if (!cancelled) setMultimediaLedgerLoading(false);
@@ -235,6 +253,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [exportingFinancialSummary, setExportingFinancialSummary] = useState(false);
   const [multimediaLedger, setMultimediaLedger] = useState<Awaited<ReturnType<typeof api.getCustomerMultimediaLedger>> | null>(null);
   const [multimediaLedgerLoading, setMultimediaLedgerLoading] = useState(false);
+  const [financialSummaryMovements, setFinancialSummaryMovements] = useState<
+    Awaited<ReturnType<typeof api.getCustomerFinancialSummary>>['movements']
+  >([]);
 
   /** Filtro por vendedor (solo ADMIN): '' = todos, '__none__' = sin vendedor, o id de usuario SELLER */
   const [sellerFilterId, setSellerFilterId] = useState<string>('');
@@ -608,43 +629,30 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
 
   type LedgerEntry = NonNullable<Awaited<ReturnType<typeof api.getCustomerMultimediaLedger>>['entries']>[number];
 
-  const unifiedLedgerEntries = useMemo(() => {
-    const entries = multimediaLedger?.entries;
-    if (!entries?.length) return [];
-    const normalizeDocType = (tipo: string, detalle?: string | null) => {
-      const t = `${tipo || ''} ${detalle || ''}`.toUpperCase();
-      if (/\bREC\b|RECIBO|COBRO|PAGO/.test(t)) return 'REC';
-      if (/\bPED\b|PEDIDO/.test(t)) return 'PED';
-      if (/\bFAC\b|FACTURA|FCA|FCB|FCC|FCE|COMPROBANTE/.test(t)) return 'FAC';
-      if (/NOTA\s*DE\s*CRED|CREDITO|\bNC\b/.test(t)) return 'NC';
-      if (/NOTA\s*DE\s*DEB|DEBITO|\bND\b/.test(t)) return 'ND';
-      return (tipo || '').toUpperCase();
+  const financialSummaryAsLedger = useMemo((): LedgerEntry[] => {
+    if (!financialSummaryMovements.length) return [];
+    const tipoMap: Record<string, string> = {
+      FACTURA: 'FAC',
+      NC: 'NC',
+      RECIBO: 'REC',
+      PEDIDO: 'PED'
     };
-    const rows = [...entries];
-    let runningSaldo = 0;
-    let hasRunningSaldo = false;
-    return rows.map((row) => {
-      const next = { ...row };
-      if (next.saldo != null && Number.isFinite(Number(next.saldo))) {
-        runningSaldo = Number(next.saldo);
-        hasRunningSaldo = true;
-        return next;
-      }
-      if (next.importe != null && Number.isFinite(Number(next.importe))) {
-        const amount = Number(next.importe);
-        const tipoNorm = normalizeDocType(next.tipo, next.detalle);
-        if (tipoNorm === 'REC' || tipoNorm === 'NC') {
-          runningSaldo = (hasRunningSaldo ? runningSaldo : 0) - amount;
-          hasRunningSaldo = true;
-        } else if (tipoNorm === 'FAC' || tipoNorm === 'ND' || tipoNorm === 'PED') {
-          runningSaldo = (hasRunningSaldo ? runningSaldo : 0) + amount;
-          hasRunningSaldo = true;
-        }
-      }
-      next.saldo = hasRunningSaldo ? Number(runningSaldo.toFixed(2)) : null;
-      return next;
+    return financialSummaryMovements.map((m, idx) => {
+      const importe = Number(m.debe || 0) > 0 ? Number(m.debe) : Number(m.haber || 0);
+      return {
+        lineOrder: 300000 + idx,
+        lineDate: m.fecha || '',
+        tipo: tipoMap[String(m.tipo || '').toUpperCase()] || String(m.tipo || ''),
+        numero: m.comprobante || '',
+        edc: null,
+        vto: null,
+        importe: importe > 0 ? importe : null,
+        saldo: null,
+        detalle: m.detalle || '',
+        paginaPdf: null
+      };
     });
-  }, [multimediaLedger]);
+  }, [financialSummaryMovements]);
 
   const ledgerDateMs = (raw: string | null | undefined) => {
     if (!raw) return 0;
@@ -655,6 +663,25 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     const t = d.getTime();
     return Number.isFinite(t) ? t : 0;
   };
+
+  const unifiedLedgerEntries = useMemo(() => {
+    const entries = multimediaLedger?.entries?.length
+      ? multimediaLedger.entries
+      : financialSummaryAsLedger;
+    if (!entries?.length) return [];
+    return [...entries].sort((a, b) => {
+      const da = ledgerDateMs(a.lineDate) - ledgerDateMs(b.lineDate);
+      if (da !== 0) return da;
+      return Number(a.lineOrder || 0) - Number(b.lineOrder || 0);
+    });
+  }, [multimediaLedger, financialSummaryAsLedger]);
+
+  const ledgerSaldoHistorialFinal =
+    multimediaLedger?.lastSaldo != null && Number.isFinite(Number(multimediaLedger.lastSaldo))
+      ? Number(multimediaLedger.lastSaldo)
+      : unifiedLedgerEntries.length > 0
+        ? unifiedLedgerEntries[unifiedLedgerEntries.length - 1]?.saldo ?? null
+        : null;
 
   const unifiedLedgerEntriesNewestFirst = useMemo(() => {
     if (!unifiedLedgerEntries.length) return [];
@@ -682,6 +709,39 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     const m = String(sql || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (!m) return sql || '—';
     return `${m[3]}/${m[2]}/${m[1]}`;
+  };
+
+  const reloadSelectedCustomerLedger = async () => {
+    if (!selectedCustomer?.id) return;
+    setMultimediaLedgerLoading(true);
+    try {
+      const d = await api.getCustomerMultimediaLedger(selectedCustomer.id);
+      setMultimediaLedger(d);
+      loadCarteraTotals();
+    } catch (err: any) {
+      showToast('error', err?.message || 'No se pudo actualizar el historial');
+    } finally {
+      setMultimediaLedgerLoading(false);
+    }
+  };
+
+  const handleDeleteLedgerManualNc = (entry: LedgerEntry) => {
+    const manualId = (entry as LedgerEntry & { manualComprobanteId?: string }).manualComprobanteId;
+    if (!manualId) return;
+    showConfirm({
+      title: 'Eliminar NC manual',
+      message: `¿Eliminar ${entry.numero || 'este comprobante'}? El saldo pendiente se recalculará.`,
+      confirmLabel: 'Eliminar',
+      onConfirm: async () => {
+        try {
+          await api.deleteManualComprobante(manualId);
+          showToast('success', 'Nota de crédito eliminada');
+          await reloadSelectedCustomerLedger();
+        } catch (err: any) {
+          showToast('error', err?.message || 'No se pudo eliminar');
+        }
+      },
+    });
   };
 
   const renderLedgerTable = (
@@ -715,15 +775,24 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 <th className="px-3 py-2">Tipo</th>
                 <th className="px-3 py-2">Número</th>
                 <th className="px-3 py-2 text-right">Importe</th>
-                <th className="px-3 py-2 text-right">Saldo</th>
+                <th className="px-3 py-2 text-right" title="Reconstruido desde importes; puede diferir del saldo pendiente oficial">
+                  Saldo corrido
+                </th>
                 <th className="px-3 py-2">Detalle</th>
+                {canViewSaldos && <th className="px-3 py-2 w-10" />}
               </tr>
             </thead>
             <tbody className="text-slate-300 divide-y divide-slate-800/80">
-              {shown.map((e, idx) => (
+              {shown.map((e, idx) => {
+                const manualId = (e as LedgerEntry & { manualComprobanteId?: string }).manualComprobanteId;
+                const isManualNc =
+                  !!manualId &&
+                  (e.detalle || '').includes('Comprobante manual') &&
+                  normalizeLedgerDocType(e.tipo, e.detalle) === 'NC';
+                return (
                 <tr key={`${e.lineOrder}-${idx}`} className="hover:bg-slate-800/30">
                   <td className="px-3 py-1.5 whitespace-nowrap tabular-nums">{formatLedgerDate(e.lineDate)}</td>
-                  <td className="px-3 py-1.5">{e.tipo}</td>
+                  <td className="px-3 py-1.5" title={e.tipo}>{ledgerTipoDisplay(e.tipo)}</td>
                   <td className="px-3 py-1.5 font-mono text-[11px]">{e.numero ?? '—'}</td>
                   <td className="px-3 py-1.5 text-right tabular-nums">
                     {e.importe != null ? `$${Number(e.importe).toLocaleString('es-AR')}` : '—'}
@@ -734,8 +803,23 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   <td className="px-3 py-1.5 text-slate-400 max-w-[200px] truncate" title={e.detalle || ''}>
                     {e.detalle || '—'}
                   </td>
+                  {canViewSaldos && (
+                    <td className="px-3 py-1.5 text-right">
+                      {isManualNc && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteLedgerManualNc(e)}
+                          className="p-1.5 rounded-lg text-red-300 hover:bg-red-950/50 border border-red-900/50"
+                          title="Eliminar NC manual"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </td>
+                  )}
                 </tr>
-              ))}
+              );
+              })}
             </tbody>
           </table>
         </div>
@@ -1458,18 +1542,11 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   <span className="text-sm font-black uppercase tracking-[0.22em]">Saldo pendiente</span>
                 </div>
                 <p className="text-[11px] text-slate-400 leading-relaxed max-w-xl">
-                  Cuenta importada (Tango / Multimedias) más facturas y pedidos LupoHub pendientes, menos notas de crédito y recibos.
-                  Abajo, el detalle de cada comprobante (importado y LupoHub).
+                  Es la <span className="text-slate-300">deuda actual</span>: suma de facturas y pedidos (Tango + LupoHub) − notas de
+                  crédito − recibos. La tabla de abajo es el historial; el número grande de arriba es el que importa para cobrar.
                 </p>
                 {carteraById[selectedCustomer.id] && (
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500 font-mono tabular-nums pt-1">
-                    <span>
-                      Cuenta importada: $
-                      {carteraById[selectedCustomer.id].multimediaSaldo.toLocaleString('es-AR', {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2
-                      })}
-                    </span>
                     <span>
                       + Facturas/pedidos: $
                       {carteraById[selectedCustomer.id].orderCargosPendientes.toLocaleString('es-AR', {
@@ -1478,7 +1555,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                       })}
                     </span>
                     <span className="text-violet-400/90">
-                      − Notas de crédito (IVA): $
+                      − Notas de crédito: $
                       {carteraById[selectedCustomer.id].totalNotasCredito.toLocaleString('es-AR', {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2
@@ -1556,6 +1633,24 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                     ) : null}
                   </p>
                 ) : null}
+                <div className="mb-3 rounded-xl border border-slate-600/60 bg-slate-950/60 px-3 py-2.5 text-xs text-slate-400 leading-relaxed space-y-1.5">
+                  <p>
+                    <span className="font-bold text-amber-200">Saldo pendiente</span> (arriba) = cuánto debe el cliente
+                    hoy. Usá ese número para cobranza.
+                  </p>
+                  <p>
+                    <span className="font-bold text-slate-300">Saldo corrido</span> (columna de la tabla) = historial
+                    movimiento por movimiento; puede ser distinto si el cierre Tango ya descontó NC o recibos.
+                  </p>
+                  {carteraById[selectedCustomer.id] &&
+                  ledgerSaldoHistorialFinal != null &&
+                  Math.abs(ledgerSaldoHistorialFinal - getSaldoPendienteTotal(selectedCustomer)) > 1 ? (
+                    <p className="text-amber-100/80">
+                      En el Excel por vendedor: ignorá el «saldo del período con arrastre» si no coincide; el que dice{' '}
+                      <span className="font-bold">Saldo pendiente</span> en verde es el mismo que acá.
+                    </p>
+                  ) : null}
+                </div>
                 {renderLedgerTable(
                   'Facturas, NC y recibos',
                   <Receipt size={16} className="text-emerald-400 shrink-0" aria-hidden />,
@@ -2510,7 +2605,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 {canViewSaldos && (
                   <div
                     className="mb-2 rounded-xl border border-slate-600/35 bg-slate-900/55 px-2.5 py-2 text-[11px]"
-                    title="Suma del saldo de cuenta importada (Excel) y del saldo pendiente de pedidos en LupoHub. Tocá el cliente para ver números de facturas y recibos."
+                    title="Facturas/pedidos − notas de crédito − recibos (Tango importado + LupoHub). Tocá el cliente para el desglose."
                   >
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="flex items-center gap-1.5 text-slate-400 font-bold uppercase text-[10px] tracking-wide">

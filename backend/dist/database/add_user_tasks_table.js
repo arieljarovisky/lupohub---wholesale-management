@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addUserTasksTable = addUserTasksTable;
+exports.addUserTasksTable = void 0;
 const db_1 = require("./db");
 function addUserTasksTable() {
     return __awaiter(this, void 0, void 0, function* () {
@@ -31,3 +31,4 @@ function addUserTasksTable() {
   `);
     });
 }
+exports.addUserTasksTable = addUserTasksTable;

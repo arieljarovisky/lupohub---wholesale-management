@@ -89,15 +89,15 @@ const listCompanyFinanceEntries = (req, res) => __awaiter(void 0, void 0, void 0
 });
 exports.listCompanyFinanceEntries = listCompanyFinanceEntries;
 const createCompanyFinanceEntry = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _b, _c, _d, _e, _f;
     try {
         if (!assertFinanceAccess(req, res))
             return;
-        const entryType = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.entryType) || '').trim();
-        const category = String(((_b = req.body) === null || _b === void 0 ? void 0 : _b.category) || '').trim();
-        const amount = Number((_c = req.body) === null || _c === void 0 ? void 0 : _c.amount);
-        const description = String(((_d = req.body) === null || _d === void 0 ? void 0 : _d.description) || '').trim() || null;
-        const entryDate = String(((_e = req.body) === null || _e === void 0 ? void 0 : _e.entryDate) || '').slice(0, 10);
+        const entryType = String(((_b = req.body) === null || _b === void 0 ? void 0 : _b.entryType) || '').trim();
+        const category = String(((_c = req.body) === null || _c === void 0 ? void 0 : _c.category) || '').trim();
+        const amount = Number((_d = req.body) === null || _d === void 0 ? void 0 : _d.amount);
+        const description = String(((_e = req.body) === null || _e === void 0 ? void 0 : _e.description) || '').trim() || null;
+        const entryDate = String(((_f = req.body) === null || _f === void 0 ? void 0 : _f.entryDate) || '').slice(0, 10);
         if (entryType !== 'expense' && entryType !== 'income') {
             return res.status(400).json({ message: 'entryType debe ser expense o income' });
         }
@@ -137,7 +137,7 @@ const createCompanyFinanceEntry = (req, res) => __awaiter(void 0, void 0, void 0
 });
 exports.createCompanyFinanceEntry = createCompanyFinanceEntry;
 const updateCompanyFinanceEntry = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _g, _h, _j, _k, _l, _m, _o;
     try {
         if (!assertFinanceAccess(req, res))
             return;
@@ -145,18 +145,18 @@ const updateCompanyFinanceEntry = (req, res) => __awaiter(void 0, void 0, void 0
         const existing = yield (0, db_1.get)(`SELECT id FROM company_finance_entries WHERE id = ?`, [id]);
         if (!existing)
             return res.status(404).json({ message: 'Movimiento no encontrado' });
-        const entryType = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.entryType) || '').trim();
-        const category = String(((_b = req.body) === null || _b === void 0 ? void 0 : _b.category) || '').trim();
-        const amount = Number((_c = req.body) === null || _c === void 0 ? void 0 : _c.amount);
-        const description = ((_d = req.body) === null || _d === void 0 ? void 0 : _d.description) != null ? String(req.body.description).trim() || null : undefined;
-        const entryDate = ((_e = req.body) === null || _e === void 0 ? void 0 : _e.entryDate) != null ? String(req.body.entryDate).slice(0, 10) : undefined;
+        const entryType = String(((_g = req.body) === null || _g === void 0 ? void 0 : _g.entryType) || '').trim();
+        const category = String(((_h = req.body) === null || _h === void 0 ? void 0 : _h.category) || '').trim();
+        const amount = Number((_j = req.body) === null || _j === void 0 ? void 0 : _j.amount);
+        const description = ((_k = req.body) === null || _k === void 0 ? void 0 : _k.description) != null ? String(req.body.description).trim() || null : undefined;
+        const entryDate = ((_l = req.body) === null || _l === void 0 ? void 0 : _l.entryDate) != null ? String(req.body.entryDate).slice(0, 10) : undefined;
         if (entryType && entryType !== 'expense' && entryType !== 'income') {
             return res.status(400).json({ message: 'entryType inválido' });
         }
         if (category && !ALL_CATEGORIES.has(category)) {
             return res.status(400).json({ message: 'Categoría inválida' });
         }
-        if (((_f = req.body) === null || _f === void 0 ? void 0 : _f.amount) != null && (!Number.isFinite(amount) || amount <= 0)) {
+        if (((_m = req.body) === null || _m === void 0 ? void 0 : _m.amount) != null && (!Number.isFinite(amount) || amount <= 0)) {
             return res.status(400).json({ message: 'Importe inválido' });
         }
         if (entryDate && !/^\d{4}-\d{2}-\d{2}$/.test(entryDate)) {
@@ -172,7 +172,7 @@ const updateCompanyFinanceEntry = (req, res) => __awaiter(void 0, void 0, void 0
             fields.push('category = ?');
             params.push(category);
         }
-        if (((_g = req.body) === null || _g === void 0 ? void 0 : _g.amount) != null) {
+        if (((_o = req.body) === null || _o === void 0 ? void 0 : _o.amount) != null) {
             fields.push('amount = ?');
             params.push(Math.round(amount * 100) / 100);
         }
@@ -289,16 +289,16 @@ const listCompanyFinanceFixedExpenses = (req, res) => __awaiter(void 0, void 0, 
 });
 exports.listCompanyFinanceFixedExpenses = listCompanyFinanceFixedExpenses;
 const createCompanyFinanceFixedExpense = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f;
+    var _p, _q, _r, _s, _t, _u;
     try {
         if (!assertFinanceAccess(req, res))
             return;
-        const category = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.category) || '').trim();
-        const amount = Number((_b = req.body) === null || _b === void 0 ? void 0 : _b.amount);
-        const description = String(((_c = req.body) === null || _c === void 0 ? void 0 : _c.description) || '').trim() || null;
-        const active = ((_d = req.body) === null || _d === void 0 ? void 0 : _d.active) !== false;
-        const startsFrom = ((_e = req.body) === null || _e === void 0 ? void 0 : _e.startsFrom) ? String(req.body.startsFrom).slice(0, 10) : null;
-        const endsAt = ((_f = req.body) === null || _f === void 0 ? void 0 : _f.endsAt) ? String(req.body.endsAt).slice(0, 10) : null;
+        const category = String(((_p = req.body) === null || _p === void 0 ? void 0 : _p.category) || '').trim();
+        const amount = Number((_q = req.body) === null || _q === void 0 ? void 0 : _q.amount);
+        const description = String(((_r = req.body) === null || _r === void 0 ? void 0 : _r.description) || '').trim() || null;
+        const active = ((_s = req.body) === null || _s === void 0 ? void 0 : _s.active) !== false;
+        const startsFrom = ((_t = req.body) === null || _t === void 0 ? void 0 : _t.startsFrom) ? String(req.body.startsFrom).slice(0, 10) : null;
+        const endsAt = ((_u = req.body) === null || _u === void 0 ? void 0 : _u.endsAt) ? String(req.body.endsAt).slice(0, 10) : null;
         if (!exports.EXPENSE_CATEGORIES.some((c) => c.id === category)) {
             return res.status(400).json({ message: 'Categoría inválida' });
         }
@@ -342,7 +342,7 @@ const createCompanyFinanceFixedExpense = (req, res) => __awaiter(void 0, void 0,
 });
 exports.createCompanyFinanceFixedExpense = createCompanyFinanceFixedExpense;
 const updateCompanyFinanceFixedExpense = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f;
+    var _v, _w, _x, _y, _z, _0;
     try {
         if (!assertFinanceAccess(req, res))
             return;
@@ -352,7 +352,7 @@ const updateCompanyFinanceFixedExpense = (req, res) => __awaiter(void 0, void 0,
             return res.status(404).json({ message: 'Gasto fijo no encontrado' });
         const fields = [];
         const params = [];
-        if (((_a = req.body) === null || _a === void 0 ? void 0 : _a.category) != null) {
+        if (((_v = req.body) === null || _v === void 0 ? void 0 : _v.category) != null) {
             const category = String(req.body.category).trim();
             if (!exports.EXPENSE_CATEGORIES.some((c) => c.id === category)) {
                 return res.status(400).json({ message: 'Categoría inválida' });
@@ -360,7 +360,7 @@ const updateCompanyFinanceFixedExpense = (req, res) => __awaiter(void 0, void 0,
             fields.push('category = ?');
             params.push(category);
         }
-        if (((_b = req.body) === null || _b === void 0 ? void 0 : _b.amount) != null) {
+        if (((_w = req.body) === null || _w === void 0 ? void 0 : _w.amount) != null) {
             const amount = Number(req.body.amount);
             if (!Number.isFinite(amount) || amount <= 0) {
                 return res.status(400).json({ message: 'Importe inválido' });
@@ -368,15 +368,15 @@ const updateCompanyFinanceFixedExpense = (req, res) => __awaiter(void 0, void 0,
             fields.push('amount = ?');
             params.push((0, companyFinanceFixed_1.round2)(amount));
         }
-        if (((_c = req.body) === null || _c === void 0 ? void 0 : _c.description) !== undefined) {
+        if (((_x = req.body) === null || _x === void 0 ? void 0 : _x.description) !== undefined) {
             fields.push('description = ?');
             params.push(String(req.body.description || '').trim() || null);
         }
-        if (((_d = req.body) === null || _d === void 0 ? void 0 : _d.active) !== undefined) {
+        if (((_y = req.body) === null || _y === void 0 ? void 0 : _y.active) !== undefined) {
             fields.push('active = ?');
             params.push(req.body.active ? 1 : 0);
         }
-        if (((_e = req.body) === null || _e === void 0 ? void 0 : _e.startsFrom) !== undefined) {
+        if (((_z = req.body) === null || _z === void 0 ? void 0 : _z.startsFrom) !== undefined) {
             const startsFrom = req.body.startsFrom ? String(req.body.startsFrom).slice(0, 10) : null;
             if (startsFrom && !/^\d{4}-\d{2}-\d{2}$/.test(startsFrom)) {
                 return res.status(400).json({ message: 'startsFrom inválida' });
@@ -384,7 +384,7 @@ const updateCompanyFinanceFixedExpense = (req, res) => __awaiter(void 0, void 0,
             fields.push('starts_from = ?');
             params.push(startsFrom);
         }
-        if (((_f = req.body) === null || _f === void 0 ? void 0 : _f.endsAt) !== undefined) {
+        if (((_0 = req.body) === null || _0 === void 0 ? void 0 : _0.endsAt) !== undefined) {
             const endsAt = req.body.endsAt ? String(req.body.endsAt).slice(0, 10) : null;
             if (endsAt && !/^\d{4}-\d{2}-\d{2}$/.test(endsAt)) {
                 return res.status(400).json({ message: 'endsAt inválida' });
@@ -426,8 +426,8 @@ const deleteCompanyFinanceFixedExpense = (req, res) => __awaiter(void 0, void 0,
 });
 exports.deleteCompanyFinanceFixedExpense = deleteCompanyFinanceFixedExpense;
 function wholesaleOrdersRevenue(from, to) {
+    var _a;
     return __awaiter(this, void 0, void 0, function* () {
-        var _a;
         const row = (yield (0, db_1.get)(`SELECT COALESCE(SUM(o.total), 0) AS total
      FROM orders o
      WHERE o.date >= ? AND o.date <= ?
@@ -465,7 +465,7 @@ const getCompanyFinancePendingInvoices = (req, res) => __awaiter(void 0, void 0,
 });
 exports.getCompanyFinancePendingInvoices = getCompanyFinancePendingInvoices;
 const getCompanyFinanceSummary = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d;
+    var _1, _2, _3, _4;
     try {
         if (!assertFinanceAccess(req, res))
             return;
@@ -493,7 +493,7 @@ const getCompanyFinanceSummary = (req, res) => __awaiter(void 0, void 0, void 0,
        WHERE entry_date >= ? AND entry_date <= ?
        GROUP BY DATE_FORMAT(entry_date, '%Y-%m'), entry_type
        ORDER BY month ASC`, [from, to]));
-        const [receipts, despachos, pendingInvoices, fixedAgg, channelAgg] = yield Promise.all([
+        const [receipts, despachos, pendingInvoices, fixedAgg, channelAgg, invoiced] = yield Promise.all([
             (0, companyFinanceAggregates_service_1.sumReceiptsInRange)(from, to),
             (0, companyFinanceAggregates_service_1.sumDespachosCostInRange)(from, to),
             (0, companyFinanceAggregates_service_1.listPendingInvoices)(200),
@@ -507,11 +507,12 @@ const getCompanyFinanceSummary = (req, res) => __awaiter(void 0, void 0, void 0,
                     { sales: 0, fees: 0, orderCount: 0, connected: false, note: undefined },
                     { sales: 0, fees: 0, orderCount: 0, connected: false, note: undefined },
                 ]),
+            (0, companyFinanceAggregates_service_1.sumInvoicedInRange)(from, to),
         ]);
         const [mlAgg, tnAgg] = channelAgg;
         const ordersRevenue = includeOrders ? yield wholesaleOrdersRevenue(from, to) : 0;
-        const manualIncome = Math.round(Number((_a = totals === null || totals === void 0 ? void 0 : totals.manualIncome) !== null && _a !== void 0 ? _a : 0) * 100) / 100;
-        const manualExpenses = Math.round(Number((_b = totals === null || totals === void 0 ? void 0 : totals.totalExpenses) !== null && _b !== void 0 ? _b : 0) * 100) / 100;
+        const manualIncome = Math.round(Number((_1 = totals === null || totals === void 0 ? void 0 : totals.manualIncome) !== null && _1 !== void 0 ? _1 : 0) * 100) / 100;
+        const manualExpenses = Math.round(Number((_2 = totals === null || totals === void 0 ? void 0 : totals.totalExpenses) !== null && _2 !== void 0 ? _2 : 0) * 100) / 100;
         const receiptsTotal = receipts.total;
         const mlSales = mlAgg.sales;
         const tnSales = tnAgg.sales;
@@ -554,8 +555,12 @@ const getCompanyFinanceSummary = (req, res) => __awaiter(void 0, void 0, void 0,
             totalExpenses,
             netResult,
             profitOrLoss: netResult >= 0 ? 'profit' : 'loss',
-            expenseCount: Number((_c = totals === null || totals === void 0 ? void 0 : totals.expenseCount) !== null && _c !== void 0 ? _c : 0),
-            incomeCount: Number((_d = totals === null || totals === void 0 ? void 0 : totals.incomeCount) !== null && _d !== void 0 ? _d : 0),
+            expenseCount: Number((_3 = totals === null || totals === void 0 ? void 0 : totals.expenseCount) !== null && _3 !== void 0 ? _3 : 0),
+            incomeCount: Number((_4 = totals === null || totals === void 0 ? void 0 : totals.incomeCount) !== null && _4 !== void 0 ? _4 : 0),
+            invoicedTotal: invoiced.total,
+            invoicedNet: invoiced.net,
+            invoicedIva: invoiced.iva,
+            invoicedCount: invoiced.count,
             pendingInvoicesTotal: pendingInvoices.totalPending,
             pendingInvoicesCount: pendingInvoices.items.length,
             pendingInvoices: pendingInvoices.items,

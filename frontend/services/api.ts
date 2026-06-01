@@ -1888,7 +1888,7 @@ export const api = {
     saldoPendiente: number;
     movements: Array<{
       fecha: string | null;
-      tipo: 'FACTURA' | 'NC' | 'RECIBO';
+      tipo: string;
       comprobante: string;
       orderId: string | null;
       debe: number;
@@ -3018,6 +3018,143 @@ export const api = {
     }, [], 'getBilling');
   },
 
+  getManualComprobanteRefs: async (
+    customerId: string
+  ): Promise<
+    Array<{
+      invoiceId?: string;
+      manualComprobanteId?: string;
+      orderId?: string;
+      label: string;
+      fecha: string;
+      importeNeto: number;
+      importeConIva: number;
+    }>
+  > => {
+    return await request(
+      `/customers/${encodeURIComponent(customerId)}/manual-comprobante-refs`,
+      'GET'
+    );
+  },
+
+  createManualComprobante: async (payload: {
+    customerId: string;
+    tipo: 'FACTURA' | 'NC';
+    fecha: string;
+    puntoVenta?: number;
+    cbteTipo?: number;
+    cbteDesde?: number;
+    cbteHasta?: number;
+    letra?: 'A' | 'B';
+    sinDetalle?: boolean;
+    cae?: string;
+    caeFchVto?: string;
+    importeBruto: number;
+    importeNeto?: number;
+    agipRetPer?: number;
+    notes?: string;
+    refInvoiceId?: string;
+    refManualComprobanteId?: string;
+    pdf?: File | null;
+  }): Promise<{
+    id: string;
+    comprobante: string;
+    importeTotal: number;
+    importeConIva?: number;
+    sinDetalle?: boolean;
+    hasPdf?: boolean;
+    allocationNote?: string;
+  }> => {
+    const { pdf, importeNeto, ...fields } = payload;
+    const body = {
+      ...fields,
+      importeBruto: fields.importeBruto ?? importeNeto
+    };
+    if (pdf) {
+      const form = new FormData();
+      Object.entries(body).forEach(([k, v]) => {
+        if (v === undefined || v === null) return;
+        form.append(k, typeof v === 'boolean' ? (v ? 'true' : 'false') : String(v));
+      });
+      form.append('pdf', pdf);
+      return await requestFormData('/billing/manual-comprobantes/upload', form, 120000);
+    }
+    return await request('/billing/manual-comprobantes', 'POST', body);
+  },
+
+  getManualComprobante: async (id: string): Promise<{
+    id: string;
+    customerId: string;
+    tipo: 'FACTURA' | 'NC';
+    fecha: string;
+    puntoVenta: number;
+    cbteTipo: number;
+    cbteDesde: number;
+    cbteHasta: number;
+    letra: 'A' | 'B';
+    importeBruto: number;
+    agipRetPer: number;
+    importeTotal: number;
+    sinDetalle: boolean;
+    hasPdf: boolean;
+    cae?: string;
+    notes?: string;
+    refInvoiceId?: string;
+    refManualComprobanteId?: string;
+    comprobante: string;
+  }> => {
+    return await request(`/billing/manual-comprobantes/${encodeURIComponent(id)}`, 'GET');
+  },
+
+  updateManualComprobante: async (
+    id: string,
+    payload: {
+      customerId: string;
+      tipo: 'FACTURA' | 'NC';
+      fecha: string;
+      puntoVenta?: number;
+      cbteTipo?: number;
+      cbteDesde?: number;
+      cbteHasta?: number;
+      letra?: 'A' | 'B';
+      sinDetalle?: boolean;
+      cae?: string;
+      importeBruto: number;
+      agipRetPer?: number;
+      notes?: string;
+      refInvoiceId?: string;
+      refManualComprobanteId?: string;
+      pdf?: File | null;
+    }
+  ) => {
+    const { pdf, ...fields } = payload;
+    if (pdf) {
+      const form = new FormData();
+      Object.entries(fields).forEach(([k, v]) => {
+        if (v === undefined || v === null) return;
+        form.append(k, typeof v === 'boolean' ? (v ? 'true' : 'false') : String(v));
+      });
+      form.append('pdf', pdf);
+      return await requestFormData(
+        `/billing/manual-comprobantes/${encodeURIComponent(id)}/upload`,
+        form,
+        120000
+      );
+    }
+    return await request(`/billing/manual-comprobantes/${encodeURIComponent(id)}`, 'PATCH', fields);
+  },
+
+  openManualComprobantePdf: async (id: string): Promise<void> => {
+    const blob = await getBlob(`/billing/manual-comprobantes/${encodeURIComponent(id)}/pdf`);
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener,noreferrer');
+    setTimeout(() => URL.revokeObjectURL(url), 120000);
+  },
+
+  deleteManualComprobante: async (id: string): Promise<{ ok: boolean; id: string; tipo: string }> => {
+    return await request(`/billing/manual-comprobantes/${encodeURIComponent(id)}`, 'DELETE');
+  },
+
   exportBilling: async (params?: { desde?: string; hasta?: string; customerId?: string; province?: string; tipo?: 'FACTURA' | 'NC' }): Promise<void> => {
     const queryParams = new URLSearchParams();
     if (params?.desde) queryParams.append('desde', params.desde);
@@ -3242,12 +3379,33 @@ export const api = {
     });
   },
 
+  /** Recibo importado Tango: imputaciones ya guardadas (si existe pago en sistema) y datos del movimiento. */
+  getImportedReceiptLinkInfo: async (
+    customerId: string,
+    importedLineOrder: number
+  ): Promise<{
+    customerId: string;
+    importedLineOrder: number;
+    paymentId?: string;
+    receiptNumber: string;
+    date: string;
+    amount: number;
+    invoiceIds: string[];
+    orderIds: string[];
+  }> => {
+    const qs = new URLSearchParams({
+      customerId,
+      importedLineOrder: String(importedLineOrder),
+    });
+    return await request(`/payments/imported/link-info?${qs.toString()}`, 'GET');
+  },
+
   /** Asocia facturas y/o pedidos sin factura a un recibo ya cargado. */
   patchPaymentInvoices: async (
     paymentId: string,
     invoiceIds: string[],
     orderIds: string[] = [],
-    opts?: { customerId?: string; importedLineOrder?: number }
+    importedMeta?: { customerId: string; importedLineOrder: number }
   ): Promise<{
     id: string;
     invoiceIds: string[];
@@ -3269,8 +3427,12 @@ export const api = {
     return await request(`/payments/${encodeURIComponent(paymentId)}/invoices`, 'PATCH', {
       invoiceIds,
       orderIds,
-      ...(opts?.customerId ? { customerId: opts.customerId } : {}),
-      ...(opts?.importedLineOrder != null ? { importedLineOrder: opts.importedLineOrder } : {})
+      ...(importedMeta
+        ? {
+            customerId: importedMeta.customerId,
+            importedLineOrder: importedMeta.importedLineOrder,
+          }
+        : {}),
     });
   },
   updatePaymentDate: async (paymentId: string, date: string): Promise<import('../types').Payment> => {

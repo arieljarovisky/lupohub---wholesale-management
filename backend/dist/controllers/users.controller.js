@@ -32,9 +32,9 @@ const listUsers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
 exports.listUsers = listUsers;
 /** Crear usuario. Solo ADMIN. */
 const createUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _b;
     try {
-        if (((_a = req.user) === null || _a === void 0 ? void 0 : _a.role) !== 'ADMIN') {
+        if (((_b = req.user) === null || _b === void 0 ? void 0 : _b.role) !== 'ADMIN') {
             return res.status(403).json({ message: 'Solo administradores pueden crear usuarios' });
         }
         const { name, email, password, role, commissionPercentage } = req.body;
@@ -71,14 +71,14 @@ const createUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
 exports.createUser = createUser;
 /** Importar vendedores (rol SELLER) en lote. Solo ADMIN. */
 const importSellers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _c, _d, _e, _f, _g;
     try {
-        if (((_a = req.user) === null || _a === void 0 ? void 0 : _a.role) !== 'ADMIN') {
+        if (((_c = req.user) === null || _c === void 0 ? void 0 : _c.role) !== 'ADMIN') {
             return res.status(403).json({ message: 'Solo administradores pueden importar vendedores' });
         }
         const body = req.body;
         const rows = Array.isArray(body.sellers) ? body.sellers : [];
-        const defaultPassword = ((_b = body.defaultPassword) !== null && _b !== void 0 ? _b : '').toString();
+        const defaultPassword = ((_d = body.defaultPassword) !== null && _d !== void 0 ? _d : '').toString();
         if (rows.length === 0) {
             return res.status(400).json({ message: 'Enviá un array sellers con al menos una fila' });
         }
@@ -92,8 +92,8 @@ const importSellers = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const errors = [];
         for (let i = 0; i < rows.length; i++) {
             const r = rows[i];
-            const name = ((_c = r.name) !== null && _c !== void 0 ? _c : '').toString().trim();
-            const email = ((_d = r.email) !== null && _d !== void 0 ? _d : '').toString().trim().toLowerCase();
+            const name = ((_e = r.name) !== null && _e !== void 0 ? _e : '').toString().trim();
+            const email = ((_f = r.email) !== null && _f !== void 0 ? _f : '').toString().trim().toLowerCase();
             const rowNum = i + 1;
             if (!name) {
                 errors.push({ row: rowNum, message: 'Falta nombre' });
@@ -103,7 +103,7 @@ const importSellers = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 errors.push({ row: rowNum, message: 'Email inválido o faltante' });
                 continue;
             }
-            const password = ((_e = r.password) !== null && _e !== void 0 ? _e : '').toString().trim() || defaultPassword;
+            const password = ((_g = r.password) !== null && _g !== void 0 ? _g : '').toString().trim() || defaultPassword;
             const commission = r.commissionPercentage != null && Number.isFinite(Number(r.commissionPercentage))
                 ? Math.min(100, Math.max(0, Number(r.commissionPercentage)))
                 : 0;
@@ -142,13 +142,13 @@ const importSellers = (req, res) => __awaiter(void 0, void 0, void 0, function* 
 exports.importSellers = importSellers;
 /** Eliminar usuario. Solo ADMIN. No se puede eliminar a uno mismo. */
 const deleteUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _h, _j;
     try {
-        if (((_a = req.user) === null || _a === void 0 ? void 0 : _a.role) !== 'ADMIN') {
+        if (((_h = req.user) === null || _h === void 0 ? void 0 : _h.role) !== 'ADMIN') {
             return res.status(403).json({ message: 'Solo administradores pueden eliminar usuarios' });
         }
         const { id } = req.params;
-        const currentUserId = (_b = req.user) === null || _b === void 0 ? void 0 : _b.id;
+        const currentUserId = (_j = req.user) === null || _j === void 0 ? void 0 : _j.id;
         if (currentUserId && currentUserId === id) {
             return res.status(400).json({ message: 'No podés eliminarte a vos mismo' });
         }
@@ -170,9 +170,9 @@ const deleteUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
 exports.deleteUser = deleteUser;
 /** Actualizar usuario (price_list_id solo para roles que no sean SELLER). Solo ADMIN. */
 const updateUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _k, _l;
     try {
-        if (((_a = req.user) === null || _a === void 0 ? void 0 : _a.role) !== 'ADMIN') {
+        if (((_k = req.user) === null || _k === void 0 ? void 0 : _k.role) !== 'ADMIN') {
             return res.status(403).json({ message: 'Solo administradores pueden actualizar usuarios' });
         }
         const { id } = req.params;
@@ -180,7 +180,7 @@ const updateUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         const existing = yield (0, db_1.get)('SELECT id, role FROM users WHERE id = ?', [id]);
         if (!existing)
             return res.status(404).json({ message: 'Usuario no encontrado' });
-        const userRole = String((_b = existing.role) !== null && _b !== void 0 ? _b : '');
+        const userRole = String((_l = existing.role) !== null && _l !== void 0 ? _l : '');
         let didUpdate = false;
         if (body.priceListId !== undefined) {
             if (userRole === 'SELLER') {

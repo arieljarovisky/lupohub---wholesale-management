@@ -3,15 +3,7 @@
  * Formato Excel "historial_clientes_multimedias": hoja Resumen + una hoja por cliente.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.padLegacyCode = padLegacyCode;
-exports.normalizeCuitDigits = normalizeCuitDigits;
-exports.parseResumenCodeToCliente = parseResumenCodeToCliente;
-exports.parseArgentineMoneyDisplay = parseArgentineMoneyDisplay;
-exports.parseArgentineDateDisplay = parseArgentineDateDisplay;
-exports.sqlDateToDisplay = sqlDateToDisplay;
-exports.parseSheetName = parseSheetName;
-exports.parseCustomerSheetRows = parseCustomerSheetRows;
-exports.excelSheetName = excelSheetName;
+exports.excelSheetName = exports.parseCustomerSheetRows = exports.parseSheetName = exports.sqlDateToDisplay = exports.parseArgentineDateDisplay = exports.parseArgentineMoneyDisplay = exports.parseResumenCodeToCliente = exports.normalizeCuitDigits = exports.padLegacyCode = void 0;
 /** Igual que en import Multimedias: código numérico corto rellenado a 6. */
 function padLegacyCode(code) {
     const t = code.trim();
@@ -19,10 +11,12 @@ function padLegacyCode(code) {
         return t.padStart(6, '0');
     return t;
 }
+exports.padLegacyCode = padLegacyCode;
 /** Solo dígitos, para matchear CUIT (11 u 8–11). */
 function normalizeCuitDigits(v) {
     return String(v !== null && v !== void 0 ? v : '').replace(/\D/g, '');
 }
+exports.normalizeCuitDigits = normalizeCuitDigits;
 /**
  * Hoja "Resumen": primera columna código, segunda cliente (como en historial Multimedias).
  * Devuelve mapa código normalizado → nombre de cliente en el Excel.
@@ -57,6 +51,7 @@ function parseResumenCodeToCliente(rows) {
     }
     return map;
 }
+exports.parseResumenCodeToCliente = parseResumenCodeToCliente;
 function cellStr(v) {
     if (v == null || v === '')
         return '';
@@ -116,6 +111,7 @@ function parseArgentineMoneyDisplay(s) {
     const v = Math.round(n * 100) / 100;
     return neg ? -v : v;
 }
+exports.parseArgentineMoneyDisplay = parseArgentineMoneyDisplay;
 function cellNum(v) {
     if (v == null || v === '')
         return null;
@@ -143,6 +139,7 @@ function parseArgentineDateDisplay(s) {
         return null;
     return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
+exports.parseArgentineDateDisplay = parseArgentineDateDisplay;
 function sqlDateToDisplay(iso) {
     if (!iso)
         return '';
@@ -151,6 +148,7 @@ function sqlDateToDisplay(iso) {
         return '';
     return `${m[3]}/${m[2]}/${m[1]}`;
 }
+exports.sqlDateToDisplay = sqlDateToDisplay;
 /** Nombre de hoja: "000809 FERNANDEZ HNOS SRL" → código + razón */
 function parseSheetName(sheetName) {
     const t = sheetName.trim();
@@ -161,6 +159,7 @@ function parseSheetName(sheetName) {
         return { code: t, restName: '' };
     return { code: t.slice(0, sp).trim(), restName: t.slice(sp + 1).trim() };
 }
+exports.parseSheetName = parseSheetName;
 /** Lee matriz de celdas de una hoja cliente (formato Multimedias). */
 function parseCustomerSheetRows(rows) {
     var _a, _b, _c;
@@ -246,6 +245,7 @@ function parseCustomerSheetRows(rows) {
         movements,
     };
 }
+exports.parseCustomerSheetRows = parseCustomerSheetRows;
 function excelSheetName(code, businessName, maxLen = 31) {
     const name = (businessName || 'Cliente').trim() || 'Cliente';
     const base = `${code} ${name}`.trim();
@@ -253,3 +253,4 @@ function excelSheetName(code, businessName, maxLen = 31) {
         return base;
     return base.slice(0, maxLen);
 }
+exports.excelSheetName = excelSheetName;

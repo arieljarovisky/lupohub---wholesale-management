@@ -417,7 +417,10 @@ export const listBilling = async (req: Request, res: Response) => {
           i.created_at,
           i.agip_alicuota,
           i.agip_ret_per,
-          (SELECT COUNT(*) FROM credit_notes cn_cnt WHERE cn_cnt.order_id = o.id) AS credit_notes_count
+          (SELECT COUNT(*) FROM credit_notes cn_cnt WHERE cn_cnt.order_id = o.id) AS credit_notes_count,
+          0 AS es_manual,
+          0 AS sin_detalle,
+          0 AS has_pdf
         FROM invoices i
         JOIN orders o ON o.id = i.order_id
         JOIN customers c ON c.id = o.customer_id
@@ -445,13 +448,46 @@ export const listBilling = async (req: Request, res: Response) => {
           MIN(cn.created_at) AS created_at,
           0 AS agip_alicuota,
           0 AS agip_ret_per,
-          (SELECT COUNT(*) FROM credit_notes cn_tot WHERE cn_tot.order_id = cn.order_id) AS credit_notes_count
+          (SELECT COUNT(*) FROM credit_notes cn_tot WHERE cn_tot.order_id = cn.order_id) AS credit_notes_count,
+          0 AS es_manual,
+          0 AS sin_detalle,
+          0 AS has_pdf
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
         JOIN customers c ON c.id = o.customer_id
         WHERE COALESCE(cn.superseded_by_reinvoice, 0) = 0
         GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
                  cn.cae_fch_vto, cn.order_id, c.id, c.business_name, c.name
+
+        UNION ALL
+
+        SELECT
+          m.id,
+          m.tipo,
+          m.cbte_tipo,
+          m.punto_venta,
+          m.cbte_desde AS numero_desde,
+          m.cbte_hasta AS numero_hasta,
+          m.ref_order_id AS order_id,
+          m.fecha,
+          CASE
+            WHEN m.tipo = 'FACTURA' THEN ROUND(m.importe_neto + COALESCE(m.agip_ret_per, 0), 2)
+            ELSE ROUND(m.importe_neto, 2)
+          END AS importe,
+          m.customer_id,
+          c.business_name AS customer_business_name,
+          c.name AS customer_name,
+          m.cae,
+          m.cae_fch_vto AS cae_fch_vto,
+          m.created_at,
+          0 AS agip_alicuota,
+          CASE WHEN m.tipo = 'FACTURA' THEN COALESCE(m.agip_ret_per, 0) ELSE 0 END AS agip_ret_per,
+          0 AS credit_notes_count,
+          1 AS es_manual,
+          COALESCE(m.sin_detalle, 0) AS sin_detalle,
+          CASE WHEN m.pdf_path IS NOT NULL AND TRIM(m.pdf_path) != '' THEN 1 ELSE 0 END AS has_pdf
+        FROM customer_manual_comprobantes m
+        JOIN customers c ON c.id = m.customer_id
       ) AS b
       ${whereSql}
       ORDER BY b.fecha DESC, b.created_at DESC
@@ -476,7 +512,10 @@ export const listBilling = async (req: Request, res: Response) => {
       createdAt: r.created_at,
       creditNotesCount: Number(r.credit_notes_count) || 0,
       agipAlicuota: Number(r.agip_alicuota) || 0,
-      agipRetPer: Number(r.agip_ret_per) || 0
+      agipRetPer: Number(r.agip_ret_per) || 0,
+      manual: !!Number(r.es_manual),
+      sinDetalle: !!Number(r.sin_detalle),
+      hasPdf: !!Number(r.has_pdf)
     }));
 
     // Integrar facturas importadas desde Tango/Multimedias en la misma vista de facturación.
@@ -554,7 +593,10 @@ export const listBilling = async (req: Request, res: Response) => {
               createdAt: null,
               creditNotesCount: 0,
               agipAlicuota: 0,
-              agipRetPer: 0
+              agipRetPer: 0,
+              manual: false,
+              sinDetalle: false,
+              hasPdf: false
             }
           };
         })

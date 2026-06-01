@@ -10,6 +10,16 @@ import {
   exportVentasJurisdiccionXlsx,
   printBilling
 } from '../controllers/billing.controller';
+import {
+  createManualComprobante,
+  createManualComprobanteMultipart,
+  getManualComprobante,
+  getManualComprobantePdf,
+  updateManualComprobante,
+  updateManualComprobanteMultipart,
+  deleteManualComprobante,
+  uploadManualComprobantePdfHandler
+} from '../controllers/manualComprobantes.controller';
 import { authMiddleware, billingAccessMiddleware } from '../middleware/auth';
 import multer from 'multer';
 
@@ -28,6 +38,21 @@ const uploadAgipPadronFile = (req: any, res: any, next: any) => {
 router.use(authMiddleware, billingAccessMiddleware);
 
 router.get('/', listBilling);
+router.post('/manual-comprobantes', createManualComprobante as any);
+router.post(
+  '/manual-comprobantes/upload',
+  uploadManualComprobantePdfHandler,
+  createManualComprobanteMultipart as any
+);
+router.get('/manual-comprobantes/:id/pdf', getManualComprobantePdf as any);
+router.get('/manual-comprobantes/:id', getManualComprobante as any);
+router.patch('/manual-comprobantes/:id', updateManualComprobante as any);
+router.patch(
+  '/manual-comprobantes/:id/upload',
+  uploadManualComprobantePdfHandler,
+  updateManualComprobanteMultipart as any
+);
+router.delete('/manual-comprobantes/:id', deleteManualComprobante as any);
 router.get('/export', exportBilling);
 router.get('/print', printBilling);
 router.get('/export-retper', exportRetPerTxt);

@@ -3,9 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.buildSignedWebhookPayload = buildSignedWebhookPayload;
-exports.isTimestampFresh = isTimestampFresh;
-exports.verifySignedWebhookPayload = verifySignedWebhookPayload;
+exports.verifySignedWebhookPayload = exports.isTimestampFresh = exports.buildSignedWebhookPayload = void 0;
 const crypto_1 = __importDefault(require("crypto"));
 const canonicalJson_1 = require("./canonicalJson");
 function buildSignedWebhookPayload(secret, timestampSec, body) {
@@ -23,6 +21,7 @@ function buildSignedWebhookPayload(secret, timestampSec, body) {
         signatureHeaderValue: `sha256=${signatureHex}`
     };
 }
+exports.buildSignedWebhookPayload = buildSignedWebhookPayload;
 function isTimestampFresh(timestampSecOrMs, options) {
     var _a, _b;
     const raw = Number(timestampSecOrMs);
@@ -34,6 +33,7 @@ function isTimestampFresh(timestampSecOrMs, options) {
     const diffMs = Math.abs(nowMs - inputMs);
     return diffMs <= maxAgeSec * 1000;
 }
+exports.isTimestampFresh = isTimestampFresh;
 function verifySignedWebhookPayload(params) {
     const { secret, timestampSecOrMs, body, signatureHeader, maxAgeSec, nowMs } = params;
     if (!isTimestampFresh(timestampSecOrMs, { nowMs, maxAgeSec })) {
@@ -51,3 +51,4 @@ function verifySignedWebhookPayload(params) {
         return { ok: false, reason: 'signature_mismatch' };
     return { ok: true };
 }
+exports.verifySignedWebhookPayload = verifySignedWebhookPayload;

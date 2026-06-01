@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.syncBundleStock = exports.createListingFromSource = exports.removeBundle = exports.updateBundle = exports.createBundle = exports.getBundle = exports.syncListingBundlesStock = exports.saveBundleGroup = exports.getBundlesByProduct = exports.getSourcePreview = exports.listBundles = void 0;
+exports.syncBundleStock = exports.createListingFromSource = exports.removeBundle = exports.updateBundle = exports.createBundle = exports.getBundle = exports.syncListingBundlesStock = exports.saveBundleGroup = exports.getBundlesByProduct = exports.getListingVariations = exports.getSourcePreview = exports.listBundles = void 0;
 const publicationStockBundle_service_1 = require("../services/publicationStockBundle.service");
 const integrations_controller_1 = require("./integrations.controller");
 const packListingCreate_service_1 = require("../services/packListingCreate.service");
@@ -59,6 +59,33 @@ const getSourcePreview = (req, res) => __awaiter(void 0, void 0, void 0, functio
     }
 });
 exports.getSourcePreview = getSourcePreview;
+const getListingVariations = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const platform = req.query.platform;
+        const listingId = String(req.query.listingId || req.query.listing_id || '').trim();
+        if (!platform || (platform !== 'mercadolibre' && platform !== 'tiendanube')) {
+            return res.status(400).json({ message: 'platform inválida' });
+        }
+        if (!listingId) {
+            return res.status(400).json({ message: 'listingId es requerido' });
+        }
+        const result = yield (0, packListingCreate_service_1.fetchListingPackVariations)(platform, listingId);
+        if (!result) {
+            const mlauHint = platform === 'mercadolibre' && /^MLAU\d+$/i.test((0, integrations_controller_1.normalizeMercadoLibreItemId)(listingId))
+                ? ' Verificá que el MLAU sea de tu cuenta ML.'
+                : '';
+            return res.status(404).json({
+                message: `Publicación no encontrada en la plataforma.${mlauHint}`
+            });
+        }
+        res.json(result);
+    }
+    catch (e) {
+        console.error('getListingVariations:', e);
+        res.status(500).json({ message: (e === null || e === void 0 ? void 0 : e.message) || 'Error obteniendo variaciones' });
+    }
+});
+exports.getListingVariations = getListingVariations;
 const getBundlesByProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const platform = req.query.platform;
@@ -111,10 +138,10 @@ const saveBundleGroup = (req, res) => __awaiter(void 0, void 0, void 0, function
 });
 exports.saveBundleGroup = saveBundleGroup;
 const syncListingBundlesStock = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _b;
     try {
         const body = req.body;
-        if (!body.platform || !((_a = body.externalProductId) === null || _a === void 0 ? void 0 : _a.trim())) {
+        if (!body.platform || !((_b = body.externalProductId) === null || _b === void 0 ? void 0 : _b.trim())) {
             return res.status(400).json({ message: 'platform y externalProductId son requeridos' });
         }
         yield (0, publicationStockBundle_service_1.syncAllBundlesForProduct)(body.platform, body.externalProductId);
@@ -141,13 +168,13 @@ const getBundle = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
 });
 exports.getBundle = getBundle;
 const createBundle = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _c;
     try {
         const body = req.body;
         if (!body.platform || (body.platform !== 'mercadolibre' && body.platform !== 'tiendanube')) {
             return res.status(400).json({ message: 'platform debe ser mercadolibre o tiendanube' });
         }
-        if (!((_a = body.externalProductId) === null || _a === void 0 ? void 0 : _a.trim())) {
+        if (!((_c = body.externalProductId) === null || _c === void 0 ? void 0 : _c.trim())) {
             return res.status(400).json({ message: 'externalProductId es requerido (ID publicación ML o producto TN)' });
         }
         if (!Array.isArray(body.items) || body.items.length === 0) {
@@ -200,13 +227,13 @@ const removeBundle = (req, res) => __awaiter(void 0, void 0, void 0, function* (
 });
 exports.removeBundle = removeBundle;
 const createListingFromSource = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _d, _e;
     try {
         const body = req.body;
         if (!body.platform || (body.platform !== 'mercadolibre' && body.platform !== 'tiendanube')) {
             return res.status(400).json({ message: 'platform debe ser mercadolibre o tiendanube' });
         }
-        if (!((_a = body.sourceExternalProductId) === null || _a === void 0 ? void 0 : _a.trim())) {
+        if (!((_d = body.sourceExternalProductId) === null || _d === void 0 ? void 0 : _d.trim())) {
             return res.status(400).json({ message: 'sourceExternalProductId es requerido (publicación individual)' });
         }
         const hasVariants = Array.isArray(body.variants) && body.variants.length > 0;
@@ -222,7 +249,7 @@ const createListingFromSource = (req, res) => __awaiter(void 0, void 0, void 0, 
             label: body.label,
             published: body.published,
             items: body.items,
-            variants: (_b = body.variants) === null || _b === void 0 ? void 0 : _b.map((v) => {
+            variants: (_e = body.variants) === null || _e === void 0 ? void 0 : _e.map((v) => {
                 var _a;
                 return ({
                     label: v.label,

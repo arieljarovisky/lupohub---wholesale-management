@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addPaymentsTable = addPaymentsTable;
+exports.addPaymentsTable = void 0;
 const db_1 = require("./db");
 /** Evita doble inserción del mismo recibo (doble click o dos POST simultáneos). */
 function ensurePaymentsNaturalUniqueIndex() {
@@ -78,3 +78,4 @@ function addPaymentsTable() {
         }
     });
 }
+exports.addPaymentsTable = addPaymentsTable;

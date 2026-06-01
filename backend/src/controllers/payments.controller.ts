@@ -13,6 +13,12 @@ import {
   validateOrdersForPayment,
   type PaymentAllocationResult
 } from '../services/orderPaymentBalance.service';
+import {
+  findOrCreatePaymentFromImportedReceipt,
+  findExistingPaymentIdForImportedEntry,
+  getImportedReceiptEntry,
+  getPaymentAllocationIds,
+} from '../services/importedReceiptPayment.service';
 
 function formatAllocationNote(
   alloc: PaymentAllocationResult,
@@ -154,99 +160,6 @@ async function ensurePaymentInvoiceRefsTable(): Promise<boolean> {
     paymentInvoiceRefsTableReady = false;
     return false;
   }
-}
-
-function parsePaymentMoney(v: unknown): number {
-  if (v == null) return 0;
-  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
-  const s = String(v).trim().replace(/\s/g, '').replace(/\$/g, '');
-  if (!s) return 0;
-  const hasComma = s.includes(',');
-  const hasDot = s.includes('.');
-  if (hasComma && hasDot) {
-    const n = Number(s.replace(/\./g, '').replace(',', '.'));
-    return Number.isFinite(n) ? n : 0;
-  }
-  if (hasComma) {
-    const n = Number(s.replace(',', '.'));
-    return Number.isFinite(n) ? n : 0;
-  }
-  const n = Number(s);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function normalizePaymentDate(v: unknown): string {
-  if (typeof v === 'string') {
-    const raw = v.trim();
-    const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if (m) {
-      return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
-    }
-  }
-  const d = new Date(v as string | number | Date);
-  if (Number.isNaN(d.getTime())) return String(v || '').slice(0, 10);
-  return d.toISOString().slice(0, 10);
-}
-
-/** Crea o reutiliza un pago en `payments` para un REC importado de Tango/Multimedias. */
-async function ensurePaymentFromMultimediaEntry(
-  customerId: string,
-  lineOrder: number
-): Promise<string> {
-  const entry = (await get(
-    `SELECT e.numero, e.line_date, e.importe, e.detalle, c.seller_id
-     FROM customer_multimedia_entries e
-     JOIN customers c ON c.id = e.customer_id
-     WHERE e.customer_id = ? AND e.line_order = ?
-       AND UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'REC%'
-     LIMIT 1`,
-    [customerId, lineOrder]
-  )) as
-    | {
-        numero?: string;
-        line_date?: string;
-        importe?: unknown;
-        detalle?: string;
-        seller_id?: string | null;
-      }
-    | undefined;
-  if (!entry) {
-    const err: any = new Error('Recibo importado de Tango no encontrado');
-    err.statusCode = 404;
-    throw err;
-  }
-
-  const receiptNumber = String(entry.numero || '').trim();
-  const date = normalizePaymentDate(entry.line_date);
-  const amount = parsePaymentMoney(entry.importe);
-  const receiptStrict = normalizeReceiptNumberStrict(receiptNumber);
-  const notes = entry.detalle ? `Importado Tango: ${entry.detalle}` : 'Importado Tango';
-
-  const existing = (await get(
-    `SELECT id FROM payments
-     WHERE customer_id = ?
-       AND ABS(amount - ?) < 0.01
-       AND (
-         (receipt_number = ? AND date = ?)
-         OR (
-           UPPER(
-             REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(receipt_number, '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
-           ) = ?
-           AND ABS(DATEDIFF(date, ?)) <= 1
-         )
-       )
-     LIMIT 1`,
-    [customerId, amount, receiptNumber, date, receiptStrict, date]
-  )) as { id: string } | undefined;
-  if (existing?.id) return existing.id;
-
-  const id = uuidv4();
-  await execute(
-    `INSERT INTO payments (id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes)
-     VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?)`,
-    [id, customerId, entry.seller_id ?? null, receiptNumber, date, amount, notes]
-  );
-  return id;
 }
 
 /** Listar pagos con filtros opcionales (cliente, factura, pedido, desde/hasta). */
@@ -860,6 +773,68 @@ export const getOrdersOutstandingHandler = async (req: any, res: Response) => {
   }
 };
 
+/** Datos previos para asociar un recibo importado de Tango (sin crear el pago hasta guardar). */
+export const getImportedReceiptLinkInfo = async (req: any, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user || !canManagePayments(user.role)) {
+      return res.status(403).json({ message: 'No autorizado' });
+    }
+    const customerId = String(req.query?.customerId || '').trim();
+    const importedLineOrder = Number(req.query?.importedLineOrder);
+    if (!customerId) return res.status(400).json({ message: 'Falta customerId' });
+    if (!Number.isFinite(importedLineOrder) || importedLineOrder <= 0) {
+      return res.status(400).json({ message: 'Falta importedLineOrder válido' });
+    }
+
+    const cust = await get('SELECT id, seller_id FROM customers WHERE id = ? LIMIT 1', [customerId]);
+    if (!cust) return res.status(404).json({ message: 'Cliente no encontrado' });
+    if (user.role === 'SELLER' && cust.seller_id !== user.id) {
+      return res.status(403).json({ message: 'Solo podés ver recibos de tus clientes' });
+    }
+
+    const entry = await getImportedReceiptEntry(customerId, importedLineOrder);
+    if (!entry) return res.status(404).json({ message: 'Recibo importado no encontrado' });
+
+    const paymentId = await findExistingPaymentIdForImportedEntry(entry);
+    const { invoiceIds, orderIds } = paymentId
+      ? await getPaymentAllocationIds(paymentId)
+      : { invoiceIds: [], orderIds: [] };
+
+    return res.json({
+      customerId,
+      importedLineOrder,
+      paymentId: paymentId ?? undefined,
+      receiptNumber: String(entry.numero || ''),
+      date: toSqlDate(entry.line_date),
+      amount: Math.round(parseImportedAmountForApi(entry.importe) * 100) / 100,
+      invoiceIds,
+      orderIds,
+    });
+  } catch (e: any) {
+    const code = e?.statusCode;
+    if (code === 400 || code === 404) {
+      return res.status(code).json({ message: e.message });
+    }
+    console.error('getImportedReceiptLinkInfo:', e);
+    return res.status(500).json({ message: 'Error consultando recibo importado', detail: e?.message });
+  }
+};
+
+function parseImportedAmountForApi(v: unknown): number {
+  if (v == null) return 0;
+  if (typeof v === 'number') return Number.isFinite(v) ? Math.abs(v) : 0;
+  const s = String(v).trim().replace(/\s/g, '').replace(/\$/g, '');
+  if (!s) return 0;
+  const hasComma = s.includes(',');
+  const hasDot = s.includes('.');
+  let n = 0;
+  if (hasComma && hasDot) n = Number(s.replace(/\./g, '').replace(',', '.'));
+  else if (hasComma) n = Number(s.replace(',', '.'));
+  else n = Number(s);
+  return Number.isFinite(n) ? Math.abs(n) : 0;
+}
+
 /** Asocia un recibo ya cargado a facturas y/o pedidos sin factura del mismo cliente. */
 export const patchPaymentInvoices = async (req: any, res: Response) => {
   try {
@@ -880,20 +855,30 @@ export const patchPaymentInvoices = async (req: any, res: Response) => {
     const systemInvoiceIds = invoiceIds.filter((id) => id && !id.startsWith('mm-'));
     const systemOrderIds = orderIds.filter((id) => id && !id.startsWith('mm-'));
 
-    const paymentOrdersEnabled = await ensurePaymentOrdersTable();
-    const paymentInvoiceRefsEnabled = await ensurePaymentInvoiceRefsTable();
-
     let paymentId = routePaymentId;
-    if (routePaymentId.startsWith('mm-')) {
+
+    if (routePaymentId.startsWith('mm-') || Number(req.body?.importedLineOrder) > 0) {
       const customerId = String(req.body?.customerId || '').trim();
-      const lineOrder = Number(req.body?.importedLineOrder);
-      if (!customerId || !Number.isFinite(lineOrder)) {
+      const importedLineOrder = Number(req.body?.importedLineOrder);
+      if (!customerId || !Number.isFinite(importedLineOrder) || importedLineOrder <= 0) {
         return res.status(400).json({
-          message: 'Para recibos importados de Tango indicá customerId e importedLineOrder'
+          message:
+            'Para un recibo importado de Tango indicá customerId e importedLineOrder al guardar la asociación.',
         });
       }
-      paymentId = await ensurePaymentFromMultimediaEntry(customerId, lineOrder);
+      const cust = (await get('SELECT id, seller_id FROM customers WHERE id = ? LIMIT 1', [
+        customerId,
+      ])) as { id: string; seller_id?: string } | undefined;
+      if (!cust) return res.status(404).json({ message: 'Cliente no encontrado' });
+      if (user.role === 'SELLER' && cust.seller_id !== user.id) {
+        return res.status(403).json({ message: 'Solo podés modificar recibos de tus clientes' });
+      }
+      const sellerId = user.role === 'SELLER' ? user.id : cust.seller_id ?? null;
+      paymentId = await findOrCreatePaymentFromImportedReceipt(customerId, importedLineOrder, sellerId);
     }
+
+    const paymentOrdersEnabled = await ensurePaymentOrdersTable();
+    const paymentInvoiceRefsEnabled = await ensurePaymentInvoiceRefsTable();
 
     const payment = (await get(
       `SELECT p.id, p.customer_id, c.seller_id

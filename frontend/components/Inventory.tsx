@@ -141,12 +141,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const stored = getStoredInventoryState();
   const [searchTerm, setSearchTerm] = useState(stored.search);
   const [hideZeroStock, setHideZeroStock] = useState(stored.hideZeroStock ?? false);
-  const [syncMenuOpen, setSyncMenuOpen] = useState(false);
   const [syncLoading, setSyncLoading] = useState<'tn' | 'ml' | 'both' | 'fromML' | null>(null);
   const [syncResult, setSyncResult] = useState<{ platform: string; updated: number; errors: number; logs: string[]; fromML?: { imported: number; errorsFromML: number; sentToTN: number; errorsToTN: number } } | null>(null);
   const [showSyncResultModal, setShowSyncResultModal] = useState(false);
-  const syncMenuRef = useRef<HTMLDivElement>(null);
-  const [syncDropdownPosition, setSyncDropdownPosition] = useState<{ top: number; left: number; width: number } | null>(null);
   const [topDotsOpen, setTopDotsOpen] = useState(false);
   const topDotsRef = useRef<HTMLDivElement>(null);
   const [topDotsPosition, setTopDotsPosition] = useState<{ top: number; left: number } | null>(null);
@@ -917,7 +914,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   /** Opcional: importar stock desde ML a LupoHub y enviar a TN (ML como fuente en ese flujo). */
   const handleSyncFromMercadoLibre = async () => {
-    setSyncMenuOpen(false);
+    setTopDotsOpen(false);
     setSyncLoading('fromML');
     setSyncResult(null);
     setShowSyncResultModal(true);
@@ -960,7 +957,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   };
 
   const handleSyncStock = async () => {
-    setSyncMenuOpen(false);
+    setTopDotsOpen(false);
     setSyncLoading('both');
     setSyncResult(null);
     setShowSyncResultModal(true);
@@ -999,7 +996,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   };
 
   const handleSyncToTiendaNube = async () => {
-    setSyncMenuOpen(false);
+    setTopDotsOpen(false);
     setSyncLoading('tn');
     setSyncResult(null);
     setShowSyncResultModal(true);
@@ -1019,7 +1016,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   };
 
   const handleSyncToMercadoLibre = async () => {
-    setSyncMenuOpen(false);
+    setTopDotsOpen(false);
     setSyncLoading('ml');
     setSyncResult(null);
     setShowSyncResultModal(true);
@@ -1083,39 +1080,6 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   };
 
   useEffect(() => {
-    if (!syncMenuOpen) return;
-    const onOutside = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (syncMenuRef.current?.contains(target)) return;
-      if ((target as Element).closest?.('[data-sync-dropdown]')) return;
-      setSyncMenuOpen(false);
-    };
-    document.addEventListener('click', onOutside);
-    return () => document.removeEventListener('click', onOutside);
-  }, [syncMenuOpen]);
-
-  // Posicionar el dropdown del sync con posición fija para que no genere scroll en el contenedor
-  useEffect(() => {
-    if (!syncMenuOpen || !syncMenuRef.current) {
-      setSyncDropdownPosition(null);
-      return;
-    }
-    const update = () => {
-      if (syncMenuRef.current) {
-        const rect = syncMenuRef.current.getBoundingClientRect();
-        setSyncDropdownPosition({ top: rect.bottom + 4, left: rect.left, width: Math.max(rect.width, 240) });
-      }
-    };
-    update();
-    window.addEventListener('scroll', update, true);
-    window.addEventListener('resize', update);
-    return () => {
-      window.removeEventListener('scroll', update, true);
-      window.removeEventListener('resize', update);
-    };
-  }, [syncMenuOpen]);
-
-  useEffect(() => {
     if (!topDotsOpen) return;
     const onOutside = (e: MouseEvent) => {
       const target = e.target as Node;
@@ -1135,7 +1099,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     const update = () => {
       if (topDotsRef.current) {
         const rect = topDotsRef.current.getBoundingClientRect();
-        setTopDotsPosition({ top: rect.bottom + 4, left: rect.right - 200 });
+        setTopDotsPosition({ top: rect.bottom + 6, left: rect.right - 268 });
       }
     };
     update();
@@ -2810,172 +2774,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         </div>
       )}
 
-      {/* Top Action Bar */}
-      <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 sm:gap-2 overflow-x-auto touch-scroll pb-2 scrollbar-hide -mx-1 px-1 sm:mx-0 sm:px-0">
-        {/* Móvil: menú de tres puntos con todas las acciones */}
-        <div className="flex sm:hidden items-center gap-2 w-full">
-          <div className="flex-1 min-w-0" />
-          <div className="relative shrink-0" ref={topDotsRef}>
-            <button
-              type="button"
-              onClick={() => setTopDotsOpen(prev => !prev)}
-              className="flex items-center justify-center w-12 h-12 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 active:bg-slate-600 transition-colors touch-manipulation"
-              aria-label="Acciones"
-            >
-              <MoreVertical size={22} />
-            </button>
-            {topDotsOpen && topDotsPosition && createPortal(
-              <div
-                data-top-dots-dropdown
-                className="py-1.5 min-w-[220px] bg-slate-800 border border-slate-600 rounded-xl shadow-xl z-[9999]"
-                style={{
-                  position: 'fixed',
-                  top: topDotsPosition.top,
-                  left: Math.max(8, Math.min(topDotsPosition.left, window.innerWidth - 228)),
-                  zIndex: 9999
-                }}
-              >
-                {isAdminOrWarehouse && (
-                  <>
-                    <div className="px-3 py-2 border-b border-slate-700">
-                      <p className="text-[10px] font-bold text-green-400 uppercase">Fuente de verdad: tu stock (LupoHub)</p>
-                    </div>
-                    <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncToMercadoLibre(); }} className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm font-semibold text-amber-200 hover:bg-amber-500/20 rounded-lg border-b border-slate-700/50">
-                      <Zap size={18} className="text-amber-400 shrink-0" />
-                      Enviar mi stock a Mercado Libre
-                    </button>
-                    <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncToTiendaNube(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg">
-                      <Cloud size={18} className="text-cyan-400" />
-                      Enviar mi stock a Tienda Nube
-                    </button>
-                    <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncStock(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg border-b border-slate-700/50">
-                      <RefreshCw size={18} className="text-blue-400" />
-                      Enviar a ambas (TN + ML)
-                    </button>
-                    <div className="px-3 py-1.5 pt-2">
-                      <p className="text-[10px] text-slate-500">Opcional: traer desde ML</p>
-                    </div>
-                    <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncFromMercadoLibre(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-400 hover:bg-slate-700 rounded-lg">
-                      <RefreshCw size={18} className="text-amber-400 shrink-0" />
-                      Importar stock desde Mercado Libre
-                    </button>
-                  </>
-                )}
-                {canManagePublicationBundles && (
-                  <button type="button" onClick={() => { setTopDotsOpen(false); setShowPublicationBundles(true); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-violet-200 hover:bg-violet-500/15 rounded-lg border-b border-slate-700/50">
-                    <Layers size={18} className="text-violet-400 shrink-0" />
-                    Packs multicolor (publicaciones)
-                  </button>
-                )}
-                {isAdminOrWarehouse && (
-                  <button type="button" onClick={() => { setTopDotsOpen(false); openMergeManualModal(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-violet-200 hover:bg-violet-500/15 rounded-lg border-b border-slate-700/50">
-                    <GitMerge size={18} className="text-violet-400 shrink-0" />
-                    Unificar artículos
-                  </button>
-                )}
-                <button type="button" onClick={() => { setTopDotsOpen(false); tangoFileInputRef.current?.click(); }} disabled={importingTango} className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg disabled:opacity-50">
-                  {importingTango ? <Loader2 size={18} className="animate-spin text-amber-400" /> : <Upload size={18} className="text-amber-400" />}
-                  Importar Tango
-                </button>
-                <button type="button" onClick={() => { setTopDotsOpen(false); stockExcelFileInputRef.current?.click(); }} disabled={importingStockExcel} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg disabled:opacity-50">
-                  {importingStockExcel ? <Loader2 size={18} className="animate-spin text-cyan-400" /> : <Package size={18} className="text-cyan-400" />}
-                  Importar stock desde Excel
-                </button>
-                <button type="button" onClick={() => { setTopDotsOpen(false); exportProductsToExcel(); }} disabled={exportingExcel} className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg disabled:opacity-50">
-                  {exportingExcel ? <Loader2 size={18} className="animate-spin text-green-400" /> : <Download size={18} className="text-green-400" />}
-                  Exportar Excel
-                </button>
-                {isAdminOrWarehouse && (
-                  <button type="button" onClick={() => { setTopDotsOpen(false); openCreationModal(); }} className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm font-semibold text-indigo-200 hover:bg-indigo-500/20 rounded-lg border-t border-slate-700/50">
-                    <Plus size={18} className="text-indigo-400" />
-                    Nuevo Modelo
-                  </button>
-                )}
-              </div>,
-              document.body
-            )}
-          </div>
-        </div>
-
-        {/* Desktop: botones visibles */}
-        <div className="hidden sm:flex flex-wrap sm:flex-nowrap items-center gap-3 sm:gap-2 flex-1">
-        {isAdminOrWarehouse && (
-          <div className="flex-shrink-0 relative" ref={syncMenuRef}>
-            <button
-              type="button"
-              onClick={() => setSyncMenuOpen(prev => !prev)}
-              disabled={!!syncLoading}
-              className="flex items-center justify-center sm:justify-start gap-2 bg-slate-800 text-blue-400 px-3 sm:px-4 py-2.5 rounded-xl border border-slate-700 active:bg-slate-700 shadow-sm min-h-[44px]"
-            >
-              {syncLoading ? (
-                <Loader2 size={18} className="animate-spin" />
-              ) : (
-                <RefreshCw size={18} />
-              )}
-              <span className="text-sm font-semibold hidden sm:inline">
-                {syncLoading === 'fromML' ? 'Importando desde ML…' : syncLoading === 'both' ? 'Enviando a TN + ML…' : syncLoading === 'tn' ? 'Enviando a TN…' : syncLoading === 'ml' ? 'Enviando a ML…' : 'Enviar mi stock'}
-              </span>
-              <ChevronDown size={16} className={`hidden sm:block transition-transform ${syncMenuOpen ? 'rotate-180' : ''}`} />
-            </button>
-            {syncMenuOpen && !syncLoading && syncDropdownPosition && createPortal(
-              <div
-                data-sync-dropdown
-                className="py-1 min-w-[240px] bg-slate-800 border border-slate-700 rounded-xl shadow-xl"
-                style={{
-                  position: 'fixed',
-                  top: syncDropdownPosition.top,
-                  left: syncDropdownPosition.left,
-                  width: syncDropdownPosition.width,
-                  zIndex: 9999
-                }}
-              >
-                <div className="px-3 py-2 border-b border-slate-700">
-                  <p className="text-[10px] font-bold text-green-400 uppercase">Fuente de verdad: tu stock (LupoHub)</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleSyncToMercadoLibre}
-                  className="w-full flex items-center gap-2 px-4 py-3 text-left text-sm font-semibold text-amber-200 hover:bg-amber-500/20 rounded-lg border-b border-slate-700/50"
-                >
-                  <Zap size={18} className="text-amber-400 shrink-0" />
-                  Enviar mi stock a Mercado Libre
-                </button>
-                <div className="px-3 py-1.5">
-                  <p className="text-[10px] text-slate-500">Enviar stock local a:</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleSyncToTiendaNube}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg"
-                >
-                  <Cloud size={18} className="text-cyan-400" />
-                  Enviar a Tienda Nube
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSyncStock}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg"
-                >
-                  <RefreshCw size={18} className="text-blue-400" />
-                  Enviar a ambas (TN + ML)
-                </button>
-                <div className="px-3 py-1.5 pt-2">
-                  <p className="text-[10px] text-slate-500">Opcional: importar desde ML</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleSyncFromMercadoLibre}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm text-slate-400 hover:bg-slate-700 rounded-lg"
-                >
-                  <RefreshCw size={18} className="text-amber-400 shrink-0" />
-                  Traer stock desde Mercado Libre
-                </button>
-              </div>,
-              document.body
-            )}
-          </div>
-        )}
-        
+      {/* Top Action Bar — acciones en menú */}
+      <div className="flex items-center justify-end gap-2">
         <input
           ref={tangoFileInputRef}
           type="file"
@@ -2990,65 +2790,99 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           className="hidden"
           onChange={handleImportStockExcel}
         />
-        <button
-          type="button"
-          onClick={() => tangoFileInputRef.current?.click()}
-          disabled={importingTango}
-          className="flex-shrink-0 flex items-center justify-center sm:justify-start gap-2 bg-slate-800 text-amber-400 px-3 sm:px-4 py-2.5 rounded-xl border border-slate-700 active:bg-slate-700 shadow-sm disabled:opacity-50 min-h-[44px]"
-        >
-          {importingTango ? <RefreshCw size={18} className="animate-spin" /> : <Upload size={18} />}
-          <span className="text-sm font-semibold hidden sm:inline">{importingTango ? 'Importando…' : 'Importar Tango'}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => stockExcelFileInputRef.current?.click()}
-          disabled={importingStockExcel}
-          className="flex-shrink-0 flex items-center justify-center sm:justify-start gap-2 bg-slate-800 text-cyan-400 px-3 sm:px-4 py-2.5 rounded-xl border border-slate-700 active:bg-slate-700 shadow-sm disabled:opacity-50 min-h-[44px]"
-        >
-          {importingStockExcel ? <Loader2 size={18} className="animate-spin" /> : <Package size={18} />}
-          <span className="text-sm font-semibold hidden sm:inline">{importingStockExcel ? 'Importando stock…' : 'Importar stock Excel'}</span>
-        </button>
-        <button 
-          onClick={exportProductsToExcel}
-          disabled={exportingExcel}
-          className="flex-shrink-0 flex items-center justify-center sm:justify-start gap-2 bg-slate-800 text-green-400 px-3 sm:px-4 py-2.5 rounded-xl border border-slate-700 active:bg-slate-700 shadow-sm disabled:opacity-50 min-h-[44px]"
-        >
-          {exportingExcel ? <RefreshCw size={18} className="animate-spin" /> : <Download size={18} />}
-          <span className="text-sm font-semibold hidden sm:inline">{exportingExcel ? 'Exportando…' : 'Exportar Excel'}</span>
-        </button>
-
-        {canManagePublicationBundles && (
+        <div className="relative shrink-0" ref={topDotsRef}>
           <button
             type="button"
-            onClick={() => setShowPublicationBundles(true)}
-            className="flex-shrink-0 flex items-center justify-center sm:justify-start gap-2 bg-violet-900/40 text-violet-200 px-3 sm:px-4 py-2.5 rounded-xl border border-violet-700/60 hover:bg-violet-800/40 shadow-sm min-h-[44px]"
+            onClick={() => setTopDotsOpen(prev => !prev)}
+            disabled={!!syncLoading}
+            className="inline-flex items-center gap-2 px-3.5 sm:px-4 py-2.5 min-h-[44px] rounded-2xl bg-slate-900/60 backdrop-blur-sm border border-slate-700/50 text-slate-300 hover:text-white hover:bg-slate-800/80 hover:border-slate-600 transition-all touch-manipulation disabled:opacity-60"
+            aria-label="Acciones de inventario"
+            aria-expanded={topDotsOpen}
           >
-            <Layers size={18} />
-            <span className="text-sm font-semibold hidden sm:inline">Packs multicolor</span>
+            {syncLoading ? (
+              <Loader2 size={18} className="animate-spin shrink-0" />
+            ) : (
+              <MoreVertical size={18} className="shrink-0" />
+            )}
+            <span className="text-sm font-medium">
+              {syncLoading === 'fromML' ? 'Sincronizando…' : syncLoading === 'both' ? 'Enviando…' : syncLoading ? 'Enviando…' : 'Acciones'}
+            </span>
+            <ChevronDown size={14} className={`shrink-0 opacity-60 transition-transform ${topDotsOpen ? 'rotate-180' : ''}`} />
           </button>
-        )}
-
-        {isAdminOrWarehouse && (
-          <button
-            type="button"
-            onClick={() => openMergeManualModal()}
-            className="flex-shrink-0 flex items-center justify-center sm:justify-start gap-2 bg-slate-800 text-violet-300 px-3 sm:px-4 py-2.5 rounded-xl border border-violet-900/40 active:bg-slate-700 shadow-sm min-h-[44px]"
-          >
-            <GitMerge size={18} />
-            <span className="text-sm font-semibold hidden sm:inline">Unificar artículos</span>
-          </button>
-        )}
-
-        {isAdminOrWarehouse && (
-          <button 
-            onClick={() => openCreationModal()}
-            className="flex-shrink-0 flex items-center justify-center sm:justify-start gap-2 bg-indigo-600 text-white px-3 sm:px-4 py-2.5 rounded-xl font-bold shadow-lg shadow-indigo-900/20 active:scale-95 transition-transform min-h-[44px]"
-          >
-            <Plus size={18} />
-            <span className="text-sm hidden sm:inline">Nuevo Modelo</span>
-          </button>
-        )}
-      </div>
+          {topDotsOpen && topDotsPosition && createPortal(
+            <div
+              data-top-dots-dropdown
+              className="py-2 min-w-[268px] max-h-[min(70vh,520px)] overflow-y-auto bg-slate-900/95 backdrop-blur-xl border border-slate-700/50 rounded-2xl shadow-2xl shadow-black/40 z-[9999]"
+              style={{
+                position: 'fixed',
+                top: topDotsPosition.top,
+                left: Math.max(8, Math.min(topDotsPosition.left, window.innerWidth - 276)),
+                zIndex: 9999
+              }}
+            >
+              {isAdminOrWarehouse && (
+                <>
+                  <p className="px-3 pt-1 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Sincronizar stock</p>
+                  <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncToMercadoLibre(); }} disabled={!!syncLoading} className="w-full flex items-center gap-3 mx-1.5 px-3 py-2.5 text-left text-sm text-slate-300 hover:bg-white/5 hover:text-white rounded-xl disabled:opacity-50 max-w-[calc(100%-12px)]">
+                    <Zap size={17} className="text-slate-400 shrink-0" />
+                    Enviar a Mercado Libre
+                  </button>
+                  <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncToTiendaNube(); }} disabled={!!syncLoading} className="w-full flex items-center gap-3 mx-1.5 px-3 py-2.5 text-left text-sm text-slate-300 hover:bg-white/5 hover:text-white rounded-xl disabled:opacity-50 max-w-[calc(100%-12px)]">
+                    <Cloud size={17} className="text-slate-400 shrink-0" />
+                    Enviar a Tienda Nube
+                  </button>
+                  <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncStock(); }} disabled={!!syncLoading} className="w-full flex items-center gap-3 mx-1.5 px-3 py-2.5 text-left text-sm text-slate-300 hover:bg-white/5 hover:text-white rounded-xl disabled:opacity-50 max-w-[calc(100%-12px)]">
+                    <RefreshCw size={17} className="text-slate-400 shrink-0" />
+                    Enviar a TN + ML
+                  </button>
+                  <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncFromMercadoLibre(); }} disabled={!!syncLoading} className="w-full flex items-center gap-3 mx-1.5 px-3 py-2.5 text-left text-sm text-slate-400 hover:bg-white/5 hover:text-slate-200 rounded-xl disabled:opacity-50 max-w-[calc(100%-12px)]">
+                    <RefreshCw size={17} className="text-slate-500 shrink-0" />
+                    Importar desde ML (opcional)
+                  </button>
+                  <div className="my-1.5 mx-3 border-t border-slate-700/50" />
+                </>
+              )}
+              <p className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">Importar / exportar</p>
+              <button type="button" onClick={() => { setTopDotsOpen(false); tangoFileInputRef.current?.click(); }} disabled={importingTango} className="w-full flex items-center gap-3 mx-1.5 px-3 py-2.5 text-left text-sm text-slate-300 hover:bg-white/5 hover:text-white rounded-xl disabled:opacity-50 max-w-[calc(100%-12px)]">
+                {importingTango ? <Loader2 size={17} className="animate-spin shrink-0" /> : <Upload size={17} className="text-slate-400 shrink-0" />}
+                Importar Tango
+              </button>
+              <button type="button" onClick={() => { setTopDotsOpen(false); stockExcelFileInputRef.current?.click(); }} disabled={importingStockExcel} className="w-full flex items-center gap-3 mx-1.5 px-3 py-2.5 text-left text-sm text-slate-300 hover:bg-white/5 hover:text-white rounded-xl disabled:opacity-50 max-w-[calc(100%-12px)]">
+                {importingStockExcel ? <Loader2 size={17} className="animate-spin shrink-0" /> : <Package size={17} className="text-slate-400 shrink-0" />}
+                Importar stock Excel
+              </button>
+              <button type="button" onClick={() => { setTopDotsOpen(false); exportProductsToExcel(); }} disabled={exportingExcel} className="w-full flex items-center gap-3 mx-1.5 px-3 py-2.5 text-left text-sm text-slate-300 hover:bg-white/5 hover:text-white rounded-xl disabled:opacity-50 max-w-[calc(100%-12px)]">
+                {exportingExcel ? <Loader2 size={17} className="animate-spin shrink-0" /> : <Download size={17} className="text-slate-400 shrink-0" />}
+                Exportar Excel
+              </button>
+              {(canManagePublicationBundles || isAdminOrWarehouse) && (
+                <div className="my-1.5 mx-3 border-t border-slate-700/50" />
+              )}
+              {canManagePublicationBundles && (
+                <button type="button" onClick={() => { setTopDotsOpen(false); setShowPublicationBundles(true); }} className="w-full flex items-center gap-3 mx-1.5 px-3 py-2.5 text-left text-sm text-slate-300 hover:bg-white/5 hover:text-white rounded-xl max-w-[calc(100%-12px)]">
+                  <Layers size={17} className="text-slate-400 shrink-0" />
+                  Packs multicolor
+                </button>
+              )}
+              {isAdminOrWarehouse && (
+                <button type="button" onClick={() => { setTopDotsOpen(false); openMergeManualModal(); }} className="w-full flex items-center gap-3 mx-1.5 px-3 py-2.5 text-left text-sm text-slate-300 hover:bg-white/5 hover:text-white rounded-xl max-w-[calc(100%-12px)]">
+                  <GitMerge size={17} className="text-slate-400 shrink-0" />
+                  Unificar artículos
+                </button>
+              )}
+              {isAdminOrWarehouse && (
+                <>
+                  <div className="my-1.5 mx-3 border-t border-slate-700/50" />
+                  <button type="button" onClick={() => { setTopDotsOpen(false); openCreationModal(); }} className="w-full flex items-center gap-3 mx-1.5 px-3 py-2.5 text-left text-sm font-medium text-indigo-200 hover:bg-indigo-500/15 rounded-xl max-w-[calc(100%-12px)]">
+                    <Plus size={17} className="text-indigo-400 shrink-0" />
+                    Nuevo modelo
+                  </button>
+                </>
+              )}
+            </div>,
+            document.body
+          )}
+        </div>
       </div>
 
       {/* Search Bar & Filters */}
@@ -3061,12 +2895,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               placeholder="Buscar Código de Producto..." 
               value={searchTerm}
               onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-              className="w-full min-w-0 pl-10 pr-4 py-3 sm:py-3.5 min-h-[48px] bg-slate-900 border border-slate-800 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-white text-sm shadow-sm box-border"
+              className="w-full min-w-0 pl-10 pr-4 py-3 sm:py-3.5 min-h-[48px] bg-slate-900/80 border border-slate-700/50 rounded-2xl focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/50 outline-none text-white text-sm box-border transition-colors"
             />
           </div>
           <button 
             onClick={() => setShowFilters(!showFilters)}
-            className={`flex-shrink-0 min-h-[48px] px-4 rounded-xl border flex items-center justify-center gap-2 font-bold transition-all touch-manipulation ${showFilters ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white'}`}
+            className={`flex-shrink-0 min-h-[48px] px-4 rounded-2xl border flex items-center justify-center gap-2 text-sm font-medium transition-all touch-manipulation ${showFilters ? 'bg-blue-500/20 text-blue-200 border-blue-500/50' : 'bg-slate-900/60 text-slate-400 border-slate-700/50 hover:text-white hover:border-slate-600 backdrop-blur-sm'}`}
           >
             <Filter size={18} />
             <span className="hidden md:inline">Filtros</span>
@@ -3181,14 +3015,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
       {/* Botón para activar modo selección (solo Mi inventario, admin/warehouse) */}
       {inventorySubView === 'mine' && isAdminOrWarehouse && !selectionModeEnabled && (
-        <div className="flex flex-wrap items-center gap-3 p-3 sm:p-4 bg-slate-800/60 border border-slate-600 rounded-xl">
-          <span className="text-slate-400 text-sm">Para enviar variantes a Mercado Libre o Tienda Nube, activá la selección.</span>
+        <div className="flex flex-wrap items-center justify-between gap-3 px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-900/40 border border-slate-700/40 rounded-2xl backdrop-blur-sm">
+          <span className="text-slate-500 text-sm">Enviá variantes a ML o TN con selección múltiple.</span>
           <button
             type="button"
             onClick={() => setSelectionModeEnabled(true)}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-bold transition-colors"
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-200 text-sm font-medium hover:bg-amber-500/20 transition-colors"
           >
-            <Check size={18} className="opacity-80" />
+            <Check size={16} className="opacity-80" />
             Seleccionar variantes
           </button>
         </div>
@@ -3196,36 +3030,36 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
       {/* Barra de selección para enviar a TN/ML */}
       {inventorySubView === 'mine' && selectionModeEnabled && selectedVariantIds.length > 0 && (
-        <div className="flex flex-wrap items-center gap-3 p-3 sm:p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl">
-          <span className="text-amber-200 font-semibold text-sm">
+        <div className="flex flex-wrap items-center gap-2 p-3 sm:px-4 sm:py-3 bg-amber-500/5 border border-amber-500/20 rounded-2xl backdrop-blur-sm">
+          <span className="text-amber-200/90 font-medium text-sm mr-auto">
             {selectedVariantIds.length} variante{selectedVariantIds.length !== 1 ? 's' : ''} seleccionada{selectedVariantIds.length !== 1 ? 's' : ''}
           </span>
           <button
             onClick={handleSyncSelectedToTiendaNube}
             disabled={!!syncSelectedLoading}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-bold disabled:opacity-50"
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-cyan-200 text-sm font-medium hover:bg-cyan-500/20 disabled:opacity-50 transition-colors"
           >
             {syncSelectedLoading === 'tn' ? <Loader2 size={16} className="animate-spin" /> : <Cloud size={16} />}
-            Enviar a Tienda Nube
+            Tienda Nube
           </button>
           <button
             onClick={handleSyncSelectedToMercadoLibre}
             disabled={!!syncSelectedLoading}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-bold disabled:opacity-50"
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-200 text-sm font-medium hover:bg-amber-500/20 disabled:opacity-50 transition-colors"
           >
             {syncSelectedLoading === 'ml' ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
-            Enviar a Mercado Libre
+            Mercado Libre
           </button>
           <button
             onClick={() => setSelectedVariantIds([])}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm font-medium"
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-slate-400 text-sm hover:text-slate-200 hover:bg-white/5 transition-colors"
           >
             <X size={16} />
-            Limpiar selección
+            Limpiar
           </button>
           <button
             onClick={() => setSelectionModeEnabled(false)}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-slate-200 text-sm font-medium"
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-slate-400 text-sm hover:text-slate-200 hover:bg-white/5 transition-colors"
             title="Ocultar cuadros de selección"
           >
             Listo
@@ -3233,14 +3067,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         </div>
       )}
 
-      {/* Barra cuando modo selección está activo pero sin variantes seleccionadas: opción de cerrar */}
       {inventorySubView === 'mine' && selectionModeEnabled && selectedVariantIds.length === 0 && (
-        <div className="flex flex-wrap items-center gap-3 p-3 sm:p-4 bg-slate-800/60 border border-slate-600 rounded-xl">
-          <span className="text-slate-400 text-sm">Expandí un artículo y marcá las variantes a enviar.</span>
+        <div className="flex flex-wrap items-center justify-between gap-3 px-3 sm:px-4 py-2.5 sm:py-3 bg-slate-900/40 border border-slate-700/40 rounded-2xl backdrop-blur-sm">
+          <span className="text-slate-500 text-sm">Expandí un artículo y marcá las variantes a enviar.</span>
           <button
             type="button"
             onClick={() => setSelectionModeEnabled(false)}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-600 hover:bg-slate-500 text-slate-200 text-sm font-medium"
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-slate-400 text-sm hover:text-slate-200 hover:bg-white/5 transition-colors"
           >
             Cerrar selección
           </button>
@@ -3330,21 +3163,21 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                       <div className="text-[9px] uppercase font-black text-slate-500 tracking-widest hidden sm:block">Stock</div>
                    </div>
                    
-                   {/* Móvil: menú de tres puntos (Agregar variante, Editar, Eliminar) */}
                    {isAdminOrWarehouse && (
-                     <div className="sm:hidden relative" ref={el => { cardDotsRefs.current[groupKey] = el; }}>
+                     <div className="relative" ref={el => { cardDotsRefs.current[groupKey] = el; }}>
                        <button
                          type="button"
                          onClick={(e) => { e.stopPropagation(); setCardDotsOpenKey(prev => prev === groupKey ? null : groupKey); }}
-                         className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-300 transition-colors touch-manipulation"
+                         className="p-2 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl border border-transparent text-slate-400 hover:text-white hover:bg-slate-700/40 hover:border-slate-600/50 transition-all touch-manipulation"
                          aria-label="Acciones del artículo"
+                         aria-expanded={cardDotsOpenKey === groupKey}
                        >
-                         <MoreVertical size={20} />
+                         <MoreVertical size={18} />
                        </button>
                        {cardDotsOpenKey === groupKey && cardDotsPosition && createPortal(
                          <div
                            data-card-dots-dropdown
-                           className="py-1 min-w-[200px] bg-slate-800 border border-slate-600 rounded-xl shadow-xl z-[9998]"
+                           className="py-1.5 min-w-[200px] bg-slate-900/95 backdrop-blur-xl border border-slate-700/50 rounded-2xl shadow-xl shadow-black/30 z-[9998]"
                            style={{
                              position: 'fixed',
                              top: cardDotsPosition.top,
@@ -3355,9 +3188,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                            <button
                              type="button"
                              onClick={(e) => { e.stopPropagation(); setCardDotsOpenKey(null); handleAddVariant(groupKey); }}
-                             className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg"
+                             className="w-full flex items-center gap-3 mx-1.5 px-3 py-2.5 text-left text-sm text-slate-300 hover:bg-white/5 hover:text-white rounded-xl max-w-[calc(100%-12px)]"
                            >
-                             <PlusCircle size={18} className="text-blue-400 shrink-0" />
+                             <PlusCircle size={17} className="text-slate-400 shrink-0" />
                              Agregar variante
                            </button>
                            {(groupVariants[0] as any)?.product_id && (
@@ -3365,17 +3198,17 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                <button
                                  type="button"
                                  onClick={(e) => { e.stopPropagation(); setCardDotsOpenKey(null); setEditingProductGroupKey(groupKey); setEditingProductId((groupVariants[0] as any).product_id); }}
-                                 className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700 rounded-lg"
+                                 className="w-full flex items-center gap-3 mx-1.5 px-3 py-2.5 text-left text-sm text-slate-300 hover:bg-white/5 hover:text-white rounded-xl max-w-[calc(100%-12px)]"
                                >
-                                 <Edit2 size={18} className="text-amber-400 shrink-0" />
+                                 <Edit2 size={17} className="text-slate-400 shrink-0" />
                                  Editar artículo
                                </button>
                                <button
                                  type="button"
                                  onClick={(e) => { e.stopPropagation(); setCardDotsOpenKey(null); handleDeleteProduct((groupVariants[0] as any).product_id, groupKey, displayName); }}
-                                 className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-red-200 hover:bg-red-900/30 rounded-lg"
+                                 className="w-full flex items-center gap-3 mx-1.5 px-3 py-2.5 text-left text-sm text-red-300/90 hover:bg-red-500/10 rounded-xl max-w-[calc(100%-12px)]"
                                >
-                                 <Trash2 size={18} className="shrink-0" />
+                                 <Trash2 size={17} className="shrink-0" />
                                  Eliminar artículo
                                </button>
                              </>
@@ -3386,37 +3219,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                      </div>
                    )}
 
-                   {/* Desktop: botones individuales */}
-                   {isAdminOrWarehouse && (
-                     <button
-                       onClick={(e) => { e.stopPropagation(); handleAddVariant(groupKey); }}
-                       className="hidden sm:flex p-2.5 min-w-[44px] min-h-[44px] items-center justify-center bg-slate-700 hover:bg-blue-600 hover:text-white rounded-lg text-slate-300 transition-colors touch-manipulation"
-                       title="Agregar variante a este modelo"
-                     >
-                       <PlusCircle size={20} />
-                     </button>
-                   )}
-                   {isAdminOrWarehouse && (groupVariants[0] as any)?.product_id && (
-                     <>
-                       <button
-                         onClick={(e) => { e.stopPropagation(); setEditingProductGroupKey(groupKey); setEditingProductId((groupVariants[0] as any).product_id); }}
-                         className="hidden sm:flex p-2.5 min-w-[44px] min-h-[44px] items-center justify-center bg-slate-700 hover:bg-amber-600 hover:text-white rounded-lg text-slate-300 transition-colors touch-manipulation"
-                         title="Editar artículo"
-                       >
-                         <Edit2 size={20} />
-                       </button>
-                       <button
-                         onClick={(e) => { e.stopPropagation(); handleDeleteProduct((groupVariants[0] as any).product_id, groupKey, displayName); }}
-                         className="hidden sm:flex p-2.5 min-w-[44px] min-h-[44px] items-center justify-center bg-slate-700 hover:bg-red-600 hover:text-white rounded-lg text-slate-300 transition-colors touch-manipulation"
-                         title="Eliminar artículo y todas sus variantes"
-                       >
-                         <Trash2 size={20} />
-                       </button>
-                     </>
-                   )}
-
-                   <div className={`p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-full transition-transform duration-300 ${isExpanded ? 'bg-blue-600 text-white rotate-180' : 'bg-slate-700 text-slate-400'}`}>
-                      <ChevronDown size={20} />
+                   <div className={`p-2 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl border transition-all duration-200 ${isExpanded ? 'bg-blue-500/20 border-blue-500/40 text-blue-300 rotate-180' : 'bg-transparent border-slate-700/40 text-slate-500'}`}>
+                      <ChevronDown size={18} />
                    </div>
                 </div>
               </div>

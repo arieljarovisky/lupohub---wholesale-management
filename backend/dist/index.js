@@ -13,8 +13,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 var _a;
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.isAllowedOrigin = isAllowedOrigin;
-exports.applyCorsHeaders = applyCorsHeaders;
+exports.applyCorsHeaders = exports.isAllowedOrigin = void 0;
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const dotenv_1 = __importDefault(require("dotenv"));
@@ -61,11 +60,15 @@ const add_remitente_table_1 = require("./database/add_remitente_table");
 const add_payment_status_orders_1 = require("./database/add_payment_status_orders");
 const add_payments_table_1 = require("./database/add_payments_table");
 const add_payment_invoices_table_1 = require("./database/add_payment_invoices_table");
+const add_payment_orders_table_1 = require("./database/add_payment_orders_table");
 const add_no_stock_impact_orders_1 = require("./database/add_no_stock_impact_orders");
+const add_include_in_saldo_orders_1 = require("./database/add_include_in_saldo_orders");
 const add_customer_invoice_fields_1 = require("./database/add_customer_invoice_fields");
 const add_external_invoices_table_1 = require("./database/add_external_invoices_table");
 const add_external_credit_notes_table_1 = require("./database/add_external_credit_notes_table");
 const add_customer_multimedia_ledger_1 = require("./database/add_customer_multimedia_ledger");
+const add_customer_manual_comprobantes_1 = require("./database/add_customer_manual_comprobantes");
+const add_customer_manual_comprobantes_pdf_1 = require("./database/add_customer_manual_comprobantes_pdf");
 const add_lupo_stock_webhook_config_table_1 = require("./database/add_lupo_stock_webhook_config_table");
 const add_variant_luposhop_stock_table_1 = require("./database/add_variant_luposhop_stock_table");
 const add_order_created_by_1 = require("./database/add_order_created_by");
@@ -107,6 +110,7 @@ function isAllowedOrigin(origin) {
         return true;
     return false;
 }
+exports.isAllowedOrigin = isAllowedOrigin;
 /** Headers CORS explícitos (también en errores JSON; el 502 del proxy de Railway no pasa por acá). */
 function applyCorsHeaders(req, res) {
     const origin = req.headers.origin;
@@ -116,6 +120,7 @@ function applyCorsHeaders(req, res) {
         res.setHeader('Vary', 'Origin');
     }
 }
+exports.applyCorsHeaders = applyCorsHeaders;
 const corsOpts = {
     origin: (origin, cb) => {
         if (isAllowedOrigin(origin))
@@ -207,11 +212,15 @@ function initDatabase() {
                 yield (0, add_payment_status_orders_1.addPaymentStatusToOrders)();
                 yield (0, add_payments_table_1.addPaymentsTable)();
                 yield (0, add_payment_invoices_table_1.addPaymentInvoicesTable)();
+                yield (0, add_payment_orders_table_1.addPaymentOrdersTable)();
                 yield (0, add_no_stock_impact_orders_1.addNoStockImpactToOrders)();
+                yield (0, add_include_in_saldo_orders_1.addIncludeInSaldoToOrders)();
                 yield (0, add_customer_invoice_fields_1.addCustomerInvoiceFields)();
                 yield (0, add_external_invoices_table_1.addExternalInvoicesTable)();
                 yield (0, add_external_credit_notes_table_1.addExternalCreditNotesTable)();
                 yield (0, add_customer_multimedia_ledger_1.addCustomerMultimediaLedger)();
+                yield (0, add_customer_manual_comprobantes_1.addCustomerManualComprobantesTable)();
+                yield (0, add_customer_manual_comprobantes_pdf_1.addCustomerManualComprobantesPdfColumns)();
                 yield (0, add_lupo_stock_webhook_config_table_1.addLupoStockWebhookConfigTable)();
                 yield (0, add_variant_luposhop_stock_table_1.addVariantLuposhopStockTable)();
                 yield (0, add_order_created_by_1.addOrderCreatedBy)();

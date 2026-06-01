@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const billing_controller_1 = require("../controllers/billing.controller");
+const manualComprobantes_controller_1 = require("../controllers/manualComprobantes.controller");
 const auth_1 = require("../middleware/auth");
 const multer_1 = __importDefault(require("multer"));
 const router = (0, express_1.Router)();
@@ -21,7 +22,14 @@ const uploadAgipPadronFile = (req, res, next) => {
 };
 router.use(auth_1.authMiddleware, auth_1.billingAccessMiddleware);
 router.get('/', billing_controller_1.listBilling);
+router.post('/manual-comprobantes', manualComprobantes_controller_1.createManualComprobante);
+router.post('/manual-comprobantes/upload', manualComprobantes_controller_1.uploadManualComprobantePdfHandler, manualComprobantes_controller_1.createManualComprobanteMultipart);
+router.get('/manual-comprobantes/:id/pdf', manualComprobantes_controller_1.getManualComprobantePdf);
+router.get('/manual-comprobantes/:id', manualComprobantes_controller_1.getManualComprobante);
+router.patch('/manual-comprobantes/:id', manualComprobantes_controller_1.updateManualComprobante);
+router.patch('/manual-comprobantes/:id/upload', manualComprobantes_controller_1.uploadManualComprobantePdfHandler, manualComprobantes_controller_1.updateManualComprobanteMultipart);
 router.get('/export', billing_controller_1.exportBilling);
+router.get('/print', billing_controller_1.printBilling);
 router.get('/export-retper', billing_controller_1.exportRetPerTxt);
 router.get('/export-ventas-jurisdiccion', billing_controller_1.exportVentasJurisdiccionXlsx);
 router.post('/export-by-customers-file', uploadAgipPadronFile, billing_controller_1.exportBillingByCustomersFile);

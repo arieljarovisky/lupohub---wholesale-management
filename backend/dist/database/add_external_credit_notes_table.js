@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.addExternalCreditNotesTable = addExternalCreditNotesTable;
+exports.addExternalCreditNotesTable = void 0;
 const db_1 = require("./db");
 /** Notas de crédito AFIP emitidas para facturas externas (TN/ML). */
 function addExternalCreditNotesTable() {
@@ -49,3 +49,4 @@ function addExternalCreditNotesTable() {
         }
     });
 }
+exports.addExternalCreditNotesTable = addExternalCreditNotesTable;

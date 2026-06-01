@@ -15,23 +15,13 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -42,13 +32,13 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteVariantPublication = exports.addVariantPublication = exports.getVariantPublications = exports.exportInventory = exports.mergeDuplicateProductsBySku = exports.mergeManualVariants = exports.mergeManualProducts = exports.getDuplicateProducts = exports.importTangoArticles = exports.deleteProduct = exports.updateVariant = exports.getVariantById = exports.deleteVariant = exports.deleteAllProducts = exports.bulkLinkVariants = exports.unlinkProductPlatforms = exports.updateVariantExternalIds = exports.updateProductExternalIds = exports.updateProduct = exports.patchStock = exports.getProductBySku = exports.getProductById = exports.getProductStockTotalBySku = exports.getVariantIdBySkuColorSize = exports.createProduct = exports.getProducts = void 0;
-exports.deleteProductById = deleteProductById;
+exports.deleteVariantPublication = exports.addVariantPublication = exports.getVariantPublications = exports.exportInventory = exports.mergeDuplicateProductsBySku = exports.mergeManualVariants = exports.mergeManualProducts = exports.getDuplicateProducts = exports.importTangoArticles = exports.deleteProduct = exports.deleteProductById = exports.updateVariant = exports.getVariantById = exports.deleteVariant = exports.deleteAllProducts = exports.bulkLinkVariants = exports.unlinkProductPlatforms = exports.updateVariantExternalIds = exports.updateProductExternalIds = exports.updateProduct = exports.patchStock = exports.getProductBySku = exports.getProductById = exports.getProductStockTotalBySku = exports.getVariantIdBySkuColorSize = exports.createProduct = exports.getProducts = void 0;
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 const talles_tango_1 = require("../talles-tango");
 const colorCodeCanonical_1 = require("../utils/colorCodeCanonical");
 const stock_controller_1 = require("./stock.controller");
+const skuString_1 = require("../utils/skuString");
 const mergeDuplicateProductsBySku_1 = require("../services/mergeDuplicateProductsBySku");
 const touchProductUpdatedAt_1 = require("../utils/touchProductUpdatedAt");
 const getProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
@@ -355,18 +345,25 @@ const getProductById = (req, res) => __awaiter(void 0, void 0, void 0, function*
 });
 exports.getProductById = getProductById;
 const getProductBySku = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _1;
     const { sku } = req.params;
+    const includeRelatedRaw = (_1 = req.query) === null || _1 === void 0 ? void 0 : _1.includeRelated;
+    const includeRelated = includeRelatedRaw !== '0' &&
+        includeRelatedRaw !== 'false' &&
+        includeRelatedRaw !== 'no';
     try {
         const { resolveProductByArticleSku, findRelatedProductIdsForArticleSku } = yield Promise.resolve().then(() => __importStar(require('../services/productSkuFamily')));
         const product = yield resolveProductByArticleSku(String(sku));
         if (!product)
             return res.status(404).json({ message: 'Producto no encontrado' });
         let productIds = [product.id];
-        try {
-            productIds = yield findRelatedProductIdsForArticleSku(String(sku), product.id);
-        }
-        catch (relatedErr) {
-            console.warn('[getProductBySku] findRelatedProductIds:', relatedErr === null || relatedErr === void 0 ? void 0 : relatedErr.message);
+        if (includeRelated) {
+            try {
+                productIds = yield findRelatedProductIdsForArticleSku(String(sku), product.id);
+            }
+            catch (relatedErr) {
+                console.warn('[getProductBySku] findRelatedProductIds:', relatedErr === null || relatedErr === void 0 ? void 0 : relatedErr.message);
+            }
         }
         const idPlaceholders = productIds.map(() => '?').join(',');
         // Variantes del producto y de registros duplicados del mismo artículo (ej. 0127501 + 1275-11)
@@ -503,7 +500,7 @@ const updateProductExternalIds = (req, res) => __awaiter(void 0, void 0, void 0,
 });
 exports.updateProductExternalIds = updateProductExternalIds;
 const updateVariantExternalIds = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _2, _3, _4;
     const { variantId } = req.params;
     const body = req.body || {};
     const hasTnVar = Object.prototype.hasOwnProperty.call(body, 'tiendaNubeVariantId');
@@ -519,19 +516,28 @@ const updateVariantExternalIds = (req, res) => __awaiter(void 0, void 0, void 0,
     if (!variantId)
         return res.status(400).json({ message: 'ID de variante inválido' });
     try {
+        const mlItemOnVariant = hasMlItem && mercadoLibreItemId != null && String(mercadoLibreItemId).trim() !== ''
+            ? String(mercadoLibreItemId).trim()
+            : null;
+        const mlVarOnVariant = !mlItemOnVariant && hasMlVar && mercadoLibreVariantId != null && String(mercadoLibreVariantId).trim() !== ''
+            ? String(mercadoLibreVariantId).trim()
+            : null;
         const sets = [];
         const params = [];
         if (hasTnVar) {
             sets.push('tienda_nube_variant_id = ?');
             params.push(tiendaNubeVariantId != null && String(tiendaNubeVariantId).trim() !== '' ? String(tiendaNubeVariantId).trim() : null);
         }
-        if (hasMlVar) {
-            sets.push('mercado_libre_variant_id = ?');
-            params.push(mercadoLibreVariantId != null && String(mercadoLibreVariantId).trim() !== '' ? String(mercadoLibreVariantId).trim() : null);
+        if (mlItemOnVariant) {
+            sets.push('mercado_libre_item_id = ?', 'mercado_libre_variant_id = NULL');
+            params.push(mlItemOnVariant);
         }
-        if (hasMlItem) {
-            sets.push('mercado_libre_item_id = ?');
-            params.push(mercadoLibreItemId != null && String(mercadoLibreItemId).trim() !== '' ? String(mercadoLibreItemId).trim() : null);
+        else if (mlVarOnVariant) {
+            sets.push('mercado_libre_variant_id = ?', 'mercado_libre_item_id = NULL');
+            params.push(mlVarOnVariant);
+        }
+        else if (hasMlVar || hasMlItem) {
+            sets.push('mercado_libre_variant_id = NULL', 'mercado_libre_item_id = NULL');
         }
         if (hasExternalSku) {
             sets.push('external_sku = ?');
@@ -548,50 +554,45 @@ const updateVariantExternalIds = (req, res) => __awaiter(void 0, void 0, void 0,
        JOIN product_colors pc ON pc.product_id = p.id
        JOIN product_variants pv ON pv.product_color_id = pc.id
        WHERE pv.id = ? LIMIT 1`, [variantId]);
-        // Actualizar IDs del producto padre solo si el request lo incluye explícitamente.
+        // Publicación propia (MLA por variante): no pisar mercado_libre_id del producto padre.
         if (productRow === null || productRow === void 0 ? void 0 : productRow.product_id) {
-            if (hasMlItem) {
-                const mlItemToSet = (mercadoLibreItemId != null && String(mercadoLibreItemId).trim() !== '') ? String(mercadoLibreItemId).trim() : null;
-                yield (0, db_1.execute)(`UPDATE products SET mercado_libre_id = ? WHERE id = ?`, [mlItemToSet, productRow.product_id]);
-                productRow = Object.assign(Object.assign({}, productRow), { mercado_libre_id: mlItemToSet });
-            }
             if (hasTnProd) {
-                const tnProdToSet = (tiendaNubeProductId != null && String(tiendaNubeProductId).trim() !== '') ? String(tiendaNubeProductId).trim() : null;
+                const tnProdToSet = tiendaNubeProductId != null && String(tiendaNubeProductId).trim() !== '' ? String(tiendaNubeProductId).trim() : null;
                 yield (0, db_1.execute)(`UPDATE products SET tienda_nube_id = ? WHERE id = ?`, [tnProdToSet, productRow.product_id]);
                 productRow = Object.assign(Object.assign({}, productRow), { tienda_nube_id: tnProdToSet });
             }
         }
-        // Registrar en variant_publications para que la sincronización de stock use esta publicación
-        const tnVariantId = (tiendaNubeVariantId != null && String(tiendaNubeVariantId).trim() !== '') ? String(tiendaNubeVariantId).trim() : null;
-        const mlVariantId = (mercadoLibreVariantId != null && String(mercadoLibreVariantId).trim() !== '') ? String(mercadoLibreVariantId).trim() : '';
+        const tnVariantId = tiendaNubeVariantId != null && String(tiendaNubeVariantId).trim() !== '' ? String(tiendaNubeVariantId).trim() : null;
         const tnProductId = ((productRow === null || productRow === void 0 ? void 0 : productRow.tienda_nube_id) && String(productRow.tienda_nube_id).trim() !== '') ? String(productRow.tienda_nube_id).trim() : null;
-        const tnPack = (_a = productRow === null || productRow === void 0 ? void 0 : productRow.tn_pack) !== null && _a !== void 0 ? _a : 1;
-        const mlPack = (_b = productRow === null || productRow === void 0 ? void 0 : productRow.ml_pack) !== null && _b !== void 0 ? _b : 1;
-        // Si se borró la publicación, también la borramos de variant_publications.
+        const tnPack = (_2 = productRow === null || productRow === void 0 ? void 0 : productRow.tn_pack) !== null && _2 !== void 0 ? _2 : 1;
+        const mlPack = (_3 = productRow === null || productRow === void 0 ? void 0 : productRow.ml_pack) !== null && _3 !== void 0 ? _3 : 1;
+        const mlPubItemId = mlItemOnVariant
+            || (mlVarOnVariant && (productRow === null || productRow === void 0 ? void 0 : productRow.mercado_libre_id) ? String(productRow.mercado_libre_id).trim() : null);
         if (hasTnVar && (!tnProductId || !tnVariantId)) {
             yield (0, db_1.execute)(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'tiendanube'`, [variantId]);
         }
         if (hasMlVar || hasMlItem) {
-            const hasAnyMl = (mercadoLibreItemId != null && String(mercadoLibreItemId).trim() !== '') || (mercadoLibreVariantId != null && String(mercadoLibreVariantId).trim() !== '');
+            const hasAnyMl = !!mlPubItemId || !!mlVarOnVariant;
             if (!hasAnyMl) {
                 yield (0, db_1.execute)(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'mercadolibre'`, [variantId]);
             }
         }
         if (tnProductId && tnVariantId) {
+            yield (0, db_1.execute)(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'tiendanube'`, [variantId]);
             yield (0, db_1.execute)(`INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
          VALUES (?, ?, 'tiendanube', ?, ?, ?)
          ON DUPLICATE KEY UPDATE pack_size = VALUES(pack_size)`, [(0, uuid_1.v4)(), variantId, tnProductId, tnVariantId, tnPack]);
         }
-        const mlItemId = ((productRow === null || productRow === void 0 ? void 0 : productRow.mercado_libre_id) && String(productRow.mercado_libre_id).trim() !== '') ? String(productRow.mercado_libre_id).trim() : null;
-        if (mlItemId) {
+        if (mlPubItemId) {
+            yield (0, db_1.execute)(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'mercadolibre'`, [variantId]);
             yield (0, db_1.execute)(`INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
          VALUES (?, ?, 'mercadolibre', ?, ?, ?)
-         ON DUPLICATE KEY UPDATE pack_size = VALUES(pack_size)`, [(0, uuid_1.v4)(), variantId, mlItemId, mlVariantId, mlPack]);
+         ON DUPLICATE KEY UPDATE external_product_id = VALUES(external_product_id), external_variant_id = VALUES(external_variant_id), pack_size = VALUES(pack_size)`, [(0, uuid_1.v4)(), variantId, mlPubItemId, mlVarOnVariant || '', mlPack]);
         }
         // Después de vincular, usar el stock local como fuente de verdad y enviarlo a ML/TN
         try {
             const stockRow = yield (0, db_1.get)(`SELECT stock FROM stocks WHERE variant_id = ?`, [variantId]);
-            const currentStock = Number((_c = stockRow === null || stockRow === void 0 ? void 0 : stockRow.stock) !== null && _c !== void 0 ? _c : 0);
+            const currentStock = Number((_4 = stockRow === null || stockRow === void 0 ? void 0 : stockRow.stock) !== null && _4 !== void 0 ? _4 : 0);
             yield (0, stock_controller_1.syncStockToExternalPlatforms)(variantId, currentStock);
         }
         catch (syncErr) {
@@ -675,7 +676,7 @@ exports.unlinkProductPlatforms = unlinkProductPlatforms;
  *  Usa el stock local como fuente de verdad y lo envía a ML/TN (no importa stock desde ML).
  */
 const bulkLinkVariants = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _5, _6, _7;
     const body = req.body || {};
     const { productId, mercadoLibreItemId, tiendaNubeProductId, links } = body;
     if (!links || !Array.isArray(links) || links.length === 0) {
@@ -684,7 +685,11 @@ const bulkLinkVariants = (req, res) => __awaiter(void 0, void 0, void 0, functio
     }
     try {
         const withMlItem = links.filter((l) => l.mercadoLibreItemId != null && String(l.mercadoLibreItemId).trim() !== '').length;
+        const withMlVar = links.filter((l) => l.mercadoLibreVariantId != null &&
+            String(l.mercadoLibreVariantId).trim() !== '' &&
+            !(l.mercadoLibreItemId != null && String(l.mercadoLibreItemId).trim() !== '')).length;
         const withTn = links.filter((l) => l.tiendaNubeVariantId != null && String(l.tiendaNubeVariantId) !== '').length;
+        const allMlOwnPublications = withMlItem > 0 && withMlVar === 0;
         console.log('[bulkLinkVariants] Actualizando', links.length, 'variantes, productId:', productId, 'ML padre:', mercadoLibreItemId, 'TN producto:', tiendaNubeProductId, '| links con ML publicación propia:', withMlItem, 'con TN:', withTn);
         let resolvedProductId = productId;
         if ((mercadoLibreItemId || tiendaNubeProductId) && !resolvedProductId && links.length > 0) {
@@ -692,34 +697,82 @@ const bulkLinkVariants = (req, res) => __awaiter(void 0, void 0, void 0, functio
          JOIN product_colors pc ON pc.product_id = p.id
          JOIN product_variants pv ON pv.product_color_id = pc.id
          WHERE pv.id = ? LIMIT 1`, [links[0].variantId]);
-            resolvedProductId = (_a = row === null || row === void 0 ? void 0 : row.product_id) !== null && _a !== void 0 ? _a : undefined;
+            resolvedProductId = (_5 = row === null || row === void 0 ? void 0 : row.product_id) !== null && _5 !== void 0 ? _5 : undefined;
         }
         if (resolvedProductId) {
             if (tiendaNubeProductId != null && tiendaNubeProductId !== '') {
                 yield (0, db_1.execute)(`UPDATE products SET tienda_nube_id = ? WHERE id = ?`, [String(tiendaNubeProductId), resolvedProductId]);
             }
-            if (mercadoLibreItemId != null && mercadoLibreItemId !== '') {
+            if (allMlOwnPublications) {
+                // Cada variante tiene su MLA: el ID padre no debe usarse para sync (evita pisar stock).
+                yield (0, db_1.execute)(`UPDATE products SET mercado_libre_id = NULL WHERE id = ?`, [resolvedProductId]);
+            }
+            else if (mercadoLibreItemId != null && mercadoLibreItemId !== '') {
                 yield (0, db_1.execute)(`UPDATE products SET mercado_libre_id = ? WHERE id = ?`, [String(mercadoLibreItemId), resolvedProductId]);
             }
         }
+        const productRow = resolvedProductId
+            ? yield (0, db_1.get)(`SELECT tienda_nube_id, mercado_libre_id,
+                  COALESCE(NULLIF(tienda_nube_pack_size, 0), 1) AS tn_pack,
+                  COALESCE(NULLIF(mercado_libre_pack_size, 0), 1) AS ml_pack
+           FROM products WHERE id = ? LIMIT 1`, [resolvedProductId])
+            : null;
+        const tnProductIdForPub = (tiendaNubeProductId && String(tiendaNubeProductId).trim()) ||
+            ((productRow === null || productRow === void 0 ? void 0 : productRow.tienda_nube_id) && String(productRow.tienda_nube_id).trim()) ||
+            null;
+        const mlParentIdForPub = allMlOwnPublications
+            ? null
+            : (mercadoLibreItemId && String(mercadoLibreItemId).trim()) ||
+                ((productRow === null || productRow === void 0 ? void 0 : productRow.mercado_libre_id) && String(productRow.mercado_libre_id).trim()) ||
+                null;
+        const tnPack = Number((_6 = productRow === null || productRow === void 0 ? void 0 : productRow.tn_pack) !== null && _6 !== void 0 ? _6 : 1) || 1;
+        const mlPack = Number((_7 = productRow === null || productRow === void 0 ? void 0 : productRow.ml_pack) !== null && _7 !== void 0 ? _7 : 1) || 1;
         for (const link of links) {
             const { variantId, mercadoLibreVariantId, mercadoLibreItemId: linkMlItemId, tiendaNubeVariantId, externalSku } = link;
             if (!variantId)
                 continue;
-            const mlVarId = (mercadoLibreVariantId != null && String(mercadoLibreVariantId).trim() !== '') ? String(mercadoLibreVariantId) : null;
             const mlItemId = (linkMlItemId != null && String(linkMlItemId).trim() !== '') ? String(linkMlItemId).trim() : null;
-            yield (0, db_1.execute)(`UPDATE product_variants SET
-           tienda_nube_variant_id = COALESCE(?, tienda_nube_variant_id),
-           mercado_libre_variant_id = COALESCE(?, mercado_libre_variant_id),
-           mercado_libre_item_id = COALESCE(?, mercado_libre_item_id),
-           external_sku = COALESCE(?, external_sku)
-         WHERE id = ?`, [
-                tiendaNubeVariantId != null && tiendaNubeVariantId !== '' ? String(tiendaNubeVariantId) : null,
-                mlVarId,
-                mlItemId,
-                externalSku !== undefined && externalSku !== null ? String(externalSku) : null,
-                variantId
-            ]);
+            const mlVarId = !mlItemId && mercadoLibreVariantId != null && String(mercadoLibreVariantId).trim() !== ''
+                ? String(mercadoLibreVariantId).trim()
+                : null;
+            const tnVarId = tiendaNubeVariantId != null && String(tiendaNubeVariantId).trim() !== '' ? String(tiendaNubeVariantId).trim() : null;
+            const sets = [];
+            const params = [];
+            if (tnVarId != null) {
+                sets.push('tienda_nube_variant_id = ?');
+                params.push(tnVarId);
+            }
+            if (mlItemId != null) {
+                sets.push('mercado_libre_item_id = ?', 'mercado_libre_variant_id = NULL');
+                params.push(mlItemId);
+            }
+            else if (mlVarId != null) {
+                sets.push('mercado_libre_variant_id = ?', 'mercado_libre_item_id = NULL');
+                params.push(mlVarId);
+            }
+            if (externalSku !== undefined && externalSku !== null) {
+                sets.push('external_sku = ?');
+                params.push(String(externalSku).trim() || null);
+            }
+            if (sets.length > 0) {
+                params.push(variantId);
+                yield (0, db_1.execute)(`UPDATE product_variants SET ${sets.join(', ')} WHERE id = ?`, params);
+            }
+            if (tnVarId && tnProductIdForPub) {
+                yield (0, db_1.execute)(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'tiendanube'`, [variantId]);
+                yield (0, db_1.execute)(`INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
+           VALUES (?, ?, 'tiendanube', ?, ?, ?)
+           ON DUPLICATE KEY UPDATE pack_size = VALUES(pack_size)`, [(0, uuid_1.v4)(), variantId, tnProductIdForPub, tnVarId, tnPack]);
+            }
+            if (mlItemId || mlVarId) {
+                yield (0, db_1.execute)(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'mercadolibre'`, [variantId]);
+                const pubItemId = mlItemId || mlParentIdForPub;
+                if (pubItemId) {
+                    yield (0, db_1.execute)(`INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
+             VALUES (?, ?, 'mercadolibre', ?, ?, ?)
+             ON DUPLICATE KEY UPDATE external_product_id = VALUES(external_product_id), external_variant_id = VALUES(external_variant_id), pack_size = VALUES(pack_size)`, [(0, uuid_1.v4)(), variantId, pubItemId, mlVarId || '', mlPack]);
+                }
+            }
         }
         // Enviar stock local a plataformas externas (ML/TN). Por lotes para no disparar el timeout del cliente.
         const SYNC_BATCH = 4;
@@ -728,10 +781,10 @@ const bulkLinkVariants = (req, res) => __awaiter(void 0, void 0, void 0, functio
         for (let i = 0; i < toSync.length; i += SYNC_BATCH) {
             const batch = toSync.slice(i, i + SYNC_BATCH);
             const batchCounts = yield Promise.all(batch.map((link) => __awaiter(void 0, void 0, void 0, function* () {
-                var _a;
+                var _8;
                 try {
                     const stockRow = yield (0, db_1.get)(`SELECT stock FROM stocks WHERE variant_id = ?`, [link.variantId]);
-                    const currentStock = Number((_a = stockRow === null || stockRow === void 0 ? void 0 : stockRow.stock) !== null && _a !== void 0 ? _a : 0);
+                    const currentStock = Number((_8 = stockRow === null || stockRow === void 0 ? void 0 : stockRow.stock) !== null && _8 !== void 0 ? _8 : 0);
                     yield (0, stock_controller_1.syncStockToExternalPlatforms)(link.variantId, currentStock);
                     return 1;
                 }
@@ -869,7 +922,7 @@ const updateVariant = (req, res) => __awaiter(void 0, void 0, void 0, function* 
        WHERE pv.id = ?`, [variantId]);
         if (!updated)
             return res.status(404).json({ message: 'Variante no encontrada' });
-        const skuToSend = (updated.external_sku || updated.sku || '').toString().trim();
+        const skuToSend = (0, skuString_1.skuToCanonicalString)(updated.sku || updated.external_sku || '');
         if (skuToSend) {
             if (updated.mercado_libre_item_id && updated.mercado_libre_variant_id) {
                 (0, stock_controller_1.updateMercadoLibreSku)(updated.mercado_libre_item_id, updated.mercado_libre_variant_id, skuToSend).catch(err => console.error('[updateVariant] Error enviando SKU a ML:', err));
@@ -902,6 +955,7 @@ function deleteProductById(productId) {
         return { deleted: true };
     });
 }
+exports.deleteProductById = deleteProductById;
 /** Eliminar un producto (artículo) y todas sus variantes, colores y stock. No se puede si alguna variante está en pedidos. */
 const deleteProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const productId = req.params.id;
@@ -1208,7 +1262,7 @@ function maybeUpgradeTrivialProductNameFromImport(productId, sku, currentName, d
     });
 }
 const importTangoArticles = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _9, _10, _11, _12, _13, _14, _15;
     try {
         const body = req.body;
         const { rows: rawRows, onlyComplete = true } = body;
@@ -1220,7 +1274,7 @@ const importTangoArticles = (req, res) => __awaiter(void 0, void 0, void 0, func
             if (!(dRow === null || dRow === void 0 ? void 0 : dRow.id)) {
                 return res.status(400).json({ message: 'despachoId no válido: no existe ese despacho.' });
             }
-            despachoLink = { id: dRow.id, pais_origen: (_a = dRow.pais_origen) !== null && _a !== void 0 ? _a : null };
+            despachoLink = { id: dRow.id, pais_origen: (_9 = dRow.pais_origen) !== null && _9 !== void 0 ? _9 : null };
         }
         if (!Array.isArray(rawRows) || rawRows.length === 0) {
             return res.status(400).json({
@@ -1236,7 +1290,7 @@ const importTangoArticles = (req, res) => __awaiter(void 0, void 0, void 0, func
         if (layout.mode === 'triple') {
             const { articuloKey, talleKey, colorKey, descKey, colorNameKey, modeloKey, cantidadKey, rgbKey } = layout;
             for (const row of rawRows) {
-                const articulo = String((_b = row[articuloKey]) !== null && _b !== void 0 ? _b : '').trim();
+                const articulo = String((_10 = row[articuloKey]) !== null && _10 !== void 0 ? _10 : '').trim();
                 const talle = normalizeTalleForImport(row[talleKey]);
                 const color = normalizeColorCodeForImport(row[colorKey]);
                 const parsed = { articulo, talle, color, codigoCompleto: `${articulo}${talle}${color}` };
@@ -1246,7 +1300,7 @@ const importTangoArticles = (req, res) => __awaiter(void 0, void 0, void 0, func
                 const descripcion = (descKey && row[descKey] != null && String(row[descKey]).trim()) ||
                     (modeloKey && row[modeloKey] != null && String(row[modeloKey]).trim()) ||
                     parsed.articulo;
-                const colorName = colorNameKey ? String((_c = row[colorNameKey]) !== null && _c !== void 0 ? _c : '').trim() : '';
+                const colorName = colorNameKey ? String((_11 = row[colorNameKey]) !== null && _11 !== void 0 ? _11 : '').trim() : '';
                 const initialStock = cantidadKey ? parseCantidadCell(row[cantidadKey]) : undefined;
                 const colorHex = rgbKey ? parseRgbToHex(row[rgbKey]) : null;
                 const rec = {
@@ -1313,20 +1367,20 @@ const importTangoArticles = (req, res) => __awaiter(void 0, void 0, void 0, func
                     yield (0, db_1.execute)(`INSERT INTO products (id, sku, name, category, base_price, description) VALUES (?, ?, ?, ?, ?, ?)`, [productId, r.articulo, name, 'General', 0, null]);
                     productsCreated++;
                 }
-                let sizeId = (_d = (yield (0, db_1.get)(`SELECT id FROM sizes WHERE size_code = ?`, [r.talle]))) === null || _d === void 0 ? void 0 : _d.id;
+                let sizeId = (_12 = (yield (0, db_1.get)(`SELECT id FROM sizes WHERE size_code = ?`, [r.talle]))) === null || _12 === void 0 ? void 0 : _12.id;
                 if (!sizeId) {
                     sizeId = (0, uuid_1.v4)();
                     const talleNombre = (0, talles_tango_1.nombreTalleDesdeCodigo)(r.talle);
                     yield (0, db_1.execute)(`INSERT INTO sizes (id, size_code, name) VALUES (?, ?, ?)`, [sizeId, r.talle, talleNombre]);
                 }
-                let colorId = (_e = (yield (0, db_1.get)(`SELECT id FROM colors WHERE code = ?`, [r.color]))) === null || _e === void 0 ? void 0 : _e.id;
+                let colorId = (_13 = (yield (0, db_1.get)(`SELECT id FROM colors WHERE code = ?`, [r.color]))) === null || _13 === void 0 ? void 0 : _13.id;
                 if (!colorId) {
                     colorId = (0, uuid_1.v4)();
                     const name = (r.colorName && r.colorName.trim()) || r.color;
                     const hex = r.colorHex || '#000000';
                     yield (0, db_1.execute)(`INSERT INTO colors (id, name, code, hex) VALUES (?, ?, ?, ?)`, [colorId, name, r.color, hex]);
                 }
-                let productColorId = (_f = (yield (0, db_1.get)(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]))) === null || _f === void 0 ? void 0 : _f.id;
+                let productColorId = (_14 = (yield (0, db_1.get)(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]))) === null || _14 === void 0 ? void 0 : _14.id;
                 if (!productColorId) {
                     productColorId = (0, uuid_1.v4)();
                     yield (0, db_1.execute)(`INSERT INTO product_colors (id, product_id, color_id) VALUES (?, ?, ?)`, [productColorId, productId, colorId]);
@@ -1336,7 +1390,7 @@ const importTangoArticles = (req, res) => __awaiter(void 0, void 0, void 0, func
                 if (!existingVariant) {
                     variantId = (0, uuid_1.v4)();
                     yield (0, db_1.execute)(`INSERT INTO product_variants (id, product_color_id, size_id, sku) VALUES (?, ?, ?, ?)`, [variantId, productColorId, sizeId, r.codigo13]);
-                    const qty = (_g = r.initialStock) !== null && _g !== void 0 ? _g : 0;
+                    const qty = (_15 = r.initialStock) !== null && _15 !== void 0 ? _15 : 0;
                     yield (0, db_1.execute)(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?)`, [variantId, qty]);
                     variantsCreated++;
                 }
@@ -1546,14 +1600,14 @@ const getDuplicateProducts = (req, res) => __awaiter(void 0, void 0, void 0, fun
 exports.getDuplicateProducts = getDuplicateProducts;
 /** Fusiona artículos elegidos manualmente en un “principal”. Body: { keeperProductId, duplicateProductIds: string[], dryRun?: boolean }. Solo ADMIN o DEPÓSITO. */
 const mergeManualProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e;
+    var _16, _17, _18, _19, _20;
     try {
-        const keeperProductId = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.keeperProductId) || '').trim();
-        const raw = (_b = req.body) === null || _b === void 0 ? void 0 : _b.duplicateProductIds;
+        const keeperProductId = String(((_16 = req.body) === null || _16 === void 0 ? void 0 : _16.keeperProductId) || '').trim();
+        const raw = (_17 = req.body) === null || _17 === void 0 ? void 0 : _17.duplicateProductIds;
         const duplicateProductIds = Array.isArray(raw)
             ? raw.map((x) => String(x !== null && x !== void 0 ? x : '').trim()).filter(Boolean)
             : [];
-        const dryRun = ((_c = req.body) === null || _c === void 0 ? void 0 : _c.dryRun) === true || ((_d = req.query) === null || _d === void 0 ? void 0 : _d.dryRun) === 'true' || ((_e = req.query) === null || _e === void 0 ? void 0 : _e.dryRun) === '1';
+        const dryRun = ((_18 = req.body) === null || _18 === void 0 ? void 0 : _18.dryRun) === true || ((_19 = req.query) === null || _19 === void 0 ? void 0 : _19.dryRun) === 'true' || ((_20 = req.query) === null || _20 === void 0 ? void 0 : _20.dryRun) === '1';
         if (!keeperProductId) {
             return res.status(400).json({ message: 'Indicá el artículo principal (keeperProductId).' });
         }
@@ -1574,10 +1628,10 @@ const mergeManualProducts = (req, res) => __awaiter(void 0, void 0, void 0, func
 exports.mergeManualProducts = mergeManualProducts;
 /** Une dos variantes del mismo artículo con el mismo talle (size_id). Body: { keeperVariantId, absorbVariantId }. */
 const mergeManualVariants = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _21, _22;
     try {
-        const keeperVariantId = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.keeperVariantId) || '').trim();
-        const absorbVariantId = String(((_b = req.body) === null || _b === void 0 ? void 0 : _b.absorbVariantId) || '').trim();
+        const keeperVariantId = String(((_21 = req.body) === null || _21 === void 0 ? void 0 : _21.keeperVariantId) || '').trim();
+        const absorbVariantId = String(((_22 = req.body) === null || _22 === void 0 ? void 0 : _22.absorbVariantId) || '').trim();
         if (!keeperVariantId || !absorbVariantId) {
             return res.status(400).json({ message: 'keeperVariantId y absorbVariantId son obligatorios.' });
         }
@@ -1600,9 +1654,9 @@ const mergeManualVariants = (req, res) => __awaiter(void 0, void 0, void 0, func
 exports.mergeManualVariants = mergeManualVariants;
 /** Fusiona productos con el mismo núcleo de SKU (guiones / ceros / formato). Solo ADMIN o DEPÓSITO. Body/query: dryRun=true para simular. */
 const mergeDuplicateProductsBySku = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _23, _24, _25;
     try {
-        const dryRun = ((_a = req.body) === null || _a === void 0 ? void 0 : _a.dryRun) === true || ((_b = req.query) === null || _b === void 0 ? void 0 : _b.dryRun) === 'true' || ((_c = req.query) === null || _c === void 0 ? void 0 : _c.dryRun) === '1';
+        const dryRun = ((_23 = req.body) === null || _23 === void 0 ? void 0 : _23.dryRun) === true || ((_24 = req.query) === null || _24 === void 0 ? void 0 : _24.dryRun) === 'true' || ((_25 = req.query) === null || _25 === void 0 ? void 0 : _25.dryRun) === '1';
         const result = yield (0, mergeDuplicateProductsBySku_1.runMergeDuplicateProductsBySku)({ dryRun });
         res.json(result);
     }

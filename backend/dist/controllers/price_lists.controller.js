@@ -12,6 +12,33 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.setPriceListItemsBySku = exports.fillPriceListFromBase = exports.duplicatePriceList = exports.createPriceListsBulk = exports.setPriceListItems = exports.getPriceListItems = exports.deletePriceList = exports.updatePriceList = exports.createPriceList = exports.getPriceList = exports.listPriceLists = void 0;
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
+/** Aplica ajuste porcentual (+10 = 10% más, -5 = 5% menos). */
+function priceWithPercentAdjust(basePrice, percentAdjust) {
+    const base = Number(basePrice);
+    if (!Number.isFinite(base) || base < 0)
+        return 0;
+    const pct = percentAdjust != null && Number.isFinite(Number(percentAdjust)) ? Number(percentAdjust) : 0;
+    if (pct === 0)
+        return Math.round(base * 100) / 100;
+    const factor = 1 + pct / 100;
+    const next = Math.round(base * factor * 100) / 100;
+    return next > 0 ? next : 0;
+}
+function copyPriceListItems(sourceListId, targetListId, percentAdjust) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const items = yield (0, db_1.query)(`SELECT product_id AS productId, price FROM price_list_items WHERE price_list_id = ?`, [sourceListId]);
+        let count = 0;
+        for (const it of items || []) {
+            const productId = it === null || it === void 0 ? void 0 : it.productId;
+            const price = priceWithPercentAdjust(Number(it === null || it === void 0 ? void 0 : it.price), percentAdjust);
+            if (!productId || !Number.isFinite(price) || price <= 0)
+                continue;
+            yield (0, db_1.execute)(`INSERT INTO price_list_items (id, price_list_id, product_id, price) VALUES (?, ?, ?, ?)`, [(0, uuid_1.v4)(), targetListId, productId, price]);
+            count++;
+        }
+        return count;
+    });
+}
 /** Listar listas de precios. Solo ADMIN. */
 const listPriceLists = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
@@ -30,9 +57,9 @@ const listPriceLists = (req, res) => __awaiter(void 0, void 0, void 0, function*
 exports.listPriceLists = listPriceLists;
 /** Obtener una lista con sus ítems (product_id y price). Solo ADMIN. */
 const getPriceList = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _b;
     try {
-        if (((_a = req.user) === null || _a === void 0 ? void 0 : _a.role) !== 'ADMIN') {
+        if (((_b = req.user) === null || _b === void 0 ? void 0 : _b.role) !== 'ADMIN') {
             return res.status(403).json({ message: 'Solo administradores pueden ver listas de precios' });
         }
         const { id } = req.params;
@@ -50,19 +77,29 @@ const getPriceList = (req, res) => __awaiter(void 0, void 0, void 0, function* (
 exports.getPriceList = getPriceList;
 /** Crear lista de precios. Solo ADMIN. */
 const createPriceList = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _c;
     try {
-        if (((_a = req.user) === null || _a === void 0 ? void 0 : _a.role) !== 'ADMIN') {
+        if (((_c = req.user) === null || _c === void 0 ? void 0 : _c.role) !== 'ADMIN') {
             return res.status(403).json({ message: 'Solo administradores pueden crear listas de precios' });
         }
-        const { name, description } = req.body;
+        const { name, description, sourceListId, percentAdjust } = req.body;
         if (!(name === null || name === void 0 ? void 0 : name.trim())) {
             return res.status(400).json({ message: 'El nombre es requerido' });
         }
+        const sourceId = (sourceListId === null || sourceListId === void 0 ? void 0 : sourceListId.trim()) || null;
+        if (sourceId) {
+            const source = yield (0, db_1.get)('SELECT id FROM price_lists WHERE id = ?', [sourceId]);
+            if (!source)
+                return res.status(404).json({ message: 'Lista origen no encontrada' });
+        }
         const id = (0, uuid_1.v4)();
         yield (0, db_1.execute)(`INSERT INTO price_lists (id, name, description) VALUES (?, ?, ?)`, [id, name.trim(), (description !== null && description !== void 0 ? description : '').toString().trim() || null]);
+        let itemsCopied = 0;
+        if (sourceId) {
+            itemsCopied = yield copyPriceListItems(sourceId, id, percentAdjust);
+        }
         const created = yield (0, db_1.get)(`SELECT id, name, description, created_at AS createdAt, updated_at AS updatedAt FROM price_lists WHERE id = ?`, [id]);
-        res.status(201).json(created);
+        res.status(201).json(Object.assign(Object.assign({}, created), { itemsCopied, percentAdjust: percentAdjust !== null && percentAdjust !== void 0 ? percentAdjust : 0 }));
     }
     catch (error) {
         console.error('createPriceList:', error);
@@ -72,9 +109,9 @@ const createPriceList = (req, res) => __awaiter(void 0, void 0, void 0, function
 exports.createPriceList = createPriceList;
 /** Actualizar lista de precios (nombre/descripción). Solo ADMIN. */
 const updatePriceList = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _d;
     try {
-        if (((_a = req.user) === null || _a === void 0 ? void 0 : _a.role) !== 'ADMIN') {
+        if (((_d = req.user) === null || _d === void 0 ? void 0 : _d.role) !== 'ADMIN') {
             return res.status(403).json({ message: 'Solo administradores pueden editar listas de precios' });
         }
         const { id } = req.params;
@@ -99,9 +136,9 @@ const updatePriceList = (req, res) => __awaiter(void 0, void 0, void 0, function
 exports.updatePriceList = updatePriceList;
 /** Eliminar lista de precios. Solo ADMIN. */
 const deletePriceList = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _e;
     try {
-        if (((_a = req.user) === null || _a === void 0 ? void 0 : _a.role) !== 'ADMIN') {
+        if (((_e = req.user) === null || _e === void 0 ? void 0 : _e.role) !== 'ADMIN') {
             return res.status(403).json({ message: 'Solo administradores pueden eliminar listas de precios' });
         }
         const { id } = req.params;
@@ -119,9 +156,9 @@ const deletePriceList = (req, res) => __awaiter(void 0, void 0, void 0, function
 exports.deletePriceList = deletePriceList;
 /** Obtener ítems de una lista (product_id, price y opcionalmente nombre/sku del producto). Solo ADMIN. */
 const getPriceListItems = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _f;
     try {
-        if (((_a = req.user) === null || _a === void 0 ? void 0 : _a.role) !== 'ADMIN') {
+        if (((_f = req.user) === null || _f === void 0 ? void 0 : _f.role) !== 'ADMIN') {
             return res.status(403).json({ message: 'Solo administradores pueden ver ítems de listas de precios' });
         }
         const { id } = req.params;
@@ -143,9 +180,9 @@ const getPriceListItems = (req, res) => __awaiter(void 0, void 0, void 0, functi
 exports.getPriceListItems = getPriceListItems;
 /** Reemplazar ítems de una lista (array de { productId, price }). Solo ADMIN. */
 const setPriceListItems = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _g;
     try {
-        if (((_a = req.user) === null || _a === void 0 ? void 0 : _a.role) !== 'ADMIN') {
+        if (((_g = req.user) === null || _g === void 0 ? void 0 : _g.role) !== 'ADMIN') {
             return res.status(403).json({ message: 'Solo administradores pueden editar ítems de listas de precios' });
         }
         const { id } = req.params;
@@ -176,13 +213,13 @@ const setPriceListItems = (req, res) => __awaiter(void 0, void 0, void 0, functi
 exports.setPriceListItems = setPriceListItems;
 /** Crear varias listas de precios de una vez. Body: { names: string[] } o { names: string, description?: string }[]. Solo ADMIN. */
 const createPriceListsBulk = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _h, _j;
     try {
-        if (((_a = req.user) === null || _a === void 0 ? void 0 : _a.role) !== 'ADMIN') {
+        if (((_h = req.user) === null || _h === void 0 ? void 0 : _h.role) !== 'ADMIN') {
             return res.status(403).json({ message: 'Solo administradores pueden crear listas de precios' });
         }
         const body = req.body;
-        const lists = ((_b = body.lists) === null || _b === void 0 ? void 0 : _b.length)
+        const lists = ((_j = body.lists) === null || _j === void 0 ? void 0 : _j.length)
             ? body.lists
             : Array.isArray(body.names)
                 ? body.names.map((n) => ({ name: String(n).trim(), description: undefined }))
@@ -208,30 +245,23 @@ const createPriceListsBulk = (req, res) => __awaiter(void 0, void 0, void 0, fun
 exports.createPriceListsBulk = createPriceListsBulk;
 /** Duplicar una lista (nueva lista con el mismo nombre + sufijo y los mismos ítems). Body: { name: string }. Solo ADMIN. */
 const duplicatePriceList = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _k;
     try {
-        if (((_a = req.user) === null || _a === void 0 ? void 0 : _a.role) !== 'ADMIN') {
+        if (((_k = req.user) === null || _k === void 0 ? void 0 : _k.role) !== 'ADMIN') {
             return res.status(403).json({ message: 'Solo administradores pueden duplicar listas de precios' });
         }
         const { id } = req.params;
-        const { name } = req.body;
+        const { name, percentAdjust } = req.body;
         if (!(name === null || name === void 0 ? void 0 : name.trim()))
             return res.status(400).json({ message: 'El nombre de la nueva lista es requerido' });
         const source = yield (0, db_1.get)('SELECT id, name FROM price_lists WHERE id = ?', [id]);
         if (!source)
             return res.status(404).json({ message: 'Lista de precios no encontrada' });
-        const items = yield (0, db_1.query)(`SELECT product_id AS productId, price FROM price_list_items WHERE price_list_id = ?`, [id]);
         const newId = (0, uuid_1.v4)();
         yield (0, db_1.execute)(`INSERT INTO price_lists (id, name, description) VALUES (?, ?, NULL)`, [newId, name.trim()]);
-        for (const it of items || []) {
-            const productId = it === null || it === void 0 ? void 0 : it.productId;
-            const price = Number(it === null || it === void 0 ? void 0 : it.price);
-            if (!productId || isNaN(price) || price < 0)
-                continue;
-            yield (0, db_1.execute)(`INSERT INTO price_list_items (id, price_list_id, product_id, price) VALUES (?, ?, ?, ?)`, [(0, uuid_1.v4)(), newId, productId, price]);
-        }
+        const itemsCopied = yield copyPriceListItems(id, newId, percentAdjust);
         const created = yield (0, db_1.get)(`SELECT id, name, description, created_at AS createdAt, updated_at AS updatedAt FROM price_lists WHERE id = ?`, [newId]);
-        res.status(201).json(created);
+        res.status(201).json(Object.assign(Object.assign({}, created), { itemsCopied, percentAdjust: percentAdjust !== null && percentAdjust !== void 0 ? percentAdjust : 0 }));
     }
     catch (error) {
         console.error('duplicatePriceList:', error);
@@ -241,9 +271,9 @@ const duplicatePriceList = (req, res) => __awaiter(void 0, void 0, void 0, funct
 exports.duplicatePriceList = duplicatePriceList;
 /** Rellenar lista con todos los productos del catálogo (precio base * multiplier). Body: { multiplier?: number }. Solo ADMIN. */
 const fillPriceListFromBase = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _l, _m;
     try {
-        if (((_a = req.user) === null || _a === void 0 ? void 0 : _a.role) !== 'ADMIN') {
+        if (((_l = req.user) === null || _l === void 0 ? void 0 : _l.role) !== 'ADMIN') {
             return res.status(403).json({ message: 'Solo administradores pueden rellenar listas' });
         }
         const { id } = req.params;
@@ -268,7 +298,7 @@ const fillPriceListFromBase = (req, res) => __awaiter(void 0, void 0, void 0, fu
         let count = 0;
         let skippedWithoutBase = 0;
         for (const p of products || []) {
-            const source = Number((_b = p.source_price) !== null && _b !== void 0 ? _b : 0);
+            const source = Number((_m = p.source_price) !== null && _m !== void 0 ? _m : 0);
             if (!Number.isFinite(source) || source <= 0) {
                 skippedWithoutBase++;
                 continue;
@@ -292,9 +322,9 @@ const fillPriceListFromBase = (req, res) => __awaiter(void 0, void 0, void 0, fu
 exports.fillPriceListFromBase = fillPriceListFromBase;
 /** Reemplazar ítems por SKU. Body: { items: { sku: string; price: number }[] }. Solo ADMIN. */
 const setPriceListItemsBySku = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _o, _p;
     try {
-        if (((_a = req.user) === null || _a === void 0 ? void 0 : _a.role) !== 'ADMIN') {
+        if (((_o = req.user) === null || _o === void 0 ? void 0 : _o.role) !== 'ADMIN') {
             return res.status(403).json({ message: 'Solo administradores pueden editar ítems de listas de precios' });
         }
         const { id } = req.params;
@@ -309,7 +339,7 @@ const setPriceListItemsBySku = (req, res) => __awaiter(void 0, void 0, void 0, f
         const escapeLike = (s) => String(s).replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
         const padArticleCodeTo7 = (s) => { const d = String(s).replace(/\D/g, ''); return d ? (d.length <= 7 ? d.padStart(7, '0') : d) : ''; };
         for (const it of input) {
-            const sku = String((_b = it === null || it === void 0 ? void 0 : it.sku) !== null && _b !== void 0 ? _b : '').trim();
+            const sku = String((_p = it === null || it === void 0 ? void 0 : it.sku) !== null && _p !== void 0 ? _p : '').trim();
             const price = Number(it === null || it === void 0 ? void 0 : it.price);
             if (!sku || isNaN(price) || price < 0)
                 continue;

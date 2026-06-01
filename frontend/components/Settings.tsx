@@ -148,8 +148,10 @@ const Settings: React.FC<SettingsProps> = ({
     if (initialTab) setActiveTab(initialTab);
   }, [initialTab]);
   const [newName, setNewName] = useState('');
+  const [newColorCode, setNewColorCode] = useState('');
   const [newColorValue, setNewColorValue] = useState('#000000');
   const [editingColorId, setEditingColorId] = useState<string | null>(null);
+  const [editingColorCode, setEditingColorCode] = useState('');
   const [editingColorName, setEditingColorName] = useState('');
   const [editingColorHex, setEditingColorHex] = useState('#000000');
   const [savingColor, setSavingColor] = useState(false);
@@ -924,17 +926,34 @@ const Settings: React.FC<SettingsProps> = ({
   const sizes = attributes.filter(a => a.type === 'size');
   const colors = attributes.filter(a => a.type === 'color');
   const handleCreateAttribute = async () => {
-    if (!newName) return;
+    if (activeTab === 'sizes') {
+      if (!newName.trim()) return;
+    } else if (!newColorCode.trim()) {
+      showToast('error', 'Indicá el código del color (ej. 111, 614, 0006).');
+      return;
+    }
     const nameTrim = newName.trim();
+    const codeTrim = newColorCode.trim();
     try {
       if (activeTab === 'sizes') {
         const created = await api.createSize({ code: nameTrim, name: nameTrim });
         onCreateAttribute({ id: created.id, type: 'size', name: created.name ?? nameTrim, code: created.code });
       } else {
-        const created = await api.createColor({ code: nameTrim, name: nameTrim, hex: newColorValue || null });
-        onCreateAttribute({ id: created.id, type: 'color', name: created.name ?? nameTrim, value: created.hex ?? undefined, code: created.code });
+        const created = await api.createColor({
+          code: codeTrim,
+          name: nameTrim || codeTrim,
+          hex: newColorValue || null,
+        });
+        onCreateAttribute({
+          id: created.id,
+          type: 'color',
+          name: created.name ?? (nameTrim || codeTrim),
+          value: created.hex ?? undefined,
+          code: created.code,
+        });
       }
       setNewName('');
+      setNewColorCode('');
       setNewColorValue('#000000');
       onRefreshData?.();
     } catch (e: any) {
@@ -963,22 +982,28 @@ const Settings: React.FC<SettingsProps> = ({
 
   const handleStartEditColor = (attr: Attribute) => {
     setEditingColorId(attr.id);
-    setEditingColorName(attr.name || (attr as any).code || '');
+    setEditingColorCode((attr as any).code != null ? String((attr as any).code).trim() : '');
+    setEditingColorName(attr.name || '');
     setEditingColorHex((attr.value as string) || '#000000');
   };
 
   const handleCancelEditColor = () => {
     setEditingColorId(null);
+    setEditingColorCode('');
     setEditingColorName('');
     setEditingColorHex('#000000');
   };
 
   const handleSaveEditColor = async () => {
-    if (!editingColorId || !editingColorName.trim()) return;
+    if (!editingColorId || !editingColorCode.trim()) {
+      showToast('error', 'El código del color es obligatorio.');
+      return;
+    }
     setSavingColor(true);
     try {
       await api.updateColor(editingColorId, {
-        name: editingColorName.trim(),
+        code: editingColorCode.trim(),
+        name: editingColorName.trim() || editingColorCode.trim(),
         hex: editingColorHex || null
       });
       showToast('success', 'Color actualizado.');
@@ -3116,23 +3141,53 @@ const Settings: React.FC<SettingsProps> = ({
       {(activeTab === 'sizes' || activeTab === 'colors') && (
         <div className="bg-slate-800 rounded-3xl p-6 border border-slate-700 shadow-xl">
           <div className="flex flex-col md:flex-row gap-4 mb-4 items-end">
-            <div className="flex-1 w-full">
-              <label className="block text-xs font-black text-slate-500 uppercase mb-2">Nombre del {activeTab === 'sizes' ? 'Talle' : 'Color'}</label>
-              <input
-                type="text"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                placeholder="Ej: XXL o Turquesa"
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-white placeholder-slate-600 focus:ring-2 focus:ring-blue-500 outline-none font-bold"
-              />
-            </div>
-            {activeTab === 'colors' && (
-              <div className="flex flex-col gap-2">
-                 <label className="block text-xs font-black text-slate-500 uppercase">Selector</label>
-                 <input type="color" value={newColorValue} onChange={(e) => setNewColorValue(e.target.value)} className="h-14 w-20 bg-slate-900 border border-slate-700 rounded-xl p-1 cursor-pointer" />
+            {activeTab === 'colors' ? (
+              <>
+                <div className="w-full md:w-36 shrink-0">
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-2">Código</label>
+                  <input
+                    type="text"
+                    value={newColorCode}
+                    onChange={(e) => setNewColorCode(e.target.value)}
+                    placeholder="Ej: 111"
+                    inputMode="numeric"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-white placeholder-slate-600 focus:ring-2 focus:ring-blue-500 outline-none font-bold font-mono"
+                  />
+                </div>
+                <div className="flex-1 w-full">
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-2">Nombre del color</label>
+                  <input
+                    type="text"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    placeholder="Ej: Natural, Blanco, Arena"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-white placeholder-slate-600 focus:ring-2 focus:ring-blue-500 outline-none font-bold"
+                  />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <label className="block text-xs font-black text-slate-500 uppercase">Selector</label>
+                  <input type="color" value={newColorValue} onChange={(e) => setNewColorValue(e.target.value)} className="h-14 w-20 bg-slate-900 border border-slate-700 rounded-xl p-1 cursor-pointer" />
+                </div>
+              </>
+            ) : (
+              <div className="flex-1 w-full">
+                <label className="block text-xs font-black text-slate-500 uppercase mb-2">Nombre del Talle</label>
+                <input
+                  type="text"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="Ej: XXL"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl p-4 text-white placeholder-slate-600 focus:ring-2 focus:ring-blue-500 outline-none font-bold"
+                />
               </div>
             )}
-            <button onClick={handleCreateAttribute} className="bg-blue-600 text-white h-14 px-8 rounded-xl font-black flex items-center gap-2 active:scale-95 transition-all shadow-lg shadow-blue-900/40 uppercase text-xs tracking-widest"><Plus size={20}/> Agregar</button>
+            <button
+              onClick={handleCreateAttribute}
+              disabled={activeTab === 'colors' ? !newColorCode.trim() : !newName.trim()}
+              className="bg-blue-600 text-white h-14 px-8 rounded-xl font-black flex items-center gap-2 active:scale-95 transition-all shadow-lg shadow-blue-900/40 uppercase text-xs tracking-widest disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Plus size={20}/> Agregar
+            </button>
           </div>
           {activeTab === 'sizes' && (
             <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-4">
@@ -3189,7 +3244,7 @@ const Settings: React.FC<SettingsProps> = ({
                   Si importaste códigos ERP de <strong className="text-slate-400">4 números</strong> (ej. 2021) y ya tenés
                   el color de <strong className="text-slate-400">3</strong> (202), usá <strong className="text-slate-300">Fusionar códigos 4 dígitos</strong>: mueve variantes al color correcto. Las importaciones nuevas ya toman solo los primeros 3 dígitos.
                 </p>
-                <p>Si eliminaste un color, volvé a cargar su código o nombre arriba, elegí el color y tocá Agregar.</p>
+                <p>Si eliminaste un color, volvé a cargar su código y nombre arriba, elegí el color en el selector y tocá Agregar.</p>
               </div>
             </div>
           )}
@@ -3206,6 +3261,13 @@ const Settings: React.FC<SettingsProps> = ({
                      <div className="flex flex-wrap items-center gap-2">
                        <input
                          type="text"
+                         value={editingColorCode}
+                         onChange={(e) => setEditingColorCode(e.target.value)}
+                         placeholder="Código"
+                         className="w-24 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm font-mono"
+                       />
+                       <input
+                         type="text"
                          value={editingColorName}
                          onChange={(e) => setEditingColorName(e.target.value)}
                          placeholder="Nombre del color"
@@ -3219,7 +3281,7 @@ const Settings: React.FC<SettingsProps> = ({
                        />
                      </div>
                      <div className="flex gap-2">
-                       <button onClick={handleSaveEditColor} disabled={savingColor || !editingColorName.trim()} className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold disabled:opacity-50">
+                       <button onClick={handleSaveEditColor} disabled={savingColor || !editingColorCode.trim()} className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold disabled:opacity-50">
                          {savingColor ? '...' : 'Guardar'}
                        </button>
                        <button onClick={handleCancelEditColor} disabled={savingColor} className="px-3 py-1.5 rounded-lg bg-slate-600 hover:bg-slate-500 text-white text-sm">

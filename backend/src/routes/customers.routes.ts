@@ -29,6 +29,7 @@ import {
   getCustomerMultimediaLedger,
   getMultimediaSaldosSummary
 } from '../controllers/multimediaHistorial.controller';
+import { listManualComprobanteRefs } from '../controllers/manualComprobantes.controller';
 import { authMiddleware } from '../middleware/auth';
 
 const router = Router();
@@ -53,6 +54,7 @@ router.post(
   assignCustomerSellersFromResumen as any
 );
 router.get('/:id/multimedia-ledger', authMiddleware as any, getCustomerMultimediaLedger as any);
+router.get('/:customerId/manual-comprobante-refs', authMiddleware as any, listManualComprobanteRefs as any);
 router.get('/', authMiddleware as any, getCustomers as any);
 router.post('/', authMiddleware as any, createCustomer as any);
 router.post('/import', authMiddleware as any, importCustomers as any);

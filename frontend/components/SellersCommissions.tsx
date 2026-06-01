@@ -44,6 +44,58 @@ const toYmd = (value?: string) => {
   return String(value).slice(0, 10);
 };
 
+const formatYmdLocal = (d: Date) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+type MassExportRangePreset =
+  | 'current_month'
+  | 'last_month'
+  | 'last_3_months'
+  | 'last_6_months'
+  | 'last_12_months'
+  | 'ytd';
+
+const MASS_EXPORT_RANGE_PRESETS: { id: MassExportRangePreset; label: string }[] = [
+  { id: 'current_month', label: 'Mes en curso' },
+  { id: 'last_month', label: 'Mes anterior' },
+  { id: 'last_3_months', label: 'Últimos 3 meses' },
+  { id: 'last_6_months', label: 'Últimos 6 meses' },
+  { id: 'last_12_months', label: 'Últimos 12 meses' },
+  { id: 'ytd', label: 'Año en curso' }
+];
+
+function massExportRangeForPreset(preset: MassExportRangePreset): { from: string; to: string } {
+  const today = new Date();
+  const to = formatYmdLocal(today);
+  const monthStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), 1);
+  const addMonths = (anchor: Date, delta: number) =>
+    new Date(anchor.getFullYear(), anchor.getMonth() + delta, 1);
+
+  switch (preset) {
+    case 'current_month':
+      return { from: formatYmdLocal(monthStart(today)), to };
+    case 'last_month': {
+      const from = addMonths(monthStart(today), -1);
+      const toLast = new Date(today.getFullYear(), today.getMonth(), 0);
+      return { from: formatYmdLocal(from), to: formatYmdLocal(toLast) };
+    }
+    case 'last_3_months':
+      return { from: formatYmdLocal(addMonths(monthStart(today), -2)), to };
+    case 'last_6_months':
+      return { from: formatYmdLocal(addMonths(monthStart(today), -5)), to };
+    case 'last_12_months':
+      return { from: formatYmdLocal(addMonths(monthStart(today), -11)), to };
+    case 'ytd':
+      return { from: `${today.getFullYear()}-01-01`, to };
+    default:
+      return { from: '', to: '' };
+  }
+}
+
 const salesTotalForSeller = (olist: Order[], sellerId: string) =>
   olist.filter((o) => o.sellerId === sellerId).reduce((sum, o) => sum + (Number(o.total) || 0), 0);
 
@@ -76,8 +128,17 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
   const [massExportTo, setMassExportTo] = useState<string>('');
   const [massExportError, setMassExportError] = useState<string>('');
   const [massExportSaldosSource, setMassExportSaldosSource] = useState<'historial' | 'sistema' | 'tango'>('historial');
+  const [massExportSellerIds, setMassExportSellerIds] = useState<string[]>([]);
 
   const sellers = useMemo(() => users.filter((u) => u.role === Role.SELLER), [users]);
+
+  const massExportSellersSelected = useMemo(
+    () => sellers.filter((s) => massExportSellerIds.includes(s.id)),
+    [sellers, massExportSellerIds]
+  );
+
+  const allMassExportSellersSelected =
+    sellers.length > 0 && massExportSellerIds.length === sellers.length;
 
   const loadSaldosCartera = useCallback(() => {
     setSaldosLoading(true);
@@ -160,6 +221,40 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
     return '';
   };
 
+  const openMassExportModal = (mode: 'saldos' | 'commissionDetail') => {
+    const { from, to } = massExportRangeForPreset('current_month');
+    setMassExportMode(mode);
+    setMassExportFrom(from);
+    setMassExportTo(to);
+    setMassExportSellerIds(sellers.map((s) => s.id));
+    setMassExportError('');
+    setMassExportModalOpen(true);
+  };
+
+  const toggleMassExportSeller = (sellerId: string) => {
+    setMassExportSellerIds((prev) =>
+      prev.includes(sellerId) ? prev.filter((id) => id !== sellerId) : [...prev, sellerId]
+    );
+  };
+
+  const applyMassExportPreset = (preset: MassExportRangePreset) => {
+    const { from, to } = massExportRangeForPreset(preset);
+    setMassExportFrom(from);
+    setMassExportTo(to);
+    setMassExportError('');
+  };
+
+  const activeMassExportPreset = useMemo((): MassExportRangePreset | null => {
+    const from = massExportFrom.trim();
+    const to = massExportTo.trim();
+    if (!from || !to) return null;
+    for (const p of MASS_EXPORT_RANGE_PRESETS) {
+      const r = massExportRangeForPreset(p.id);
+      if (r.from === from && r.to === to) return p.id;
+    }
+    return null;
+  }, [massExportFrom, massExportTo]);
+
   const runMassExport = async () => {
     const from = massExportFrom.trim();
     const to = massExportTo.trim();
@@ -168,10 +263,14 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
       setMassExportError(validationError);
       return;
     }
+    if (massExportSellersSelected.length === 0) {
+      setMassExportError('Seleccioná al menos un vendedor.');
+      return;
+    }
     setMassExportError('');
     setMassExporting(true);
     try {
-      for (const seller of sellers) {
+      for (const seller of massExportSellersSelected) {
         await api.exportSaldosPendientesPorCliente({
           sellerId: seller.id,
           sellerName: seller.name,
@@ -315,12 +414,16 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
       setMassExportError(validationError);
       return;
     }
+    if (massExportSellersSelected.length === 0) {
+      setMassExportError('Seleccioná al menos un vendedor.');
+      return;
+    }
     setMassExportError('');
     setMassExporting(true);
     try {
       const rows = await api.getPayments({ desde: from || undefined, hasta: to || undefined });
       await downloadCommissionWorkbook({
-        sellersToExport: sellers,
+        sellersToExport: massExportSellersSelected,
         from,
         to,
         rows: rows || [],
@@ -506,11 +609,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
         </p>
         <button
           type="button"
-          onClick={() => {
-            setMassExportMode('saldos');
-            setMassExportError('');
-            setMassExportModalOpen(true);
-          }}
+          onClick={() => openMassExportModal('saldos')}
           className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-emerald-700/60 text-emerald-300 hover:text-white hover:bg-emerald-700/20 text-sm font-semibold transition disabled:opacity-60"
           title="Descargar un Excel por cada vendedor (solicita fechas)"
           disabled={massExporting}
@@ -520,11 +619,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
         </button>
         <button
           type="button"
-          onClick={() => {
-            setMassExportMode('commissionDetail');
-            setMassExportError('');
-            setMassExportModalOpen(true);
-          }}
+          onClick={() => openMassExportModal('commissionDetail')}
           className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-indigo-700/60 text-indigo-300 hover:text-white hover:bg-indigo-700/20 text-sm font-semibold transition disabled:opacity-60"
           title="Descargar detalle de comisiones por cada vendedor (solicita fechas)"
           disabled={massExporting}
@@ -591,17 +686,92 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
 
       {massExportModalOpen && (
         <div className="fixed inset-0 z-[110] bg-black/65 backdrop-blur-[1px] flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
-            <div className="px-5 py-4 border-b border-slate-700">
+          <div className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl max-h-[min(92vh,720px)] flex flex-col">
+            <div className="px-5 py-4 border-b border-slate-700 shrink-0">
               <h3 className="text-white font-black text-lg">Descarga masiva por vendedor</h3>
               <p className="text-slate-400 text-sm mt-1">
                 {massExportMode === 'saldos'
-                  ? 'Elegí rango de fechas para exportar un Excel por cada vendedor.'
-                  : 'Elegí rango de fechas para exportar un detalle de comisiones por cada vendedor.'}
+                  ? 'Elegí vendedores y rango de fechas. Se descarga un Excel por cada vendedor seleccionado.'
+                  : 'Elegí vendedores y rango de fechas. Se arma un detalle de comisiones por cada uno.'}
               </p>
             </div>
 
-            <div className="px-5 py-4 space-y-4">
+            <div className="px-5 py-4 space-y-4 overflow-y-auto flex-1 min-h-0">
+              <div>
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-400">
+                    Vendedores ({massExportSellersSelected.length}/{sellers.length})
+                  </p>
+                  <div className="flex gap-1.5">
+                    <button
+                      type="button"
+                      disabled={massExporting || allMassExportSellersSelected}
+                      onClick={() => setMassExportSellerIds(sellers.map((s) => s.id))}
+                      className="px-2 py-1 rounded-md text-[11px] font-semibold border border-slate-600 text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+                    >
+                      Todos
+                    </button>
+                    <button
+                      type="button"
+                      disabled={massExporting || massExportSellerIds.length === 0}
+                      onClick={() => setMassExportSellerIds([])}
+                      className="px-2 py-1 rounded-md text-[11px] font-semibold border border-slate-600 text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+                    >
+                      Ninguno
+                    </button>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-700 bg-slate-950/60 max-h-44 overflow-y-auto divide-y divide-slate-800">
+                  {sellers.map((seller) => {
+                    const checked = massExportSellerIds.includes(seller.id);
+                    return (
+                      <label
+                        key={seller.id}
+                        className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-slate-800/50 ${
+                          checked ? 'bg-blue-950/20' : ''
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="accent-blue-500 shrink-0"
+                          checked={checked}
+                          disabled={massExporting}
+                          onChange={() => toggleMassExportSeller(seller.id)}
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm font-semibold text-slate-100 truncate">{seller.name}</span>
+                          <span className="block text-[11px] text-slate-500 truncate">{seller.email}</span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2">Rango rápido</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {MASS_EXPORT_RANGE_PRESETS.map((p) => {
+                    const active = activeMassExportPreset === p.id;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => applyMassExportPreset(p.id)}
+                        disabled={massExporting}
+                        className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition touch-manipulation ${
+                          active
+                            ? 'bg-blue-600/30 border-blue-500/70 text-blue-100'
+                            : 'bg-slate-800/80 border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white'
+                        } disabled:opacity-50`}
+                      >
+                        {p.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wide text-slate-400 mb-1">Desde</label>
                 <input
@@ -624,7 +794,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
 
               {massExportMode === 'saldos' && (
                 <p className="text-[11px] text-slate-500 leading-snug">
-                  El detalle del Excel solo incluye movimientos del rango; el saldo por cliente sigue la misma lógica que el historial unificado (con arrastre de lo anterior al inicio del rango).
+                  El detalle respeta el rango «desde» / «hasta». La columna Saldo termina en el saldo pendiente a cobrar (deuda actual, no solo del mes).
                 </p>
               )}
 
@@ -667,7 +837,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
               {massExportError ? <p className="text-rose-300 text-sm">{massExportError}</p> : null}
             </div>
 
-            <div className="px-5 py-4 border-t border-slate-700 flex items-center justify-end gap-2">
+            <div className="px-5 py-4 border-t border-slate-700 flex items-center justify-end gap-2 shrink-0">
               <button
                 type="button"
                 onClick={() => {
@@ -684,10 +854,12 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
                 type="button"
                 onClick={massExportMode === 'saldos' ? runMassExport : runMassCommissionDetailExport}
                 className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-700/60 text-emerald-300 hover:text-white hover:bg-emerald-700/20 text-sm font-semibold transition disabled:opacity-60"
-                disabled={massExporting}
+                disabled={massExporting || massExportSellersSelected.length === 0}
               >
                 {massExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-                {massExporting ? 'Exportando…' : 'Descargar'}
+                {massExporting
+                  ? 'Exportando…'
+                  : `Descargar (${massExportSellersSelected.length})`}
               </button>
             </div>
           </div>
@@ -796,7 +968,7 @@ function SellerDetailView({
             />
           </div>
           <span className="text-[10px] text-slate-500 max-w-md leading-snug">
-            En el Excel solo se listan movimientos del rango; el saldo coincide con el historial unificado (se suma lo anterior al inicio del rango aunque no aparezca en el detalle).
+            El detalle solo incluye movimientos entre «desde» y «hasta». La columna Saldo cierra en el saldo pendiente (fila verde).
           </span>
         </div>
         <button

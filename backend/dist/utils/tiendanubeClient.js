@@ -9,8 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.tnPutWithRetry = tnPutWithRetry;
-exports.tnPostWithRetry = tnPostWithRetry;
+exports.tnDeleteWithRetry = exports.tnGetWithRetry = exports.tnPostWithRetry = exports.tnPutWithRetry = void 0;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 /**
  * Rate limiter global (en memoria) para requests a Tienda Nube.
@@ -50,8 +49,8 @@ function scheduleTn(fn, minIntervalMs) {
     });
 }
 function tnPutWithRetry(axiosInstance, url, body, config, opts) {
+    var _a, _b, _c;
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c;
         const maxRetries = Math.max(0, (_a = opts === null || opts === void 0 ? void 0 : opts.maxRetries) !== null && _a !== void 0 ? _a : 4);
         const envInterval = parseInt(process.env.TN_RATE_LIMIT_DELAY_MS || '800', 10);
         const resolvedInterval = (_b = opts === null || opts === void 0 ? void 0 : opts.minIntervalMs) !== null && _b !== void 0 ? _b : (Number.isFinite(envInterval) ? envInterval : 800);
@@ -76,9 +75,10 @@ function tnPutWithRetry(axiosInstance, url, body, config, opts) {
         }
     });
 }
+exports.tnPutWithRetry = tnPutWithRetry;
 function tnPostWithRetry(axiosInstance, url, body, config, opts) {
+    var _a, _b, _c;
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c;
         const maxRetries = Math.max(0, (_a = opts === null || opts === void 0 ? void 0 : opts.maxRetries) !== null && _a !== void 0 ? _a : 4);
         const envInterval = parseInt(process.env.TN_RATE_LIMIT_DELAY_MS || '800', 10);
         const resolvedInterval = (_b = opts === null || opts === void 0 ? void 0 : opts.minIntervalMs) !== null && _b !== void 0 ? _b : (Number.isFinite(envInterval) ? envInterval : 800);
@@ -103,3 +103,60 @@ function tnPostWithRetry(axiosInstance, url, body, config, opts) {
         throw new Error('tnPostWithRetry: retries exhausted');
     });
 }
+exports.tnPostWithRetry = tnPostWithRetry;
+function tnGetWithRetry(axiosInstance, url, config, opts) {
+    var _a, _b, _c;
+    return __awaiter(this, void 0, void 0, function* () {
+        const maxRetries = Math.max(0, (_a = opts === null || opts === void 0 ? void 0 : opts.maxRetries) !== null && _a !== void 0 ? _a : 4);
+        const envInterval = parseInt(process.env.TN_RATE_LIMIT_DELAY_MS || '800', 10);
+        const resolvedInterval = (_b = opts === null || opts === void 0 ? void 0 : opts.minIntervalMs) !== null && _b !== void 0 ? _b : (Number.isFinite(envInterval) ? envInterval : 800);
+        const minIntervalMs = Math.max(0, resolvedInterval);
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                return yield scheduleTn(() => axiosInstance.get(url, config), minIntervalMs);
+            }
+            catch (e) {
+                const status = (_c = e === null || e === void 0 ? void 0 : e.response) === null || _c === void 0 ? void 0 : _c.status;
+                const is429 = status === 429;
+                const isNetwork = (e === null || e === void 0 ? void 0 : e.code) === 'ECONNRESET' || (e === null || e === void 0 ? void 0 : e.code) === 'ETIMEDOUT' || (e === null || e === void 0 ? void 0 : e.code) === 'ECONNREFUSED';
+                if ((is429 || isNetwork) && attempt < maxRetries) {
+                    const retryAfterMs = is429 ? getRetryAfterMs(e) : null;
+                    const backoffMs = 1500 + attempt * 1500;
+                    yield sleep(Math.max(retryAfterMs !== null && retryAfterMs !== void 0 ? retryAfterMs : 0, backoffMs));
+                    continue;
+                }
+                throw e;
+            }
+        }
+        throw new Error('tnGetWithRetry: retries exhausted');
+    });
+}
+exports.tnGetWithRetry = tnGetWithRetry;
+function tnDeleteWithRetry(axiosInstance, url, config, opts) {
+    var _a, _b, _c;
+    return __awaiter(this, void 0, void 0, function* () {
+        const maxRetries = Math.max(0, (_a = opts === null || opts === void 0 ? void 0 : opts.maxRetries) !== null && _a !== void 0 ? _a : 4);
+        const envInterval = parseInt(process.env.TN_RATE_LIMIT_DELAY_MS || '800', 10);
+        const resolvedInterval = (_b = opts === null || opts === void 0 ? void 0 : opts.minIntervalMs) !== null && _b !== void 0 ? _b : (Number.isFinite(envInterval) ? envInterval : 800);
+        const minIntervalMs = Math.max(0, resolvedInterval);
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                yield scheduleTn(() => axiosInstance.delete(url, config), minIntervalMs);
+                return;
+            }
+            catch (e) {
+                const status = (_c = e === null || e === void 0 ? void 0 : e.response) === null || _c === void 0 ? void 0 : _c.status;
+                const is429 = status === 429;
+                const isNetwork = (e === null || e === void 0 ? void 0 : e.code) === 'ECONNRESET' || (e === null || e === void 0 ? void 0 : e.code) === 'ETIMEDOUT' || (e === null || e === void 0 ? void 0 : e.code) === 'ECONNREFUSED';
+                if ((is429 || isNetwork) && attempt < maxRetries) {
+                    const retryAfterMs = is429 ? getRetryAfterMs(e) : null;
+                    const backoffMs = 1500 + attempt * 1500;
+                    yield sleep(Math.max(retryAfterMs !== null && retryAfterMs !== void 0 ? retryAfterMs : 0, backoffMs));
+                    continue;
+                }
+                throw e;
+            }
+        }
+    });
+}
+exports.tnDeleteWithRetry = tnDeleteWithRetry;
