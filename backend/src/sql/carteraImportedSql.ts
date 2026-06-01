@@ -37,21 +37,6 @@ export const SQL_MM_IS_FAC_IMPORTADA = `(
   OR UPPER(COALESCE(e.detalle, '')) LIKE '%COMPROBANTE%'
 )`;
 
-/** FAC/ND importada de Tango cuando el mismo pedido ya tiene factura AFIP en LupoHub. */
-export const SQL_MM_FAC_IMPORTADA_CON_FACTURA_AFIP = `(
-  EXISTS (
-    SELECT 1
-    FROM invoices i
-    INNER JOIN orders o ON o.id = i.order_id
-    WHERE o.customer_id = e.customer_id
-      AND (
-        UPPER(COALESCE(e.detalle, '')) LIKE CONCAT('%', o.id, '%')
-        OR UPPER(COALESCE(e.detalle, '')) LIKE CONCAT('%', REPLACE(o.id, 'O-', '0-'), '%')
-        OR UPPER(COALESCE(e.detalle, '')) LIKE CONCAT('%', REPLACE(o.id, '0-', 'O-'), '%')
-      )
-  )
-)`;
-
 export const SQL_MM_IS_RECIBO_IMPORTADO = `(
   UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'REC%'
   OR UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('PAGO', 'COBRO', 'INGRESO', 'R/C')
@@ -86,7 +71,6 @@ export const CARTERA_IMPORTED_MOVEMENTS_AGG_SUBQUERY = `
     SUM(
       CASE
         WHEN (${SQL_MM_IS_FAC_IMPORTADA} OR ${SQL_MM_IS_ND_IMPORTADO})
-          AND NOT (${SQL_MM_FAC_IMPORTADA_CON_FACTURA_AFIP})
         THEN ROUND(ABS(COALESCE(e.importe, 0)), 2)
         ELSE 0
       END

@@ -4273,30 +4273,9 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
     existingKeys.add(toKey(tipo, m.fecha, m.comprobante, Number(m.debe || 0), Number(m.haber || 0)));
   }
 
-  const invoicedOrderTokens = new Set<string>();
-  const orderRowsWithInvoice = (await query(
-    `SELECT o.id FROM orders o INNER JOIN invoices i ON i.order_id = o.id WHERE o.customer_id = ?`,
-    [customerId]
-  )) as Array<{ id: string }>;
-  for (const row of orderRowsWithInvoice) {
-    const id = String(row.id || '').trim();
-    if (!id) continue;
-    invoicedOrderTokens.add(id.toUpperCase());
-    if (id.startsWith('O-')) invoicedOrderTokens.add(id.replace(/^O-/, '0-').toUpperCase());
-    if (id.startsWith('0-')) invoicedOrderTokens.add(id.replace(/^0-/, 'O-').toUpperCase());
-  }
-  const detalleRefsInvoicedOrder = (detalle: string): boolean => {
-    const d = String(detalle || '').toUpperCase();
-    for (const tok of invoicedOrderTokens) {
-      if (tok && d.includes(tok)) return true;
-    }
-    return false;
-  };
-
   for (const e of importedEntries) {
     const tipo = classifyImportedEntry(String(e.tipo_raw || ''), String(e.detalle || ''));
     if (!tipo) continue;
-    if (tipo === 'FACTURA' && detalleRefsInvoicedOrder(String(e.detalle || ''))) continue;
     const importe = Math.round(Math.abs(parseMoney(e.importe)) * 100) / 100;
     if (importe <= 0) continue;
     const debe = tipo === 'FACTURA' ? importe : 0;
