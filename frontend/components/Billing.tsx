@@ -8,7 +8,7 @@ import {
   type ManualFacturaFields,
 } from '../utils/wholesaleInvoiceHtml';
 import { Customer, Order, Payment, Product, Role, User } from '../types';
-import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2, Percent, RefreshCcw, FileMinus, ExternalLink, Printer, MoreHorizontal, ChevronDown, Download, Upload, Wallet, FilePlus, FileText } from 'lucide-react';
+import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2, Percent, RefreshCcw, FileMinus, ExternalLink, Printer, MoreHorizontal, ChevronDown, Download, Upload, Wallet, FilePlus, FileText, Pencil } from 'lucide-react';
 import { useNotification } from '../context/NotificationContext';
 import { formatMoneyAr } from '../utils/moneyFormat';
 import { getStoredOrdersListFilters, setStoredOrdersListFilters } from '../utils/ordersListFilters';
@@ -124,7 +124,9 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [manualPuntoVta, setManualPuntoVta] = useState('21');
   const [manualNumero, setManualNumero] = useState('');
   const [manualCae, setManualCae] = useState('');
-  const [manualImporteNeto, setManualImporteNeto] = useState('');
+  const [manualImporteBruto, setManualImporteBruto] = useState('');
+  const [manualEditingId, setManualEditingId] = useState<string | null>(null);
+  const [manualHasPdf, setManualHasPdf] = useState(false);
   const [manualAgip, setManualAgip] = useState('');
   const [manualNotes, setManualNotes] = useState('');
   const [manualRefKey, setManualRefKey] = useState('');
@@ -697,9 +699,9 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     if (item?.manual) {
       if (item.hasPdf) {
         await openManualPdf(item);
-        return;
+      } else {
+        showToast('info', 'Comprobante manual sin PDF. Usá Editar para modificar datos.');
       }
-      showToast('info', 'Comprobante manual sin pedido ni PDF adjunto.');
       return;
     }
     if (!item?.orderId) {
@@ -937,7 +939,9 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     return letra === 'A' ? 3 : 8;
   };
 
-  const openManualComprobanteModal = () => {
+  const resetManualComprobanteForm = () => {
+    setManualEditingId(null);
+    setManualHasPdf(false);
     setManualTipo('FACTURA');
     setManualCustomerId(customerId !== 'ALL' ? customerId : 'ALL');
     setManualFecha(new Date().toISOString().slice(0, 10));
@@ -945,7 +949,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     setManualPuntoVta('21');
     setManualNumero('');
     setManualCae('');
-    setManualImporteNeto('');
+    setManualImporteBruto('');
     setManualAgip('');
     setManualNotes('');
     setManualRefKey('');
@@ -953,7 +957,43 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     setManualSinDetalle(false);
     setManualPdfFile(null);
     if (manualPdfInputRef.current) manualPdfInputRef.current.value = '';
+  };
+
+  const openManualComprobanteModal = () => {
+    resetManualComprobanteForm();
     setShowManualComprobanteModal(true);
+  };
+
+  const openManualComprobanteEdit = async (item: any) => {
+    if (!item?.id) return;
+    try {
+      const row = await api.getManualComprobante(item.id);
+      setManualEditingId(row.id);
+      setManualHasPdf(!!row.hasPdf);
+      setManualTipo(row.tipo);
+      setManualCustomerId(row.customerId);
+      setManualFecha(String(row.fecha || '').slice(0, 10));
+      setManualLetra(row.letra || 'B');
+      setManualPuntoVta(String(row.puntoVenta ?? ''));
+      setManualNumero(row.sinDetalle ? '' : String(row.cbteDesde ?? ''));
+      setManualCae(row.cae || '');
+      setManualImporteBruto(String(row.importeBruto ?? ''));
+      setManualAgip(String(row.agipRetPer ?? ''));
+      setManualNotes(row.notes || '');
+      setManualSinDetalle(!!row.sinDetalle);
+      setManualPdfFile(null);
+      if (manualPdfInputRef.current) manualPdfInputRef.current.value = '';
+      setManualRefKey(
+        row.refInvoiceId
+          ? `inv:${row.refInvoiceId}`
+          : row.refManualComprobanteId
+            ? `man:${row.refManualComprobanteId}`
+            : ''
+      );
+      setShowManualComprobanteModal(true);
+    } catch (err: any) {
+      showToast('error', err?.message || 'No se pudo cargar el comprobante');
+    }
   };
 
   useEffect(() => {
@@ -1370,6 +1410,16 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                 <div className="flex items-center justify-between gap-2 pt-1">
                   <span className="text-base font-black text-white tabular-nums">${formatMoneyAr(item.importe ?? 0)}</span>
                   <div className="flex gap-2">
+                    {item.manual && (
+                      <button
+                        type="button"
+                        onClick={() => openManualComprobanteEdit(item)}
+                        className="px-3 py-2 rounded-xl bg-violet-900/50 text-violet-200 text-xs font-bold border border-violet-700/60 touch-manipulation inline-flex items-center gap-1"
+                      >
+                        <Pencil size={14} />
+                        Editar
+                      </button>
+                    )}
                     {item.manual && item.hasPdf && (
                       <button
                         type="button"
@@ -1385,7 +1435,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                       onClick={() => handleVer(item)}
                       className="px-3 py-2 rounded-xl bg-slate-800 text-slate-200 text-xs font-bold border border-slate-700 touch-manipulation"
                     >
-                      {item.manual && item.hasPdf ? 'Ver' : 'Ver'}
+                      Ver
                     </button>
                   </div>
                 </div>
@@ -1464,6 +1514,16 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                     </td>
                     <td className="px-2 py-1.5 align-middle text-right sticky right-0 z-10 bg-slate-900 group-hover:bg-slate-800/60 shadow-[-8px_0_12px_rgba(0,0,0,0.35)]">
                       <div className="inline-flex flex-nowrap items-center justify-end gap-0.5">
+                        {item.manual && (
+                          <button
+                            type="button"
+                            onClick={() => openManualComprobanteEdit(item)}
+                            className="inline-flex items-center justify-center p-1.5 rounded-lg bg-violet-900/40 text-violet-200 hover:bg-violet-800/60 border border-violet-700/60"
+                            title="Editar comprobante manual"
+                          >
+                            <Pencil size={15} />
+                          </button>
+                        )}
                         {item.manual && item.hasPdf && (
                           <button
                             type="button"
@@ -2119,10 +2179,15 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="w-full max-w-lg bg-slate-900 border border-slate-700 rounded-3xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
             <div className="p-5 border-b border-slate-800 flex items-center justify-between shrink-0">
-              <h3 className="text-white font-black text-lg">Comprobante manual</h3>
+              <h3 className="text-white font-black text-lg">
+                {manualEditingId ? 'Editar comprobante manual' : 'Comprobante manual'}
+              </h3>
               <button
                 type="button"
-                onClick={() => setShowManualComprobanteModal(false)}
+                onClick={() => {
+                  setShowManualComprobanteModal(false);
+                  resetManualComprobanteForm();
+                }}
                 className="text-slate-400 hover:text-white"
               >
                 ✕
@@ -2131,8 +2196,8 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             <div className="p-5 space-y-4 overflow-y-auto flex-1">
               <p className="text-xs text-slate-400 leading-relaxed">
                 Para facturas o NC emitidas fuera de LupoHub. El importe es{' '}
-                <span className="text-slate-200">neto gravado</span> (IVA 21% en saldo). Podés cargar solo importe y
-                PDF, sin número AFIP.
+                <span className="text-slate-200">bruto (con IVA incluido)</span>, el mismo que figura en el comprobante.
+                En facturas, la percepción IIBB se suma aparte al saldo.
               </p>
               <label className="flex items-start gap-3 p-3 rounded-xl bg-slate-950/80 border border-slate-800 cursor-pointer">
                 <input
@@ -2156,6 +2221,9 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                     onChange={(e) => setManualPdfFile(e.target.files?.[0] ?? null)}
                     className="w-full text-sm text-slate-300 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-violet-800 file:text-white file:font-bold"
                   />
+                  {manualHasPdf && !manualPdfFile && (
+                    <p className="text-xs text-emerald-400/90 mt-1">Ya hay un PDF cargado. Elegí otro archivo para reemplazarlo.</p>
+                  )}
                   {manualPdfFile && (
                     <p className="text-xs text-slate-500 mt-1 truncate" title={manualPdfFile.name}>
                       {manualPdfFile.name} ({Math.round(manualPdfFile.size / 1024)} KB)
@@ -2237,10 +2305,10 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                   </>
                 )}
                 <div className="col-span-2">
-                  <label className="block text-xs font-black text-slate-500 uppercase mb-1">Importe neto</label>
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-1">Importe bruto</label>
                   <input
-                    value={manualImporteNeto}
-                    onChange={(e) => setManualImporteNeto(e.target.value)}
+                    value={manualImporteBruto}
+                    onChange={(e) => setManualImporteBruto(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none"
                     placeholder="0"
                   />
@@ -2307,7 +2375,10 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             <div className="p-5 border-t border-slate-800 flex gap-2 shrink-0">
               <button
                 type="button"
-                onClick={() => setShowManualComprobanteModal(false)}
+                onClick={() => {
+                  setShowManualComprobanteModal(false);
+                  resetManualComprobanteForm();
+                }}
                 className="flex-1 bg-slate-700 hover:bg-slate-600 text-white px-4 py-3 rounded-2xl font-bold"
               >
                 Cancelar
@@ -2317,7 +2388,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                 disabled={manualSubmitting}
                 onClick={async () => {
                   if (manualSubmitting) return;
-                  const neto = parseMoneyInput(manualImporteNeto);
+                  const bruto = parseMoneyInput(manualImporteBruto);
                   if (!manualCustomerId || manualCustomerId === 'ALL') {
                     showToast('error', 'Seleccioná un cliente');
                     return;
@@ -2336,8 +2407,8 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                       return;
                     }
                   }
-                  if (!Number.isFinite(neto) || neto <= 0) {
-                    showToast('error', 'Importe neto inválido');
+                  if (!Number.isFinite(bruto) || bruto <= 0) {
+                    showToast('error', 'Importe bruto inválido');
                     return;
                   }
                   let refInvoiceId: string | undefined;
@@ -2349,7 +2420,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                   }
                   try {
                     setManualSubmitting(true);
-                    const created = await api.createManualComprobante({
+                    const payload = {
                       customerId: manualCustomerId,
                       tipo: manualTipo,
                       fecha: manualFecha,
@@ -2364,18 +2435,22 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                             cbteHasta: num,
                             cae: manualCae.trim() || undefined
                           }),
-                      importeNeto: neto,
+                      importeBruto: bruto,
                       agipRetPer: manualTipo === 'FACTURA' ? parseMoneyInput(manualAgip || '0') : 0,
                       notes: manualNotes.trim() || undefined,
                       refInvoiceId,
                       refManualComprobanteId,
                       pdf: manualPdfFile
-                    });
+                    };
+                    const saved = manualEditingId
+                      ? await api.updateManualComprobante(manualEditingId, payload)
+                      : await api.createManualComprobante(payload);
                     showToast(
                       'success',
-                      `${manualTipo === 'FACTURA' ? 'Factura' : 'NC'} ${created.comprobante} cargada ($${formatMoneyAr(created.importeConIva)} c/ IVA).`
+                      `${manualTipo === 'FACTURA' ? 'Factura' : 'NC'} ${saved.comprobante} ${manualEditingId ? 'actualizada' : 'cargada'} ($${formatMoneyAr(saved.importeTotal ?? saved.importeConIva ?? 0)}).`
                     );
                     setShowManualComprobanteModal(false);
+                    resetManualComprobanteForm();
                     load();
                   } catch (err: any) {
                     showToast('error', err?.response?.data?.message || err?.message || 'Error guardando');
@@ -2386,7 +2461,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                 className="flex-1 bg-violet-700 hover:bg-violet-600 text-white px-4 py-3 rounded-2xl font-black disabled:opacity-60 inline-flex items-center justify-center gap-2"
               >
                 {manualSubmitting && <Loader2 size={18} className="animate-spin" />}
-                {manualSubmitting ? 'Guardando…' : 'Guardar'}
+                {manualSubmitting ? 'Guardando…' : manualEditingId ? 'Guardar cambios' : 'Guardar'}
               </button>
             </div>
           </div>

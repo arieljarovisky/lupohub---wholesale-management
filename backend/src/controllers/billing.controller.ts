@@ -471,8 +471,8 @@ export const listBilling = async (req: Request, res: Response) => {
           m.ref_order_id AS order_id,
           m.fecha,
           CASE
-            WHEN m.tipo = 'FACTURA' THEN ROUND(m.importe_neto * 1.21 + COALESCE(m.agip_ret_per, 0), 2)
-            ELSE ROUND(m.importe_neto * 1.21, 2)
+            WHEN m.tipo = 'FACTURA' THEN ROUND(m.importe_neto + COALESCE(m.agip_ret_per, 0), 2)
+            ELSE ROUND(m.importe_neto, 2)
           END AS importe,
           m.customer_id,
           c.business_name AS customer_business_name,

@@ -1455,13 +1455,13 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
       GROUP BY o.customer_id
     ) ob ON ob.customer_id = c.id
     LEFT JOIN (
-      SELECT customer_id, SUM(ROUND(importe_neto * 1.21 + COALESCE(agip_ret_per, 0), 2)) AS manual_fac
+      SELECT customer_id, SUM(ROUND(importe_neto + COALESCE(agip_ret_per, 0), 2)) AS manual_fac
       FROM customer_manual_comprobantes
       WHERE tipo = 'FACTURA'
       GROUP BY customer_id
     ) mfac ON mfac.customer_id = c.id
     LEFT JOIN (
-      SELECT customer_id, SUM(ROUND(importe_neto * 1.21, 2)) AS manual_nc
+      SELECT customer_id, SUM(ROUND(importe_neto, 2)) AS manual_nc
       FROM customer_manual_comprobantes
       WHERE tipo = 'NC'
       GROUP BY customer_id
@@ -1514,13 +1514,13 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
       GROUP BY o.customer_id
     ) ob ON ob.customer_id = c.id
     LEFT JOIN (
-      SELECT customer_id, SUM(ROUND(importe_neto * 1.21 + COALESCE(agip_ret_per, 0), 2)) AS manual_fac
+      SELECT customer_id, SUM(ROUND(importe_neto + COALESCE(agip_ret_per, 0), 2)) AS manual_fac
       FROM customer_manual_comprobantes
       WHERE tipo = 'FACTURA'
       GROUP BY customer_id
     ) mfac ON mfac.customer_id = c.id
     LEFT JOIN (
-      SELECT customer_id, SUM(ROUND(importe_neto * 1.21, 2)) AS manual_nc
+      SELECT customer_id, SUM(ROUND(importe_neto, 2)) AS manual_nc
       FROM customer_manual_comprobantes
       WHERE tipo = 'NC'
       GROUP BY customer_id
@@ -4082,8 +4082,8 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
           LPAD(COALESCE(m.cbte_desde, 0), 8, '0')
         ) AS comprobante,
         m.ref_order_id AS order_id,
-        CASE WHEN m.tipo = 'FACTURA' THEN ROUND(m.importe_neto * 1.21 + COALESCE(m.agip_ret_per, 0), 2) ELSE 0 END AS debe,
-        CASE WHEN m.tipo = 'NC' THEN ROUND(m.importe_neto * 1.21, 2) ELSE 0 END AS haber,
+        CASE WHEN m.tipo = 'FACTURA' THEN ROUND(m.importe_neto + COALESCE(m.agip_ret_per, 0), 2) ELSE 0 END AS debe,
+        CASE WHEN m.tipo = 'NC' THEN ROUND(m.importe_neto, 2) ELSE 0 END AS haber,
         CONCAT('Comprobante manual', COALESCE(CONCAT(' · ', m.notes), '')) AS detalle
       FROM customer_manual_comprobantes m
       WHERE m.customer_id = ?
@@ -4586,8 +4586,8 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
     ) as any;
     const manualAgg = await get(
       `SELECT
-         ROUND(COALESCE(SUM(CASE WHEN tipo = 'FACTURA' THEN importe_neto * 1.21 + COALESCE(agip_ret_per, 0) ELSE 0 END), 0), 2) AS manual_fac,
-         ROUND(COALESCE(SUM(CASE WHEN tipo = 'NC' THEN importe_neto * 1.21 ELSE 0 END), 0), 2) AS manual_nc
+         ROUND(COALESCE(SUM(CASE WHEN tipo = 'FACTURA' THEN importe_neto + COALESCE(agip_ret_per, 0) ELSE 0 END), 0), 2) AS manual_fac,
+         ROUND(COALESCE(SUM(CASE WHEN tipo = 'NC' THEN importe_neto ELSE 0 END), 0), 2) AS manual_nc
        FROM customer_manual_comprobantes
        WHERE customer_id = ?`,
       [customerId]

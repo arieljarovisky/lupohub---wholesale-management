@@ -48,8 +48,13 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-function importeConIva(neto: number, agip: number): number {
-  return round2(Math.max(0, neto) * 1.21 + Math.max(0, agip));
+/** Columna importe_neto: guarda importe BRUTO del comprobante (IVA incluido). */
+export const SQL_MANUAL_FAC_TOTAL = `ROUND(importe_neto + COALESCE(agip_ret_per, 0), 2)`;
+export const SQL_MANUAL_NC_TOTAL = `ROUND(importe_neto, 2)`;
+
+function importeTotalBruto(tipo: 'FACTURA' | 'NC', bruto: number, agip: number): number {
+  if (tipo === 'NC') return round2(Math.max(0, bruto));
+  return round2(Math.max(0, bruto) + Math.max(0, agip));
 }
 
 function parseBool(v: unknown): boolean {
@@ -88,7 +93,7 @@ type CreateManualInput = {
   cbteTipo: number;
   cbteDesde: number;
   cbteHasta: number;
-  importeNeto: number;
+  importeBruto: number;
   agipRetPer: number;
   cae: string | null;
   caeFchVto: string | null;
@@ -112,7 +117,7 @@ async function resolveRefsAndInsert(
     cbteTipo,
     cbteDesde,
     cbteHasta,
-    importeNeto,
+    importeBruto,
     agipRetPer,
     cae,
     caeFchVto,
@@ -179,7 +184,7 @@ async function resolveRefsAndInsert(
       cbteHasta,
       cae,
       caeFchVto,
-      importeNeto,
+      importeBruto,
       agipRetPer,
       notes,
       sinDetalle ? 1 : 0,
@@ -217,7 +222,7 @@ function parseCreateBody(raw: Record<string, unknown>) {
       ? Number(raw.cbteHasta)
       : cbteDesde;
 
-  const importeNeto = round2(Number(raw.importeNeto));
+  const importeBruto = round2(Number(raw.importeBruto ?? raw.importeNeto));
   const agipRetPer = tipo === 'FACTURA' ? round2(Number(raw.agipRetPer || 0)) : 0;
   const cae = raw.cae != null && String(raw.cae).trim() ? String(raw.cae).trim() : null;
   const caeFchVto =
@@ -238,7 +243,7 @@ function parseCreateBody(raw: Record<string, unknown>) {
     cbteTipo,
     cbteDesde,
     cbteHasta,
-    importeNeto,
+    importeBruto,
     agipRetPer,
     cae,
     caeFchVto,
@@ -257,13 +262,13 @@ function validateCreateFields(parsed: ReturnType<typeof parseCreateBody>) {
     puntoVenta,
     cbteTipo,
     cbteDesde,
-    importeNeto
+    importeBruto
   } = parsed;
 
   if (!customerId) return 'Falta cliente';
   if (tipo !== 'FACTURA' && tipo !== 'NC') return 'Tipo inválido (FACTURA o NC)';
   if (!fecha || !/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return 'Fecha inválida (YYYY-MM-DD)';
-  if (importeNeto <= 0) return 'Importe neto debe ser mayor a 0';
+  if (importeBruto <= 0) return 'Importe bruto debe ser mayor a 0';
 
   if (!sinDetalle) {
     if (!Number.isFinite(puntoVenta) || puntoVenta < 0) return 'Punto de venta inválido';
@@ -345,8 +350,8 @@ export const listManualComprobanteRefs = async (req: Request, res: Response) => 
          m.cbte_desde AS cbteDesde,
          m.sin_detalle AS sinDetalle,
          m.fecha AS fecha,
-         m.importe_neto AS importeNeto,
-         ROUND(m.importe_neto * 1.21 + COALESCE(m.agip_ret_per, 0), 2) AS importeConIva
+         m.importe_neto AS importeBruto,
+         ROUND(m.importe_neto + COALESCE(m.agip_ret_per, 0), 2) AS importeTotal
        FROM customer_manual_comprobantes m
        WHERE m.customer_id = ? AND m.tipo = 'FACTURA'
        ORDER BY m.fecha DESC
@@ -365,10 +370,10 @@ export const listManualComprobanteRefs = async (req: Request, res: Response) => 
         invoiceId: r.invoiceId ?? undefined,
         manualComprobanteId: r.manualComprobanteId ?? undefined,
         orderId: r.orderId ?? undefined,
-        label: `${labelNum} — $${Number(r.importeConIva || 0).toLocaleString('es-AR')}${r.orderId ? ` (pedido ${r.orderId})` : ' (manual)'}`,
+        label: `${labelNum} — $${Number(r.importeTotal || 0).toLocaleString('es-AR')}${r.orderId ? ` (pedido ${r.orderId})` : ' (manual)'}`,
         fecha: r.fecha,
-        importeNeto: Number(r.importeNeto) || 0,
-        importeConIva: Number(r.importeConIva) || 0
+        importeBruto: Number(r.importeBruto) || 0,
+        importeTotal: Number(r.importeTotal) || 0
       };
     });
 
@@ -406,7 +411,7 @@ async function createManualComprobanteCore(
     }
   }
 
-  const { tipo, importeNeto, agipRetPer, sinDetalle } = parsed;
+  const { tipo, importeBruto, agipRetPer, sinDetalle } = parsed;
   const cbteHasta = Number.isFinite(parsed.cbteHasta) ? parsed.cbteHasta : parsed.cbteDesde;
 
   try {
@@ -418,7 +423,7 @@ async function createManualComprobanteCore(
       cbteTipo: parsed.cbteTipo,
       cbteDesde: parsed.cbteDesde,
       cbteHasta,
-      importeNeto,
+      importeBruto,
       agipRetPer,
       cae: parsed.cae,
       caeFchVto: parsed.caeFchVto,
@@ -430,7 +435,7 @@ async function createManualComprobanteCore(
       pdfFileName
     });
 
-    const iva = importeConIva(importeNeto, agipRetPer);
+    const total = importeTotalBruto(tipo as 'FACTURA' | 'NC', importeBruto, agipRetPer);
     return res.status(201).json({
       id,
       customerId: parsed.customerId,
@@ -441,9 +446,10 @@ async function createManualComprobanteCore(
       cbteDesde: parsed.cbteDesde,
       cbteHasta,
       cae: parsed.cae ?? undefined,
-      importeNeto,
+      importeBruto,
       agipRetPer,
-      importeConIva: tipo === 'NC' ? round2(importeNeto * 1.21) : iva,
+      importeTotal: total,
+      importeConIva: total,
       notes: parsed.notes ?? undefined,
       refInvoiceId: parsed.refInvoiceId ?? undefined,
       refManualComprobanteId: parsed.refManualComprobanteId ?? undefined,
@@ -538,17 +544,247 @@ export const getManualComprobantePdf = async (req: Request, res: Response) => {
   }
 };
 
-/** Subconsultas reutilizables para saldos y listados. */
+/** Subconsultas reutilizables para saldos y listados (importe bruto en importe_neto). */
 export const SQL_MANUAL_FAC_IVA_SUM = `(
-  SELECT customer_id, SUM(ROUND(importe_neto * 1.21 + COALESCE(agip_ret_per, 0), 2)) AS total
+  SELECT customer_id, SUM(${SQL_MANUAL_FAC_TOTAL}) AS total
   FROM customer_manual_comprobantes
   WHERE tipo = 'FACTURA'
   GROUP BY customer_id
 )`;
 
 export const SQL_MANUAL_NC_IVA_SUM = `(
-  SELECT customer_id, SUM(ROUND(importe_neto * 1.21, 2)) AS total
+  SELECT customer_id, SUM(${SQL_MANUAL_NC_TOTAL}) AS total
   FROM customer_manual_comprobantes
   WHERE tipo = 'NC'
   GROUP BY customer_id
 )`;
+
+function rowToManualResponse(row: any) {
+  const tipo = String(row.tipo || '') as 'FACTURA' | 'NC';
+  const bruto = Number(row.importe_neto) || 0;
+  const agip = Number(row.agip_ret_per) || 0;
+  const sinDetalle = !!Number(row.sin_detalle);
+  const cbteTipo = Number(row.cbte_tipo) || 0;
+  const pv = Number(row.punto_venta) || 0;
+  const cbteDesde = Number(row.cbte_desde) || 0;
+  const letra =
+    tipo === 'FACTURA' ? (cbteTipo === 1 ? 'A' : 'B') : cbteTipo === 3 ? 'A' : 'B';
+  return {
+    id: row.id,
+    customerId: row.customer_id,
+    tipo,
+    fecha: row.fecha,
+    puntoVenta: pv,
+    cbteTipo,
+    cbteDesde,
+    cbteHasta: Number(row.cbte_hasta) || cbteDesde,
+    cae: row.cae ?? undefined,
+    caeFchVto: row.cae_fch_vto ?? undefined,
+    importeBruto: bruto,
+    agipRetPer: agip,
+    importeTotal: importeTotalBruto(tipo, bruto, agip),
+    notes: row.notes ?? undefined,
+    refInvoiceId: row.ref_invoice_id ?? undefined,
+    refManualComprobanteId: row.ref_manual_comprobante_id ?? undefined,
+    refOrderId: row.ref_order_id ?? undefined,
+    sinDetalle,
+    hasPdf: !!(row.pdf_path && String(row.pdf_path).trim()),
+    pdfFileName: row.pdf_file_name ?? undefined,
+    letra,
+    comprobante: formatComprobanteLabel(cbteTipo, pv, cbteDesde, sinDetalle)
+  };
+}
+
+async function resolveNcRefs(
+  customerId: string,
+  tipo: string,
+  refInvoiceId: string | null,
+  refManualComprobanteId: string | null,
+  excludeManualId?: string
+): Promise<string | null> {
+  if (tipo !== 'NC') return null;
+  if (refInvoiceId && refManualComprobanteId) {
+    throw Object.assign(new Error('Elegí solo una factura de referencia'), { status: 400 });
+  }
+  if (refInvoiceId) {
+    const inv = (await get(
+      `SELECT i.id, i.order_id, o.customer_id
+       FROM invoices i
+       JOIN orders o ON o.id = i.order_id
+       WHERE i.id = ?`,
+      [refInvoiceId]
+    )) as { id: string; order_id: string; customer_id: string } | undefined;
+    if (!inv || inv.customer_id !== customerId) {
+      throw Object.assign(new Error('Factura de referencia inválida para este cliente'), { status: 400 });
+    }
+    return inv.order_id;
+  }
+  if (refManualComprobanteId) {
+    if (excludeManualId && refManualComprobanteId === excludeManualId) {
+      throw Object.assign(new Error('La NC no puede referenciar a sí misma'), { status: 400 });
+    }
+    const man = (await get(
+      `SELECT id, customer_id, ref_order_id, tipo FROM customer_manual_comprobantes WHERE id = ?`,
+      [refManualComprobanteId]
+    )) as { id: string; customer_id: string; ref_order_id?: string; tipo: string } | undefined;
+    if (!man || man.customer_id !== customerId || man.tipo !== 'FACTURA') {
+      throw Object.assign(new Error('Factura manual de referencia inválida'), { status: 400 });
+    }
+    return man.ref_order_id ?? null;
+  }
+  return null;
+}
+
+/** GET un comprobante manual (para edición). */
+export const getManualComprobante = async (req: Request, res: Response) => {
+  try {
+    const user = (req as any).user;
+    if (!user || !canManage(user.role)) {
+      return res.status(403).json({ message: 'No autorizado' });
+    }
+    const id = String(req.params.id || '').trim();
+    const row = (await get(
+      `SELECT m.*, c.seller_id
+       FROM customer_manual_comprobantes m
+       JOIN customers c ON c.id = m.customer_id
+       WHERE m.id = ?`,
+      [id]
+    )) as any;
+    if (!row) return res.status(404).json({ message: 'Comprobante no encontrado' });
+    if (user.role === 'SELLER' && row.seller_id !== user.id) {
+      return res.status(403).json({ message: 'No autorizado' });
+    }
+    return res.json(rowToManualResponse(row));
+  } catch (e: any) {
+    console.error('getManualComprobante:', e);
+    return res.status(500).json({ message: 'Error obteniendo comprobante', detail: e?.message });
+  }
+};
+
+async function updateManualComprobanteCore(
+  req: Request,
+  res: Response,
+  id: string,
+  bodySource: Record<string, unknown>
+) {
+  const user = (req as any).user;
+  if (!user || !canManage(user.role)) {
+    return res.status(403).json({ message: 'No autorizado' });
+  }
+
+  const existing = (await get(
+    `SELECT m.*, c.seller_id
+     FROM customer_manual_comprobantes m
+     JOIN customers c ON c.id = m.customer_id
+     WHERE m.id = ?`,
+    [id]
+  )) as any;
+  if (!existing) return res.status(404).json({ message: 'Comprobante no encontrado' });
+  if (user.role === 'SELLER' && existing.seller_id !== user.id) {
+    return res.status(403).json({ message: 'No autorizado' });
+  }
+
+  const parsed = parseCreateBody(bodySource);
+  const errMsg = validateCreateFields(parsed);
+  if (errMsg) return res.status(400).json({ message: errMsg });
+
+  const cust = (await get('SELECT id, seller_id FROM customers WHERE id = ?', [parsed.customerId])) as
+    | { id: string; seller_id?: string }
+    | undefined;
+  if (!cust) return res.status(404).json({ message: 'Cliente no encontrado' });
+  if (user.role === 'SELLER' && cust.seller_id !== user.id) {
+    return res.status(403).json({ message: 'Solo podés editar comprobantes de tus clientes' });
+  }
+
+  const file = (req as any).file as Express.Multer.File | undefined;
+  let pdfPath: string | null = existing.pdf_path ?? null;
+  let pdfFileName: string | null = existing.pdf_file_name ?? null;
+  const oldPdfPath = existing.pdf_path ?? null;
+
+  if (file?.path) {
+    try {
+      const saved = saveUploadedPdf(file);
+      pdfPath = saved.pdfPath;
+      pdfFileName = saved.pdfFileName;
+      if (oldPdfPath && oldPdfPath !== pdfPath) {
+        try {
+          const full = path.join(UPLOADS_ROOT, oldPdfPath);
+          if (fs.existsSync(full)) fs.unlinkSync(full);
+        } catch (_) {}
+      }
+    } catch (e: any) {
+      return res.status(e.status || 400).json({ message: e.message });
+    }
+  }
+
+  const cbteHasta = Number.isFinite(parsed.cbteHasta) ? parsed.cbteHasta : parsed.cbteDesde;
+  let refOrderId: string | null = null;
+  try {
+    refOrderId = await resolveNcRefs(
+      parsed.customerId,
+      parsed.tipo,
+      parsed.refInvoiceId,
+      parsed.refManualComprobanteId,
+      id
+    );
+  } catch (e: any) {
+    return res.status(e.status || 400).json({ message: e.message });
+  }
+
+  await execute(
+    `UPDATE customer_manual_comprobantes SET
+       customer_id = ?, tipo = ?, fecha = ?, punto_venta = ?, cbte_tipo = ?, cbte_desde = ?, cbte_hasta = ?,
+       cae = ?, cae_fch_vto = ?, importe_neto = ?, agip_ret_per = ?, notes = ?, sin_detalle = ?,
+       pdf_path = ?, pdf_file_name = ?,
+       ref_invoice_id = ?, ref_manual_comprobante_id = ?, ref_order_id = ?
+     WHERE id = ?`,
+    [
+      parsed.customerId,
+      parsed.tipo,
+      parsed.fecha,
+      parsed.puntoVenta,
+      parsed.cbteTipo,
+      parsed.cbteDesde,
+      cbteHasta,
+      parsed.cae,
+      parsed.caeFchVto,
+      parsed.importeBruto,
+      parsed.agipRetPer,
+      parsed.notes,
+      parsed.sinDetalle ? 1 : 0,
+      pdfPath,
+      pdfFileName,
+      parsed.refInvoiceId,
+      parsed.refManualComprobanteId,
+      refOrderId,
+      id
+    ]
+  );
+
+  const updated = (await get(`SELECT * FROM customer_manual_comprobantes WHERE id = ?`, [id])) as any;
+  return res.json(rowToManualResponse(updated));
+}
+
+/** PATCH comprobante manual (JSON). */
+export const updateManualComprobante = async (req: Request, res: Response) => {
+  const id = String(req.params.id || '').trim();
+  if (!id) return res.status(400).json({ message: 'Falta id' });
+  try {
+    return await updateManualComprobanteCore(req, res, id, (req.body || {}) as Record<string, unknown>);
+  } catch (e: any) {
+    console.error('updateManualComprobante:', e);
+    return res.status(500).json({ message: 'Error actualizando comprobante', detail: e?.message });
+  }
+};
+
+/** PATCH con PDF opcional. */
+export const updateManualComprobanteMultipart = async (req: Request, res: Response) => {
+  const id = String(req.params.id || '').trim();
+  if (!id) return res.status(400).json({ message: 'Falta id' });
+  try {
+    return await updateManualComprobanteCore(req, res, id, (req.body || {}) as Record<string, unknown>);
+  } catch (e: any) {
+    console.error('updateManualComprobanteMultipart:', e);
+    return res.status(500).json({ message: 'Error actualizando comprobante', detail: e?.message });
+  }
+};

@@ -3049,7 +3049,8 @@ export const api = {
     sinDetalle?: boolean;
     cae?: string;
     caeFchVto?: string;
-    importeNeto: number;
+    importeBruto: number;
+    importeNeto?: number;
     agipRetPer?: number;
     notes?: string;
     refInvoiceId?: string;
@@ -3058,11 +3059,74 @@ export const api = {
   }): Promise<{
     id: string;
     comprobante: string;
-    importeConIva: number;
+    importeTotal: number;
+    importeConIva?: number;
     sinDetalle?: boolean;
     hasPdf?: boolean;
     allocationNote?: string;
   }> => {
+    const { pdf, importeNeto, ...fields } = payload;
+    const body = {
+      ...fields,
+      importeBruto: fields.importeBruto ?? importeNeto
+    };
+    if (pdf) {
+      const form = new FormData();
+      Object.entries(body).forEach(([k, v]) => {
+        if (v === undefined || v === null) return;
+        form.append(k, typeof v === 'boolean' ? (v ? 'true' : 'false') : String(v));
+      });
+      form.append('pdf', pdf);
+      return await requestFormData('/billing/manual-comprobantes/upload', form, 120000);
+    }
+    return await request('/billing/manual-comprobantes', 'POST', body);
+  },
+
+  getManualComprobante: async (id: string): Promise<{
+    id: string;
+    customerId: string;
+    tipo: 'FACTURA' | 'NC';
+    fecha: string;
+    puntoVenta: number;
+    cbteTipo: number;
+    cbteDesde: number;
+    cbteHasta: number;
+    letra: 'A' | 'B';
+    importeBruto: number;
+    agipRetPer: number;
+    importeTotal: number;
+    sinDetalle: boolean;
+    hasPdf: boolean;
+    cae?: string;
+    notes?: string;
+    refInvoiceId?: string;
+    refManualComprobanteId?: string;
+    comprobante: string;
+  }> => {
+    return await request(`/billing/manual-comprobantes/${encodeURIComponent(id)}`, 'GET');
+  },
+
+  updateManualComprobante: async (
+    id: string,
+    payload: {
+      customerId: string;
+      tipo: 'FACTURA' | 'NC';
+      fecha: string;
+      puntoVenta?: number;
+      cbteTipo?: number;
+      cbteDesde?: number;
+      cbteHasta?: number;
+      letra?: 'A' | 'B';
+      sinDetalle?: boolean;
+      cae?: string;
+      importeBruto: number;
+      agipRetPer?: number;
+      notes?: string;
+      refInvoiceId?: string;
+      refManualComprobanteId?: string;
+      pdf?: File | null;
+    }
+  ) => {
     const { pdf, ...fields } = payload;
     if (pdf) {
       const form = new FormData();
@@ -3071,9 +3135,13 @@ export const api = {
         form.append(k, typeof v === 'boolean' ? (v ? 'true' : 'false') : String(v));
       });
       form.append('pdf', pdf);
-      return await requestFormData('/billing/manual-comprobantes/upload', form, 120000);
+      return await requestFormData(
+        `/billing/manual-comprobantes/${encodeURIComponent(id)}/upload`,
+        form,
+        120000
+      );
     }
-    return await request('/billing/manual-comprobantes', 'POST', fields);
+    return await request(`/billing/manual-comprobantes/${encodeURIComponent(id)}`, 'PATCH', fields);
   },
 
   openManualComprobantePdf: async (id: string): Promise<void> => {

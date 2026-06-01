@@ -560,8 +560,8 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
     const manualComprobanteAsEntries = manualComprobanteRows.map((m, idx) => {
       const importe =
         m.tipo === 'FACTURA'
-          ? Math.round((Number(m.importe_neto || 0) * 1.21 + Number(m.agip_ret_per || 0)) * 100) / 100
-          : Math.round(Number(m.importe_neto || 0) * 1.21 * 100) / 100;
+          ? Math.round((Number(m.importe_neto || 0) + Number(m.agip_ret_per || 0)) * 100) / 100
+          : Math.round(Number(m.importe_neto || 0) * 100) / 100;
       const sinDetalle = !!Number(m.sin_detalle);
       const numero = sinDetalle
         ? 'Sin nº AFIP'

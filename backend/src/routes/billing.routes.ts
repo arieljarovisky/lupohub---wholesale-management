@@ -13,7 +13,10 @@ import {
 import {
   createManualComprobante,
   createManualComprobanteMultipart,
+  getManualComprobante,
   getManualComprobantePdf,
+  updateManualComprobante,
+  updateManualComprobanteMultipart,
   uploadManualComprobantePdfHandler
 } from '../controllers/manualComprobantes.controller';
 import { authMiddleware, billingAccessMiddleware } from '../middleware/auth';
@@ -41,6 +44,13 @@ router.post(
   createManualComprobanteMultipart as any
 );
 router.get('/manual-comprobantes/:id/pdf', getManualComprobantePdf as any);
+router.get('/manual-comprobantes/:id', getManualComprobante as any);
+router.patch('/manual-comprobantes/:id', updateManualComprobante as any);
+router.patch(
+  '/manual-comprobantes/:id/upload',
+  uploadManualComprobantePdfHandler,
+  updateManualComprobanteMultipart as any
+);
 router.get('/export', exportBilling);
 router.get('/print', printBilling);
 router.get('/export-retper', exportRetPerTxt);
