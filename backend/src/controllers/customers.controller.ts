@@ -3093,43 +3093,42 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         cell.alignment = { horizontal: 'left', vertical: 'middle' };
       });
 
-      const movsInTable = from
-        ? movs.filter((m) => {
-            const d = m.fecha ? new Date(m.fecha) : null;
-            if (!d || Number.isNaN(d.getTime())) return true;
-            const fromD = new Date(`${from}T12:00:00`);
-            return d.getTime() >= fromD.getTime();
-          })
-        : movs;
+      const movsOrdenados = [...movs].sort((a, b) => {
+        const da = new Date(a.fecha || 0).getTime() || 0;
+        const db = new Date(b.fecha || 0).getTime() || 0;
+        if (da !== db) return da - db;
+        return String(a.comprobante || '').localeCompare(String(b.comprobante || ''), 'es');
+      });
 
       let netoTabla = 0;
-      for (const m of movsInTable) {
-        const debe = Number(m.debe || 0);
-        const haber = Number(m.haber || 0);
-        netoTabla = Math.round((netoTabla + debe - haber) * 100) / 100;
+      for (const m of movsOrdenados) {
+        netoTabla = Math.round((netoTabla + Number(m.debe || 0) - Number(m.haber || 0)) * 100) / 100;
       }
 
-      let saldo: number;
-      if (from && Math.abs(openingBalance) > 0.005) {
-        saldo = openingBalance;
-        const saldoAntRow = wsDetalle.addRow({
-          fecha: new Date(from),
-          tipo: 'Saldo anterior',
+      /** Saldo previo a la 1.ª fila listada: hace que el corrido cierre en saldo pendiente (cartera). */
+      let saldoCorrido = Math.round((saldoCartera - netoTabla) * 100) / 100;
+
+      if (movsOrdenados.length > 0 && Math.abs(saldoCorrido) > 0.005) {
+        const saldoIniRow = wsDetalle.addRow({
+          fecha: movsOrdenados[0].fecha ? new Date(movsOrdenados[0].fecha) : from ? new Date(from) : null,
+          tipo: 'Saldo inicial',
           comprobante: '',
           pedido: '',
           debe: 0,
           haber: 0,
-          saldo: openingBalance,
+          saldo: saldoCorrido,
         });
-        saldoAntRow.font = { italic: true, color: { argb: 'FF64748B' } };
-      } else {
-        saldo = Math.round((saldoCartera - netoTabla) * 100) / 100;
+        saldoIniRow.font = { italic: true, color: { argb: 'FF64748B' } };
       }
 
-      for (const m of movsInTable) {
+      for (let i = 0; i < movsOrdenados.length; i += 1) {
+        const m = movsOrdenados[i];
         const debe = Number(m.debe || 0);
         const haber = Number(m.haber || 0);
-        saldo = Math.round((saldo + debe - haber) * 100) / 100;
+        saldoCorrido = Math.round((saldoCorrido + debe - haber) * 100) / 100;
+        if (i === movsOrdenados.length - 1) {
+          saldoCorrido = Math.round(saldoCartera * 100) / 100;
+        }
         wsDetalle.addRow({
           fecha: m.fecha ? new Date(m.fecha) : null,
           tipo: labelTipoSaldoExporter(m),
@@ -3137,7 +3136,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           pedido: m.order_id ?? '',
           debe,
           haber,
-          saldo
+          saldo: saldoCorrido,
         });
       }
 
