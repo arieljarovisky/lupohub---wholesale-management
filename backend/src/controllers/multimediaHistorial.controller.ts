@@ -448,11 +448,7 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
          o.id AS order_id,
          o.date AS order_date,
          o.remito_number,
-         (${SQL_ORDER_SALDO_RESIDUAL}) AS residual,
-         i.cbte_tipo,
-         i.punto_venta,
-         i.cbte_desde,
-         CASE WHEN i.id IS NOT NULL THEN 1 ELSE 0 END AS has_invoice
+         (${SQL_ORDER_SALDO_RESIDUAL}) AS residual
        FROM orders o
        LEFT JOIN (
          SELECT order_id, SUM(amount_credited) AS cn_total
@@ -463,8 +459,25 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
        WHERE o.customer_id = ?
          AND ${SQL_ORDER_ACTIVE_COND}
          AND ${SQL_ORDER_IN_SALDO_SCOPE}
+         AND i.id IS NULL
          AND (${SQL_ORDER_SALDO_RESIDUAL}) > 0.005
        ORDER BY o.date ASC, o.id ASC`,
+      [id]
+    )) as any[];
+    const invoiceRows = (await query(
+      `SELECT
+         i.id,
+         i.order_id,
+         i.cbte_tipo,
+         i.punto_venta,
+         i.cbte_desde,
+         i.created_at,
+         i.agip_ret_per,
+         o.total
+       FROM invoices i
+       JOIN orders o ON o.id = i.order_id
+       WHERE o.customer_id = ?
+       ORDER BY i.created_at ASC, i.id ASC`,
       [id]
     )) as any[];
     const creditNoteRows = (await query(
@@ -504,26 +517,42 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
     const maxLineOrder = entries.reduce((m, e) => Math.max(m, Number(e.line_order || 0)), 0);
     const orderSaldoAsEntries = orderSaldoRows.map((ord, idx) => {
       const residual = Math.round(Number(ord.residual || 0) * 100) / 100;
-      const hasInvoice = !!Number(ord.has_invoice);
-      const numero = hasInvoice
-        ? formatLedgerAfipNumero(
-            Number(ord.cbte_tipo || 0),
-            Number(ord.punto_venta || 0),
-            Number(ord.cbte_desde || 0)
-          )
-        : ord.remito_number != null && Number(ord.remito_number) > 0
+      const numero =
+        ord.remito_number != null && Number(ord.remito_number) > 0
           ? String(Number(ord.remito_number))
           : String(ord.order_id || '').slice(0, 12);
       return {
         lineOrder: maxLineOrder + 50000 + idx,
         lineDate: ord.order_date,
-        tipo: hasInvoice ? 'FAC' : 'PED',
+        tipo: 'PED',
         numero,
         edc: null,
         vto: null,
         importe: residual > 0 ? residual : null,
         saldo: null,
-        detalle: `Pedido ${ord.order_id || ''} · Saldo pendiente${hasInvoice ? ' (facturado)' : ' (sin factura)'}`,
+        detalle: `Pedido ${ord.order_id || ''} · Saldo pendiente (sin factura)`,
+        paginaPdf: null,
+        source: 'system' as const
+      };
+    });
+    const invoiceAsEntries = invoiceRows.map((inv, idx) => {
+      const importe =
+        Math.round((Number(inv.total || 0) * 1.21 + Number(inv.agip_ret_per || 0)) * 100) / 100;
+      const numero = formatLedgerAfipNumero(
+        Number(inv.cbte_tipo || 0),
+        Number(inv.punto_venta || 0),
+        Number(inv.cbte_desde || 0)
+      );
+      return {
+        lineOrder: maxLineOrder + 55000 + idx,
+        lineDate: inv.created_at,
+        tipo: 'FAC',
+        numero,
+        edc: null,
+        vto: null,
+        importe: importe > 0 ? importe : null,
+        saldo: null,
+        detalle: `Pedido ${inv.order_id || ''} · Factura AFIP LupoHub`,
         paginaPdf: null,
         source: 'system' as const
       };
@@ -624,6 +653,7 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
         source: 'imported' as const
       })),
       ...orderSaldoAsEntries,
+      ...invoiceAsEntries,
       ...creditNoteAsEntries,
       ...manualComprobanteAsEntries,
       ...paymentAsEntries
