@@ -453,6 +453,7 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
        LEFT JOIN (
          SELECT order_id, SUM(amount_credited) AS cn_total
          FROM credit_notes
+         WHERE COALESCE(superseded_by_reinvoice, 0) = 0
          GROUP BY order_id
        ) cn ON cn.order_id = o.id
        LEFT JOIN invoices i ON i.order_id = o.id
@@ -471,9 +472,10 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
          i.cbte_tipo,
          i.punto_venta,
          i.cbte_desde,
-         i.created_at,
+         COALESCE(DATE(i.created_at), o.date) AS line_date,
          i.agip_ret_per,
-         o.total
+         o.total,
+         o.date AS order_date
        FROM invoices i
        JOIN orders o ON o.id = i.order_id
        WHERE o.customer_id = ?
@@ -545,7 +547,7 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
       );
       return {
         lineOrder: maxLineOrder + 55000 + idx,
-        lineDate: inv.created_at,
+        lineDate: inv.line_date || inv.order_date,
         tipo: 'FAC',
         numero,
         edc: null,
@@ -668,13 +670,14 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
         deduped.push(row);
         continue;
       }
-      const key = ledgerMovementDedupeKey({
-        tipo: row.tipo,
-        detalle: row.detalle,
-        lineDate: row.lineDate,
-        numero: row.numero,
-        importe: row.importe,
-      });
+      const key =
+        ledgerMovementDedupeKey({
+          tipo: row.tipo,
+          detalle: row.detalle,
+          lineDate: row.lineDate,
+          numero: row.numero,
+          importe: row.importe,
+        }) + (String(row.detalle || '').includes('AFIP LupoHub') ? '|LH' : '');
       const prev = movementByKey.get(key);
       if (!prev) {
         movementByKey.set(key, row);

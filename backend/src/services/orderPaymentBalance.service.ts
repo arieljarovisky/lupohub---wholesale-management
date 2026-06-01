@@ -89,10 +89,25 @@ export const SQL_ORDER_PAID_ON_ORDER = `COALESCE((
   ) per_payment
 ), 0)`;
 
-/** Cargo neto de NC (sin IVA en pedidos sin factura; con IVA 21% si hay factura AFIP). */
+/** NC activas por pedido (excluye NC anuladas al reemitir factura con IIBB). */
+export const SQL_CN_TOTAL_SUBQUERY = `
+  SELECT order_id, SUM(amount_credited) AS cn_total
+  FROM credit_notes
+  WHERE COALESCE(superseded_by_reinvoice, 0) = 0
+  GROUP BY order_id
+`;
+
+export const SQL_INVOICE_AGIP_RET_PER = `COALESCE((
+  SELECT i.agip_ret_per FROM invoices i WHERE i.order_id = o.id LIMIT 1
+), 0)`;
+
+/** Cargo neto de NC (sin IVA en pedidos sin factura; con IVA 21% + IIBB si hay factura AFIP). */
 export const SQL_ORDER_CARGO_SALDO = `CASE
   WHEN EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
-    THEN ROUND(GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21, 2)
+    THEN ROUND(
+      GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21
+      + (${SQL_INVOICE_AGIP_RET_PER}),
+    2)
   ELSE ROUND(GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)), 2)
 END`;
 
@@ -138,7 +153,10 @@ export async function getInvoiceOutstandingConIva(
 
   const row = (await get(
     `SELECT
-       ROUND(GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21, 2) AS cargo_iva,
+       ROUND(
+         GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21
+         + COALESCE(i.agip_ret_per, 0),
+       2) AS cargo_iva,
        COALESCE((
          SELECT SUM(ROUND(per_pay.applied, 2))
          FROM (
@@ -165,11 +183,7 @@ export async function getInvoiceOutstandingConIva(
        ), 0) AS paid
      FROM invoices i
      JOIN orders o ON o.id = i.order_id
-     LEFT JOIN (
-       SELECT order_id, SUM(amount_credited) AS cn_total
-       FROM credit_notes
-       GROUP BY order_id
-     ) cn ON cn.order_id = o.id
+     LEFT JOIN (${SQL_CN_TOTAL_SUBQUERY}) cn ON cn.order_id = o.id
      WHERE i.id = ?`,
     params
   )) as { cargo_iva: number; paid: number } | undefined;
@@ -239,11 +253,7 @@ export async function getOrderOutstandingSinFactura(
   const row = (await get(
     `SELECT (${SQL_ORDER_SALDO_RESIDUAL}) AS residual
      FROM orders o
-     LEFT JOIN (
-       SELECT order_id, SUM(amount_credited) AS cn_total
-       FROM credit_notes
-       GROUP BY order_id
-     ) cn ON cn.order_id = o.id
+     LEFT JOIN (${SQL_CN_TOTAL_SUBQUERY}) cn ON cn.order_id = o.id
      WHERE o.id = ?`,
     [orderId]
   )) as { residual: number } | undefined;
@@ -597,11 +607,7 @@ export async function syncOrderPaymentStatus(orderId: string): Promise<void> {
   const row = (await get(
     `SELECT (${SQL_ORDER_SALDO_RESIDUAL}) AS residual
      FROM orders o
-     LEFT JOIN (
-       SELECT order_id, SUM(amount_credited) AS cn_total
-       FROM credit_notes
-       GROUP BY order_id
-     ) cn ON cn.order_id = o.id
+     LEFT JOIN (${SQL_CN_TOTAL_SUBQUERY}) cn ON cn.order_id = o.id
      WHERE o.id = ?`,
     [orderId]
   )) as { residual: number } | undefined;

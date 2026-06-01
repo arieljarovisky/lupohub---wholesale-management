@@ -54,6 +54,7 @@ export function filterSystemDuplicatesAgainstImport<T extends LedgerRunningRow>(
   }
   return rows.filter((row) => {
     if (row.source !== 'system') return true;
+    if (String(row.detalle || '').includes('AFIP LupoHub')) return true;
     const key = ledgerMovementDedupeKey({
       tipo: row.tipo,
       detalle: row.detalle,

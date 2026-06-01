@@ -1251,6 +1251,7 @@ export const getSaldosPendientes = async (req: Request, res: Response) => {
       LEFT JOIN (
         SELECT order_id, SUM(amount_credited) AS cn_total
         FROM credit_notes
+        WHERE COALESCE(superseded_by_reinvoice, 0) = 0
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
       WHERE ${SQL_ORDER_ACTIVE_COND}
@@ -1466,6 +1467,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
       LEFT JOIN (
         SELECT order_id, SUM(amount_credited) AS cn_total
         FROM credit_notes
+        WHERE COALESCE(superseded_by_reinvoice, 0) = 0
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
       WHERE ${SQL_ORDER_ACTIVE_COND}
@@ -1492,6 +1494,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
       LEFT JOIN (
         SELECT order_id, SUM(amount_credited) AS cn_total
         FROM credit_notes
+        WHERE COALESCE(superseded_by_reinvoice, 0) = 0
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
       WHERE ${SQL_ORDER_ACTIVE_COND}
@@ -1523,6 +1526,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
       LEFT JOIN (
         SELECT order_id, SUM(amount_credited) AS cn_total
         FROM credit_notes
+        WHERE COALESCE(superseded_by_reinvoice, 0) = 0
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
       WHERE ${SQL_ORDER_ACTIVE_COND}
@@ -1549,6 +1553,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
       LEFT JOIN (
         SELECT order_id, SUM(amount_credited) AS cn_total
         FROM credit_notes
+        WHERE COALESCE(superseded_by_reinvoice, 0) = 0
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
       WHERE ${SQL_ORDER_ACTIVE_COND}
@@ -1661,7 +1666,7 @@ async function fetchCarteraSaldoUnificadoMap(
     LEFT JOIN (
       SELECT o.customer_id, SUM(${SQL_ORDER_SALDO_RESIDUAL}) AS facturas_bruto
       FROM orders o
-      LEFT JOIN (SELECT order_id, SUM(amount_credited) AS cn_total FROM credit_notes GROUP BY order_id) cn ON cn.order_id = o.id
+      LEFT JOIN (SELECT order_id, SUM(amount_credited) AS cn_total FROM credit_notes WHERE COALESCE(superseded_by_reinvoice, 0) = 0 GROUP BY order_id) cn ON cn.order_id = o.id
       WHERE ${SQL_ORDER_ACTIVE_COND} AND ${SQL_ORDER_IN_SALDO_SCOPE}
       GROUP BY o.customer_id
     ) ob ON ob.customer_id = c.id
@@ -1677,7 +1682,7 @@ async function fetchCarteraSaldoUnificadoMap(
       SELECT o.customer_id,
         SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), (${SQL_ORDER_NETO_GRAVADO})) * 1.21, 2)) AS nc_iva
       FROM orders o
-      LEFT JOIN (SELECT order_id, SUM(amount_credited) AS cn_total FROM credit_notes GROUP BY order_id) cn ON cn.order_id = o.id
+      LEFT JOIN (SELECT order_id, SUM(amount_credited) AS cn_total FROM credit_notes WHERE COALESCE(superseded_by_reinvoice, 0) = 0 GROUP BY order_id) cn ON cn.order_id = o.id
       WHERE ${SQL_ORDER_ACTIVE_COND} AND ${SQL_ORDER_IN_SALDO_SCOPE}
       GROUP BY o.customer_id
     ) ncv ON ncv.customer_id = c.id
@@ -1788,6 +1793,7 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
       LEFT JOIN (
         SELECT order_id, SUM(amount_credited) AS cn_total
         FROM credit_notes
+        WHERE COALESCE(superseded_by_reinvoice, 0) = 0
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
       WHERE ${SQL_ORDER_ACTIVE_COND}
@@ -3293,6 +3299,7 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
       LEFT JOIN (
         SELECT order_id, SUM(amount_credited) AS cn_total
         FROM credit_notes
+        WHERE COALESCE(superseded_by_reinvoice, 0) = 0
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
       WHERE ${SQL_ORDER_ACTIVE_COND}
@@ -4143,6 +4150,7 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
       LEFT JOIN (
         SELECT order_id, SUM(amount_credited) AS cn_total
         FROM credit_notes
+        WHERE COALESCE(superseded_by_reinvoice, 0) = 0
         GROUP BY order_id
       ) cn ON cn.order_id = o.id
       WHERE o.customer_id = ?

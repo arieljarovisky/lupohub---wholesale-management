@@ -15,7 +15,9 @@ import { v4 as uuidv4 } from 'uuid';
 import { normalizeMatrixImportArticleSku } from '../utils/matrixImportSku';
 import {
   SQL_ORDER_IN_SALDO_SCOPE,
-  SQL_ORDER_SALDO_RESIDUAL
+  SQL_ORDER_SALDO_RESIDUAL,
+  syncAllOrderPaymentStatusForCustomer,
+  syncOrderPaymentStatus,
 } from '../services/orderPaymentBalance.service';
 
 /** Evita dos POST simultáneos al mismo pedido; el segundo espera el mismo resultado AFIP. */
@@ -415,6 +417,7 @@ export const getLinkableOrdersForPayment = async (req: any, res: Response) => {
        LEFT JOIN (
          SELECT order_id, SUM(amount_credited) AS cn_total
          FROM credit_notes
+         WHERE COALESCE(superseded_by_reinvoice, 0) = 0
          GROUP BY order_id
        ) cn ON cn.order_id = o.id
        WHERE o.customer_id = ?
@@ -2008,6 +2011,9 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
 
       await execute(`UPDATE credit_notes SET superseded_by_reinvoice = 1 WHERE id = ?`, [creditNoteId]);
 
+      await syncOrderPaymentStatus(id);
+      await syncAllOrderPaymentStatusForCustomer(String(orderRow.customer_id));
+
       const padronHint =
         agip.periodUsed && agipPeriodYyyymmFromOrderDate(orderRow.date) !== agip.periodUsed
           ? ` (padrón AGIP ${agip.periodUsed})`
@@ -2218,6 +2224,8 @@ export const emitirFactura = async (req: any, res: any) => {
           ]
         );
         await execute('UPDATE orders SET total = ? WHERE id = ?', [totalForAfip, id]);
+        await syncOrderPaymentStatus(id);
+        await syncAllOrderPaymentStatusForCustomer(String(orderRow.customer_id));
         return {
           id: invoiceId,
           orderId: id,
