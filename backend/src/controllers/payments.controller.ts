@@ -845,15 +845,19 @@ export const patchPaymentInvoices = async (req: any, res: Response) => {
     const routePaymentId = String(req.params?.id || '').trim();
     if (!routePaymentId) return res.status(400).json({ message: 'ID de recibo requerido' });
 
-    const invoiceIds = Array.isArray(req.body?.invoiceIds)
-      ? req.body.invoiceIds.map((x: unknown) => String(x || '').trim()).filter(Boolean)
+    const invoiceIds: string[] = Array.isArray(req.body?.invoiceIds)
+      ? req.body.invoiceIds
+          .map((x: unknown) => String(x || '').trim())
+          .filter((x): x is string => Boolean(x))
       : [];
-    const orderIds = Array.isArray(req.body?.orderIds)
-      ? req.body.orderIds.map((x: unknown) => String(x || '').trim()).filter(Boolean)
+    const orderIds: string[] = Array.isArray(req.body?.orderIds)
+      ? req.body.orderIds
+          .map((x: unknown) => String(x || '').trim())
+          .filter((x): x is string => Boolean(x))
       : [];
-    const importedInvoiceRefs = invoiceIds.filter((id) => id.startsWith('mm-fac-'));
-    const systemInvoiceIds = invoiceIds.filter((id) => id && !id.startsWith('mm-'));
-    const systemOrderIds = orderIds.filter((id) => id && !id.startsWith('mm-'));
+    const importedInvoiceRefs = invoiceIds.filter((id: string) => id.startsWith('mm-fac-'));
+    const systemInvoiceIds = invoiceIds.filter((id: string) => id && !id.startsWith('mm-'));
+    const systemOrderIds = orderIds.filter((id: string) => id && !id.startsWith('mm-'));
 
     let paymentId = routePaymentId;
 
