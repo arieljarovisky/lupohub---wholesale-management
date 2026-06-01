@@ -7,6 +7,8 @@ import { padLegacyCode } from '../utils/multimediaHistorialExcel';
 import { canonicalizeCityInput } from '../utils/cityNormalize';
 import {
   backfillPaymentOrdersFromLegacy,
+  SQL_CN_TOTAL_SUBQUERY,
+  SQL_ORDER_CARGO_SALDO,
   SQL_ORDER_IN_SALDO_SCOPE,
   SQL_ORDER_SALDO_RESIDUAL
 } from '../services/orderPaymentBalance.service';
@@ -1139,6 +1141,36 @@ const SQL_ORDER_CARGO_CON_IVA = `ROUND((${SQL_ORDER_NETO_GRAVADO}) * 1.21, 2)`;
 
 const SQL_ORDER_ACTIVE_COND = `o.status NOT IN ('Cancelado', 'Borrador') AND (o.archived = 0 OR o.archived IS NULL)`;
 
+/** Pedidos que suman cargo bruto en cartera (incluye facturados aunque estén pagos). */
+const SQL_ORDER_CARGO_GROSS_SCOPE = `(
+  ${SQL_ORDER_IN_SALDO_SCOPE}
+  OR EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
+)`;
+
+/** Subquery agregada: cargo bruto por cliente (IVA + IIBB, neto de NC activas). */
+const SQL_CARTERA_OB_GROSS_SUBQUERY = `
+  SELECT
+    o.customer_id,
+    SUM(${SQL_ORDER_CARGO_SALDO}) AS facturas_bruto
+  FROM orders o
+  LEFT JOIN (${SQL_CN_TOTAL_SUBQUERY}) cn ON cn.order_id = o.id
+  WHERE ${SQL_ORDER_ACTIVE_COND}
+    AND ${SQL_ORDER_CARGO_GROSS_SCOPE}
+  GROUP BY o.customer_id
+`;
+
+/** Subquery agregada: saldo neto por cliente (cargo − cobros imputados al pedido). */
+const SQL_CARTERA_OB_NET_SUBQUERY = `
+  SELECT
+    o.customer_id,
+    SUM(${SQL_ORDER_SALDO_RESIDUAL}) AS facturas_neto
+  FROM orders o
+  LEFT JOIN (${SQL_CN_TOTAL_SUBQUERY}) cn ON cn.order_id = o.id
+  WHERE ${SQL_ORDER_ACTIVE_COND}
+    AND ${SQL_ORDER_IN_SALDO_SCOPE}
+  GROUP BY o.customer_id
+`;
+
 /** Recibos sin imputar a factura/pedido (el resto se descuenta del cargo de cada pedido). */
 const SQL_PAYMENT_UNALLOCATED_COND = `NOT EXISTS (
   SELECT 1 FROM payment_invoices pi WHERE pi.payment_id = p.id
@@ -1149,13 +1181,12 @@ AND NOT EXISTS (
 AND TRIM(COALESCE(p.invoice_id, '')) = ''
 AND TRIM(COALESCE(p.order_id, '')) = ''`;
 
-/** Saldo = facturas/pedidos (LupoHub + import Tango) − NC − recibos. */
+/** Saldo = cargos netos LupoHub + import − NC/import NC − recibos (sin restar NC dos veces). */
 function carteraSaldoSqlExpr(): string {
   return `ROUND(
-    COALESCE(ob.facturas_bruto, 0)
+    COALESCE(obn.facturas_neto, 0)
     + COALESCE(mfac.manual_fac, 0)
     + COALESCE(imp.import_debe, 0)
-    - COALESCE(ncv.nc_iva, 0)
     - COALESCE(mnc.manual_nc, 0)
     - COALESCE(imp.import_nc, 0)
     - COALESCE(pay.total_pagos, 0)
@@ -1459,21 +1490,8 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
       ${carteraTotalRecibosSql()} AS totalPagos,
       ${saldoExpr} AS saldoPendienteUnificado
     FROM customers c
-    LEFT JOIN (
-      SELECT
-        o.customer_id,
-        SUM(${SQL_ORDER_SALDO_RESIDUAL}) AS facturas_bruto
-      FROM orders o
-      LEFT JOIN (
-        SELECT order_id, SUM(amount_credited) AS cn_total
-        FROM credit_notes
-        WHERE COALESCE(superseded_by_reinvoice, 0) = 0
-        GROUP BY order_id
-      ) cn ON cn.order_id = o.id
-      WHERE ${SQL_ORDER_ACTIVE_COND}
-        AND ${SQL_ORDER_IN_SALDO_SCOPE}
-      GROUP BY o.customer_id
-    ) ob ON ob.customer_id = c.id
+    LEFT JOIN (${SQL_CARTERA_OB_GROSS_SUBQUERY}) ob ON ob.customer_id = c.id
+    LEFT JOIN (${SQL_CARTERA_OB_NET_SUBQUERY}) obn ON obn.customer_id = c.id
     LEFT JOIN (
       SELECT customer_id, SUM(ROUND(importe_neto + COALESCE(agip_ret_per, 0), 2)) AS manual_fac
       FROM customer_manual_comprobantes
@@ -1491,12 +1509,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
         o.customer_id,
         SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), (${SQL_ORDER_NETO_GRAVADO})) * 1.21, 2)) AS nc_iva
       FROM orders o
-      LEFT JOIN (
-        SELECT order_id, SUM(amount_credited) AS cn_total
-        FROM credit_notes
-        WHERE COALESCE(superseded_by_reinvoice, 0) = 0
-        GROUP BY order_id
-      ) cn ON cn.order_id = o.id
+      LEFT JOIN (${SQL_CN_TOTAL_SUBQUERY}) cn ON cn.order_id = o.id
       WHERE ${SQL_ORDER_ACTIVE_COND}
         AND ${SQL_ORDER_IN_SALDO_SCOPE}
       GROUP BY o.customer_id
@@ -1518,21 +1531,8 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
       ${carteraTotalRecibosSql()} AS totalPagos,
       ${saldoExpr} AS saldoPendienteUnificado
     FROM customers c
-    LEFT JOIN (
-      SELECT
-        o.customer_id,
-        SUM(${SQL_ORDER_SALDO_RESIDUAL}) AS facturas_bruto
-      FROM orders o
-      LEFT JOIN (
-        SELECT order_id, SUM(amount_credited) AS cn_total
-        FROM credit_notes
-        WHERE COALESCE(superseded_by_reinvoice, 0) = 0
-        GROUP BY order_id
-      ) cn ON cn.order_id = o.id
-      WHERE ${SQL_ORDER_ACTIVE_COND}
-        AND ${SQL_ORDER_IN_SALDO_SCOPE}
-      GROUP BY o.customer_id
-    ) ob ON ob.customer_id = c.id
+    LEFT JOIN (${SQL_CARTERA_OB_GROSS_SUBQUERY}) ob ON ob.customer_id = c.id
+    LEFT JOIN (${SQL_CARTERA_OB_NET_SUBQUERY}) obn ON obn.customer_id = c.id
     LEFT JOIN (
       SELECT customer_id, SUM(ROUND(importe_neto + COALESCE(agip_ret_per, 0), 2)) AS manual_fac
       FROM customer_manual_comprobantes
@@ -1663,13 +1663,8 @@ async function fetchCarteraSaldoUnificadoMap(
   const sql = `
     SELECT c.id AS customerId, ${saldoExpr} AS saldoPendienteUnificado
     FROM customers c
-    LEFT JOIN (
-      SELECT o.customer_id, SUM(${SQL_ORDER_SALDO_RESIDUAL}) AS facturas_bruto
-      FROM orders o
-      LEFT JOIN (SELECT order_id, SUM(amount_credited) AS cn_total FROM credit_notes WHERE COALESCE(superseded_by_reinvoice, 0) = 0 GROUP BY order_id) cn ON cn.order_id = o.id
-      WHERE ${SQL_ORDER_ACTIVE_COND} AND ${SQL_ORDER_IN_SALDO_SCOPE}
-      GROUP BY o.customer_id
-    ) ob ON ob.customer_id = c.id
+    LEFT JOIN (${SQL_CARTERA_OB_GROSS_SUBQUERY}) ob ON ob.customer_id = c.id
+    LEFT JOIN (${SQL_CARTERA_OB_NET_SUBQUERY}) obn ON obn.customer_id = c.id
     LEFT JOIN (
       SELECT customer_id, SUM(ROUND(importe_neto + COALESCE(agip_ret_per, 0), 2)) AS manual_fac
       FROM customer_manual_comprobantes WHERE tipo = 'FACTURA' GROUP BY customer_id
@@ -1678,14 +1673,6 @@ async function fetchCarteraSaldoUnificadoMap(
       SELECT customer_id, SUM(ROUND(importe_neto, 2)) AS manual_nc
       FROM customer_manual_comprobantes WHERE tipo = 'NC' GROUP BY customer_id
     ) mnc ON mnc.customer_id = c.id
-    LEFT JOIN (
-      SELECT o.customer_id,
-        SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), (${SQL_ORDER_NETO_GRAVADO})) * 1.21, 2)) AS nc_iva
-      FROM orders o
-      LEFT JOIN (SELECT order_id, SUM(amount_credited) AS cn_total FROM credit_notes WHERE COALESCE(superseded_by_reinvoice, 0) = 0 GROUP BY order_id) cn ON cn.order_id = o.id
-      WHERE ${SQL_ORDER_ACTIVE_COND} AND ${SQL_ORDER_IN_SALDO_SCOPE}
-      GROUP BY o.customer_id
-    ) ncv ON ncv.customer_id = c.id
     LEFT JOIN (${CARTERA_IMPORTED_MOVEMENTS_AGG_SUBQUERY}) imp ON imp.customer_id = c.id
     LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
     WHERE 1=1 ${sellerFilter}
@@ -4113,6 +4100,7 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
       FROM credit_notes cn
       JOIN orders o ON o.id = cn.order_id
       WHERE o.customer_id = ?
+        AND COALESCE(cn.superseded_by_reinvoice, 0) = 0
 
       UNION ALL
 

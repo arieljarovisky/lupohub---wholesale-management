@@ -10,7 +10,7 @@ import { getWholesaleStockImpactMeta } from '../utils/orderStockImpact';
 import { orderNetoSaldoForOrderCard, orderTotalesFacturado } from '../utils/wholesaleInvoiceHtml';
 import { canonicalizeCityInput, cityDisplayLabel, isCabaCity, normalizeCityKey } from '../utils/cityNormalize';
 import { CityInput } from './CityInput';
-import { ledgerTipoDisplay, normalizeLedgerDocType } from '../utils/ledgerDocType';
+import { ledgerTipoDisplay } from '../utils/ledgerDocType';
 
 interface CustomersProps {
   customers: Customer[];
@@ -139,22 +139,21 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     let cancelled = false;
     setMultimediaLedgerLoading(true);
     setFinancialSummaryMovements([]);
-    const loadFinancialSummary = () =>
-      api
-        .getCustomerFinancialSummary(selectedCustomer.id)
-        .then((summary) => {
-          if (!cancelled) setFinancialSummaryMovements(summary.movements || []);
-        })
-        .catch(() => {
-          if (!cancelled) setFinancialSummaryMovements([]);
-        });
-
-    loadFinancialSummary();
     api
       .getCustomerMultimediaLedger(selectedCustomer.id)
       .then((d) => {
         if (cancelled) return;
         setMultimediaLedger(d);
+        if (!d.entries?.length) {
+          api
+            .getCustomerFinancialSummary(selectedCustomer.id)
+            .then((summary) => {
+              if (!cancelled) setFinancialSummaryMovements(summary.movements || []);
+            })
+            .catch(() => {
+              if (!cancelled) setFinancialSummaryMovements([]);
+            });
+        }
       })
       .catch((err: any) => {
         if (cancelled) return;
@@ -663,31 +662,12 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     return Number.isFinite(t) ? t : 0;
   };
 
-  const ledgerMovementKey = (e: LedgerEntry) => {
-    const tipo = normalizeLedgerDocType(e.tipo, e.detalle);
-    const num = String(e.numero || '')
-      .replace(/[^A-Z0-9]/gi, '')
-      .toUpperCase();
-    const fecha = String(e.lineDate || '').slice(0, 10);
-    const imp = Number(e.importe || 0).toFixed(2);
-    return `${tipo}|${fecha}|${num}|${imp}`;
-  };
-
   const unifiedLedgerEntries = useMemo(() => {
-    const fromMultimedia = multimediaLedger?.entries ?? [];
-    const fromFinancial = financialSummaryAsLedger;
-    const base = fromMultimedia.length ? fromMultimedia : fromFinancial;
-    if (!base.length && !fromFinancial.length) return [];
-
-    const keys = new Set(base.map(ledgerMovementKey));
-    const extras = fromFinancial.filter((e) => {
-      const tipo = normalizeLedgerDocType(e.tipo, e.detalle);
-      if (tipo !== 'FAC' && tipo !== 'NC') return false;
-      return !keys.has(ledgerMovementKey(e));
-    });
-
-    const merged = extras.length ? [...base, ...extras] : base;
-    return [...merged].sort((a, b) => {
+    const entries = multimediaLedger?.entries?.length
+      ? multimediaLedger.entries
+      : financialSummaryAsLedger;
+    if (!entries?.length) return [];
+    return [...entries].sort((a, b) => {
       const da = ledgerDateMs(a.lineDate) - ledgerDateMs(b.lineDate);
       if (da !== 0) return da;
       return Number(a.lineOrder || 0) - Number(b.lineOrder || 0);
