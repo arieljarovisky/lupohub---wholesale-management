@@ -520,20 +520,32 @@ export const createPayment = async (req: any, res: Response) => {
       ? user.id
       : (body.sellerId ? String(body.sellerId).trim() : null);
     const orderId = body.orderId ? String(body.orderId).trim() : null;
-    const orderIds = Array.isArray(body.orderIds)
-      ? Array.from(new Set(body.orderIds.map((x) => String(x || '').trim()).filter(Boolean)))
+    const orderIds: string[] = Array.isArray(body.orderIds)
+      ? Array.from(
+          new Set(
+            (body.orderIds as unknown[])
+              .map((x: unknown) => String(x || '').trim())
+              .filter((s: string) => s.length > 0)
+          )
+        )
       : [];
     if (orderId && !orderIds.includes(orderId)) orderIds.unshift(orderId);
     const invoiceId = body.invoiceId ? String(body.invoiceId).trim() : null;
-    const invoiceIds = Array.isArray(body.invoiceIds)
-      ? Array.from(new Set(body.invoiceIds.map((x) => String(x || '').trim()).filter(Boolean)))
+    const invoiceIds: string[] = Array.isArray(body.invoiceIds)
+      ? Array.from(
+          new Set(
+            (body.invoiceIds as unknown[])
+              .map((x: unknown) => String(x || '').trim())
+              .filter((s: string) => s.length > 0)
+          )
+        )
       : [];
     const notes = body.notes != null && String(body.notes).trim() ? String(body.notes).trim() : null;
 
     if (invoiceId && !invoiceIds.includes(invoiceId)) invoiceIds.unshift(invoiceId);
-    const systemInvoiceIds = invoiceIds.filter((id) => !id.startsWith('mm-fac-'));
-    const systemOrderIds = orderIds.filter((id) => id && !id.startsWith('mm-'));
-    const importedInvoiceRefs = invoiceIds.filter((id) => id.startsWith('mm-fac-'));
+    const systemInvoiceIds = invoiceIds.filter((id: string) => !id.startsWith('mm-fac-'));
+    const systemOrderIds = orderIds.filter((id: string) => id && !id.startsWith('mm-'));
+    const importedInvoiceRefs = invoiceIds.filter((id: string) => id.startsWith('mm-fac-'));
     const primaryInvoiceId = systemInvoiceIds[0] || null;
     const primaryOrderId = systemOrderIds[0] || orderId || null;
 
@@ -846,14 +858,14 @@ export const patchPaymentInvoices = async (req: any, res: Response) => {
     if (!routePaymentId) return res.status(400).json({ message: 'ID de recibo requerido' });
 
     const invoiceIds: string[] = Array.isArray(req.body?.invoiceIds)
-      ? req.body.invoiceIds
+      ? (req.body.invoiceIds as unknown[])
           .map((x: unknown) => String(x || '').trim())
-          .filter((x): x is string => Boolean(x))
+          .filter((s: string) => s.length > 0)
       : [];
     const orderIds: string[] = Array.isArray(req.body?.orderIds)
-      ? req.body.orderIds
+      ? (req.body.orderIds as unknown[])
           .map((x: unknown) => String(x || '').trim())
-          .filter((x): x is string => Boolean(x))
+          .filter((s: string) => s.length > 0)
       : [];
     const importedInvoiceRefs = invoiceIds.filter((id: string) => id.startsWith('mm-fac-'));
     const systemInvoiceIds = invoiceIds.filter((id: string) => id && !id.startsWith('mm-'));
