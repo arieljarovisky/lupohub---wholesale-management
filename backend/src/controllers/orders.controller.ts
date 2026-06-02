@@ -2163,7 +2163,9 @@ export const emitirFactura = async (req: any, res: any) => {
           'El importe neto a facturar es cero. Revisá las cantidades en picking: debe haber al menos una unidad pickeada con precio.',
       });
     }
-    const totalForAfip = netFromItems > 0 ? netFromItems : Number(orderRow.total);
+    const { orderGrossToAfipNeto, ORDER_PRICES_INCLUDE_IVA } = await import('../config/orderPricing');
+    const grossFromItems = netFromItems > 0 ? netFromItems : Number(orderRow.total);
+    const totalForAfip = orderGrossToAfipNeto(grossFromItems);
 
     const agip = await getAgipRetentionForOrder({
       orderDate: orderRow.date,
@@ -2223,7 +2225,10 @@ export const emitirFactura = async (req: any, res: any) => {
             agip?.amount ?? 0
           ]
         );
-        await execute('UPDATE orders SET total = ? WHERE id = ?', [totalForAfip, id]);
+        await execute('UPDATE orders SET total = ? WHERE id = ?', [
+          ORDER_PRICES_INCLUDE_IVA ? grossFromItems : totalForAfip,
+          id
+        ]);
         await syncOrderPaymentStatus(id);
         await syncAllOrderPaymentStatusForCustomer(String(orderRow.customer_id));
         return {

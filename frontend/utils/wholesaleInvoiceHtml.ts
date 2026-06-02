@@ -3,7 +3,8 @@
  * Totales: neto gravado + IVA 21% + percepción IIBB (Factura A); en Factura B el importe impreso lleva IVA incluido sin discriminar.
  */
 import type { CreditNote, Customer, Order, OrderItem, Product } from '../types';
-import { calcTotalesDesdeNetoGravado } from './afipComprobante';
+import { calcTotalesDesdeNetoGravado, isComprobanteClaseB } from './afipComprobante';
+import { ORDER_PRICES_INCLUDE_IVA, IVA_RATE, orderGrossToAfipNeto } from './orderPricing';
 import { formatMoneyAr } from './moneyFormat';
 import { codigoTalleParaSku, nombreTalleDesdeCodigo } from './tallesTango';
 
@@ -394,10 +395,19 @@ function ncCbteTipoFromFactura(cbteTipoFactura: number): number {
   return Number(cbteTipoFactura) === 1 ? 3 : 8;
 }
 
-/** Neto gravado estimado de la factura (IIBB guardado, picking o cantidades del pedido). */
+/** Suma de líneas del pedido (con IVA incluido si ORDER_PRICES_INCLUDE_IVA). */
+export function orderLineGross(order: Order): number {
+  return orderNetoFromItemsByQuantity(order);
+}
+
+/** Neto gravado AFIP estimado de la factura. */
 export function orderNetoFacturadoEstimado(order: Order): number {
   if (!order.invoice) return 0;
   const inv = order.invoice;
+  const lineGross = orderLineGross(order);
+  if (ORDER_PRICES_INCLUDE_IVA && lineGross > 0.005) {
+    return orderGrossToAfipNeto(lineGross);
+  }
   const retPer = Number(inv.agipRetPer ?? (inv as { agip_ret_per?: number }).agip_ret_per ?? 0);
   const alicuota = Number(inv.agipAlicuota ?? (inv as { agip_alicuota?: number }).agip_alicuota ?? 0);
   if (retPer > 0.005 && alicuota > 0.005) {
@@ -405,7 +415,7 @@ export function orderNetoFacturadoEstimado(order: Order): number {
   }
   const netoPicked = orderNetoFromItemsForAfip(order);
   if (netoPicked > 0.005) return netoPicked;
-  const netoQty = orderNetoFromItemsByQuantity(order);
+  const netoQty = lineGross;
   if (netoQty > 0.005) return netoQty;
   const stored = Math.round((Number(order.total) || 0) * 100) / 100;
   if (stored > 0.005) return stored;
@@ -424,12 +434,25 @@ export function orderUnitsDisplayCount(order: Order): number | null {
   return null;
 }
 
-/** Total del comprobante facturado (neto + IVA + IIBB según datos guardados). */
+/** Total del comprobante (líneas con IVA + IIBB, o neto+IVA+IIBB según config). */
 export function orderTotalesFacturado(order: Order): OrderFiscalTotalsDisplay | null {
   if (!order.invoice) return null;
-  const neto = orderNetoFacturadoEstimado(order);
   const cbteTipo = Number(order.invoice.cbteTipo ?? 6);
-  const agipRet = Number(order.invoice.agipRetPer ?? 0);
+  const agipRet = Math.round((Number(order.invoice.agipRetPer ?? 0)) * 100) / 100;
+  const lineGross = orderLineGross(order);
+  if (ORDER_PRICES_INCLUDE_IVA && lineGross > 0.005) {
+    const neto = orderGrossToAfipNeto(lineGross);
+    const iva = Math.round((lineGross - neto) * 100) / 100;
+    const total = Math.round((lineGross + agipRet) * 100) / 100;
+    return {
+      neto,
+      iva,
+      iibb: agipRet,
+      total,
+      discriminaIva: !isComprobanteClaseB(cbteTipo),
+    };
+  }
+  const neto = orderNetoFacturadoEstimado(order);
   const t = calcTotalesDesdeNetoGravado(neto, cbteTipo, agipRet);
   return {
     neto: t.neto,
@@ -437,6 +460,33 @@ export function orderTotalesFacturado(order: Order): OrderFiscalTotalsDisplay | 
     iibb: t.agip,
     total: t.total,
     discriminaIva: t.discriminaIva,
+  };
+}
+
+/** Totales para la ficha del pedido en Clientes (listado + detalle alineados). */
+export function orderPedidoImporteDisplay(order: Order): {
+  lineGross: number;
+  fact: OrderFiscalTotalsDisplay | null;
+  mainAmount: number;
+  mainLabel: string;
+} {
+  const lineGross = orderNetoSaldoForOrderCard(order);
+  const fact = order.invoice ? orderTotalesFacturado(order) : null;
+  const labelSinFactura = ORDER_PRICES_INCLUDE_IVA ? 'Total pedido (IVA incluido)' : 'Neto pedido (sin IVA)';
+  const labelFacturado = ORDER_PRICES_INCLUDE_IVA ? 'Total pedido (IVA incluido)' : 'Total facturado (AFIP)';
+  if (!fact) {
+    return {
+      lineGross,
+      fact: null,
+      mainAmount: lineGross,
+      mainLabel: labelSinFactura,
+    };
+  }
+  return {
+    lineGross,
+    fact,
+    mainAmount: fact.total,
+    mainLabel: labelFacturado,
   };
 }
 

@@ -14,6 +14,7 @@ import {
   type MultimediaMovementRow,
 } from '../utils/multimediaHistorialExcel';
 import { INCLUDE_TANGO_IMPORT_IN_SYSTEM } from '../sql/carteraImportedSql';
+import { invoiceLedgerImporte, ncLedgerImporte } from '../config/orderPricing';
 import {
   backfillPaymentOrdersFromLegacy,
   SQL_ORDER_IN_SALDO_SCOPE,
@@ -557,8 +558,7 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
       };
     });
     const invoiceAsEntries = invoiceRows.filter((inv) => movementOnOrAfterOpening(inv.line_date || inv.order_date)).map((inv, idx) => {
-      const importe =
-        Math.round((Number(inv.total || 0) * 1.21 + Number(inv.agip_ret_per || 0)) * 100) / 100;
+      const importe = invoiceLedgerImporte(Number(inv.total || 0), Number(inv.agip_ret_per || 0));
       const numero = formatLedgerAfipNumero(
         Number(inv.cbte_tipo || 0),
         Number(inv.punto_venta || 0),
@@ -579,7 +579,7 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
       };
     });
     const creditNoteAsEntries = creditNoteRows.filter((cn) => movementOnOrAfterOpening(cn.created_at)).map((cn, idx) => {
-      const importe = Math.round(Number(cn.amount_credited || 0) * 1.21 * 100) / 100;
+      const importe = ncLedgerImporte(Number(cn.amount_credited || 0));
       const numero = formatLedgerAfipNumero(
         Number(cn.cbte_tipo || 0),
         Number(cn.punto_venta || 0),

@@ -7,7 +7,9 @@ import { parseCustomersExcel, parseCustomersCuitUpdateExcel } from '../utils/cus
 import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
 import { getWholesaleStockImpactMeta } from '../utils/orderStockImpact';
-import { orderNetoSaldoForOrderCard, orderTotalesFacturado } from '../utils/wholesaleInvoiceHtml';
+import { orderPedidoImporteDisplay } from '../utils/wholesaleInvoiceHtml';
+import { formatMoneyAr } from '../utils/moneyFormat';
+import { ORDER_PRICES_INCLUDE_IVA } from '../utils/orderPricing';
 import { canonicalizeCityInput, cityDisplayLabel, isCabaCity, normalizeCityKey } from '../utils/cityNormalize';
 import { CityInput } from './CityInput';
 import { ledgerTipoDisplay } from '../utils/ledgerDocType';
@@ -931,8 +933,20 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                  </div>
               </div>
               <div className="text-right">
-                 <p className="text-sm text-slate-500 uppercase font-bold">Total</p>
-                 <p className="text-3xl font-black text-white">${selectedOrder.total.toLocaleString()}</p>
+                 {(() => {
+                   const disp = orderPedidoImporteDisplay(selectedOrder);
+                   return (
+                     <>
+                       <p className="text-sm text-slate-500 uppercase font-bold">{disp.mainLabel}</p>
+                       <p className="text-3xl font-black text-white tabular-nums">${formatMoneyAr(disp.mainAmount)}</p>
+                       {disp.fact && disp.fact.iibb > 0.005 ? (
+                         <p className="text-[10px] text-slate-500 tabular-nums mt-1 max-w-[220px] ml-auto leading-snug">
+                           Incluye IIBB ${formatMoneyAr(disp.fact.iibb)}
+                         </p>
+                       ) : null}
+                     </>
+                   );
+                 })()}
               </div>
            </div>
            
@@ -952,8 +966,14 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                              </div>
                           </div>
                           <div className="text-right">
-                             <p className="font-bold text-white">${(item.priceAtMoment * item.quantity).toLocaleString()}</p>
-                             <p className="text-xs text-slate-500">${item.priceAtMoment.toLocaleString()} c/u</p>
+                             <p className="font-bold text-white tabular-nums">
+                               ${formatMoneyAr(item.priceAtMoment * item.quantity)}
+                             </p>
+                             <p className="text-xs text-slate-500 tabular-nums">
+                               ${formatMoneyAr(item.priceAtMoment)} c/u
+                               {selectedOrder.invoice && !ORDER_PRICES_INCLUDE_IVA ? ' · neto' : ''}
+                               {ORDER_PRICES_INCLUDE_IVA ? ' · c/IVA' : ''}
+                             </p>
                           </div>
                        </div>
                     );
@@ -2091,16 +2111,18 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                     <div className="flex items-center gap-6 w-full sm:w-auto justify-between sm:justify-end">
                        <div className="text-right">
                           {(() => {
-                            const fact = order.invoice ? orderTotalesFacturado(order) : null;
-                            const amount = fact?.total ?? orderNetoSaldoForOrderCard(order) * 1.21;
+                            const disp = orderPedidoImporteDisplay(order);
                             return (
                               <>
-                                <p className="font-black text-white text-lg">
-                                  ${amount.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                <p className="font-black text-white text-lg tabular-nums">
+                                  ${formatMoneyAr(disp.mainAmount)}
                                 </p>
-                                {fact && (
-                                  <p className="text-[10px] text-slate-500 uppercase tracking-wide">Total facturado</p>
-                                )}
+                                <p className="text-[10px] text-slate-500 uppercase tracking-wide">{disp.mainLabel}</p>
+                                {disp.fact && disp.fact.iibb > 0.005 ? (
+                                  <p className="text-[9px] text-slate-600 tabular-nums mt-0.5">
+                                    + IIBB ${formatMoneyAr(disp.fact.iibb)}
+                                  </p>
+                                ) : null}
                               </>
                             );
                           })()}

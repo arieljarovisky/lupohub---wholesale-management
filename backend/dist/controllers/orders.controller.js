@@ -1985,7 +1985,9 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                 message: 'El importe neto a facturar es cero. Revisá las cantidades en picking: debe haber al menos una unidad pickeada con precio.',
             });
         }
-        const totalForAfip = netFromItems > 0 ? netFromItems : Number(orderRow.total);
+        const { orderGrossToAfipNeto, ORDER_PRICES_INCLUDE_IVA } = yield Promise.resolve().then(() => __importStar(require('../config/orderPricing')));
+        const grossFromItems = netFromItems > 0 ? netFromItems : Number(orderRow.total);
+        const totalForAfip = orderGrossToAfipNeto(grossFromItems);
         const agip = yield getAgipRetentionForOrder({
             orderDate: orderRow.date,
             customerCuit: customerRow.cuit,
@@ -2031,7 +2033,10 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                     (_c = agip === null || agip === void 0 ? void 0 : agip.alicuota) !== null && _c !== void 0 ? _c : 0,
                     (_d = agip === null || agip === void 0 ? void 0 : agip.amount) !== null && _d !== void 0 ? _d : 0
                 ]);
-                yield (0, db_1.execute)('UPDATE orders SET total = ? WHERE id = ?', [totalForAfip, id]);
+                yield (0, db_1.execute)('UPDATE orders SET total = ? WHERE id = ?', [
+                    ORDER_PRICES_INCLUDE_IVA ? grossFromItems : totalForAfip,
+                    id
+                ]);
                 yield (0, orderPaymentBalance_service_1.syncOrderPaymentStatus)(id);
                 yield (0, orderPaymentBalance_service_1.syncAllOrderPaymentStatusForCustomer)(String(orderRow.customer_id));
                 return {

@@ -318,9 +318,8 @@ function emitirFactura(order, customer, forceCbteTipo) {
                 condicionIva = CONSUMIDOR_FINAL;
             }
         }
-        // En la app el total del pedido se maneja en neto; para AFIP emitimos total con IVA 21%.
-        const impNetoRaw = Number(order.total);
-        const impNeto = Math.round((Number.isFinite(impNetoRaw) ? impNetoRaw : 0) * 100) / 100;
+        const { orderGrossToAfipNeto } = yield Promise.resolve().then(() => __importStar(require('../config/orderPricing')));
+        const impNeto = orderGrossToAfipNeto(Number(order.total));
         if (impNeto <= 0)
             throw new Error('El total neto del pedido debe ser mayor a 0.');
         if (impNeto > AFIP_MAX_IMP_NETO) {

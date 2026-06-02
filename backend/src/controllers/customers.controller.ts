@@ -8,11 +8,21 @@ import { canonicalizeCityInput } from '../utils/cityNormalize';
 import {
   backfillPaymentOrdersFromLegacy,
   SQL_CN_TOTAL_SUBQUERY,
+  SQL_ORDER_BASE_MINUS_NC,
   SQL_ORDER_CARGO_SALDO,
   SQL_ORDER_CARTERA_NET,
   SQL_ORDER_IN_SALDO_SCOPE,
+  SQL_ORDER_NETO_AFIP,
   SQL_ORDER_SALDO_RESIDUAL
 } from '../services/orderPaymentBalance.service';
+import {
+  IVA_MULTIPLIER,
+  ORDER_PRICES_INCLUDE_IVA,
+  sqlAmountWithIvaFromOrderLines,
+  sqlInvoiceAmountFromOrderTotal,
+  sqlNetoAfipToAmountWithIva,
+  sqlOrderTotalWithIvaExpr
+} from '../config/orderPricing';
 import {
   INCLUDE_TANGO_IMPORT_IN_SYSTEM,
   SQL_CARTERA_IMPORT_DEBE_EXPR,
@@ -478,7 +488,7 @@ export const exportCustomersBySheetsXlsx = async (req: Request, res: Response) =
                LPAD(COALESCE(i.cbte_desde, 0), 8, '0')
              ) AS comprobante,
              o.id AS order_id,
-             ROUND(COALESCE(o.total, 0) * 1.21, 2) AS importe
+             ${sqlOrderTotalWithIvaExpr()} AS importe
            FROM invoices i
            JOIN orders o ON o.id = i.order_id
            WHERE o.customer_id = ?
@@ -1187,7 +1197,14 @@ const SQL_ORDER_NETO_GRAVADO = `GREATEST(
   ), 0)
 )`;
 
-const SQL_ORDER_CARGO_CON_IVA = `ROUND((${SQL_ORDER_NETO_GRAVADO}) * 1.21, 2)`;
+const SQL_ORDER_CARGO_CON_IVA = sqlAmountWithIvaFromOrderLines(SQL_ORDER_NETO_GRAVADO);
+const SQL_ORDER_CARGO_PENDIENTE_SUM = `SUM(ROUND((${SQL_ORDER_BASE_MINUS_NC})${
+  ORDER_PRICES_INCLUDE_IVA ? '' : ` * ${IVA_MULTIPLIER}`
+}, 2))`;
+const SQL_ORDER_NC_CREDIT_EXPR = sqlNetoAfipToAmountWithIva(
+  `LEAST(COALESCE(cn.cn_total, 0), (${SQL_ORDER_NETO_AFIP}))`
+);
+const SQL_ORDER_NC_CREDIT_SUM = `SUM(${SQL_ORDER_NC_CREDIT_EXPR})`;
 
 const SQL_ORDER_ACTIVE_COND = `o.status NOT IN ('Cancelado', 'Borrador') AND (o.archived = 0 OR o.archived IS NULL)`;
 
@@ -1333,7 +1350,7 @@ export const getSaldosPendientes = async (req: Request, res: Response) => {
         c.cuit,
         c.city,
         c.email,
-        SUM(ROUND(GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargosPendientes,
+        ${SQL_ORDER_CARGO_PENDIENTE_SUM} AS cargosPendientes,
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
@@ -1570,7 +1587,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
     LEFT JOIN (
       SELECT
         o.customer_id,
-        SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), (${SQL_ORDER_NETO_GRAVADO})) * 1.21, 2)) AS nc_iva
+        ${SQL_ORDER_NC_CREDIT_SUM} AS nc_iva
       FROM orders o
       INNER JOIN customers co ON co.id = o.customer_id
       LEFT JOIN (${SQL_CN_TOTAL_SUBQUERY}) cn ON cn.order_id = o.id
@@ -1613,7 +1630,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
     LEFT JOIN (
       SELECT
         o.customer_id,
-        SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), (${SQL_ORDER_NETO_GRAVADO})) * 1.21, 2)) AS nc_iva
+        ${SQL_ORDER_NC_CREDIT_SUM} AS nc_iva
       FROM orders o
       LEFT JOIN (
         SELECT order_id, SUM(amount_credited) AS cn_total
@@ -1848,7 +1865,7 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
         c.cuit,
         c.city,
         c.email,
-        SUM(ROUND(GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargosPendientes,
+        ${SQL_ORDER_CARGO_PENDIENTE_SUM} AS cargosPendientes,
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
@@ -1995,7 +2012,7 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
             LPAD(COALESCE(i.cbte_desde, 0), 8, '0')
           ) AS comprobante,
           o.id AS order_id,
-          ROUND(COALESCE(o.total, 0) * 1.21, 2) AS debe,
+          ${sqlOrderTotalWithIvaExpr()} AS debe,
           0 AS haber
         FROM invoices i
         JOIN orders o ON o.id = i.order_id
@@ -2279,7 +2296,7 @@ export const exportSaldosMovimientosSistemaXlsx = async (req: Request, res: Resp
             LPAD(COALESCE(i.cbte_desde, 0), 8, '0')
           ) AS comprobante,
           o.id AS order_id,
-          ROUND(COALESCE(o.total, 0) * 1.21, 2) AS debe,
+          ${sqlOrderTotalWithIvaExpr()} AS debe,
           0 AS haber
         FROM invoices i
         JOIN orders o ON o.id = i.order_id
@@ -2530,7 +2547,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
             LPAD(COALESCE(i.cbte_desde, 0), 8, '0')
           ) AS comprobante,
           o.id AS order_id,
-          ROUND(COALESCE(o.total, 0) * 1.21, 2) AS debe,
+          ${sqlOrderTotalWithIvaExpr()} AS debe,
           0 AS haber
         FROM invoices i
         JOIN orders o ON o.id = i.order_id
@@ -2557,7 +2574,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
             LPAD(COALESCE(i.cbte_desde, 0), 8, '0')
           ) AS comprobante,
           o.id AS order_id,
-          ROUND(COALESCE(o.total, 0) * 1.21, 2) AS debe,
+          ${sqlOrderTotalWithIvaExpr()} AS debe,
           0 AS haber
         FROM invoices i
         JOIN orders o ON o.id = i.order_id
@@ -3354,7 +3371,7 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
         c.business_name AS businessName,
         c.name AS contactName,
         c.cuit,
-        SUM(ROUND(GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21, 2)) AS cargosPendientes,
+        ${SQL_ORDER_CARGO_PENDIENTE_SUM} AS cargosPendientes,
         COUNT(DISTINCT o.id) AS pedidosPendientes
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
@@ -4159,7 +4176,7 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
           LPAD(COALESCE(i.cbte_desde, 0), 8, '0')
         ) AS comprobante,
         o.id AS order_id,
-        ROUND(COALESCE(o.total, 0) * 1.21 + COALESCE(i.agip_ret_per, 0), 2) AS debe,
+        ${sqlInvoiceAmountFromOrderTotal()} AS debe,
         0 AS haber,
         CONCAT('Pedido ', COALESCE(o.id, '')) AS detalle
       FROM invoices i
@@ -4652,7 +4669,7 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
     const orderAgg = await get(
       `SELECT
          ROUND(COALESCE(SUM(${SQL_ORDER_SALDO_RESIDUAL}), 0), 2) AS facturas_bruto,
-         ROUND(COALESCE(SUM(ROUND(LEAST(COALESCE(cn.cn_total, 0), (${SQL_ORDER_NETO_GRAVADO})) * 1.21, 2)), 0), 2) AS nc_iva
+         ROUND(COALESCE(SUM(${SQL_ORDER_NC_CREDIT_EXPR}), 0), 2) AS nc_iva
        FROM orders o
        LEFT JOIN (
          SELECT order_id, SUM(amount_credited) AS cn_total

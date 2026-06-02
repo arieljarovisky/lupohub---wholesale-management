@@ -1,4 +1,5 @@
 import { execute, get, query } from '../database/db';
+import { IVA_MULTIPLIER, ORDER_PRICES_INCLUDE_IVA } from '../config/orderPricing';
 
 export const SQL_ORDER_NETO_GRAVADO = `GREATEST(
   COALESCE(o.total, 0),
@@ -101,14 +102,24 @@ export const SQL_INVOICE_AGIP_RET_PER = `COALESCE((
   SELECT i.agip_ret_per FROM invoices i WHERE i.order_id = o.id LIMIT 1
 ), 0)`;
 
-/** Cargo neto de NC (sin IVA en pedidos sin factura; con IVA 21% + IIBB si hay factura AFIP). */
+export const SQL_ORDER_BASE_MINUS_NC = ORDER_PRICES_INCLUDE_IVA
+  ? `GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - ROUND(COALESCE(cn.cn_total, 0) * ${IVA_MULTIPLIER}, 2))`
+  : `GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0))`;
+
+/** Neto AFIP equivalente al total de líneas del pedido. */
+export const SQL_ORDER_NETO_AFIP = ORDER_PRICES_INCLUDE_IVA
+  ? `ROUND((${SQL_ORDER_NETO_GRAVADO}) / ${IVA_MULTIPLIER}, 2)`
+  : `(${SQL_ORDER_NETO_GRAVADO})`;
+
+/** Cargo del pedido (líneas con IVA incluido o neto+IVA según config; NC en neto AFIP). */
 export const SQL_ORDER_CARGO_SALDO = `CASE
   WHEN EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
     THEN ROUND(
-      GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21
-      + (${SQL_INVOICE_AGIP_RET_PER}),
+      (${SQL_ORDER_BASE_MINUS_NC})${
+        ORDER_PRICES_INCLUDE_IVA ? '' : ` * ${IVA_MULTIPLIER}`
+      } + (${SQL_INVOICE_AGIP_RET_PER}),
     2)
-  ELSE ROUND(GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)), 2)
+  ELSE ROUND((${SQL_ORDER_BASE_MINUS_NC}), 2)
 END`;
 
 /** Saldo pendiente del pedido menos cobros imputados (neto sin factura; con IVA si está facturado). */
@@ -123,11 +134,10 @@ export const SQL_ORDER_HAS_SUPERSEDED_REINVOICE = `EXISTS (
   WHERE cn_r.order_id = o.id AND COALESCE(cn_r.superseded_by_reinvoice, 0) = 1
 )`;
 
-/** Cargo neto+IVA de la factura reemitida (sin IIBB en saldo; el IIBB queda en AFIP). */
-export const SQL_ORDER_CARGO_REINVOICE_NET = `ROUND(
-  GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21,
-  2
-)`;
+/** Cargo de la factura reemitida (sin IIBB en saldo; el IIBB queda en AFIP). */
+export const SQL_ORDER_CARGO_REINVOICE_NET = ORDER_PRICES_INCLUDE_IVA
+  ? `ROUND((${SQL_ORDER_BASE_MINUS_NC}), 2)`
+  : `ROUND((${SQL_ORDER_BASE_MINUS_NC}) * ${IVA_MULTIPLIER}, 2)`;
 
 /** Contribución al saldo de cartera por pedido (reemisión = cargo completo sin restar cobros). */
 export const SQL_ORDER_CARTERA_NET = `CASE

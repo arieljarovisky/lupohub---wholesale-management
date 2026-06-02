@@ -48,6 +48,7 @@ const uuid_1 = require("uuid");
 const db_1 = require("../database/db");
 const multimediaHistorialExcel_1 = require("../utils/multimediaHistorialExcel");
 const carteraImportedSql_1 = require("../sql/carteraImportedSql");
+const orderPricing_1 = require("../config/orderPricing");
 const orderPaymentBalance_service_1 = require("../services/orderPaymentBalance.service");
 const ledgerDocType_1 = require("../utils/ledgerDocType");
 const ledgerRunningSaldo_1 = require("../utils/ledgerRunningSaldo");
@@ -495,7 +496,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
             };
         });
         const invoiceAsEntries = invoiceRows.filter((inv) => movementOnOrAfterOpening(inv.line_date || inv.order_date)).map((inv, idx) => {
-            const importe = Math.round((Number(inv.total || 0) * 1.21 + Number(inv.agip_ret_per || 0)) * 100) / 100;
+            const importe = (0, orderPricing_1.invoiceLedgerImporte)(Number(inv.total || 0), Number(inv.agip_ret_per || 0));
             const numero = formatLedgerAfipNumero(Number(inv.cbte_tipo || 0), Number(inv.punto_venta || 0), Number(inv.cbte_desde || 0));
             return {
                 lineOrder: maxLineOrder + 55000 + idx,
@@ -512,7 +513,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
             };
         });
         const creditNoteAsEntries = creditNoteRows.filter((cn) => movementOnOrAfterOpening(cn.created_at)).map((cn, idx) => {
-            const importe = Math.round(Number(cn.amount_credited || 0) * 1.21 * 100) / 100;
+            const importe = (0, orderPricing_1.ncLedgerImporte)(Number(cn.amount_credited || 0));
             const numero = formatLedgerAfipNumero(Number(cn.cbte_tipo || 0), Number(cn.punto_venta || 0), Number(cn.cbte_desde || 0));
             return {
                 lineOrder: maxLineOrder + 60000 + idx,
