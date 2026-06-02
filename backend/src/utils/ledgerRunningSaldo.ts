@@ -34,6 +34,8 @@ export type LedgerRunningRow = {
   detalle?: string | null;
   source?: 'imported' | 'system';
   saldoCorrido?: number | null;
+  /** NC de reemisión: visible en historial pero no modifica el saldo corrido. */
+  excluirDeSaldo?: boolean;
 };
 
 /** Quita movimientos LupoHub que ya existen en el import Tango (misma clave). */
@@ -79,6 +81,10 @@ export function applyLedgerRunningSaldoSimple(rows: LedgerRunningRow[]): number 
   let hasRunning = false;
 
   for (const row of sorted) {
+    if (row.excluirDeSaldo) {
+      row.saldoCorrido = hasRunning ? running : null;
+      continue;
+    }
     if (row.importe != null && Number.isFinite(Number(row.importe))) {
       const tipoNorm = normalizeLedgerDocType(row.tipo, row.detalle);
       const amount = Math.abs(Number(row.importe)) || 0;
@@ -122,6 +128,11 @@ export function applyLedgerRunningSaldo(rows: LedgerRunningRow[]): number {
       running = Math.round(importedSaldo * 100) / 100;
       hasRunning = true;
       row.saldoCorrido = running;
+      continue;
+    }
+
+    if (row.excluirDeSaldo) {
+      row.saldoCorrido = hasRunning ? running : null;
       continue;
     }
 

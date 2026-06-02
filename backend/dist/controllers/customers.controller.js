@@ -1158,7 +1158,7 @@ const SQL_CARTERA_AFIP_INVOICES_SUBQUERY = `
     )
   GROUP BY o.customer_id
 `;
-/** NC AFIP activas (× IVA), desde saldo inicial — alineado con historial / saldo corrido. */
+/** NC AFIP (× IVA), desde saldo inicial — incluye reemisión (anulan la factura previa). */
 const SQL_CARTERA_AFIP_NC_SUBQUERY = `
   SELECT
     o.customer_id,
@@ -1167,7 +1167,6 @@ const SQL_CARTERA_AFIP_NC_SUBQUERY = `
   INNER JOIN orders o ON o.id = cn.order_id
   INNER JOIN customers co ON co.id = o.customer_id
   WHERE ${SQL_ORDER_ACTIVE_COND}
-    AND COALESCE(cn.superseded_by_reinvoice, 0) = 0
     AND (
       co.opening_balance_date IS NULL
       OR DATE(cn.created_at) >= co.opening_balance_date
@@ -3839,7 +3838,6 @@ function buildCustomerFinancialSummary(customerId) {
       FROM credit_notes cn
       JOIN orders o ON o.id = cn.order_id
       WHERE o.customer_id = ?
-        AND COALESCE(cn.superseded_by_reinvoice, 0) = 0
 
       UNION ALL
 

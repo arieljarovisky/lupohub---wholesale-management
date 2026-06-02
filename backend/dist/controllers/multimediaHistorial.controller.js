@@ -448,11 +448,11 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
          cn.punto_venta,
          cn.cbte_desde,
          cn.created_at,
-         cn.amount_credited
+         cn.amount_credited,
+         COALESCE(cn.superseded_by_reinvoice, 0) AS superseded_by_reinvoice
        FROM credit_notes cn
        JOIN orders o ON o.id = cn.order_id
        WHERE o.customer_id = ?
-         AND COALESCE(cn.superseded_by_reinvoice, 0) = 0
        ORDER BY cn.created_at ASC, cn.id ASC`, [id]));
         let manualComprobanteRows = [];
         try {
@@ -507,6 +507,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
         });
         const creditNoteAsEntries = creditNoteRows.filter((cn) => movementOnOrAfterOpening(cn.created_at)).map((cn, idx) => {
             const importe = (0, orderPricing_1.ncLedgerImporte)(Number(cn.amount_credited || 0));
+            const superseded = !!Number(cn.superseded_by_reinvoice);
             const numero = formatLedgerAfipNumero(Number(cn.cbte_tipo || 0), Number(cn.punto_venta || 0), Number(cn.cbte_desde || 0));
             return {
                 lineOrder: maxLineOrder + 60000 + idx,
@@ -517,7 +518,9 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 vto: null,
                 importe: importe > 0 ? importe : null,
                 saldo: null,
-                detalle: `Pedido ${cn.order_id || ''} · NC AFIP LupoHub`,
+                detalle: superseded
+                    ? `Pedido ${cn.order_id || ''} · NC AFIP LupoHub · reemisión`
+                    : `Pedido ${cn.order_id || ''} · NC AFIP LupoHub`,
                 paginaPdf: null,
                 source: 'system'
             };
