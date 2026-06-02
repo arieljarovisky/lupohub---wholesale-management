@@ -216,6 +216,18 @@ function mapCustomerFromApi(r: any): Customer {
     legacyCode: r.legacyCode ?? r.legacy_code ?? undefined,
     accountZone: r.accountZone ?? r.account_zone ?? undefined,
     accountSellerLabel: r.accountSellerLabel ?? r.account_seller_label ?? undefined,
+    openingBalance:
+      r.openingBalance != null && r.openingBalance !== ''
+        ? Number(r.openingBalance)
+        : r.opening_balance != null && r.opening_balance !== ''
+          ? Number(r.opening_balance)
+          : undefined,
+    openingBalanceDate:
+      r.openingBalanceDate != null && String(r.openingBalanceDate).trim()
+        ? String(r.openingBalanceDate).slice(0, 10)
+        : r.opening_balance_date != null && String(r.opening_balance_date).trim()
+          ? String(r.opening_balance_date).slice(0, 10)
+          : undefined,
     shouldRetainIibb: Boolean(r.shouldRetainIibb ?? r.should_retain_iibb),
     agipPadronPeriod: r.agipPadronPeriod ?? r.agip_padron_period ?? undefined,
     iibbAlicuota: r.iibbAlicuota != null ? Number(r.iibbAlicuota) : (r.iibb_alicuota != null ? Number(r.iibb_alicuota) : undefined),

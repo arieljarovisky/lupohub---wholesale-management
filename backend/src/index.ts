@@ -66,6 +66,7 @@ import companyFinanceRoutes from './routes/companyFinance.routes';
 import { addRemitoSequence } from './database/add_remito_sequence';
 import { addCustomerDeliveryAddresses } from './database/add_customer_delivery_addresses';
 import { addCustomerSellerCommission } from './database/add_customer_seller_commission';
+import { addCustomerOpeningBalance } from './database/add_customer_opening_balance';
 import { addPublicationStockBundles } from './database/add_publication_stock_bundles';
 import { addOrdersPerformanceIndexes } from './database/add_orders_performance_indexes';
 import { initSchema } from './database/init_schema';
@@ -218,6 +219,7 @@ async function initDatabase() {
       await addRemitoSequence();
       await addCustomerDeliveryAddresses();
       await addCustomerSellerCommission();
+      await addCustomerOpeningBalance();
       await addPublicationStockBundles();
       await addOrdersPerformanceIndexes();
       console.log('[DB] Tablas inicializadas correctamente');

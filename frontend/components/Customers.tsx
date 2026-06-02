@@ -167,7 +167,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     return () => {
       cancelled = true;
     };
-  }, [selectedCustomer?.id, canViewSaldos]);
+  }, [selectedCustomer?.id, selectedCustomer?.openingBalance, selectedCustomer?.openingBalanceDate, canViewSaldos]);
 
   useEffect(() => {
     setLedgerVisibleCount(LEDGER_MOVEMENTS_PAGE);
@@ -223,6 +223,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [newLegacyCode, setNewLegacyCode] = useState('');
   const [newAccountZone, setNewAccountZone] = useState('');
   const [newAccountSellerLabel, setNewAccountSellerLabel] = useState('');
+  const [newOpeningBalance, setNewOpeningBalance] = useState('');
+  const [newOpeningBalanceDate, setNewOpeningBalanceDate] = useState('');
   const [selectedTransporteIds, setSelectedTransporteIds] = useState<string[]>([]);
   /** Sucursales / puntos de entrega adicionales (se guardan en `deliveryAddresses`). */
   const [deliveryBranchRows, setDeliveryBranchRows] = useState<CustomerDeliveryAddress[]>([]);
@@ -465,6 +467,14 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         accountZone: newAccountZone.trim() || undefined,
         accountSellerLabel: newAccountSellerLabel.trim() || undefined,
         deliveryAddresses: normalizedDeliveryBranches(),
+        ...(role === Role.ADMIN
+          ? {
+              openingBalance: newOpeningBalance.trim()
+                ? Number(newOpeningBalance.replace(/\./g, '').replace(',', '.'))
+                : null,
+              openingBalanceDate: newOpeningBalanceDate.trim() || null
+            }
+          : {})
       };
       Promise.resolve(onUpdateCustomer(editingCustomer.id, data)).then(() => {
         setSelectedCustomer(prev => prev?.id === editingCustomer.id ? { ...prev, ...data, transportes: selectedTransporteIds.map(id => ({ id, name: transportes.find(t => t.id === id)?.name ?? '' })), deliveryAddresses: normalizedDeliveryBranches() } : prev);
@@ -483,8 +493,11 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         setNewLegacyCode('');
         setNewAccountZone('');
         setNewAccountSellerLabel('');
+        setNewOpeningBalance('');
+        setNewOpeningBalanceDate('');
         setSelectedTransporteIds([]);
         setDeliveryBranchRows([]);
+        loadCarteraTotals();
       }).catch(() => {});
       return;
     }
@@ -965,7 +978,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
           <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900 rounded-t-3xl">
             <h3 className="text-xl font-bold text-white">{editingCustomer ? 'Editar cliente' : 'Alta de Cliente'}</h3>
             <button
-              onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setNewLegacyCode(''); setNewAccountZone(''); setNewAccountSellerLabel(''); setSelectedTransporteIds([]); setDeliveryBranchRows([]); }}
+              onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setNewLegacyCode(''); setNewAccountZone(''); setNewAccountSellerLabel(''); setNewOpeningBalance(''); setNewOpeningBalanceDate(''); setSelectedTransporteIds([]); setDeliveryBranchRows([]); }}
               className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full hover:bg-slate-700 transition"
             >
               <X size={20} />
@@ -1070,9 +1083,40 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 </div>
               </div>
             </div>
+            {role === Role.ADMIN && (
+              <div className="pt-3 border-t border-amber-500/20">
+                <p className="text-[10px] text-amber-200/80 uppercase font-black mb-2 ml-1">Saldo inicial de cuenta corriente</p>
+                <p className="text-[10px] text-slate-500 mb-3 ml-1 leading-relaxed">
+                  Cargá el saldo que el cliente tenía a una fecha (ej. cierre 31/03). Solo se suman movimientos LupoHub desde esa fecha.
+                  Dejá vacío para quitar el saldo inicial.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Importe ($)</label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all font-mono text-sm"
+                      value={newOpeningBalance}
+                      onChange={(e) => setNewOpeningBalance(e.target.value)}
+                      placeholder="Ej: 1228093.27"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Desde fecha</label>
+                    <input
+                      type="date"
+                      className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all text-sm"
+                      value={newOpeningBalanceDate}
+                      onChange={(e) => setNewOpeningBalanceDate(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
           <div className="p-6 border-t border-slate-800 bg-slate-900 rounded-b-3xl flex justify-end gap-3">
-            <button onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setNewLegacyCode(''); setNewAccountZone(''); setNewAccountSellerLabel(''); setSelectedTransporteIds([]); setDeliveryBranchRows([]); }} className="px-5 py-2.5 text-slate-400 hover:bg-slate-800 rounded-xl transition font-medium">Cancelar</button>
+            <button onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setNewLegacyCode(''); setNewAccountZone(''); setNewAccountSellerLabel(''); setNewOpeningBalance(''); setNewOpeningBalanceDate(''); setSelectedTransporteIds([]); setDeliveryBranchRows([]); }} className="px-5 py-2.5 text-slate-400 hover:bg-slate-800 rounded-xl transition font-medium">Cancelar</button>
             <button onClick={handleSave} disabled={!newBusinessName || !newEmail} className="bg-blue-600 text-white px-6 py-2.5 rounded-xl font-bold hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-lg shadow-blue-900/40 active:scale-95 transition-all">
               <Save size={18} />
               {editingCustomer ? 'Guardar cambios' : 'Guardar Cliente'}
@@ -1193,6 +1237,12 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                  setNewLegacyCode(selectedCustomer.legacyCode || '');
                  setNewAccountZone(selectedCustomer.accountZone || '');
                  setNewAccountSellerLabel(selectedCustomer.accountSellerLabel || '');
+                 setNewOpeningBalance(
+                   selectedCustomer.openingBalance != null && Number.isFinite(selectedCustomer.openingBalance)
+                     ? String(selectedCustomer.openingBalance)
+                     : ''
+                 );
+                 setNewOpeningBalanceDate(selectedCustomer.openingBalanceDate || '');
                  setSelectedTransporteIds(selectedCustomer.transportes?.map(t => t.id) ?? []);
                  setDeliveryBranchRows((selectedCustomer.deliveryAddresses ?? []).map((d) => ({ ...d })));
                  setEditingCustomer(selectedCustomer);
@@ -1501,11 +1551,26 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   <span className="text-sm font-black uppercase tracking-[0.22em]">Saldo pendiente</span>
                 </div>
                 <p className="text-[11px] text-slate-400 leading-relaxed max-w-xl">
-                  Es la <span className="text-slate-300">deuda actual</span>: suma de facturas y pedidos LupoHub − notas de crédito −
-                  recibos. La tabla de abajo es el historial; el número grande de arriba es el que importa para cobrar.
+                  Es la <span className="text-slate-300">deuda actual</span>: saldo inicial manual (si cargaste uno) + facturas y pedidos
+                  LupoHub desde esa fecha − notas de crédito − recibos. La tabla de abajo es el historial; el número grande de arriba es el
+                  que importa para cobrar.
                 </p>
                 {carteraById[selectedCustomer.id] && (
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500 font-mono tabular-nums pt-1">
+                    {selectedCustomer.openingBalance != null &&
+                    Math.abs(Number(selectedCustomer.openingBalance)) > 0.005 ? (
+                      <span className="text-amber-300/90">
+                        + Saldo inicial
+                        {selectedCustomer.openingBalanceDate
+                          ? ` (${selectedCustomer.openingBalanceDate.split('-').reverse().join('/')})`
+                          : ''}
+                        : $
+                        {Number(selectedCustomer.openingBalance).toLocaleString('es-AR', {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2
+                        })}
+                      </span>
+                    ) : null}
                     <span>
                       + Facturas/pedidos: $
                       {carteraById[selectedCustomer.id].orderCargosPendientes.toLocaleString('es-AR', {
@@ -2669,7 +2734,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900 rounded-t-3xl">
               <h3 className="text-xl font-bold text-white">{editingCustomer ? 'Editar cliente' : 'Alta de Cliente'}</h3>
               <button
-                onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setNewLegacyCode(''); setNewAccountZone(''); setNewAccountSellerLabel(''); setSelectedTransporteIds([]); setDeliveryBranchRows([]); }}
+                onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setNewLegacyCode(''); setNewAccountZone(''); setNewAccountSellerLabel(''); setNewOpeningBalance(''); setNewOpeningBalanceDate(''); setSelectedTransporteIds([]); setDeliveryBranchRows([]); }}
                 className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-full hover:bg-slate-700 transition"
               >
                 <X size={20} />
@@ -2835,11 +2900,42 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   </div>
                 </div>
               </div>
+              {role === Role.ADMIN && (
+                <div className="pt-3 border-t border-amber-500/20">
+                  <p className="text-[10px] text-amber-200/80 uppercase font-black mb-2 ml-1">Saldo inicial de cuenta corriente</p>
+                  <p className="text-[10px] text-slate-500 mb-3 ml-1 leading-relaxed">
+                    Cargá el saldo que el cliente tenía a una fecha (ej. cierre 31/03). Solo se suman movimientos LupoHub desde esa fecha.
+                    Dejá vacío para quitar el saldo inicial.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Importe ($)</label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all font-mono text-sm"
+                        value={newOpeningBalance}
+                        onChange={(e) => setNewOpeningBalance(e.target.value)}
+                        placeholder="Ej: 1228093.27"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Desde fecha</label>
+                      <input
+                        type="date"
+                        className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all text-sm"
+                        value={newOpeningBalanceDate}
+                        onChange={(e) => setNewOpeningBalanceDate(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="p-6 border-t border-slate-800 bg-slate-900 rounded-b-3xl flex justify-end gap-3">
               <button 
-                onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setNewLegacyCode(''); setNewAccountZone(''); setNewAccountSellerLabel(''); setSelectedTransporteIds([]); setDeliveryBranchRows([]); }}
+                onClick={() => { setIsCreating(false); setEditingCustomer(null); setNewPhone(''); setNewTransportNumber(''); setNewRemitoNumber(''); setNewSaleCondition(''); setNewCondicionIva(''); setNewLegacyCode(''); setNewAccountZone(''); setNewAccountSellerLabel(''); setNewOpeningBalance(''); setNewOpeningBalanceDate(''); setSelectedTransporteIds([]); setDeliveryBranchRows([]); }}
                 className="px-5 py-2.5 text-slate-400 hover:bg-slate-800 rounded-xl transition font-medium"
               >
                 Cancelar

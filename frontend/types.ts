@@ -141,6 +141,10 @@ export interface Customer {
   accountZone?: string;
   /** Vendedor habitual en historial (ej. "27 - Colombo") */
   accountSellerLabel?: string;
+  /** Saldo de arranque manual (cuenta corriente desde una fecha). Solo admin. */
+  openingBalance?: number | null;
+  /** Fecha desde la cual cuentan movimientos LupoHub (YYYY-MM-DD). */
+  openingBalanceDate?: string | null;
   /** Si el CUIT figura en padrón AGIP del último período importado. */
   shouldRetainIibb?: boolean;
   /** Período AGIP (YYYYMM) usado para la validación de retención. */
