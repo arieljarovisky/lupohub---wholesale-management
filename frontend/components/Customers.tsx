@@ -9,7 +9,6 @@ import { useNotification } from '../context/NotificationContext';
 import { getWholesaleStockImpactMeta } from '../utils/orderStockImpact';
 import { orderPedidoImporteDisplay } from '../utils/wholesaleInvoiceHtml';
 import { formatMoneyAr } from '../utils/moneyFormat';
-import { ORDER_PRICES_INCLUDE_IVA } from '../utils/orderPricing';
 import { canonicalizeCityInput, cityDisplayLabel, isCabaCity, normalizeCityKey } from '../utils/cityNormalize';
 import { CityInput } from './CityInput';
 import { ledgerTipoDisplay } from '../utils/ledgerDocType';
@@ -971,8 +970,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                              </p>
                              <p className="text-xs text-slate-500 tabular-nums">
                                ${formatMoneyAr(item.priceAtMoment)} c/u
-                               {selectedOrder.invoice && !ORDER_PRICES_INCLUDE_IVA ? ' · neto' : ''}
-                               {ORDER_PRICES_INCLUDE_IVA ? ' · c/IVA' : ''}
+                               {selectedOrder.invoice ? ' · neto' : ''}
                              </p>
                           </div>
                        </div>

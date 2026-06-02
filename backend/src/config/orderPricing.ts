@@ -1,11 +1,13 @@
 /**
- * Precios de pedido mayorista (`price_at_moment`, `orders.total`): importe con IVA 21% incluido.
- * AFIP y NC siguen usando neto gravado; las conversiones se hacen acá.
- * Para volver al modelo neto + IVA aparte: ORDER_PRICES_INCLUDE_IVA=0
+ * `orders.total` y `price_at_moment` = neto gravado (sin IVA).
+ * El total de la factura AFIP = neto × 1,21 + percepción IIBB (una sola vez).
+ *
+ * Si en algún cliente los precios de lista ya incluyen IVA en el pedido:
+ * ORDER_PRICES_INCLUDE_IVA=1 (solo afecta cartera/saldo, no la pantalla Facturación).
  */
 export const ORDER_PRICES_INCLUDE_IVA =
-  process.env.ORDER_PRICES_INCLUDE_IVA !== '0' &&
-  process.env.ORDER_PRICES_INCLUDE_IVA !== 'false';
+  process.env.ORDER_PRICES_INCLUDE_IVA === '1' ||
+  process.env.ORDER_PRICES_INCLUDE_IVA === 'true';
 
 export const IVA_MULTIPLIER = 1.21;
 
@@ -21,7 +23,7 @@ export function orderAfipNetoToGross(neto: number): number {
   return Math.round(n * IVA_MULTIPLIER * 100) / 100;
 }
 
-/** SQL: importe con IVA desde suma de líneas / total pedido (ya con IVA o neto según config). */
+/** SQL: cargo en cartera desde líneas del pedido. */
 export function sqlAmountWithIvaFromOrderLines(netoGravadoExpr: string): string {
   if (ORDER_PRICES_INCLUDE_IVA) {
     return `ROUND((${netoGravadoExpr}), 2)`;
@@ -29,33 +31,26 @@ export function sqlAmountWithIvaFromOrderLines(netoGravadoExpr: string): string 
   return `ROUND((${netoGravadoExpr}) * ${IVA_MULTIPLIER}, 2)`;
 }
 
-/** SQL: NC u otro neto AFIP → importe con IVA (amount_credited siempre es neto). */
+/** SQL: NC — amount_credited es neto AFIP. */
 export function sqlNetoAfipToAmountWithIva(netoExpr: string): string {
   return `ROUND((${netoExpr}) * ${IVA_MULTIPLIER}, 2)`;
 }
 
-/** SQL: importe factura desde orders.total (con o sin IVA según config). */
+/** SQL: importe total de factura AFIP (neto del pedido + IVA 21% + IIBB). */
 export function sqlInvoiceAmountFromOrderTotal(): string {
-  if (ORDER_PRICES_INCLUDE_IVA) {
-    return 'ROUND(COALESCE(o.total, 0) + COALESCE(i.agip_ret_per, 0), 2)';
-  }
-  return 'ROUND(COALESCE(o.total, 0) * 1.21 + COALESCE(i.agip_ret_per, 0), 2)';
+  return `ROUND(COALESCE(o.total, 0) * ${IVA_MULTIPLIER} + COALESCE(i.agip_ret_per, 0), 2)`;
 }
 
-/** SQL: importe factura solo desde orders.total (sin IIBB). */
+/** SQL: neto del pedido + IVA (sin IIBB). */
 export function sqlOrderTotalWithIvaExpr(): string {
-  if (ORDER_PRICES_INCLUDE_IVA) {
-    return 'ROUND(COALESCE(o.total, 0), 2)';
-  }
-  return 'ROUND(COALESCE(o.total, 0) * 1.21, 2)';
+  return `ROUND(COALESCE(o.total, 0) * ${IVA_MULTIPLIER}, 2)`;
 }
 
-/** Importe con IVA para historial / ledger (orders.total con IVA incluido). */
+/** Importe de factura para historial / listados (siempre neto + IVA + IIBB). */
 export function invoiceLedgerImporte(orderTotal: number, agipRetPer = 0): number {
-  const gross = Math.round((Number(orderTotal) || 0) * 100) / 100;
+  const neto = Math.round((Number(orderTotal) || 0) * 100) / 100;
   const agip = Math.round((Number(agipRetPer) || 0) * 100) / 100;
-  if (ORDER_PRICES_INCLUDE_IVA) return Math.round((gross + agip) * 100) / 100;
-  return Math.round((gross * IVA_MULTIPLIER + agip) * 100) / 100;
+  return Math.round((neto * IVA_MULTIPLIER + agip) * 100) / 100;
 }
 
 /** NC: amount_credited es neto AFIP. */

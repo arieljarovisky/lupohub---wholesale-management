@@ -434,24 +434,11 @@ export function orderUnitsDisplayCount(order: Order): number | null {
   return null;
 }
 
-/** Total del comprobante (líneas con IVA + IIBB, o neto+IVA+IIBB según config). */
+/** Total del comprobante AFIP: neto gravado del pedido + IVA 21% + IIBB. */
 export function orderTotalesFacturado(order: Order): OrderFiscalTotalsDisplay | null {
   if (!order.invoice) return null;
   const cbteTipo = Number(order.invoice.cbteTipo ?? 6);
   const agipRet = Math.round((Number(order.invoice.agipRetPer ?? 0)) * 100) / 100;
-  const lineGross = orderLineGross(order);
-  if (ORDER_PRICES_INCLUDE_IVA && lineGross > 0.005) {
-    const neto = orderGrossToAfipNeto(lineGross);
-    const iva = Math.round((lineGross - neto) * 100) / 100;
-    const total = Math.round((lineGross + agipRet) * 100) / 100;
-    return {
-      neto,
-      iva,
-      iibb: agipRet,
-      total,
-      discriminaIva: !isComprobanteClaseB(cbteTipo),
-    };
-  }
   const neto = orderNetoFacturadoEstimado(order);
   const t = calcTotalesDesdeNetoGravado(neto, cbteTipo, agipRet);
   return {
@@ -472,8 +459,8 @@ export function orderPedidoImporteDisplay(order: Order): {
 } {
   const lineGross = orderNetoSaldoForOrderCard(order);
   const fact = order.invoice ? orderTotalesFacturado(order) : null;
-  const labelSinFactura = ORDER_PRICES_INCLUDE_IVA ? 'Total pedido (IVA incluido)' : 'Neto pedido (sin IVA)';
-  const labelFacturado = ORDER_PRICES_INCLUDE_IVA ? 'Total pedido (IVA incluido)' : 'Total facturado (AFIP)';
+  const labelSinFactura = 'Neto pedido (sin IVA)';
+  const labelFacturado = 'Total facturado (AFIP)';
   if (!fact) {
     return {
       lineGross,
