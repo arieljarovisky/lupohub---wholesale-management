@@ -836,10 +836,17 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
       });
     }
     applyLedgerRunningSaldo(unified);
-    const lastSaldo = applyLedgerRunningSaldoSimple(unified);
+    const lastSaldoHistorial = applyLedgerRunningSaldoSimple(unified);
     for (const row of unified) {
       row.saldo = row.saldoCorrido ?? null;
     }
+
+    const { queryCarteraTotalsForCustomer } = await import('./customers.controller');
+    const carteraTotals = await queryCarteraTotalsForCustomer(id, {
+      id: String(user.id),
+      role: String(user.role)
+    });
+    const saldoPendienteUnificado = carteraTotals?.saldoPendienteUnificado ?? lastSaldoHistorial;
 
     res.json({
       customerId: id,
@@ -847,7 +854,11 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
       accountZone: cust.account_zone ?? null,
       accountSellerLabel: cust.account_seller_label ?? null,
       movementCount: unified.length,
-      lastSaldo,
+      lastSaldo: saldoPendienteUnificado,
+      lastSaldoHistorial,
+      saldoPendienteUnificado,
+      openingBalance,
+      carteraTotals,
       entries: unified
     });
   } catch (e: any) {

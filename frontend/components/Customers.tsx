@@ -145,6 +145,20 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
       .then((d) => {
         if (cancelled) return;
         setMultimediaLedger(d);
+        const ct = (d as { carteraTotals?: typeof carteraById[string] }).carteraTotals;
+        const saldoUni = Number((d as { saldoPendienteUnificado?: number }).saldoPendienteUnificado);
+        if (ct && Number.isFinite(saldoUni)) {
+          setCarteraById((prev) => ({
+            ...prev,
+            [selectedCustomer.id]: {
+              orderCargosPendientes: Number(ct.orderCargosPendientes) || 0,
+              totalNotasCredito: Number(ct.totalNotasCredito) || 0,
+              totalPagos: Number(ct.totalPagos) || 0,
+              multimediaSaldo: 0,
+              saldoPendienteUnificado: saldoUni
+            }
+          }));
+        }
         if (!d.entries?.length) {
           api
             .getCustomerFinancialSummary(selectedCustomer.id)
@@ -305,18 +319,6 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     if (t == null) return 0;
     const n = Number(t.saldoPendienteUnificado);
     return Number.isFinite(n) ? n : 0;
-  };
-
-  /** En detalle del cliente, prioriza el cierre del historial si ya cargó (coincide con la tabla). */
-  const saldoPendienteDisplay = (c: Customer) => {
-    if (
-      selectedCustomer?.id === c.id &&
-      multimediaLedger?.lastSaldo != null &&
-      Number.isFinite(Number(multimediaLedger.lastSaldo))
-    ) {
-      return Number(multimediaLedger.lastSaldo);
-    }
-    return getSaldoPendienteTotal(c);
   };
 
   const displayCustomers = useMemo(() => {
@@ -1587,20 +1589,23 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 </p>
                 {carteraById[selectedCustomer.id] && (
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500 font-mono tabular-nums pt-1">
-                    {selectedCustomer.openingBalance != null &&
-                    Math.abs(Number(selectedCustomer.openingBalance)) > 0.005 ? (
-                      <span className="text-amber-300/90">
-                        + Saldo inicial
-                        {selectedCustomer.openingBalanceDate
-                          ? ` (${selectedCustomer.openingBalanceDate.split('-').reverse().join('/')})`
-                          : ''}
-                        : $
-                        {Number(selectedCustomer.openingBalance).toLocaleString('es-AR', {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2
-                        })}
-                      </span>
-                    ) : null}
+                    {(() => {
+                      const ob =
+                        Number(multimediaLedger?.openingBalance ?? selectedCustomer.openingBalance) || 0;
+                      if (Math.abs(ob) <= 0.005) return null;
+                      const dateLabel = selectedCustomer.openingBalanceDate
+                        ? ` (${selectedCustomer.openingBalanceDate.split('-').reverse().join('/')})`
+                        : '';
+                      return (
+                        <span className="text-amber-300/90">
+                          + Saldo inicial{dateLabel}: $
+                          {ob.toLocaleString('es-AR', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2
+                          })}
+                        </span>
+                      );
+                    })()}
                     <span>
                       + Facturas/pedidos: $
                       {carteraById[selectedCustomer.id].orderCargosPendientes.toLocaleString('es-AR', {
@@ -1628,12 +1633,12 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               <div className="flex flex-col items-stretch sm:items-end gap-2 shrink-0">
                 <p
                   className={`text-3xl font-black tabular-nums sm:text-right ${
-                    saldoPendienteDisplay(selectedCustomer) < -0.01
+                    getSaldoPendienteTotal(selectedCustomer) < -0.01
                       ? 'text-emerald-300'
                       : 'text-white'
                   }`}
                   title={
-                    saldoPendienteDisplay(selectedCustomer) < -0.01
+                    getSaldoPendienteTotal(selectedCustomer) < -0.01
                       ? 'Saldo a favor del cliente (le debés)'
                       : undefined
                   }
@@ -1643,7 +1648,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   ) : (
                     <>
                       $
-                      {saldoPendienteDisplay(selectedCustomer).toLocaleString('es-AR', {
+                      {getSaldoPendienteTotal(selectedCustomer).toLocaleString('es-AR', {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2
                       })}
@@ -1698,7 +1703,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   </p>
                   {carteraById[selectedCustomer.id] &&
                   ledgerSaldoHistorialFinal != null &&
-                  Math.abs(ledgerSaldoHistorialFinal - saldoPendienteDisplay(selectedCustomer)) > 1 ? (
+                  Math.abs(ledgerSaldoHistorialFinal - getSaldoPendienteTotal(selectedCustomer)) > 1 ? (
                     <p className="text-amber-100/80">
                       En el Excel por vendedor: ignorá el «saldo del período con arrastre» si no coincide; el que dice{' '}
                       <span className="font-bold">Saldo pendiente</span> en verde es el mismo que acá.

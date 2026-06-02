@@ -1640,6 +1640,114 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
   }
 };
 
+export type CarteraTotalsOne = {
+  orderCargosPendientes: number;
+  totalNotasCredito: number;
+  totalPagos: number;
+  saldoPendienteUnificado: number;
+  openingBalance: number;
+};
+
+/** Totales de cartera de un cliente (misma consulta que GET /cartera-totals). */
+export async function queryCarteraTotalsForCustomer(
+  customerId: string,
+  user: { id: string; role: string }
+): Promise<CarteraTotalsOne | null> {
+  await backfillPaymentOrdersFromLegacy();
+  const sellerFilter = user.role === 'SELLER' ? ' AND c.seller_id = ?' : '';
+  const paymentsSubquery =
+    user.role === 'SELLER'
+      ? `SELECT d.customer_id, SUM(d.amount) AS total_pagos
+         FROM (
+           SELECT p.customer_id, ROUND(COALESCE(p.amount, 0), 2) AS amount,
+             CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+             ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END AS receipt_norm
+           FROM payments p
+           INNER JOIN customers c2 ON c2.id = p.customer_id
+           LEFT JOIN (
+             SELECT e.customer_id, DATE(e.line_date) AS line_date, ROUND(COALESCE(e.importe, 0), 2) AS amount,
+               UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) AS receipt_norm
+             FROM customer_multimedia_entries e
+             WHERE UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO') AND TRIM(COALESCE(e.numero, '')) <> ''
+             GROUP BY e.customer_id, DATE(e.line_date), ROUND(COALESCE(e.importe, 0), 2),
+               UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', ''))
+           ) me_rec ON me_rec.customer_id = p.customer_id AND me_rec.line_date = DATE(p.date)
+             AND me_rec.amount = ROUND(COALESCE(p.amount, 0), 2)
+             AND me_rec.receipt_norm = CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+             ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END
+           WHERE (p.seller_id = ? OR c2.seller_id = ?) AND me_rec.customer_id IS NULL
+             AND ${sqlOpeningPaymentDateWhere('c2')} AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
+           GROUP BY p.customer_id, DATE(p.date), ROUND(COALESCE(p.amount, 0), 2),
+             CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+             ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END
+         ) d GROUP BY d.customer_id`
+      : `SELECT d.customer_id, SUM(d.amount) AS total_pagos
+         FROM (
+           SELECT p.customer_id, ROUND(COALESCE(p.amount, 0), 2) AS amount,
+             CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+             ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END AS receipt_norm
+           FROM payments p
+           INNER JOIN customers cp ON cp.id = p.customer_id
+           LEFT JOIN (
+             SELECT e.customer_id, DATE(e.line_date) AS line_date, ROUND(COALESCE(e.importe, 0), 2) AS amount,
+               UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) AS receipt_norm
+             FROM customer_multimedia_entries e
+             WHERE UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('REC', 'RECIBO', 'PAGO', 'COBRO', 'INGRESO') AND TRIM(COALESCE(e.numero, '')) <> ''
+             GROUP BY e.customer_id, DATE(e.line_date), ROUND(COALESCE(e.importe, 0), 2),
+               UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', ''))
+           ) me_rec ON me_rec.customer_id = p.customer_id AND me_rec.line_date = DATE(p.date)
+             AND me_rec.amount = ROUND(COALESCE(p.amount, 0), 2)
+             AND me_rec.receipt_norm = CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+             ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END
+           WHERE me_rec.customer_id IS NULL AND ${sqlOpeningPaymentDateWhere('cp')} AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
+           GROUP BY p.customer_id, DATE(p.date), ROUND(COALESCE(p.amount, 0), 2),
+             CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+             ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END
+         ) d GROUP BY d.customer_id`;
+
+  const saldoExpr = carteraSaldoSqlExpr();
+  const sql = `
+    SELECT
+      ${carteraTotalFacturasSql()} AS orderCargosPendientes,
+      ${carteraTotalNcSql()} AS totalNotasCredito,
+      ${carteraTotalRecibosSql()} AS totalPagos,
+      ${saldoExpr} AS saldoPendienteUnificado,
+      ROUND(COALESCE(c.opening_balance, 0), 2) AS openingBalance
+    FROM customers c
+    LEFT JOIN (${SQL_CARTERA_AFIP_INVOICES_SUBQUERY}) afip ON afip.customer_id = c.id
+    LEFT JOIN (${SQL_CARTERA_PEDIDOS_SF_SUBQUERY}) ped ON ped.customer_id = c.id
+    LEFT JOIN (${SQL_CARTERA_AFIP_NC_SUBQUERY}) afipnc ON afipnc.customer_id = c.id
+    LEFT JOIN (
+      SELECT m.customer_id, SUM(ROUND(m.importe_neto + COALESCE(m.agip_ret_per, 0), 2)) AS manual_fac
+      FROM customer_manual_comprobantes m
+      INNER JOIN customers co ON co.id = m.customer_id
+      WHERE m.tipo = 'FACTURA' AND ${SQL_OPENING_MANUAL_DATE_WHERE}
+      GROUP BY m.customer_id
+    ) mfac ON mfac.customer_id = c.id
+    LEFT JOIN (
+      SELECT m.customer_id, SUM(ROUND(m.importe_neto, 2)) AS manual_nc
+      FROM customer_manual_comprobantes m
+      INNER JOIN customers co ON co.id = m.customer_id
+      WHERE m.tipo = 'NC' AND ${SQL_OPENING_MANUAL_DATE_WHERE}
+      GROUP BY m.customer_id
+    ) mnc ON mnc.customer_id = c.id
+    ${SQL_CARTERA_IMPORT_JOIN}
+    LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
+    WHERE c.id = ?${sellerFilter}
+  `;
+  const params: any[] =
+    user.role === 'SELLER' ? [user.id, user.id, customerId, user.id] : [customerId];
+  const row = (await get(sql, params)) as Record<string, unknown> | undefined;
+  if (!row) return null;
+  return {
+    orderCargosPendientes: parseSaldoNumero(row.orderCargosPendientes),
+    totalNotasCredito: parseSaldoNumero(row.totalNotasCredito),
+    totalPagos: parseSaldoNumero(row.totalPagos),
+    saldoPendienteUnificado: parseSaldoNumero(row.saldoPendienteUnificado),
+    openingBalance: parseSaldoNumero(row.openingBalance)
+  };
+}
+
 /** Saldo unificado por cliente (misma fórmula que getCarteraTotals), sin filtrar por saldo > 0. */
 async function fetchCarteraSaldoUnificadoMap(
   sellerIdFilter: string,

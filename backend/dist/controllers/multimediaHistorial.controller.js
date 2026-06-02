@@ -391,7 +391,7 @@ const importMultimediaHistorial = (req, res) => __awaiter(void 0, void 0, void 0
 exports.importMultimediaHistorial = importMultimediaHistorial;
 /** GET /customers/:id/multimedia-ledger — movimientos importados (Excel Tango/Multimedias) para la ficha del cliente. */
 const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d;
+    var _a, _b, _c, _d, _e;
     try {
         const user = req.user;
         if (!user || !canManage(user.role)) {
@@ -504,7 +504,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
          WHERE customer_id = ?
          ORDER BY fecha ASC, created_at ASC`, [id]));
         }
-        catch (_e) {
+        catch (_f) {
             manualComprobanteRows = (yield (0, db_1.query)(`SELECT id, tipo, fecha, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, importe_neto, agip_ret_per, notes, ref_order_id, created_at
          FROM customer_manual_comprobantes
          WHERE customer_id = ?
@@ -760,17 +760,27 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
             });
         }
         (0, ledgerRunningSaldo_1.applyLedgerRunningSaldo)(unified);
-        const lastSaldo = (0, ledgerRunningSaldo_1.applyLedgerRunningSaldoSimple)(unified);
+        const lastSaldoHistorial = (0, ledgerRunningSaldo_1.applyLedgerRunningSaldoSimple)(unified);
         for (const row of unified) {
             row.saldo = (_a = row.saldoCorrido) !== null && _a !== void 0 ? _a : null;
         }
+        const { queryCarteraTotalsForCustomer } = yield Promise.resolve().then(() => __importStar(require('./customers.controller')));
+        const carteraTotals = yield queryCarteraTotalsForCustomer(id, {
+            id: String(user.id),
+            role: String(user.role)
+        });
+        const saldoPendienteUnificado = (_b = carteraTotals === null || carteraTotals === void 0 ? void 0 : carteraTotals.saldoPendienteUnificado) !== null && _b !== void 0 ? _b : lastSaldoHistorial;
         res.json({
             customerId: id,
-            legacyCode: (_b = cust.legacy_code) !== null && _b !== void 0 ? _b : null,
-            accountZone: (_c = cust.account_zone) !== null && _c !== void 0 ? _c : null,
-            accountSellerLabel: (_d = cust.account_seller_label) !== null && _d !== void 0 ? _d : null,
+            legacyCode: (_c = cust.legacy_code) !== null && _c !== void 0 ? _c : null,
+            accountZone: (_d = cust.account_zone) !== null && _d !== void 0 ? _d : null,
+            accountSellerLabel: (_e = cust.account_seller_label) !== null && _e !== void 0 ? _e : null,
             movementCount: unified.length,
-            lastSaldo,
+            lastSaldo: saldoPendienteUnificado,
+            lastSaldoHistorial,
+            saldoPendienteUnificado,
+            openingBalance,
+            carteraTotals,
             entries: unified
         });
     }
