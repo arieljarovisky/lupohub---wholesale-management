@@ -31,6 +31,8 @@ import {
 } from '../sql/carteraImportedSql';
 import {
   SQL_CUSTOMER_OPENING_BALANCE_EXPR,
+  SQL_OPENING_AFIP_CN_DATE_WHERE,
+  SQL_OPENING_AFIP_INVOICE_DATE_WHERE,
   SQL_OPENING_MANUAL_DATE_WHERE,
   SQL_OPENING_ORDER_DATE_WHERE,
   SQL_OPENING_PAYMENT_DATE_WHERE,
@@ -1205,7 +1207,7 @@ const SQL_ORDER_NC_CREDIT_SUM = `SUM(${SQL_ORDER_NC_CREDIT_EXPR})`;
 
 const SQL_ORDER_ACTIVE_COND = `o.status NOT IN ('Cancelado', 'Borrador') AND (o.archived = 0 OR o.archived IS NULL)`;
 
-/** Facturas AFIP emitidas (total con IVA + IIBB), desde saldo inicial. */
+/** Facturas AFIP emitidas (total con IVA + IIBB), desde saldo inicial. Sin filtro de estado del pedido: si hay comprobante AFIP, cuenta en cartera (como el historial). */
 const SQL_CARTERA_AFIP_INVOICES_SUBQUERY = `
   SELECT
     o.customer_id,
@@ -1213,11 +1215,7 @@ const SQL_CARTERA_AFIP_INVOICES_SUBQUERY = `
   FROM invoices i
   INNER JOIN orders o ON o.id = i.order_id
   INNER JOIN customers co ON co.id = o.customer_id
-  WHERE ${SQL_ORDER_ACTIVE_COND}
-    AND (
-      co.opening_balance_date IS NULL
-      OR DATE(COALESCE(i.created_at, o.date)) >= co.opening_balance_date
-    )
+  WHERE ${SQL_OPENING_AFIP_INVOICE_DATE_WHERE}
   GROUP BY o.customer_id
 `;
 
@@ -1232,12 +1230,8 @@ const SQL_CARTERA_AFIP_NC_SUBQUERY = `
   FROM credit_notes cn
   INNER JOIN orders o ON o.id = cn.order_id
   INNER JOIN customers co ON co.id = o.customer_id
-  WHERE ${SQL_ORDER_ACTIVE_COND}
-    AND COALESCE(cn.superseded_by_reinvoice, 0) = 0
-    AND (
-      co.opening_balance_date IS NULL
-      OR DATE(cn.created_at) >= co.opening_balance_date
-    )
+  WHERE COALESCE(cn.superseded_by_reinvoice, 0) = 0
+    AND ${SQL_OPENING_AFIP_CN_DATE_WHERE}
   GROUP BY o.customer_id
 `;
 

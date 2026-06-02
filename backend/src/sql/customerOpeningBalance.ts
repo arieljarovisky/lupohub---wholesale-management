@@ -20,6 +20,23 @@ export const SQL_OPENING_MANUAL_DATE_WHERE = `(
   OR DATE(m.fecha) >= co.opening_balance_date
 )`;
 
+/**
+ * Factura AFIP en cartera: misma regla que el historial (cualquier fecha del movimiento
+ * en o después del saldo inicial). Requiere `invoices i`, `orders o`, `customers co`.
+ */
+export const SQL_OPENING_AFIP_INVOICE_DATE_WHERE = `(
+  co.opening_balance_date IS NULL
+  OR DATE(o.date) >= co.opening_balance_date
+  OR (i.created_at IS NOT NULL AND DATE(i.created_at) >= co.opening_balance_date)
+)`;
+
+/** NC AFIP en cartera (`credit_notes cn`, `orders o`, `customers co`). */
+export const SQL_OPENING_AFIP_CN_DATE_WHERE = `(
+  co.opening_balance_date IS NULL
+  OR DATE(o.date) >= co.opening_balance_date
+  OR DATE(cn.created_at) >= co.opening_balance_date
+)`;
+
 export function parseOpeningBalanceInput(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null;
   const n = typeof v === 'number' ? v : Number(String(v).replace(/\./g, '').replace(',', '.'));
