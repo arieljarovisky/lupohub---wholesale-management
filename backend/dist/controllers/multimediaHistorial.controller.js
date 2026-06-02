@@ -49,6 +49,7 @@ const db_1 = require("../database/db");
 const multimediaHistorialExcel_1 = require("../utils/multimediaHistorialExcel");
 const carteraImportedSql_1 = require("../sql/carteraImportedSql");
 const orderPricing_1 = require("../config/orderPricing");
+const customerOpeningBalance_1 = require("../sql/customerOpeningBalance");
 const orderPaymentBalance_service_1 = require("../services/orderPaymentBalance.service");
 const ledgerDocType_1 = require("../utils/ledgerDocType");
 const ledgerRunningSaldo_1 = require("../utils/ledgerRunningSaldo");
@@ -381,17 +382,8 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
         const openingBalance = cust.opening_balance != null && cust.opening_balance !== ''
             ? Math.round(Number(cust.opening_balance) * 100) / 100
             : 0;
-        const openingBalanceDate = cust.opening_balance_date != null && String(cust.opening_balance_date).trim()
-            ? String(cust.opening_balance_date).slice(0, 10)
-            : null;
-        const movementOnOrAfterOpening = (lineDate) => {
-            if (!openingBalanceDate)
-                return true;
-            const d = lineDate == null ? '' : String(lineDate).slice(0, 10);
-            if (!d)
-                return true;
-            return d >= openingBalanceDate;
-        };
+        const openingBalanceDate = (0, customerOpeningBalance_1.normalizeYmdDate)(cust.opening_balance_date);
+        const movementOnOrAfterOpening = (lineDate) => (0, customerOpeningBalance_1.movementOnOrAfterOpeningDate)(lineDate, openingBalanceDate);
         yield (0, orderPaymentBalance_service_1.backfillPaymentOrdersFromLegacy)();
         const entries = carteraImportedSql_1.INCLUDE_TANGO_IMPORT_IN_SYSTEM
             ? (yield (0, db_1.query)(`SELECT line_order, line_date, tipo, numero, edc, vto, importe, saldo, detalle, pagina_pdf

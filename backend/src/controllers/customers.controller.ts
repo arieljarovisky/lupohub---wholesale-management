@@ -36,6 +36,8 @@ import {
   SQL_OPENING_MANUAL_DATE_WHERE,
   SQL_OPENING_ORDER_DATE_WHERE,
   SQL_OPENING_PAYMENT_DATE_WHERE,
+  movementOnOrAfterOpeningDate,
+  normalizeYmdDate,
   parseOpeningBalanceDateInput,
   parseOpeningBalanceInput,
   sqlOpeningPaymentDateWhere
@@ -172,10 +174,7 @@ function toCustomer(row: any, transportes?: { id: string; name: string; address?
       row.opening_balance != null && row.opening_balance !== ''
         ? Math.round(Number(row.opening_balance) * 100) / 100
         : undefined,
-    openingBalanceDate:
-      row.opening_balance_date != null && String(row.opening_balance_date).trim()
-        ? String(row.opening_balance_date).slice(0, 10)
-        : undefined
+    openingBalanceDate: normalizeYmdDate(row.opening_balance_date) ?? undefined
   };
 }
 
@@ -4146,10 +4145,7 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
     custOpening?.opening_balance != null && custOpening.opening_balance !== ''
       ? Math.round(Number(custOpening.opening_balance) * 100) / 100
       : 0;
-  const openingBalanceDate =
-    custOpening?.opening_balance_date != null && String(custOpening.opening_balance_date).trim()
-      ? String(custOpening.opening_balance_date).slice(0, 10)
-      : null;
+  const openingBalanceDate = normalizeYmdDate(custOpening?.opening_balance_date);
 
   const movements = (await query(
     `
@@ -4420,11 +4416,7 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
     return String(a.comprobante || '').localeCompare(String(b.comprobante || ''), 'es');
   });
 
-  const movementOnOrAfterOpening = (fecha: string | null) => {
-    if (!openingBalanceDate || !fecha) return true;
-    return String(fecha).slice(0, 10) >= openingBalanceDate;
-  };
-  const periodMovements = mapped.filter((m) => movementOnOrAfterOpening(m.fecha));
+  const periodMovements = mapped.filter((m) => movementOnOrAfterOpeningDate(m.fecha, openingBalanceDate));
 
   let totalFacturas = 0;
   let totalNc = 0;

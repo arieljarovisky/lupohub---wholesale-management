@@ -222,12 +222,19 @@ function mapCustomerFromApi(r: any): Customer {
         : r.opening_balance != null && r.opening_balance !== ''
           ? Number(r.opening_balance)
           : undefined,
-    openingBalanceDate:
-      r.openingBalanceDate != null && String(r.openingBalanceDate).trim()
-        ? String(r.openingBalanceDate).slice(0, 10)
-        : r.opening_balance_date != null && String(r.opening_balance_date).trim()
-          ? String(r.opening_balance_date).slice(0, 10)
-          : undefined,
+    openingBalanceDate: (() => {
+      const raw = r.openingBalanceDate ?? r.opening_balance_date;
+      if (raw == null || raw === '') return undefined;
+      if (raw instanceof Date && !Number.isNaN(raw.getTime())) {
+        return raw.toISOString().slice(0, 10);
+      }
+      const s = String(raw).trim();
+      const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+      const d = new Date(s);
+      if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+      return undefined;
+    })(),
     shouldRetainIibb: Boolean(r.shouldRetainIibb ?? r.should_retain_iibb),
     agipPadronPeriod: r.agipPadronPeriod ?? r.agip_padron_period ?? undefined,
     iibbAlicuota: r.iibbAlicuota != null ? Number(r.iibbAlicuota) : (r.iibb_alicuota != null ? Number(r.iibb_alicuota) : undefined),

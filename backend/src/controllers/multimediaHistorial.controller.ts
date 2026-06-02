@@ -15,6 +15,7 @@ import {
 } from '../utils/multimediaHistorialExcel';
 import { INCLUDE_TANGO_IMPORT_IN_SYSTEM } from '../sql/carteraImportedSql';
 import { invoiceLedgerImporte, ncLedgerImporte } from '../config/orderPricing';
+import { movementOnOrAfterOpeningDate, normalizeYmdDate } from '../sql/customerOpeningBalance';
 import {
   backfillPaymentOrdersFromLegacy,
   SQL_ORDER_IN_SALDO_SCOPE,
@@ -423,16 +424,9 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
       cust.opening_balance != null && cust.opening_balance !== ''
         ? Math.round(Number(cust.opening_balance) * 100) / 100
         : 0;
-    const openingBalanceDate =
-      cust.opening_balance_date != null && String(cust.opening_balance_date).trim()
-        ? String(cust.opening_balance_date).slice(0, 10)
-        : null;
-    const movementOnOrAfterOpening = (lineDate: unknown) => {
-      if (!openingBalanceDate) return true;
-      const d = lineDate == null ? '' : String(lineDate).slice(0, 10);
-      if (!d) return true;
-      return d >= openingBalanceDate;
-    };
+    const openingBalanceDate = normalizeYmdDate(cust.opening_balance_date);
+    const movementOnOrAfterOpening = (lineDate: unknown) =>
+      movementOnOrAfterOpeningDate(lineDate, openingBalanceDate);
     await backfillPaymentOrdersFromLegacy();
     const entries = INCLUDE_TANGO_IMPORT_IN_SYSTEM
       ? ((await query(

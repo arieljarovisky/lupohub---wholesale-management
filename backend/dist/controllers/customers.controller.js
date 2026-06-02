@@ -168,7 +168,7 @@ function parseSellerCommissionPercentage(v) {
     return Math.round(n * 100) / 100;
 }
 function toCustomer(row, transportes) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u;
     const sellerCommissionPct = row.seller_commission_percentage != null ? parseSellerCommissionPercentage(row.seller_commission_percentage) : null;
     return {
         id: row.id,
@@ -198,9 +198,7 @@ function toCustomer(row, transportes) {
         openingBalance: row.opening_balance != null && row.opening_balance !== ''
             ? Math.round(Number(row.opening_balance) * 100) / 100
             : undefined,
-        openingBalanceDate: row.opening_balance_date != null && String(row.opening_balance_date).trim()
-            ? String(row.opening_balance_date).slice(0, 10)
-            : undefined
+        openingBalanceDate: (_u = (0, customerOpeningBalance_1.normalizeYmdDate)(row.opening_balance_date)) !== null && _u !== void 0 ? _u : undefined
     };
 }
 /** Listar todos los clientes (camelCase para el frontend) con transportes asignados. */
@@ -3828,9 +3826,7 @@ function buildCustomerFinancialSummary(customerId) {
         const openingBalance = (custOpening === null || custOpening === void 0 ? void 0 : custOpening.opening_balance) != null && custOpening.opening_balance !== ''
             ? Math.round(Number(custOpening.opening_balance) * 100) / 100
             : 0;
-        const openingBalanceDate = (custOpening === null || custOpening === void 0 ? void 0 : custOpening.opening_balance_date) != null && String(custOpening.opening_balance_date).trim()
-            ? String(custOpening.opening_balance_date).slice(0, 10)
-            : null;
+        const openingBalanceDate = (0, customerOpeningBalance_1.normalizeYmdDate)(custOpening === null || custOpening === void 0 ? void 0 : custOpening.opening_balance_date);
         const movements = (yield (0, db_1.query)(`
     SELECT
       m.fecha,
@@ -4098,12 +4094,7 @@ function buildCustomerFinancialSummary(customerId) {
                 return da - db;
             return String(a.comprobante || '').localeCompare(String(b.comprobante || ''), 'es');
         });
-        const movementOnOrAfterOpening = (fecha) => {
-            if (!openingBalanceDate || !fecha)
-                return true;
-            return String(fecha).slice(0, 10) >= openingBalanceDate;
-        };
-        const periodMovements = mapped.filter((m) => movementOnOrAfterOpening(m.fecha));
+        const periodMovements = mapped.filter((m) => (0, customerOpeningBalance_1.movementOnOrAfterOpeningDate)(m.fecha, openingBalanceDate));
         let totalFacturas = 0;
         let totalNc = 0;
         let totalRecibos = 0;
