@@ -452,6 +452,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
        FROM credit_notes cn
        JOIN orders o ON o.id = cn.order_id
        WHERE o.customer_id = ?
+         AND COALESCE(cn.superseded_by_reinvoice, 0) = 0
        ORDER BY cn.created_at ASC, cn.id ASC`, [id]));
         let manualComprobanteRows = [];
         try {
