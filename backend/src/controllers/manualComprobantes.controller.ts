@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import multer from 'multer';
 import { execute, get, query } from '../database/db';
+import { sqlInvoiceAmountFromOrderTotal } from '../config/orderPricing';
 
 const UPLOADS_ROOT = process.env.UPLOADS_ROOT || process.cwd();
 const MANUAL_PDF_DIR = path.join(UPLOADS_ROOT, 'uploads', 'manual-comprobantes');
@@ -331,7 +332,7 @@ export const listManualComprobanteRefs = async (req: Request, res: Response) => 
          i.cbte_desde AS cbteDesde,
          COALESCE(DATE(i.created_at), o.date) AS fecha,
          ROUND(o.total, 2) AS importeNeto,
-         ROUND(o.total * 1.21 + COALESCE(i.agip_ret_per, 0), 2) AS importeConIva
+         ${sqlInvoiceAmountFromOrderTotal()} AS importeConIva
        FROM invoices i
        JOIN orders o ON o.id = i.order_id
        WHERE o.customer_id = ?

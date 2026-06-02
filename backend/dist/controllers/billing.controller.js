@@ -47,6 +47,8 @@ const db_1 = require("../database/db");
 const XLSX = __importStar(require("xlsx"));
 const cityNormalize_1 = require("../utils/cityNormalize");
 const orderPaymentBalance_service_1 = require("../services/orderPaymentBalance.service");
+const orderPricing_1 = require("../config/orderPricing");
+const SQL_INVOICE_IMPORTE_EXPR = (0, orderPricing_1.sqlInvoiceAmountFromOrderTotal)();
 function parseMoney(value) {
     if (value == null)
         return 0;
@@ -412,7 +414,7 @@ const listBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
           i.cbte_hasta AS numero_hasta,
           o.id AS order_id,
           COALESCE(DATE(i.created_at), o.date) AS fecha,
-          ROUND(o.total * 1.21 + COALESCE(i.agip_ret_per, 0), 2) AS importe,
+          ${SQL_INVOICE_IMPORTE_EXPR} AS importe,
           c.id AS customer_id,
           c.business_name AS customer_business_name,
           c.name AS customer_name,
@@ -783,7 +785,7 @@ const exportBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* 
           i.cbte_hasta AS numero_hasta,
           o.id AS order_id,
           COALESCE(DATE(i.created_at), o.date) AS fecha,
-          ROUND(o.total * 1.21 + COALESCE(i.agip_ret_per, 0), 2) AS importe,
+          ${SQL_INVOICE_IMPORTE_EXPR} AS importe,
           c.id AS customer_id,
           c.business_name AS customer_business_name,
           c.cuit AS customer_cuit,
@@ -989,7 +991,7 @@ const printBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* (
           i.cbte_desde AS numero_desde,
           i.cbte_hasta AS numero_hasta,
           COALESCE(DATE(i.created_at), o.date) AS fecha,
-          ROUND(o.total * 1.21 + COALESCE(i.agip_ret_per, 0), 2) AS importe,
+          ${SQL_INVOICE_IMPORTE_EXPR} AS importe,
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, '') AS cliente,
           c.cuit AS cuit,
@@ -1975,7 +1977,7 @@ const exportBillingByCustomersFile = (req, res) => __awaiter(void 0, void 0, voi
           i.punto_venta,
           i.cbte_desde,
           i.cbte_hasta,
-          ROUND(o.total * 1.21 + COALESCE(i.agip_ret_per, 0), 2) AS importe,
+          ${SQL_INVOICE_IMPORTE_EXPR} AS importe,
           o.id AS order_id,
           i.cae,
           i.cae_fch_vto,
