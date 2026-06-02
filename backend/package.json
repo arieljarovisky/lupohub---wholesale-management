@@ -20,6 +20,8 @@
     "import-multimedia-saldos": "ts-node scripts/import-multimedia-composicion-saldos.ts",
     "import-seller-commissions": "ts-node scripts/import-seller-commissions.ts",
     "import-pending-payments": "ts-node scripts/import-pending-payments.ts",
+    "auto-allocate-payments": "npx ts-node scripts/auto-allocate-unallocated-payments.ts",
+    "auto-allocate-payments:dry-run": "npx ts-node scripts/auto-allocate-unallocated-payments.ts --dry-run",
     "test:lupo-webhook": "ts-node src/tests/lupoStockWebhook.test.ts",
     "test-webhook-stock": "ts-node scripts/send-lupo-stock-webhook-test.ts",
     "download-tn-category-images": "ts-node scripts/download-tiendanube-category-images.ts"

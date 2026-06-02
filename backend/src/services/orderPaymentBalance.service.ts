@@ -659,3 +659,278 @@ export async function syncAllOrderPaymentStatusForCustomer(customerId: string): 
     await syncOrderPaymentStatus(r.id);
   }
 }
+
+function isCommissionImportPayment(notes?: string | null): boolean {
+  const n = String(notes || '').toLowerCase();
+  return n.includes('comisión vendedor') || n.includes('comision vendedor');
+}
+
+export type UnallocatedPaymentRow = {
+  id: string;
+  customer_id: string;
+  amount: number;
+  date: string;
+  receipt_number?: string | null;
+  notes?: string | null;
+};
+
+/** Recibos sin filas en payment_invoices ni payment_orders (misma regla que “Sin imputar” en historial). */
+export async function listUnallocatedPayments(): Promise<UnallocatedPaymentRow[]> {
+  await backfillPaymentOrdersFromLegacy();
+  const rows = (await query(
+    `SELECT p.id, p.customer_id, p.amount, p.date, p.receipt_number, p.notes
+     FROM payments p
+     WHERE COALESCE(p.amount, 0) > 0.005
+       AND NOT EXISTS (SELECT 1 FROM payment_invoices pi WHERE pi.payment_id = p.id)
+       AND NOT EXISTS (SELECT 1 FROM payment_orders po WHERE po.payment_id = p.id)
+     ORDER BY p.date ASC, p.created_at ASC`
+  )) as UnallocatedPaymentRow[];
+  return rows.map((r) => ({
+    ...r,
+    amount: round2(Number(r.amount) || 0)
+  }));
+}
+
+/** Facturas con saldo pendiente del cliente (más antiguas primero). */
+export async function getCustomerOutstandingInvoiceIds(
+  customerId: string,
+  excludePaymentId?: string
+): Promise<string[]> {
+  const rows = (await query(
+    `SELECT i.id
+     FROM invoices i
+     JOIN orders o ON o.id = i.order_id
+     WHERE o.customer_id = ?
+       AND o.status NOT IN ('Cancelado', 'Borrador')
+       AND (o.archived = 0 OR o.archived IS NULL)
+     ORDER BY i.created_at ASC, i.id ASC`,
+    [customerId]
+  )) as Array<{ id: string }>;
+  const out: string[] = [];
+  for (const r of rows) {
+    const outstanding = await getInvoiceOutstandingConIva(r.id, excludePaymentId);
+    if (outstanding > 0.005) out.push(r.id);
+  }
+  return out;
+}
+
+/** Pedidos sin factura con saldo pendiente (más antiguos primero). */
+export async function getCustomerOutstandingOrderIds(
+  customerId: string,
+  excludePaymentId?: string
+): Promise<string[]> {
+  const rows = (await query(
+    `SELECT o.id
+     FROM orders o
+     LEFT JOIN (${SQL_CN_TOTAL_SUBQUERY}) cn ON cn.order_id = o.id
+     WHERE o.customer_id = ?
+       AND o.status NOT IN ('Cancelado', 'Borrador')
+       AND (o.archived = 0 OR o.archived IS NULL)
+       AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
+       AND (${SQL_ORDER_SALDO_RESIDUAL}) > 0.005
+     ORDER BY o.date ASC, o.id ASC`,
+    [customerId]
+  )) as Array<{ id: string }>;
+  const out: string[] = [];
+  for (const r of rows) {
+    const outstanding = await getOrderOutstandingSinFactura(r.id, excludePaymentId);
+    if (outstanding > 0.005) out.push(r.id);
+  }
+  return out;
+}
+
+export type AutoAllocatePaymentResult = PaymentAllocationResult & {
+  paymentId: string;
+  customerId: string;
+  skipped?: string;
+};
+
+/** Imputa un recibo sin asignar a deuda pendiente del cliente (facturas, luego pedidos). */
+export async function autoAllocatePaymentByFifo(
+  paymentId: string
+): Promise<AutoAllocatePaymentResult> {
+  const payment = (await get(
+    `SELECT id, customer_id, amount, notes FROM payments WHERE id = ?`,
+    [paymentId]
+  )) as { id: string; customer_id: string; amount: number; notes?: string } | undefined;
+  if (!payment) {
+    const err: any = new Error('Recibo no encontrado');
+    err.statusCode = 404;
+    throw err;
+  }
+  if (isCommissionImportPayment(payment.notes)) {
+    return {
+      paymentId,
+      customerId: payment.customer_id,
+      appliedTotal: 0,
+      remainingUnallocated: round2(Number(payment.amount) || 0),
+      invoiceAllocations: [],
+      orderAllocations: [],
+      skipped: 'comisión vendedor (no se imputa a facturas del cliente)'
+    };
+  }
+
+  const hasLinks = (await get(
+    `SELECT 1 AS x FROM payment_invoices WHERE payment_id = ? LIMIT 1`,
+    [paymentId]
+  )) as { x: number } | undefined;
+  const hasOrderLinks = (await get(
+    `SELECT 1 AS x FROM payment_orders WHERE payment_id = ? LIMIT 1`,
+    [paymentId]
+  )) as { x: number } | undefined;
+  if (hasLinks || hasOrderLinks) {
+    return {
+      paymentId,
+      customerId: payment.customer_id,
+      appliedTotal: 0,
+      remainingUnallocated: round2(Number(payment.amount) || 0),
+      invoiceAllocations: [],
+      orderAllocations: [],
+      skipped: 'ya imputado'
+    };
+  }
+
+  const amount = round2(Number(payment.amount) || 0);
+  const invoiceIds = await getCustomerOutstandingInvoiceIds(payment.customer_id, paymentId);
+  const orderIds = await getCustomerOutstandingOrderIds(payment.customer_id, paymentId);
+
+  if (invoiceIds.length === 0 && orderIds.length === 0) {
+    return {
+      paymentId,
+      customerId: payment.customer_id,
+      appliedTotal: 0,
+      remainingUnallocated: amount,
+      invoiceAllocations: [],
+      orderAllocations: [],
+      skipped: 'sin facturas ni pedidos con saldo pendiente'
+    };
+  }
+
+  const result = await allocatePayment(paymentId, amount, invoiceIds, orderIds);
+
+  const primaryInvoiceId = invoiceIds[0] || null;
+  let primaryOrderId: string | null = null;
+  if (primaryInvoiceId) {
+    const ord = (await get('SELECT order_id FROM invoices WHERE id = ?', [primaryInvoiceId])) as
+      | { order_id: string }
+      | undefined;
+    primaryOrderId = ord?.order_id ?? null;
+  } else if (orderIds.length > 0) {
+    primaryOrderId = orderIds[0];
+  }
+  await execute('UPDATE payments SET invoice_id = ?, order_id = ? WHERE id = ?', [
+    primaryInvoiceId,
+    primaryOrderId,
+    paymentId
+  ]);
+
+  await syncAllOrderPaymentStatusForCustomer(payment.customer_id);
+
+  return { paymentId, customerId: payment.customer_id, ...result };
+}
+
+export type AutoAllocateAllSummary = {
+  dryRun: boolean;
+  total: number;
+  allocated: number;
+  skipped: number;
+  partial: number;
+  remainingTotal: number;
+  details: Array<{
+    paymentId: string;
+    customerId: string;
+    receiptNumber?: string | null;
+    amount: number;
+    appliedTotal: number;
+    remainingUnallocated: number;
+    skipped?: string;
+  }>;
+};
+
+/** Imputa todos los recibos sin asignar de todos los clientes. */
+export async function autoAllocateAllUnallocatedPayments(
+  dryRun = false
+): Promise<AutoAllocateAllSummary> {
+  const payments = await listUnallocatedPayments();
+  const details: AutoAllocateAllSummary['details'] = [];
+  let allocated = 0;
+  let skipped = 0;
+  let partial = 0;
+  let remainingTotal = 0;
+
+  for (const p of payments) {
+    if (dryRun) {
+      if (isCommissionImportPayment(p.notes)) {
+        details.push({
+          paymentId: p.id,
+          customerId: p.customer_id,
+          receiptNumber: p.receipt_number,
+          amount: p.amount,
+          appliedTotal: 0,
+          remainingUnallocated: p.amount,
+          skipped: 'comisión vendedor'
+        });
+        skipped++;
+        continue;
+      }
+      const invoiceIds = await getCustomerOutstandingInvoiceIds(p.customer_id, p.id);
+      const orderIds = await getCustomerOutstandingOrderIds(p.customer_id, p.id);
+      if (invoiceIds.length === 0 && orderIds.length === 0) {
+        details.push({
+          paymentId: p.id,
+          customerId: p.customer_id,
+          receiptNumber: p.receipt_number,
+          amount: p.amount,
+          appliedTotal: 0,
+          remainingUnallocated: p.amount,
+          skipped: 'sin deuda imputable'
+        });
+        skipped++;
+        continue;
+      }
+      const preview = await previewPaymentAllocation(p.amount, invoiceIds, orderIds, p.id);
+      details.push({
+        paymentId: p.id,
+        customerId: p.customer_id,
+        receiptNumber: p.receipt_number,
+        amount: p.amount,
+        appliedTotal: preview.appliedTotal,
+        remainingUnallocated: preview.remainingUnallocated
+      });
+      if (preview.remainingUnallocated > 0.005) partial++;
+      else allocated++;
+      remainingTotal = round2(remainingTotal + preview.remainingUnallocated);
+      continue;
+    }
+
+    const result = await autoAllocatePaymentByFifo(p.id);
+    details.push({
+      paymentId: p.id,
+      customerId: p.customer_id,
+      receiptNumber: p.receipt_number,
+      amount: p.amount,
+      appliedTotal: result.appliedTotal,
+      remainingUnallocated: result.remainingUnallocated,
+      skipped: result.skipped
+    });
+    if (result.skipped) {
+      skipped++;
+      remainingTotal = round2(remainingTotal + result.remainingUnallocated);
+    } else if (result.remainingUnallocated > 0.005) {
+      partial++;
+      remainingTotal = round2(remainingTotal + result.remainingUnallocated);
+    } else {
+      allocated++;
+    }
+  }
+
+  return {
+    dryRun,
+    total: payments.length,
+    allocated,
+    skipped,
+    partial,
+    remainingTotal,
+    details
+  };
+}
