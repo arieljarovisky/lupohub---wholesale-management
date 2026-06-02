@@ -12,7 +12,9 @@ export function normalizeLedgerDocType(tipo: string | null | undefined, detalle?
   if (t0 === 'PED' || t0 === 'PEDIDO') return 'PED';
   if (t0 === 'FAC' || t0 === 'FACTURA' || t0 === 'FACTURA_IMPORTADA') return 'FAC';
   if (t0 === 'ND' || t0 === 'NOTA_DEBITO_IMPORTADA') return 'ND';
+  if (t0 === 'SALDO' || t0 === 'OPENING' || t0 === 'INICIAL') return 'SALDO';
   const t = `${t0} ${String(detalle || '')}`.toUpperCase();
+  if (/SALDO\s*INICIAL|SALDO\s*AL\b/.test(t)) return 'SALDO';
   if (/\bREC\b|RECIBO|COBRO|PAGO/.test(t)) return 'REC';
   if (/\bPED\b|PEDIDO/.test(t)) return 'PED';
   if (/^CDE|NOTA\s*DE\s*CRED|CREDITO|\bNC\b|N\/C/.test(t)) return 'NC';
@@ -23,6 +25,6 @@ export function normalizeLedgerDocType(tipo: string | null | undefined, detalle?
 
 export function ledgerDocTypeAffectsSaldo(tipoNorm: string): 'debe' | 'haber' | null {
   if (tipoNorm === 'REC' || tipoNorm === 'NC') return 'haber';
-  if (tipoNorm === 'FAC' || tipoNorm === 'ND' || tipoNorm === 'PED') return 'debe';
+  if (tipoNorm === 'FAC' || tipoNorm === 'ND' || tipoNorm === 'PED' || tipoNorm === 'SALDO') return 'debe';
   return null;
 }
