@@ -75,6 +75,10 @@ function formatLedgerAfipNumero(cbteTipo, puntoVta, cbteDesde) {
                 : 'X';
     return `${letra}${String(puntoVta || 0).padStart(5, '0')}${String(cbteDesde || 0).padStart(8, '0')}`;
 }
+/** Mismo formato que el listado AFIP: 00021-00000012 */
+function formatAfipComprobanteNumero(puntoVta, cbteDesde) {
+    return `${String(puntoVta || 0).padStart(5, '0')}-${String(cbteDesde || 0).padStart(8, '0')}`;
+}
 function orderIdFromLedgerDetalle(detalle) {
     const m = String(detalle || '').match(/Pedido\s+(\S+)/i);
     return (m === null || m === void 0 ? void 0 : m[1]) || '';
@@ -421,9 +425,21 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
          p.order_id,
          GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids,
          GROUP_CONCAT(DISTINCT pir.invoice_ref) AS invoice_refs,
-         GROUP_CONCAT(DISTINCT po.order_id) AS payment_order_ids
+         GROUP_CONCAT(DISTINCT po.order_id) AS payment_order_ids,
+         GROUP_CONCAT(DISTINCT CONCAT(
+           LPAD(COALESCE(i_pi.punto_venta, 0), 5, '0'),
+           '-',
+           LPAD(COALESCE(i_pi.cbte_desde, 0), 8, '0')
+         ) SEPARATOR ' | ') AS invoice_comprobantes,
+         GROUP_CONCAT(DISTINCT CONCAT(
+           LPAD(COALESCE(i_legacy.punto_venta, 0), 5, '0'),
+           '-',
+           LPAD(COALESCE(i_legacy.cbte_desde, 0), 8, '0')
+         ) SEPARATOR ' | ') AS legacy_invoice_comprobantes
        FROM payments p
        LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
+       LEFT JOIN invoices i_pi ON i_pi.id = pi.invoice_id
+       LEFT JOIN invoices i_legacy ON i_legacy.id = p.invoice_id
        LEFT JOIN payment_invoice_refs pir ON pir.payment_id = p.id
        LEFT JOIN payment_orders po ON po.payment_id = p.id
        WHERE p.customer_id = ?
@@ -472,7 +488,11 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
          cn.cbte_desde,
          cn.created_at,
          cn.amount_credited,
-         COALESCE(cn.superseded_by_reinvoice, 0) AS superseded_by_reinvoice
+         COALESCE(cn.superseded_by_reinvoice, 0) AS superseded_by_reinvoice,
+         cn.voided_invoice_cbte_tipo,
+         cn.voided_invoice_punto_venta,
+         cn.voided_invoice_cbte_desde,
+         o.date AS order_date
        FROM credit_notes cn
        JOIN orders o ON o.id = cn.order_id
        WHERE o.customer_id = ?
@@ -516,7 +536,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
             .map((inv, idx) => {
             const agipRet = Number(inv.agip_ret_per || 0);
             const importe = (0, orderPricing_1.invoiceLedgerImporte)(Number(inv.total || 0), agipRet);
-            const numero = formatLedgerAfipNumero(Number(inv.cbte_tipo || 0), Number(inv.punto_venta || 0), Number(inv.cbte_desde || 0));
+            const numero = formatAfipComprobanteNumero(Number(inv.punto_venta || 0), Number(inv.cbte_desde || 0));
             const lineDate = inv.invoice_created_at || inv.line_date || inv.order_date;
             return {
                 lineOrder: maxLineOrder + 60000 + idx,
@@ -532,11 +552,34 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 source: 'system'
             };
         });
+        /** Factura AFIP que la NC anuló (mismo nº/importe que en AFIP; no suma al saldo porque la NC ya resta). */
+        const voidedInvoiceAsEntries = creditNoteRows
+            .filter((cn) => cn.voided_invoice_cbte_desde != null &&
+            Number(cn.voided_invoice_cbte_desde) > 0 &&
+            ledgerMovementVisibleAfterOpening(openingBalanceDate, cn.order_date, cn.created_at))
+            .map((cn, idx) => {
+            const importe = (0, orderPricing_1.ncLedgerImporte)(Number(cn.amount_credited || 0));
+            const numero = formatAfipComprobanteNumero(Number(cn.voided_invoice_punto_venta || 0), Number(cn.voided_invoice_cbte_desde || 0));
+            return {
+                lineOrder: maxLineOrder + 54500 + idx,
+                lineDate: cn.order_date || cn.created_at,
+                tipo: 'FAC',
+                numero,
+                edc: null,
+                vto: null,
+                importe: importe > 0 ? importe : null,
+                saldo: null,
+                detalle: `Pedido ${cn.order_id || ''} · Factura AFIP LupoHub`,
+                excluirDeSaldo: true,
+                paginaPdf: null,
+                source: 'system'
+            };
+        });
         const creditNoteAsEntries = creditNoteRows
             .filter((cn) => ledgerMovementVisibleAfterOpening(openingBalanceDate, cn.created_at))
             .map((cn, idx) => {
             const importe = (0, orderPricing_1.ncLedgerImporte)(Number(cn.amount_credited || 0));
-            const numero = formatLedgerAfipNumero(Number(cn.cbte_tipo || 0), Number(cn.punto_venta || 0), Number(cn.cbte_desde || 0));
+            const numero = formatAfipComprobanteNumero(Number(cn.punto_venta || 0), Number(cn.cbte_desde || 0));
             return {
                 lineOrder: maxLineOrder + 55000 + idx,
                 lineDate: cn.created_at,
@@ -558,7 +601,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
             const sinDetalle = !!Number(m.sin_detalle);
             const numero = sinDetalle
                 ? 'Sin nº AFIP'
-                : formatLedgerAfipNumero(Number(m.cbte_tipo || 0), Number(m.punto_venta || 0), Number(m.cbte_desde || 0));
+                : formatAfipComprobanteNumero(Number(m.punto_venta || 0), Number(m.cbte_desde || 0));
             const tipoLabel = m.tipo === 'NC' ? 'NC' : 'FAC';
             const detalleExtra = m.notes ? String(m.notes).trim() : '';
             const pdfNote = m.pdf_path ? ' · PDF adjunto' : '';
@@ -578,18 +621,23 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 source: 'system'
             };
         });
-        const paymentAsEntries = paymentEntries.filter((p) => movementOnOrAfterOpening(p.date)).map((p, idx) => {
-            const invoiceRefs = Array.from(new Set([
-                ...String(p.invoice_ids || p.invoice_id || '').split(',').map((x) => x.trim()).filter(Boolean),
-                ...String(p.invoice_refs || '').split(',').map((x) => x.trim()).filter(Boolean),
-            ]));
+        const paymentAsEntries = paymentEntries
+            .filter((p) => ledgerMovementVisibleAfterOpening(openingBalanceDate, p.date))
+            .map((p, idx) => {
+            const comprobantes = Array.from(new Set([
+                ...String(p.invoice_comprobantes || '').split('|'),
+                ...String(p.legacy_invoice_comprobantes || '').split('|'),
+                ...String(p.invoice_refs || '').split(','),
+            ]
+                .map((x) => x.trim())
+                .filter(Boolean)));
             const orderRefs = Array.from(new Set([
                 ...String(p.payment_order_ids || '').split(',').map((x) => x.trim()).filter(Boolean),
                 ...(p.order_id ? [String(p.order_id).trim()] : []),
             ])).filter((oid) => oid && !oid.startsWith('mm-'));
             const parts = [];
-            if (invoiceRefs.length)
-                parts.push(`Factura(s): ${invoiceRefs.join(' | ')}`);
+            if (comprobantes.length)
+                parts.push(`Factura(s) AFIP: ${comprobantes.join(' | ')}`);
             if (orderRefs.length)
                 parts.push(`Pedido(s): ${orderRefs.join(' | ')}`);
             const refsText = parts.length ? parts.join(' · ') : 'Sin imputar';
@@ -625,6 +673,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 }))
                 : []),
             ...orderSaldoAsEntries,
+            ...voidedInvoiceAsEntries,
             ...creditNoteAsEntries,
             ...invoiceAsEntries,
             ...manualComprobanteAsEntries,
@@ -660,27 +709,30 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
         }
         deduped.push(...Array.from(movementByKey.values()));
         const unified = (0, ledgerRunningSaldo_1.filterSystemDuplicatesAgainstImport)(deduped);
-        const ledgerTipoSortRank = (tipo, detalle) => {
-            const t = (0, ledgerDocType_1.normalizeLedgerDocType)(tipo, detalle);
+        const ledgerTipoSortRank = (row) => {
+            const t = (0, ledgerDocType_1.normalizeLedgerDocType)(row.tipo, row.detalle);
             if (t === 'SALDO')
                 return 0;
+            if (t === 'FAC' || t === 'ND') {
+                if (row.excluirDeSaldo)
+                    return 1;
+                return 3;
+            }
             if (t === 'NC')
-                return 1;
-            if (t === 'FAC' || t === 'ND')
                 return 2;
             if (t === 'PED')
-                return 3;
-            if (t === 'REC')
                 return 4;
-            return 5;
+            if (t === 'REC')
+                return 5;
+            return 6;
         };
         unified.sort((a, b) => {
             const da = new Date(a.lineDate || 0).getTime() || 0;
             const db = new Date(b.lineDate || 0).getTime() || 0;
             if (da !== db)
                 return da - db;
-            const ra = ledgerTipoSortRank(a.tipo, a.detalle);
-            const rb = ledgerTipoSortRank(b.tipo, b.detalle);
+            const ra = ledgerTipoSortRank(a);
+            const rb = ledgerTipoSortRank(b);
             if (ra !== rb)
                 return ra - rb;
             return Number(a.lineOrder || 0) - Number(b.lineOrder || 0);
