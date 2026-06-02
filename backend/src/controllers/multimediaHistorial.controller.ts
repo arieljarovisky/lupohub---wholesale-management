@@ -657,6 +657,7 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
       .filter((cn) => ledgerMovementVisibleAfterOpening(openingBalanceDate, cn.created_at))
       .map((cn, idx) => {
         const importe = ncLedgerImporte(Number(cn.amount_credited || 0));
+        const superseded = !!Number(cn.superseded_by_reinvoice);
         const numero = formatAfipComprobanteNumero(Number(cn.punto_venta || 0), Number(cn.cbte_desde || 0));
         return {
           lineOrder: maxLineOrder + 55000 + idx,
@@ -668,6 +669,7 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
           importe: importe > 0 ? importe : null,
           saldo: null,
           detalle: `Pedido ${cn.order_id || ''} · NC AFIP LupoHub`,
+          excluirDeSaldo: superseded,
           paginaPdf: null,
           source: 'system' as const
         };
