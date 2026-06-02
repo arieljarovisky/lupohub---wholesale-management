@@ -634,7 +634,7 @@ export const listBilling = async (req: Request, res: Response) => {
 };
 
 const canDeleteBilling = (role?: string) =>
-  role === 'ADMIN' || role === 'DEPOSITO' || role === 'WAREHOUSE' || role === 'SELLER';
+  role === 'ADMIN' || role === 'DEPOSITO' || role === 'WAREHOUSE';
 
 const canDeleteLocalAfip = (role?: string) =>
   role === 'ADMIN' || role === 'DEPOSITO' || role === 'WAREHOUSE';

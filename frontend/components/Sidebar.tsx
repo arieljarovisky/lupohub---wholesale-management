@@ -49,7 +49,7 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({ currentView, onChangeView,
     {
       title: 'Sistema',
       items: [
-        { id: 'facturacion', label: 'Facturación', icon: DollarSign, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE], color: 'emerald' },
+        { id: 'facturacion', label: 'Facturación', icon: DollarSign, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'emerald' },
         { id: 'settings', label: 'Configuración', icon: Settings, roles: [Role.ADMIN, Role.WAREHOUSE] },
       ]
     },

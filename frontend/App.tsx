@@ -144,7 +144,7 @@ const App: React.FC = () => {
     visits: [Role.ADMIN, Role.SELLER],
     catalogs: [Role.ADMIN, Role.SELLER, Role.CUSTOMER],
     settings: [Role.ADMIN],
-    facturacion: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE],
+    facturacion: [Role.ADMIN, Role.WAREHOUSE],
     order_picking: [Role.ADMIN, Role.WAREHOUSE],
   };
   const defaultViewForRole = useCallback((role: Role): string => {
@@ -916,7 +916,7 @@ const App: React.FC = () => {
       ? [
           { id: 'dashboard', icon: LayoutDashboard, label: 'Inicio', roles: [Role.SELLER] },
           { id: 'customers', icon: Users, label: 'Clientes', roles: [Role.SELLER] },
-          { id: 'facturacion', icon: DollarSign, label: 'Facturas', roles: [Role.SELLER] },
+          { id: 'sellers', icon: Percent, label: 'Comisiones', roles: [Role.SELLER] },
           { id: 'orders', icon: ShoppingCart, label: 'Pedidos', roles: [Role.SELLER] },
         ]
       : [
@@ -948,7 +948,7 @@ const App: React.FC = () => {
       { id: 'sellers', label: 'Vendedores', icon: Percent, roles: [Role.ADMIN, Role.SELLER] },
       { id: 'visits', label: 'Visitas', icon: MapPin, roles: [Role.ADMIN, Role.SELLER] },
       { id: 'catalogs', label: 'Catálogos', icon: BookOpen, roles: [Role.ADMIN, Role.SELLER, Role.CUSTOMER] },
-      { id: 'facturacion', label: 'Facturación', icon: DollarSign, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE] },
+      { id: 'facturacion', label: 'Facturación', icon: DollarSign, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'settings', label: 'Configuración', icon: SettingsIcon, roles: [Role.ADMIN, Role.WAREHOUSE] },
     ]},
   ];
