@@ -81,6 +81,7 @@ const companyFinance_routes_1 = __importDefault(require("./routes/companyFinance
 const add_remito_sequence_1 = require("./database/add_remito_sequence");
 const add_customer_delivery_addresses_1 = require("./database/add_customer_delivery_addresses");
 const add_customer_seller_commission_1 = require("./database/add_customer_seller_commission");
+const add_customer_opening_balance_1 = require("./database/add_customer_opening_balance");
 const add_publication_stock_bundles_1 = require("./database/add_publication_stock_bundles");
 const add_orders_performance_indexes_1 = require("./database/add_orders_performance_indexes");
 const init_schema_1 = require("./database/init_schema");
@@ -230,6 +231,7 @@ function initDatabase() {
                 yield (0, add_remito_sequence_1.addRemitoSequence)();
                 yield (0, add_customer_delivery_addresses_1.addCustomerDeliveryAddresses)();
                 yield (0, add_customer_seller_commission_1.addCustomerSellerCommission)();
+                yield (0, add_customer_opening_balance_1.addCustomerOpeningBalance)();
                 yield (0, add_publication_stock_bundles_1.addPublicationStockBundles)();
                 yield (0, add_orders_performance_indexes_1.addOrdersPerformanceIndexes)();
                 console.log('[DB] Tablas inicializadas correctamente');

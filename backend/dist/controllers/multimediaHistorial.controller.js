@@ -47,6 +47,7 @@ const XLSX = __importStar(require("xlsx"));
 const uuid_1 = require("uuid");
 const db_1 = require("../database/db");
 const multimediaHistorialExcel_1 = require("../utils/multimediaHistorialExcel");
+const carteraImportedSql_1 = require("../sql/carteraImportedSql");
 const orderPaymentBalance_service_1 = require("../services/orderPaymentBalance.service");
 const ledgerDocType_1 = require("../utils/ledgerDocType");
 const ledgerRunningSaldo_1 = require("../utils/ledgerRunningSaldo");
@@ -370,15 +371,31 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
             return res.status(403).json({ message: 'Sin permiso' });
         }
         const { id } = req.params;
-        const cust = (yield (0, db_1.get)(`SELECT id, seller_id, business_name, legacy_code, account_zone, account_seller_label FROM customers WHERE id = ?`, [id]));
+        const cust = (yield (0, db_1.get)(`SELECT id, seller_id, business_name, legacy_code, account_zone, account_seller_label, opening_balance, opening_balance_date FROM customers WHERE id = ?`, [id]));
         if (!cust)
             return res.status(404).json({ message: 'Cliente no encontrado' });
         if (user.role === 'SELLER' && cust.seller_id !== user.id) {
             return res.status(403).json({ message: 'No autorizado' });
         }
+        const openingBalance = cust.opening_balance != null && cust.opening_balance !== ''
+            ? Math.round(Number(cust.opening_balance) * 100) / 100
+            : 0;
+        const openingBalanceDate = cust.opening_balance_date != null && String(cust.opening_balance_date).trim()
+            ? String(cust.opening_balance_date).slice(0, 10)
+            : null;
+        const movementOnOrAfterOpening = (lineDate) => {
+            if (!openingBalanceDate)
+                return true;
+            const d = lineDate == null ? '' : String(lineDate).slice(0, 10);
+            if (!d)
+                return true;
+            return d >= openingBalanceDate;
+        };
         yield (0, orderPaymentBalance_service_1.backfillPaymentOrdersFromLegacy)();
-        const entries = (yield (0, db_1.query)(`SELECT line_order, line_date, tipo, numero, edc, vto, importe, saldo, detalle, pagina_pdf
-       FROM customer_multimedia_entries WHERE customer_id = ? ORDER BY line_order ASC, line_date ASC`, [id]));
+        const entries = carteraImportedSql_1.INCLUDE_TANGO_IMPORT_IN_SYSTEM
+            ? (yield (0, db_1.query)(`SELECT line_order, line_date, tipo, numero, edc, vto, importe, saldo, detalle, pagina_pdf
+       FROM customer_multimedia_entries WHERE customer_id = ? ORDER BY line_order ASC, line_date ASC`, [id]))
+            : [];
         const paymentEntries = (yield (0, db_1.query)(`SELECT
          p.id,
          p.date,
@@ -458,7 +475,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
         }
         const normalizeDocType = (tipo, detalle) => (0, ledgerDocType_1.normalizeLedgerDocType)(tipo, detalle);
         const maxLineOrder = entries.reduce((m, e) => Math.max(m, Number(e.line_order || 0)), 0);
-        const orderSaldoAsEntries = orderSaldoRows.map((ord, idx) => {
+        const orderSaldoAsEntries = orderSaldoRows.filter((ord) => movementOnOrAfterOpening(ord.order_date)).map((ord, idx) => {
             const residual = Math.round(Number(ord.residual || 0) * 100) / 100;
             const numero = ord.remito_number != null && Number(ord.remito_number) > 0
                 ? String(Number(ord.remito_number))
@@ -477,7 +494,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 source: 'system'
             };
         });
-        const invoiceAsEntries = invoiceRows.map((inv, idx) => {
+        const invoiceAsEntries = invoiceRows.filter((inv) => movementOnOrAfterOpening(inv.line_date || inv.order_date)).map((inv, idx) => {
             const importe = Math.round((Number(inv.total || 0) * 1.21 + Number(inv.agip_ret_per || 0)) * 100) / 100;
             const numero = formatLedgerAfipNumero(Number(inv.cbte_tipo || 0), Number(inv.punto_venta || 0), Number(inv.cbte_desde || 0));
             return {
@@ -494,7 +511,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 source: 'system'
             };
         });
-        const creditNoteAsEntries = creditNoteRows.map((cn, idx) => {
+        const creditNoteAsEntries = creditNoteRows.filter((cn) => movementOnOrAfterOpening(cn.created_at)).map((cn, idx) => {
             const importe = Math.round(Number(cn.amount_credited || 0) * 1.21 * 100) / 100;
             const numero = formatLedgerAfipNumero(Number(cn.cbte_tipo || 0), Number(cn.punto_venta || 0), Number(cn.cbte_desde || 0));
             return {
@@ -511,7 +528,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 source: 'system'
             };
         });
-        const manualComprobanteAsEntries = manualComprobanteRows.map((m, idx) => {
+        const manualComprobanteAsEntries = manualComprobanteRows.filter((m) => movementOnOrAfterOpening(m.fecha || m.created_at)).map((m, idx) => {
             const importe = m.tipo === 'FACTURA'
                 ? Math.round((Number(m.importe_neto || 0) + Number(m.agip_ret_per || 0)) * 100) / 100
                 : Math.round(Number(m.importe_neto || 0) * 100) / 100;
@@ -538,7 +555,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 source: 'system'
             };
         });
-        const paymentAsEntries = paymentEntries.map((p, idx) => {
+        const paymentAsEntries = paymentEntries.filter((p) => movementOnOrAfterOpening(p.date)).map((p, idx) => {
             const invoiceRefs = Array.from(new Set([
                 ...String(p.invoice_ids || p.invoice_id || '').split(',').map((x) => x.trim()).filter(Boolean),
                 ...String(p.invoice_refs || '').split(',').map((x) => x.trim()).filter(Boolean),
@@ -569,19 +586,21 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
             };
         });
         const mergedEntries = [
-            ...entries.map((e) => ({
-                lineOrder: e.line_order,
-                lineDate: e.line_date,
-                tipo: e.tipo,
-                numero: e.numero,
-                edc: e.edc,
-                vto: e.vto,
-                importe: e.importe != null ? Number(e.importe) : null,
-                saldo: e.saldo != null ? Number(e.saldo) : null,
-                detalle: e.detalle,
-                paginaPdf: e.pagina_pdf,
-                source: 'imported'
-            })),
+            ...(carteraImportedSql_1.INCLUDE_TANGO_IMPORT_IN_SYSTEM
+                ? entries.filter((e) => movementOnOrAfterOpening(e.line_date)).map((e) => ({
+                    lineOrder: e.line_order,
+                    lineDate: e.line_date,
+                    tipo: e.tipo,
+                    numero: e.numero,
+                    edc: e.edc,
+                    vto: e.vto,
+                    importe: e.importe != null ? Number(e.importe) : null,
+                    saldo: e.saldo != null ? Number(e.saldo) : null,
+                    detalle: e.detalle,
+                    paginaPdf: e.pagina_pdf,
+                    source: 'imported'
+                }))
+                : []),
             ...orderSaldoAsEntries,
             ...invoiceAsEntries,
             ...creditNoteAsEntries,
@@ -625,6 +644,26 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 return da - db;
             return Number(a.lineOrder || 0) - Number(b.lineOrder || 0);
         });
+        if (Math.abs(openingBalance) > 0.005) {
+            const fechaLabel = openingBalanceDate
+                ? openingBalanceDate.split('-').reverse().join('/')
+                : '';
+            unified.unshift({
+                lineOrder: -1,
+                lineDate: openingBalanceDate || null,
+                tipo: 'SALDO',
+                numero: 'INICIAL',
+                edc: null,
+                vto: null,
+                importe: openingBalance,
+                saldo: null,
+                detalle: fechaLabel
+                    ? `Saldo inicial manual al ${fechaLabel}`
+                    : 'Saldo inicial manual',
+                paginaPdf: null,
+                source: 'system'
+            });
+        }
         (0, ledgerRunningSaldo_1.applyLedgerRunningSaldo)(unified);
         const lastSaldo = (0, ledgerRunningSaldo_1.applyLedgerRunningSaldoSimple)(unified);
         for (const row of unified) {
@@ -652,6 +691,9 @@ const getMultimediaSaldosSummary = (req, res) => __awaiter(void 0, void 0, void 
         const user = req.user;
         if (!user || !canManage(user.role)) {
             return res.status(403).json({ message: 'Sin permiso' });
+        }
+        if (!carteraImportedSql_1.INCLUDE_TANGO_IMPORT_IN_SYSTEM) {
+            return res.json([]);
         }
         const sellerFilter = user.role === 'SELLER' ? ' AND c.seller_id = ?' : '';
         const params = user.role === 'SELLER' ? [user.id] : [];

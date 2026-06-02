@@ -701,7 +701,7 @@ export const updateCustomer = async (req: Request, res: Response) => {
       accountSellerLabel?: string;
       deliveryAddresses?: unknown[] | null;
       sellerCommissionPercentage?: number | null;
-      openingBalance?: number | null;
+      openingBalance?: number | string | null;
       openingBalanceDate?: string | null;
     };
     const existing = await get('SELECT id FROM customers WHERE id = ?', [id]);
@@ -747,7 +747,7 @@ export const updateCustomer = async (req: Request, res: Response) => {
     }
     if (body.openingBalance !== undefined) {
       const ob = parseOpeningBalanceInput(body.openingBalance);
-      if (body.openingBalance != null && body.openingBalance !== '' && ob === null) {
+      if (body.openingBalance != null && String(body.openingBalance).trim() !== '' && ob === null) {
         return res.status(400).json({ message: 'openingBalance debe ser un importe válido' });
       }
       updates.push('opening_balance = ?');
@@ -4106,7 +4106,7 @@ export const clearDispatchedPendingsForCustomer = async (req: Request, res: Resp
 
 type CustomerFinancialMovement = {
   fecha: string | null;
-  tipo: 'FACTURA' | 'NC' | 'RECIBO';
+  tipo: 'FACTURA' | 'NC' | 'RECIBO' | 'PEDIDO';
   comprobante: string;
   orderId: string | null;
   debe: number;
