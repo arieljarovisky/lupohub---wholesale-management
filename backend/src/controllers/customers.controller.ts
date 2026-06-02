@@ -13,7 +13,14 @@ import {
   SQL_ORDER_IN_SALDO_SCOPE,
   SQL_ORDER_SALDO_RESIDUAL
 } from '../services/orderPaymentBalance.service';
-import { CARTERA_IMPORTED_MOVEMENTS_AGG_SUBQUERY } from '../sql/carteraImportedSql';
+import {
+  INCLUDE_TANGO_IMPORT_IN_SYSTEM,
+  SQL_CARTERA_IMPORT_DEBE_EXPR,
+  SQL_CARTERA_IMPORT_JOIN,
+  SQL_CARTERA_IMPORT_NC_EXPR,
+  SQL_CARTERA_IMPORT_REC_EXPR,
+  SQL_CARTERA_MULTIMEDIA_SALDO_EXPR
+} from '../sql/carteraImportedSql';
 
 export type CustomerDeliveryAddressDto = { id: string; label: string; address: string; city: string };
 
@@ -1185,36 +1192,36 @@ AND NOT EXISTS (
 AND TRIM(COALESCE(p.invoice_id, '')) = ''
 AND TRIM(COALESCE(p.order_id, '')) = ''`;
 
-/** Saldo = cargos netos LupoHub + import − NC/import NC − recibos (sin restar NC dos veces). */
+/** Saldo = cargos netos LupoHub (+ import Tango si está habilitado) − NC − recibos. */
 function carteraSaldoSqlExpr(): string {
   return `ROUND(
     COALESCE(obn.facturas_neto, 0)
     + COALESCE(mfac.manual_fac, 0)
-    + COALESCE(imp.import_debe, 0)
+    + ${SQL_CARTERA_IMPORT_DEBE_EXPR}
     - COALESCE(mnc.manual_nc, 0)
-    - COALESCE(imp.import_nc, 0)
+    - ${SQL_CARTERA_IMPORT_NC_EXPR}
     - COALESCE(pay.total_pagos, 0)
-    - COALESCE(imp.import_rec, 0),
+    - ${SQL_CARTERA_IMPORT_REC_EXPR},
     2
   )`;
 }
 
 function carteraTotalFacturasSql(): string {
   return `ROUND(
-    COALESCE(ob.facturas_bruto, 0) + COALESCE(mfac.manual_fac, 0) + COALESCE(imp.import_debe, 0),
+    COALESCE(ob.facturas_bruto, 0) + COALESCE(mfac.manual_fac, 0) + ${SQL_CARTERA_IMPORT_DEBE_EXPR},
     2
   )`;
 }
 
 function carteraTotalNcSql(): string {
   return `ROUND(
-    COALESCE(ncv.nc_iva, 0) + COALESCE(mnc.manual_nc, 0) + COALESCE(imp.import_nc, 0),
+    COALESCE(ncv.nc_iva, 0) + COALESCE(mnc.manual_nc, 0) + ${SQL_CARTERA_IMPORT_NC_EXPR},
     2
   )`;
 }
 
 function carteraTotalRecibosSql(): string {
-  return `ROUND(COALESCE(pay.total_pagos, 0) + COALESCE(imp.import_rec, 0), 2)`;
+  return `ROUND(COALESCE(pay.total_pagos, 0) + ${SQL_CARTERA_IMPORT_REC_EXPR}, 2)`;
 }
 
 /** Saldos: pedidos con cobro pendiente (IVA 21% sobre neto, neto de NC) menos pagos/recibos en `payments`. */
@@ -1490,7 +1497,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
       c.id AS customerId,
       ${carteraTotalFacturasSql()} AS orderCargosPendientes,
       ${carteraTotalNcSql()} AS totalNotasCredito,
-      ROUND(COALESCE(imp.import_debe, 0) - COALESCE(imp.import_nc, 0) - COALESCE(imp.import_rec, 0), 2) AS multimediaSaldo,
+      ${SQL_CARTERA_MULTIMEDIA_SALDO_EXPR} AS multimediaSaldo,
       ${carteraTotalRecibosSql()} AS totalPagos,
       ${saldoExpr} AS saldoPendienteUnificado
     FROM customers c
@@ -1518,7 +1525,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
         AND ${SQL_ORDER_IN_SALDO_SCOPE}
       GROUP BY o.customer_id
     ) ncv ON ncv.customer_id = c.id
-    LEFT JOIN (${CARTERA_IMPORTED_MOVEMENTS_AGG_SUBQUERY}) imp ON imp.customer_id = c.id
+    ${SQL_CARTERA_IMPORT_JOIN}
     LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
     WHERE 1=1 ${sellerFilter}
       AND ABS(${saldoExpr}) > 0.005
@@ -1531,7 +1538,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
       c.id AS customerId,
       ${carteraTotalFacturasSql()} AS orderCargosPendientes,
       ${carteraTotalNcSql()} AS totalNotasCredito,
-      ROUND(COALESCE(imp.import_debe, 0) - COALESCE(imp.import_nc, 0) - COALESCE(imp.import_rec, 0), 2) AS multimediaSaldo,
+      ${SQL_CARTERA_MULTIMEDIA_SALDO_EXPR} AS multimediaSaldo,
       ${carteraTotalRecibosSql()} AS totalPagos,
       ${saldoExpr} AS saldoPendienteUnificado
     FROM customers c
@@ -1564,7 +1571,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
         AND ${SQL_ORDER_IN_SALDO_SCOPE}
       GROUP BY o.customer_id
     ) ncv ON ncv.customer_id = c.id
-    LEFT JOIN (${CARTERA_IMPORTED_MOVEMENTS_AGG_SUBQUERY}) imp ON imp.customer_id = c.id
+    ${SQL_CARTERA_IMPORT_JOIN}
     LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
     WHERE 1=1 ${sellerFilter}
       AND ABS(${saldoExpr}) > 0.005
@@ -1677,7 +1684,7 @@ async function fetchCarteraSaldoUnificadoMap(
       SELECT customer_id, SUM(ROUND(importe_neto, 2)) AS manual_nc
       FROM customer_manual_comprobantes WHERE tipo = 'NC' GROUP BY customer_id
     ) mnc ON mnc.customer_id = c.id
-    LEFT JOIN (${CARTERA_IMPORTED_MOVEMENTS_AGG_SUBQUERY}) imp ON imp.customer_id = c.id
+    ${SQL_CARTERA_IMPORT_JOIN}
     LEFT JOIN (${paymentsSubquery}) pay ON pay.customer_id = c.id
     WHERE 1=1 ${sellerFilter}
   `;
@@ -4199,8 +4206,9 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
     [customerId, customerId, customerId, customerId, customerId]
   )) as any[];
 
-  const importedEntries = (await query(
-    `
+  const importedEntries = INCLUDE_TANGO_IMPORT_IN_SYSTEM
+    ? ((await query(
+        `
     SELECT
       e.line_date AS fecha,
       UPPER(TRIM(COALESCE(e.tipo, ''))) AS tipo_raw,
@@ -4212,8 +4220,9 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
     WHERE e.customer_id = ?
     ORDER BY e.line_date ASC, e.line_order ASC
     `,
-    [customerId]
-  )) as any[];
+        [customerId]
+      )) as any[])
+    : [];
 
   const parseMoney = (v: any): number => {
     if (v == null) return 0;
@@ -4274,25 +4283,27 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
     existingKeys.add(toKey(tipo, m.fecha, m.comprobante, Number(m.debe || 0), Number(m.haber || 0)));
   }
 
-  for (const e of importedEntries) {
-    const tipo = classifyImportedEntry(String(e.tipo_raw || ''), String(e.detalle || ''));
-    if (!tipo) continue;
-    const importe = Math.round(Math.abs(parseMoney(e.importe)) * 100) / 100;
-    if (importe <= 0) continue;
-    const debe = tipo === 'FACTURA' ? importe : 0;
-    const haber = tipo === 'RECIBO' || tipo === 'NC' ? importe : 0;
-    const key = toKey(tipo, e.fecha, e.comprobante, debe, haber);
-    if (existingKeys.has(key)) continue;
-    existingKeys.add(key);
-    movements.push({
-      fecha: normalizeDate(e.fecha),
-      tipo,
-      comprobante: e.comprobante ?? '',
-      orderId: null,
-      debe,
-      haber,
-      detalle: e.detalle ? `Importado: ${e.detalle}` : 'Importado'
-    });
+  if (INCLUDE_TANGO_IMPORT_IN_SYSTEM) {
+    for (const e of importedEntries) {
+      const tipo = classifyImportedEntry(String(e.tipo_raw || ''), String(e.detalle || ''));
+      if (!tipo) continue;
+      const importe = Math.round(Math.abs(parseMoney(e.importe)) * 100) / 100;
+      if (importe <= 0) continue;
+      const debe = tipo === 'FACTURA' ? importe : 0;
+      const haber = tipo === 'RECIBO' || tipo === 'NC' ? importe : 0;
+      const key = toKey(tipo, e.fecha, e.comprobante, debe, haber);
+      if (existingKeys.has(key)) continue;
+      existingKeys.add(key);
+      movements.push({
+        fecha: normalizeDate(e.fecha),
+        tipo,
+        comprobante: e.comprobante ?? '',
+        orderId: null,
+        debe,
+        haber,
+        detalle: e.detalle ? `Importado: ${e.detalle}` : 'Importado'
+      });
+    }
   }
 
   let totalFacturas = 0;
@@ -4489,13 +4500,15 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
     const entriesParams: any[] = [customerId];
     if (from) { entriesWhere.push('e.line_date >= ?'); entriesParams.push(from); }
     if (to) { entriesWhere.push('e.line_date <= ?'); entriesParams.push(to); }
-    const entries = await query(
-      `SELECT e.line_order, e.line_date, e.tipo, e.numero, e.importe, e.saldo, e.detalle
+    const entries = INCLUDE_TANGO_IMPORT_IN_SYSTEM
+      ? ((await query(
+          `SELECT e.line_order, e.line_date, e.tipo, e.numero, e.importe, e.saldo, e.detalle
        FROM customer_multimedia_entries e
        WHERE ${entriesWhere.join(' AND ')}
        ORDER BY e.line_date ASC, e.line_order ASC`,
-      entriesParams
-    ) as any[];
+          entriesParams
+        )) as any[])
+      : [];
 
     const ordersWhere: string[] = ['o.customer_id = ?'];
     const ordersParams: any[] = [customerId];
@@ -4551,8 +4564,9 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
          AND ${SQL_ORDER_IN_SALDO_SCOPE}`,
       [customerId]
     ) as any;
-    const multimediaAgg = await get(
-      `SELECT CAST(COALESCE(
+    const multimediaAgg = INCLUDE_TANGO_IMPORT_IN_SYSTEM
+      ? ((await get(
+          `SELECT CAST(COALESCE(
          (SELECT CAST(e_lo.saldo AS DECIMAL(16,2))
           FROM customer_multimedia_entries e_lo
           WHERE e_lo.customer_id = ?
@@ -4565,8 +4579,9 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
           LIMIT 1),
          0
        ) AS DECIMAL(16,2)) AS multimediaSaldo`,
-      [customerId, customerId]
-    ) as any;
+          [customerId, customerId]
+        )) as any)
+      : { multimediaSaldo: 0 };
     const paymentsAgg = await get(
       `SELECT ROUND(COALESCE(SUM(d.amount), 0), 2) AS totalPagos
        FROM (

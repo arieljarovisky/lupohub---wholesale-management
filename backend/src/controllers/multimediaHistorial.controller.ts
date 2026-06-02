@@ -13,6 +13,7 @@ import {
   normalizeCuitDigits,
   type MultimediaMovementRow,
 } from '../utils/multimediaHistorialExcel';
+import { INCLUDE_TANGO_IMPORT_IN_SYSTEM } from '../sql/carteraImportedSql';
 import {
   backfillPaymentOrdersFromLegacy,
   SQL_ORDER_IN_SALDO_SCOPE,
@@ -416,11 +417,13 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
       return res.status(403).json({ message: 'No autorizado' });
     }
     await backfillPaymentOrdersFromLegacy();
-    const entries = (await query(
-      `SELECT line_order, line_date, tipo, numero, edc, vto, importe, saldo, detalle, pagina_pdf
+    const entries = INCLUDE_TANGO_IMPORT_IN_SYSTEM
+      ? ((await query(
+          `SELECT line_order, line_date, tipo, numero, edc, vto, importe, saldo, detalle, pagina_pdf
        FROM customer_multimedia_entries WHERE customer_id = ? ORDER BY line_order ASC, line_date ASC`,
-      [id]
-    )) as any[];
+          [id]
+        )) as any[])
+      : [];
     const paymentEntries = (await query(
       `SELECT
          p.id,
@@ -641,19 +644,21 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
       };
     });
     const mergedEntries = [
-      ...entries.map((e) => ({
-        lineOrder: e.line_order,
-        lineDate: e.line_date,
-        tipo: e.tipo,
-        numero: e.numero,
-        edc: e.edc,
-        vto: e.vto,
-        importe: e.importe != null ? Number(e.importe) : null,
-        saldo: e.saldo != null ? Number(e.saldo) : null,
-        detalle: e.detalle,
-        paginaPdf: e.pagina_pdf,
-        source: 'imported' as const
-      })),
+      ...(INCLUDE_TANGO_IMPORT_IN_SYSTEM
+        ? entries.map((e) => ({
+            lineOrder: e.line_order,
+            lineDate: e.line_date,
+            tipo: e.tipo,
+            numero: e.numero,
+            edc: e.edc,
+            vto: e.vto,
+            importe: e.importe != null ? Number(e.importe) : null,
+            saldo: e.saldo != null ? Number(e.saldo) : null,
+            detalle: e.detalle,
+            paginaPdf: e.pagina_pdf,
+            source: 'imported' as const
+          }))
+        : []),
       ...orderSaldoAsEntries,
       ...invoiceAsEntries,
       ...creditNoteAsEntries,
@@ -723,6 +728,9 @@ export const getMultimediaSaldosSummary = async (req: Request, res: Response) =>
     const user = (req as any).user;
     if (!user || !canManage(user.role)) {
       return res.status(403).json({ message: 'Sin permiso' });
+    }
+    if (!INCLUDE_TANGO_IMPORT_IN_SYSTEM) {
+      return res.json([]);
     }
     const sellerFilter = user.role === 'SELLER' ? ' AND c.seller_id = ?' : '';
     const params: any[] = user.role === 'SELLER' ? [user.id] : [];

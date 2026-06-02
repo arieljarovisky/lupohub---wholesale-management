@@ -1,3 +1,10 @@
+/**
+ * Import Tango/Multimedias (`customer_multimedia_entries`).
+ * En false: no entra al saldo ni al historial del cliente (solo LupoHub).
+ * El Excel sigue importándose para archivo; no se muestra en la ficha ni en cartera.
+ */
+export const INCLUDE_TANGO_IMPORT_IN_SYSTEM = false;
+
 /** Clasificación de líneas en customer_multimedia_entries (misma lógica que export historial). */
 
 export const SQL_MM_IS_NC_IMPORTADO = `(
@@ -94,3 +101,23 @@ export const CARTERA_IMPORTED_MOVEMENTS_AGG_SUBQUERY = `
     AND ABS(COALESCE(e.importe, 0)) > 0.001
     AND UPPER(TRIM(COALESCE(e.tipo, ''))) NOT IN ('SALDO AL', 'SALDO_INICIAL', 'SALDO')
   GROUP BY e.customer_id`;
+
+export const SQL_CARTERA_IMPORT_JOIN = INCLUDE_TANGO_IMPORT_IN_SYSTEM
+  ? `LEFT JOIN (${CARTERA_IMPORTED_MOVEMENTS_AGG_SUBQUERY}) imp ON imp.customer_id = c.id`
+  : '';
+
+export const SQL_CARTERA_IMPORT_DEBE_EXPR = INCLUDE_TANGO_IMPORT_IN_SYSTEM
+  ? 'COALESCE(imp.import_debe, 0)'
+  : '0';
+
+export const SQL_CARTERA_IMPORT_NC_EXPR = INCLUDE_TANGO_IMPORT_IN_SYSTEM
+  ? 'COALESCE(imp.import_nc, 0)'
+  : '0';
+
+export const SQL_CARTERA_IMPORT_REC_EXPR = INCLUDE_TANGO_IMPORT_IN_SYSTEM
+  ? 'COALESCE(imp.import_rec, 0)'
+  : '0';
+
+export const SQL_CARTERA_MULTIMEDIA_SALDO_EXPR = INCLUDE_TANGO_IMPORT_IN_SYSTEM
+  ? `ROUND(${SQL_CARTERA_IMPORT_DEBE_EXPR} - ${SQL_CARTERA_IMPORT_NC_EXPR} - ${SQL_CARTERA_IMPORT_REC_EXPR}, 2)`
+  : '0';

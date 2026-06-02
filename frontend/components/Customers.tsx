@@ -1501,8 +1501,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   <span className="text-sm font-black uppercase tracking-[0.22em]">Saldo pendiente</span>
                 </div>
                 <p className="text-[11px] text-slate-400 leading-relaxed max-w-xl">
-                  Es la <span className="text-slate-300">deuda actual</span>: suma de facturas y pedidos (Tango + LupoHub) − notas de
-                  crédito − recibos. La tabla de abajo es el historial; el número grande de arriba es el que importa para cobrar.
+                  Es la <span className="text-slate-300">deuda actual</span>: suma de facturas y pedidos LupoHub − notas de crédito −
+                  recibos. La tabla de abajo es el historial; el número grande de arriba es el que importa para cobrar.
                 </p>
                 {carteraById[selectedCustomer.id] && (
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-slate-500 font-mono tabular-nums pt-1">
@@ -1599,7 +1599,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   </p>
                   <p>
                     <span className="font-bold text-slate-300">Saldo corrido</span> (columna de la tabla) = historial
-                    movimiento por movimiento; puede ser distinto si el cierre Tango ya descontó NC o recibos.
+                    movimiento por movimiento (solo comprobantes del sistema).
                   </p>
                   {carteraById[selectedCustomer.id] &&
                   ledgerSaldoHistorialFinal != null &&
@@ -1625,8 +1625,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               </div>
             ) : (
               <p className="text-sm text-slate-500 mt-4 py-4 text-center border-t border-slate-800/80 leading-relaxed">
-                Sin movimientos en el detalle. El saldo puede provenir solo de pedidos LupoHub pendientes. Importá el Excel
-                de Multimedias desde herramientas de cartera si falta el historial.
+                Sin movimientos en el detalle. El saldo puede provenir de pedidos o facturas LupoHub pendientes de cobro.
               </p>
             )}
           </div>
@@ -2564,7 +2563,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 {canViewSaldos && (
                   <div
                     className="mb-2 rounded-xl border border-slate-600/35 bg-slate-900/55 px-2.5 py-2 text-[11px]"
-                    title="Facturas/pedidos − notas de crédito − recibos (Tango importado + LupoHub). Tocá el cliente para el desglose."
+                    title="Facturas/pedidos − notas de crédito − recibos (LupoHub). Tocá el cliente para el desglose."
                   >
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="flex items-center gap-1.5 text-slate-400 font-bold uppercase text-[10px] tracking-wide">
