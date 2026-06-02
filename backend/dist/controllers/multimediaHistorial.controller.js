@@ -75,6 +75,28 @@ function formatLedgerAfipNumero(cbteTipo, puntoVta, cbteDesde) {
                 : 'X';
     return `${letra}${String(puntoVta || 0).padStart(5, '0')}${String(cbteDesde || 0).padStart(8, '0')}`;
 }
+function orderIdFromLedgerDetalle(detalle) {
+    const m = String(detalle || '').match(/Pedido\s+(\S+)/i);
+    return (m === null || m === void 0 ? void 0 : m[1]) || '';
+}
+/** Visible si alguna fecha del movimiento cae en o después del saldo inicial. */
+function ledgerMovementVisibleAfterOpening(openingYmd, ...dates) {
+    if (!openingYmd)
+        return true;
+    for (const d of dates) {
+        if ((0, customerOpeningBalance_1.movementOnOrAfterOpeningDate)(d, openingYmd))
+            return true;
+    }
+    return false;
+}
+/** Evita que un FAC importado de Tango pise la factura LupoHub reemitida del mismo pedido. */
+function lupoHubLedgerDedupeExtra(row) {
+    const det = String(row.detalle || '');
+    if (!det.includes('AFIP LupoHub') && !det.includes('Factura anulada'))
+        return '';
+    const oid = orderIdFromLedgerDetalle(det);
+    return oid ? `|LH|${oid}` : '';
+}
 function tryFuzzyNameMatch(normSheet, customerByNorm) {
     if (!normSheet || normSheet.length < 5)
         return null;
@@ -433,8 +455,10 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
          i.cbte_tipo,
          i.punto_venta,
          i.cbte_desde,
+         i.created_at AS invoice_created_at,
          COALESCE(DATE(i.created_at), o.date) AS line_date,
          i.agip_ret_per,
+         i.agip_alicuota,
          o.total,
          o.date AS order_date
        FROM invoices i
@@ -449,7 +473,10 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
          cn.cbte_desde,
          cn.created_at,
          cn.amount_credited,
-         COALESCE(cn.superseded_by_reinvoice, 0) AS superseded_by_reinvoice
+         COALESCE(cn.superseded_by_reinvoice, 0) AS superseded_by_reinvoice,
+         cn.voided_invoice_cbte_tipo,
+         cn.voided_invoice_punto_venta,
+         cn.voided_invoice_cbte_desde
        FROM credit_notes cn
        JOIN orders o ON o.id = cn.order_id
        WHERE o.customer_id = ?
@@ -488,24 +515,53 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 source: 'system'
             };
         });
-        const invoiceAsEntries = invoiceRows.filter((inv) => movementOnOrAfterOpening(inv.line_date || inv.order_date)).map((inv, idx) => {
-            const importe = (0, orderPricing_1.invoiceLedgerImporte)(Number(inv.total || 0), Number(inv.agip_ret_per || 0));
+        const invoiceAsEntries = invoiceRows
+            .filter((inv) => ledgerMovementVisibleAfterOpening(openingBalanceDate, inv.invoice_created_at, inv.line_date, inv.order_date))
+            .map((inv, idx) => {
+            const agipRet = Number(inv.agip_ret_per || 0);
+            const importe = (0, orderPricing_1.invoiceLedgerImporte)(Number(inv.total || 0), agipRet);
             const numero = formatLedgerAfipNumero(Number(inv.cbte_tipo || 0), Number(inv.punto_venta || 0), Number(inv.cbte_desde || 0));
+            const lineDate = inv.invoice_created_at || inv.line_date || inv.order_date;
+            const iibbNote = agipRet > 0.005 ? ' · c/ percepción IIBB' : '';
             return {
                 lineOrder: maxLineOrder + 55000 + idx,
-                lineDate: inv.line_date || inv.order_date,
+                lineDate,
                 tipo: 'FAC',
                 numero,
                 edc: null,
                 vto: null,
                 importe: importe > 0 ? importe : null,
                 saldo: null,
-                detalle: `Pedido ${inv.order_id || ''} · Factura AFIP LupoHub`,
+                detalle: `Pedido ${inv.order_id || ''} · Factura AFIP LupoHub${iibbNote}`,
                 paginaPdf: null,
                 source: 'system'
             };
         });
-        const creditNoteAsEntries = creditNoteRows.filter((cn) => movementOnOrAfterOpening(cn.created_at)).map((cn, idx) => {
+        const voidedInvoiceAsEntries = creditNoteRows
+            .filter((cn) => cn.voided_invoice_cbte_desde != null &&
+            Number(cn.voided_invoice_cbte_desde) > 0 &&
+            ledgerMovementVisibleAfterOpening(openingBalanceDate, cn.created_at))
+            .map((cn, idx) => {
+            const importe = (0, orderPricing_1.ncLedgerImporte)(Number(cn.amount_credited || 0));
+            const numero = formatLedgerAfipNumero(Number(cn.voided_invoice_cbte_tipo || 0), Number(cn.voided_invoice_punto_venta || 0), Number(cn.voided_invoice_cbte_desde || 0));
+            return {
+                lineOrder: maxLineOrder + 57500 + idx,
+                lineDate: cn.created_at,
+                tipo: 'FAC',
+                numero,
+                edc: null,
+                vto: null,
+                importe: importe > 0 ? importe : null,
+                saldo: null,
+                detalle: `Pedido ${cn.order_id || ''} · Factura anulada (reemisión IIBB)`,
+                excluirDeSaldo: true,
+                paginaPdf: null,
+                source: 'system'
+            };
+        });
+        const creditNoteAsEntries = creditNoteRows
+            .filter((cn) => ledgerMovementVisibleAfterOpening(openingBalanceDate, cn.created_at))
+            .map((cn, idx) => {
             const importe = (0, orderPricing_1.ncLedgerImporte)(Number(cn.amount_credited || 0));
             const superseded = !!Number(cn.superseded_by_reinvoice);
             const numero = formatLedgerAfipNumero(Number(cn.cbte_tipo || 0), Number(cn.punto_venta || 0), Number(cn.cbte_desde || 0));
@@ -599,6 +655,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 }))
                 : []),
             ...orderSaldoAsEntries,
+            ...voidedInvoiceAsEntries,
             ...invoiceAsEntries,
             ...creditNoteAsEntries,
             ...manualComprobanteAsEntries,
@@ -619,7 +676,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 lineDate: row.lineDate,
                 numero: row.numero,
                 importe: row.importe,
-            }) + (String(row.detalle || '').includes('AFIP LupoHub') ? '|LH' : '');
+            }) + lupoHubLedgerDedupeExtra(row);
             const prev = movementByKey.get(key);
             if (!prev) {
                 movementByKey.set(key, row);

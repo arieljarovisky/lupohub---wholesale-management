@@ -637,7 +637,7 @@ const listBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
     }
 });
 exports.listBilling = listBilling;
-const canDeleteBilling = (role) => role === 'ADMIN' || role === 'DEPOSITO' || role === 'WAREHOUSE' || role === 'SELLER';
+const canDeleteBilling = (role) => role === 'ADMIN' || role === 'DEPOSITO' || role === 'WAREHOUSE';
 const canDeleteLocalAfip = (role) => role === 'ADMIN' || role === 'DEPOSITO' || role === 'WAREHOUSE';
 /** Elimina una línea FAC/NC del historial importado Tango (customer_multimedia_entries). */
 const deleteImportedBillingEntry = (req, res) => __awaiter(void 0, void 0, void 0, function* () {

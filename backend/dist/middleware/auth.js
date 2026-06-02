@@ -47,11 +47,11 @@ const adminOrDepositoMiddleware = (req, res, next) => {
     return res.status(403).json({ message: 'Solo para usuarios con rol ADMIN o DEPOSITO' });
 };
 exports.adminOrDepositoMiddleware = adminOrDepositoMiddleware;
-/** Lista/export de comprobantes y pagos: mismo alcance que recibos (`payments`). */
+/** Lista/export de comprobantes y pagos (módulo Facturación). Vendedores sin acceso. */
 const billingAccessMiddleware = (req, res, next) => {
     var _a;
     const role = (_a = req.user) === null || _a === void 0 ? void 0 : _a.role;
-    if (role === 'ADMIN' || role === 'DEPOSITO' || role === 'WAREHOUSE' || role === 'SELLER')
+    if (role === 'ADMIN' || role === 'DEPOSITO' || role === 'WAREHOUSE')
         return next();
     return res.status(403).json({ message: 'Sin permiso para facturación' });
 };
