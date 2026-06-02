@@ -71,11 +71,10 @@ function ledgerMovementVisibleAfterOpening(openingYmd: string | null, ...dates: 
   return false;
 }
 
-/** Evita que un FAC importado de Tango pise la factura LupoHub reemitida del mismo pedido. */
+/** Evita que un FAC importado de Tango pise la factura LupoHub del mismo pedido. */
 function lupoHubLedgerDedupeExtra(row: { detalle?: string | null; numero?: string | null }): string {
-  const det = String(row.detalle || '');
-  if (!det.includes('AFIP LupoHub') && !det.includes('Factura anulada')) return '';
-  const oid = orderIdFromLedgerDetalle(det);
+  if (!String(row.detalle || '').includes('AFIP LupoHub')) return '';
+  const oid = orderIdFromLedgerDetalle(row.detalle);
   return oid ? `|LH|${oid}` : '';
 }
 
@@ -529,10 +528,7 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
          cn.cbte_desde,
          cn.created_at,
          cn.amount_credited,
-         COALESCE(cn.superseded_by_reinvoice, 0) AS superseded_by_reinvoice,
-         cn.voided_invoice_cbte_tipo,
-         cn.voided_invoice_punto_venta,
-         cn.voided_invoice_cbte_desde
+         COALESCE(cn.superseded_by_reinvoice, 0) AS superseded_by_reinvoice
        FROM credit_notes cn
        JOIN orders o ON o.id = cn.order_id
        WHERE o.customer_id = ?
@@ -597,9 +593,8 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
           Number(inv.cbte_desde || 0)
         );
         const lineDate = inv.invoice_created_at || inv.line_date || inv.order_date;
-        const iibbNote = agipRet > 0.005 ? ' · c/ percepción IIBB' : '';
         return {
-          lineOrder: maxLineOrder + 55000 + idx,
+          lineOrder: maxLineOrder + 60000 + idx,
           lineDate,
           tipo: 'FAC',
           numero,
@@ -607,36 +602,7 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
           vto: null,
           importe: importe > 0 ? importe : null,
           saldo: null,
-          detalle: `Pedido ${inv.order_id || ''} · Factura AFIP LupoHub${iibbNote}`,
-          paginaPdf: null,
-          source: 'system' as const
-        };
-      });
-    const voidedInvoiceAsEntries = creditNoteRows
-      .filter(
-        (cn) =>
-          cn.voided_invoice_cbte_desde != null &&
-          Number(cn.voided_invoice_cbte_desde) > 0 &&
-          ledgerMovementVisibleAfterOpening(openingBalanceDate, cn.created_at)
-      )
-      .map((cn, idx) => {
-        const importe = ncLedgerImporte(Number(cn.amount_credited || 0));
-        const numero = formatLedgerAfipNumero(
-          Number(cn.voided_invoice_cbte_tipo || 0),
-          Number(cn.voided_invoice_punto_venta || 0),
-          Number(cn.voided_invoice_cbte_desde || 0)
-        );
-        return {
-          lineOrder: maxLineOrder + 57500 + idx,
-          lineDate: cn.created_at,
-          tipo: 'FAC',
-          numero,
-          edc: null,
-          vto: null,
-          importe: importe > 0 ? importe : null,
-          saldo: null,
-          detalle: `Pedido ${cn.order_id || ''} · Factura anulada (reemisión IIBB)`,
-          excluirDeSaldo: true,
+          detalle: `Pedido ${inv.order_id || ''} · Factura AFIP LupoHub`,
           paginaPdf: null,
           source: 'system' as const
         };
@@ -644,29 +610,26 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
     const creditNoteAsEntries = creditNoteRows
       .filter((cn) => ledgerMovementVisibleAfterOpening(openingBalanceDate, cn.created_at))
       .map((cn, idx) => {
-      const importe = ncLedgerImporte(Number(cn.amount_credited || 0));
-      const superseded = !!Number(cn.superseded_by_reinvoice);
-      const numero = formatLedgerAfipNumero(
-        Number(cn.cbte_tipo || 0),
-        Number(cn.punto_venta || 0),
-        Number(cn.cbte_desde || 0)
-      );
-      return {
-        lineOrder: maxLineOrder + 60000 + idx,
-        lineDate: cn.created_at,
-        tipo: 'NC',
-        numero,
-        edc: null,
-        vto: null,
-        importe: importe > 0 ? importe : null,
-        saldo: null,
-        detalle: superseded
-          ? `Pedido ${cn.order_id || ''} · NC AFIP LupoHub · reemisión`
-          : `Pedido ${cn.order_id || ''} · NC AFIP LupoHub`,
-        paginaPdf: null,
-        source: 'system' as const
-      };
-    });
+        const importe = ncLedgerImporte(Number(cn.amount_credited || 0));
+        const numero = formatLedgerAfipNumero(
+          Number(cn.cbte_tipo || 0),
+          Number(cn.punto_venta || 0),
+          Number(cn.cbte_desde || 0)
+        );
+        return {
+          lineOrder: maxLineOrder + 55000 + idx,
+          lineDate: cn.created_at,
+          tipo: 'NC',
+          numero,
+          edc: null,
+          vto: null,
+          importe: importe > 0 ? importe : null,
+          saldo: null,
+          detalle: `Pedido ${cn.order_id || ''} · NC AFIP LupoHub`,
+          paginaPdf: null,
+          source: 'system' as const
+        };
+      });
     const manualComprobanteAsEntries = manualComprobanteRows.filter((m) => movementOnOrAfterOpening(m.fecha || m.created_at)).map((m, idx) => {
       const importe =
         m.tipo === 'FACTURA'
@@ -744,9 +707,8 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
           }))
         : []),
       ...orderSaldoAsEntries,
-      ...voidedInvoiceAsEntries,
-      ...invoiceAsEntries,
       ...creditNoteAsEntries,
+      ...invoiceAsEntries,
       ...manualComprobanteAsEntries,
       ...paymentAsEntries
     ];
@@ -780,10 +742,22 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
     }
     deduped.push(...Array.from(movementByKey.values()));
     const unified = filterSystemDuplicatesAgainstImport(deduped);
+    const ledgerTipoSortRank = (tipo: string, detalle?: string | null) => {
+      const t = normalizeLedgerDocType(tipo, detalle);
+      if (t === 'SALDO') return 0;
+      if (t === 'NC') return 1;
+      if (t === 'FAC' || t === 'ND') return 2;
+      if (t === 'PED') return 3;
+      if (t === 'REC') return 4;
+      return 5;
+    };
     unified.sort((a, b) => {
       const da = new Date(a.lineDate || 0).getTime() || 0;
       const db = new Date(b.lineDate || 0).getTime() || 0;
       if (da !== db) return da - db;
+      const ra = ledgerTipoSortRank(a.tipo, a.detalle);
+      const rb = ledgerTipoSortRank(b.tipo, b.detalle);
+      if (ra !== rb) return ra - rb;
       return Number(a.lineOrder || 0) - Number(b.lineOrder || 0);
     });
     if (Math.abs(openingBalance) > 0.005) {
