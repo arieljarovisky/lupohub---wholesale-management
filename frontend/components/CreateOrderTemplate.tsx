@@ -1235,13 +1235,13 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         </button>
       </div>
 
-      {/* Tabla o estado vacío */}
-      <div className="flex-1 min-h-0 overflow-auto rounded-2xl border border-slate-700/80 bg-slate-800/40 shadow-inner">
+      {/* Tabla o estado vacío — scroll interno para que el thead sticky funcione (el scroll de <main> rompe position:sticky) */}
+      <div className="rounded-2xl border border-slate-700/80 bg-slate-800/40 shadow-inner">
         {rows.length === 0 ? (
           <button
             type="button"
             onClick={() => setShowAddModal(true)}
-            className="w-full h-full min-h-[280px] flex flex-col items-center justify-center gap-4 py-12 px-4 rounded-2xl border-2 border-dashed border-slate-600/80 hover:border-blue-500/50 hover:bg-slate-800/60 transition-colors group"
+            className="w-full min-h-[280px] flex flex-col items-center justify-center gap-4 py-12 px-4 rounded-2xl border-2 border-dashed border-slate-600/80 hover:border-blue-500/50 hover:bg-slate-800/60 transition-colors group"
           >
             <span className="w-16 h-16 rounded-2xl bg-slate-700/80 group-hover:bg-blue-500/20 flex items-center justify-center transition-colors">
               <Plus size={32} className="text-slate-400 group-hover:text-blue-400" strokeWidth={2} />
@@ -1252,20 +1252,20 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
             </div>
           </button>
         ) : (
-          <div className="touch-scroll">
-            <table className="w-full min-w-[640px] text-sm border-collapse">
-              <thead className="sticky top-0 z-20">
-                <tr className="border-b border-slate-600/80 bg-slate-800/95 shadow-[0_1px_0_0_rgba(71,85,105,0.6)]">
-                  <th className="text-left text-slate-400 font-semibold py-3 px-3 sticky top-0 left-0 bg-slate-800/95 z-30 rounded-tl-xl">Código</th>
-                  <th className="text-left text-slate-400 font-semibold py-3 px-3 bg-slate-800/95">Color</th>
-                  <th className="text-center text-slate-400 font-semibold py-3 px-2 min-w-[70px] bg-slate-800/95" title="Misma cantidad en todos los talles">Todas</th>
+          <div className="overflow-x-auto overflow-y-auto touch-scroll overscroll-contain max-h-[calc(100dvh-20rem)] sm:max-h-[calc(100dvh-17rem)] md:max-h-[calc(100vh-13rem)]">
+            <table className="w-full min-w-[640px] text-sm border-separate border-spacing-0">
+              <thead>
+                <tr className="border-b border-slate-600/80">
+                  <th className="text-left text-slate-400 font-semibold py-3 px-3 sticky top-0 left-0 bg-slate-800 z-30 rounded-tl-xl border-b border-slate-600/80 shadow-[0_1px_0_0_rgba(71,85,105,0.6)]">Código</th>
+                  <th className="text-left text-slate-400 font-semibold py-3 px-3 sticky top-0 bg-slate-800 z-20 border-b border-slate-600/80 shadow-[0_1px_0_0_rgba(71,85,105,0.6)]">Color</th>
+                  <th className="text-center text-slate-400 font-semibold py-3 px-2 min-w-[70px] sticky top-0 bg-slate-800 z-20 border-b border-slate-600/80 shadow-[0_1px_0_0_rgba(71,85,105,0.6)]" title="Misma cantidad en todos los talles">Todas</th>
                   {sizeColumns.map(s => (
-                    <th key={s.code} className="text-center text-slate-400 font-semibold py-3 px-2 min-w-[48px] bg-slate-800/95">
+                    <th key={s.code} className="text-center text-slate-400 font-semibold py-3 px-2 min-w-[48px] sticky top-0 bg-slate-800 z-20 border-b border-slate-600/80 shadow-[0_1px_0_0_rgba(71,85,105,0.6)]">
                       {labelTalle(s.code) || s.name || s.code}
                     </th>
                   ))}
-                  <th className="text-right text-slate-400 font-semibold py-3 px-3 bg-slate-800/95">Precio</th>
-                  <th className="w-12 py-3 px-2 bg-slate-800/95 rounded-tr-xl"></th>
+                  <th className="text-right text-slate-400 font-semibold py-3 px-3 sticky top-0 bg-slate-800 z-20 border-b border-slate-600/80 shadow-[0_1px_0_0_rgba(71,85,105,0.6)]">Precio</th>
+                  <th className="w-12 py-3 px-2 sticky top-0 bg-slate-800 z-20 rounded-tr-xl border-b border-slate-600/80 shadow-[0_1px_0_0_rgba(71,85,105,0.6)]"></th>
                 </tr>
               </thead>
               <tbody>
