@@ -61,16 +61,117 @@ function formatColorCell(colorCode: string, colorName: string): string {
 
 function normalizeSizeCode(value: unknown, skuRaw?: string): string {
   const directRaw = String(value ?? '').trim();
-  const direct = codigoTalleParaSku(directRaw) || directRaw;
-  if (direct) return direct;
+  if (directRaw) {
+    const numLead = directRaw.match(/^(\d{2,3})\b/);
+    if (numLead) return numLead[1];
+    const fromName = codigoTalleParaSku(directRaw);
+    if (fromName && /^\d{2,3}$/.test(fromName)) return fromName;
+  }
   const sku = String(skuRaw ?? '').trim();
-  if (!sku) return 'U';
+  if (!sku) return '';
   const parts = sku.split('-').filter(Boolean);
+  if (parts.length >= 3 && /^\d{2,3}$/.test(parts[1])) return parts[1];
   if (parts.length >= 2) {
     const fromSku = String(parts[parts.length - 2]).trim();
-    return codigoTalleParaSku(fromSku) || fromSku || 'U';
+    const norm = codigoTalleParaSku(fromSku) || fromSku;
+    if (/^\d{2,3}$/.test(norm)) return norm;
   }
-  return 'U';
+  return '';
+}
+
+function colorCodeFromVariantSku(sku: string): string {
+  const parts = String(sku ?? '').split('-').filter(Boolean);
+  return parts.length >= 3 ? String(parts[parts.length - 1]).trim() : '';
+}
+
+function normalizeColorName(name: string): string {
+  return String(name ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+/** SKU canónico base-talle-color (ej. 4080001-130-111). Ignora concatenados tipo 4080001130614. */
+function variantSkuLooksCanonical(variantSku: string, parentSku: string): boolean {
+  const v = String(variantSku ?? '').trim();
+  const parts = v.split('-').filter(Boolean);
+  if (parts.length !== 3) return false;
+  if (!/^\d{2,3}$/.test(parts[1])) return false;
+  const parent = String(parentSku ?? '').trim();
+  return !parent || articleCodesMatch(parts[0], parent);
+}
+
+function rowMatchesCatalogVariant(row: TemplateRow, p: Product, articlePrefix: string): boolean {
+  const pid = String(row.productId ?? '').trim();
+  const pPid = String(p.product_id ?? '').trim();
+  if (pid && pPid) {
+    if (pid !== pPid) return false;
+  } else if (articlePrefix) {
+    const base = String(p.base_sku ?? '').trim();
+    if (base && !articleCodesMatch(base, articlePrefix)) return false;
+  } else {
+    return false;
+  }
+  const skuColor = colorCodeFromVariantSku(p.sku);
+  const rowKey = variantColorKey(row.colorCode, row.colorName);
+  const catKey = variantColorKey(skuColor, p.color ?? '');
+  if (rowKey === catKey) return true;
+  const rn = normalizeColorName(row.colorName);
+  const cn = normalizeColorName(p.color);
+  return rn.length > 0 && cn.length > 0 && rn === cn;
+}
+
+function mergeCatalogVariantsIntoRow(
+  row: TemplateRow,
+  products: Product[],
+  articlePrefix: string
+): TemplateRow {
+  const parentSku = articlePrefix || row.productCode;
+  const variantBySize = { ...row.variantBySize };
+  const stockBySize = { ...row.stockBySize };
+  let changed = false;
+  for (const p of products) {
+    if (!rowMatchesCatalogVariant(row, p, articlePrefix)) continue;
+    if (!variantSkuLooksCanonical(p.sku, parentSku)) continue;
+    const sizeCode = normalizeSizeCode(p.size, p.sku);
+    if (!sizeCode || !/^\d{2,3}$/.test(sizeCode)) continue;
+    if (variantBySize[sizeCode]) continue;
+    variantBySize[sizeCode] = p.id;
+    stockBySize[sizeCode] = Math.max(0, Number(p.stock ?? 0));
+    changed = true;
+  }
+  return changed ? { ...row, variantBySize, stockBySize } : row;
+}
+
+function assignVariantsToMaps(
+  vars: Array<{
+    variant_id: string;
+    size_code?: string;
+    stock?: number;
+    sku?: string;
+    variant_sku?: string;
+  }>,
+  parentSku: string,
+  variantBySize: Record<string, string>,
+  stockBySize: Record<string, number>
+): void {
+  const sorted = [...vars].sort((a, b) => {
+    const skuA = String((a as { variant_sku?: string }).variant_sku || a.sku || '');
+    const skuB = String((b as { variant_sku?: string }).variant_sku || b.sku || '');
+    const ca = variantSkuLooksCanonical(skuA, parentSku) ? 0 : 1;
+    const cb = variantSkuLooksCanonical(skuB, parentSku) ? 0 : 1;
+    return ca - cb;
+  });
+  for (const v of sorted) {
+    const variantSkuRef = String((v as { variant_sku?: string }).variant_sku || v.sku || '');
+    if (!variantSkuLooksCanonical(variantSkuRef, parentSku)) continue;
+    const sizeCode = normalizeSizeCode(v.size_code, variantSkuRef);
+    if (!sizeCode || !/^\d{2,3}$/.test(sizeCode)) continue;
+    if (variantBySize[sizeCode]) continue;
+    variantBySize[sizeCode] = v.variant_id;
+    stockBySize[sizeCode] = Math.max(0, Number((v as { stock?: number }).stock ?? 0));
+  }
 }
 
 const canonicalSizeCode = (value: unknown): string => {
@@ -392,12 +493,16 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         });
       }
       const row = rowsByKey.get(key)!;
-      row.variantBySize[sizeCode] = variantId;
+      const parentSku = row.productCode || productCode;
+      if (variantSkuLooksCanonical(rawSku, parentSku) && sizeCode && /^\d{2,3}$/.test(sizeCode)) {
+        if (!row.variantBySize[sizeCode]) row.variantBySize[sizeCode] = variantId;
+      }
       row.quantitiesBySize[sizeCode] = (row.quantitiesBySize[sizeCode] || 0) + Number(item.quantity || 0);
       if (!row.price && price) row.price = price;
       if (!row.productId && parentProductId) row.productId = parentProductId;
     }
     const sorted = Array.from(rowsByKey.values())
+      .map((row) => mergeCatalogVariantsIntoRow(row, products, resolveDisplayArticleCode(row.productCode)))
       .filter((row) => Object.values(row.quantitiesBySize).some((q) => Number(q) > 0))
       .sort((a, b) => {
       const byCode = a.productCode.localeCompare(b.productCode, undefined, { numeric: true, sensitivity: 'base' });
@@ -531,13 +636,10 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         const colorName = first?.color_name ?? colorCode;
         const variantBySize: Record<string, string> = {};
         const stockBySize: Record<string, number> = {};
-        vars.forEach(v => {
-          const variantSkuRef = String((v as any).variant_sku || v.sku || product.sku || '');
-          const sizeCode = normalizeSizeCode(v.size_code, variantSkuRef);
-          variantBySize[sizeCode] = v.variant_id;
-          stockBySize[sizeCode] = Math.max(0, Number(v.stock ?? 0));
-          if (defaultQtys[sizeCode] == null) defaultQtys[sizeCode] = 0;
-        });
+        assignVariantsToMaps(vars, displayCode, variantBySize, stockBySize);
+        for (const code of Object.keys(variantBySize)) {
+          if (defaultQtys[code] == null) defaultQtys[code] = 0;
+        }
         newRows.push({
           id: `row-${Date.now()}-${Math.random().toString(36).slice(2)}`,
           productCode: displayCode,
@@ -585,30 +687,66 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     }));
   };
 
-  /** Compatibilidad con borradores viejos: talla guardada como letra/nombre en vez de código numérico. */
-  const getVariantIdBySizeCompat = (row: TemplateRow, sizeCode: string): string | undefined => {
-    const direct = row.variantBySize?.[sizeCode];
-    if (direct) return direct;
-    const target = canonicalSizeCode(sizeCode);
-    for (const [key, variantId] of Object.entries(row.variantBySize || {})) {
-      const k = canonicalSizeCode(key);
-      if (!k || !variantId) continue;
-      if (k === target) return variantId;
-    }
-    return undefined;
-  };
+  /** Compatibilidad con borradores viejos + catálogo cargado (todos los talles del artículo/color). */
+  const getVariantIdBySizeCompat = useCallback(
+    (row: TemplateRow, sizeCode: string): string | undefined => {
+      const direct = row.variantBySize?.[sizeCode];
+      if (direct) return direct;
+      const target = canonicalSizeCode(sizeCode);
+      for (const [key, variantId] of Object.entries(row.variantBySize || {})) {
+        const k = canonicalSizeCode(key);
+        if (!k || !variantId) continue;
+        if (k === target) return variantId;
+      }
+      const prefix = rowArticlePrefix(row);
+      const parentSku = prefix || row.productCode;
+      for (const p of products) {
+        if (!rowMatchesCatalogVariant(row, p, prefix)) continue;
+        if (!variantSkuLooksCanonical(p.sku, parentSku)) continue;
+        if (canonicalSizeCode(normalizeSizeCode(p.size, p.sku)) !== target) continue;
+        return p.id;
+      }
+      return undefined;
+    },
+    [products, rowArticlePrefix]
+  );
 
-  const getStockBySizeCompat = (row: TemplateRow, sizeCode: string): number | undefined => {
-    const direct = row.stockBySize?.[sizeCode];
-    if (direct != null) return Number(direct);
-    const target = canonicalSizeCode(sizeCode);
-    for (const [key, stock] of Object.entries(row.stockBySize || {})) {
-      const k = canonicalSizeCode(key);
-      if (!k) continue;
-      if (k === target) return Number(stock);
-    }
-    return undefined;
-  };
+  const getStockBySizeCompat = useCallback(
+    (row: TemplateRow, sizeCode: string): number | undefined => {
+      const direct = row.stockBySize?.[sizeCode];
+      if (direct != null) return Number(direct);
+      const target = canonicalSizeCode(sizeCode);
+      for (const [key, stock] of Object.entries(row.stockBySize || {})) {
+        const k = canonicalSizeCode(key);
+        if (!k) continue;
+        if (k === target) return Number(stock);
+      }
+      const prefix = rowArticlePrefix(row);
+      const parentSku = prefix || row.productCode;
+      for (const p of products) {
+        if (!rowMatchesCatalogVariant(row, p, prefix)) continue;
+        if (!variantSkuLooksCanonical(p.sku, parentSku)) continue;
+        if (canonicalSizeCode(normalizeSizeCode(p.size, p.sku)) !== target) continue;
+        return Math.max(0, Number(p.stock ?? 0));
+      }
+      return undefined;
+    },
+    [products, rowArticlePrefix]
+  );
+
+  /** Completa talles habilitados desde el catálogo (p. ej. al editar un pedido ya guardado). */
+  useEffect(() => {
+    if (!products.length || !rows.length) return;
+    setRows((prev) => {
+      let changed = false;
+      const next = prev.map((r) => {
+        const merged = mergeCatalogVariantsIntoRow(r, products, rowArticlePrefix(r));
+        if (merged !== r) changed = true;
+        return merged;
+      });
+      return changed ? next : prev;
+    });
+  }, [products, rows.length, rowArticlePrefix]);
 
   /** Aplicar la misma cantidad a todos los talles de la fila. */
   const setRowAllQuantities = (rowId: string, value: number) => {
@@ -744,13 +882,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     const price = getPriceFromList(product.id, product.sku, (product as any).base_price);
     const variantBySize: Record<string, string> = {};
     const stockBySize: Record<string, number> = {};
-    vars.forEach(v => {
-      const variantSkuRef = String((v as any).variant_sku || v.sku || product.sku || '');
-      const sizeCode = normalizeSizeCode(v.size_code, variantSkuRef);
-      variantBySize[sizeCode] = v.variant_id;
-      const st = (v as any).stock ?? (v as any).stock_quantity;
-      stockBySize[sizeCode] = Math.max(0, Number(st ?? 0));
-    });
+    assignVariantsToMaps(vars, displayCode, variantBySize, stockBySize);
     return {
       id: `row-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       productCode: displayCode,
@@ -1055,7 +1187,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full min-h-0 pb-32 md:pb-0 px-3 sm:px-0 max-w-full">
+    <div className="flex flex-col pb-32 md:pb-0 px-3 sm:px-0 max-w-full">
       {/* Header: queda FUERA del subtree `inert` para que "Volver" siempre funcione, incluso en solo lectura. */}
       <header className="shrink-0 mb-5">
         <div className="flex items-center gap-3">
@@ -1245,7 +1377,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         </button>
       </div>
 
-      {/* Tabla o estado vacío — scroll interno para que el thead sticky funcione (el scroll de <main> rompe position:sticky) */}
+      {/* Tabla: crece con el contenido; el scroll es el de la página (<main>) */}
       <div className="rounded-2xl border border-slate-700/80 bg-slate-800/40 shadow-inner">
         {rows.length === 0 ? (
           <button
@@ -1262,7 +1394,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
             </div>
           </button>
         ) : (
-          <div className="overflow-x-auto overflow-y-auto touch-scroll overscroll-contain max-h-[calc(100dvh-20rem)] sm:max-h-[calc(100dvh-17rem)] md:max-h-[calc(100vh-13rem)]">
+          <div className="overflow-x-auto">
             <table className="w-full min-w-[640px] text-sm border-separate border-spacing-0">
               <thead>
                 <tr className="border-b border-slate-600/80">
