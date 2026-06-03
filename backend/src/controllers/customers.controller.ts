@@ -1221,7 +1221,8 @@ const SQL_CARTERA_AFIP_INVOICES_SUBQUERY = `
 `;
 
 /**
- * NC AFIP (× IVA) que restan del saldo. Solo punto de venta 21. Excluye NC de reemisión con IIBB.
+ * NC AFIP (× IVA) que restan del saldo. Solo punto de venta 21.
+ * Incluye NC de reemisión con IIBB: anulan la factura anterior y la nueva factura suma por separado.
  */
 const SQL_CARTERA_AFIP_NC_SUBQUERY = `
   SELECT
@@ -1231,7 +1232,6 @@ const SQL_CARTERA_AFIP_NC_SUBQUERY = `
   INNER JOIN orders o ON o.id = cn.order_id
   INNER JOIN customers co ON co.id = o.customer_id
   WHERE cn.punto_venta = 21
-    AND COALESCE(cn.superseded_by_reinvoice, 0) = 0
     AND ${SQL_OPENING_AFIP_CN_DATE_WHERE}
   GROUP BY o.customer_id
 `;
@@ -1435,7 +1435,7 @@ export const getSaldosPendientes = async (req: Request, res: Response) => {
 
 /**
  * Cartera unificada por cliente: saldo inicial + facturas AFIP + pedidos sin factura − NC − recibos.
- * Alineado con el historial (saldo corrido): importes de factura con IVA, todas las NC activas y todos los recibos LupoHub.
+ * Alineado con el historial (saldo corrido): importes de factura con IVA, todas las NC AFIP y todos los recibos LupoHub.
  */
 export const getCarteraTotals = async (req: Request, res: Response) => {
   const user = (req as any).user;
@@ -4264,7 +4264,6 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
       FROM credit_notes cn
       JOIN orders o ON o.id = cn.order_id
       WHERE o.customer_id = ?
-        AND COALESCE(cn.superseded_by_reinvoice, 0) = 0
 
       UNION ALL
 

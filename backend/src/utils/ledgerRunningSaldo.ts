@@ -34,7 +34,7 @@ export type LedgerRunningRow = {
   detalle?: string | null;
   source?: 'imported' | 'system';
   saldoCorrido?: number | null;
-  /** NC de reemisión: visible en historial pero no modifica el saldo corrido. */
+  /** Factura anulada por NC de reemisión: visible en historial pero no suma al saldo corrido. */
   excluirDeSaldo?: boolean;
 };
 
