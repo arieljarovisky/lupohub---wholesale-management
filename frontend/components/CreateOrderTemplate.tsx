@@ -79,11 +79,6 @@ function normalizeSizeCode(value: unknown, skuRaw?: string): string {
   return '';
 }
 
-function colorCodeFromVariantSku(sku: string): string {
-  const parts = String(sku ?? '').split('-').filter(Boolean);
-  return parts.length >= 3 ? String(parts[parts.length - 1]).trim() : '';
-}
-
 function normalizeColorName(name: string): string {
   return String(name ?? '')
     .trim()
@@ -102,46 +97,16 @@ function variantSkuLooksCanonical(variantSku: string, parentSku: string): boolea
   return !parent || articleCodesMatch(parts[0], parent);
 }
 
-function rowMatchesCatalogVariant(row: TemplateRow, p: Product, articlePrefix: string): boolean {
-  const pid = String(row.productId ?? '').trim();
-  const pPid = String(p.product_id ?? '').trim();
-  if (pid && pPid) {
-    if (pid !== pPid) return false;
-  } else if (articlePrefix) {
-    const base = String(p.base_sku ?? '').trim();
-    if (base && !articleCodesMatch(base, articlePrefix)) return false;
-  } else {
-    return false;
-  }
-  const skuColor = colorCodeFromVariantSku(p.sku);
+function variantMatchesRowColor(
+  v: { color_code?: string; color_name?: string },
+  row: TemplateRow
+): boolean {
   const rowKey = variantColorKey(row.colorCode, row.colorName);
-  const catKey = variantColorKey(skuColor, p.color ?? '');
-  if (rowKey === catKey) return true;
+  const vKey = variantColorKey(String(v.color_code ?? ''), String(v.color_name ?? ''));
+  if (rowKey === vKey) return true;
   const rn = normalizeColorName(row.colorName);
-  const cn = normalizeColorName(p.color);
-  return rn.length > 0 && cn.length > 0 && rn === cn;
-}
-
-function mergeCatalogVariantsIntoRow(
-  row: TemplateRow,
-  products: Product[],
-  articlePrefix: string
-): TemplateRow {
-  const parentSku = articlePrefix || row.productCode;
-  const variantBySize = { ...row.variantBySize };
-  const stockBySize = { ...row.stockBySize };
-  let changed = false;
-  for (const p of products) {
-    if (!rowMatchesCatalogVariant(row, p, articlePrefix)) continue;
-    if (!variantSkuLooksCanonical(p.sku, parentSku)) continue;
-    const sizeCode = normalizeSizeCode(p.size, p.sku);
-    if (!sizeCode || !/^\d{2,3}$/.test(sizeCode)) continue;
-    if (variantBySize[sizeCode]) continue;
-    variantBySize[sizeCode] = p.id;
-    stockBySize[sizeCode] = Math.max(0, Number(p.stock ?? 0));
-    changed = true;
-  }
-  return changed ? { ...row, variantBySize, stockBySize } : row;
+  const vn = normalizeColorName(String(v.color_name ?? ''));
+  return rn.length > 0 && vn.length > 0 && rn === vn;
 }
 
 function assignVariantsToMaps(
@@ -165,13 +130,71 @@ function assignVariantsToMaps(
   });
   for (const v of sorted) {
     const variantSkuRef = String((v as { variant_sku?: string }).variant_sku || v.sku || '');
-    if (!variantSkuLooksCanonical(variantSkuRef, parentSku)) continue;
     const sizeCode = normalizeSizeCode(v.size_code, variantSkuRef);
     if (!sizeCode || !/^\d{2,3}$/.test(sizeCode)) continue;
+    const hasDbSize = Boolean(String(v.size_code ?? '').trim());
+    const canonical = variantSkuLooksCanonical(variantSkuRef, parentSku);
+    if (!canonical && !hasDbSize) continue;
     if (variantBySize[sizeCode]) continue;
     variantBySize[sizeCode] = v.variant_id;
     stockBySize[sizeCode] = Math.max(0, Number((v as { stock?: number }).stock ?? 0));
   }
+}
+
+/** Carga todas las variantes del artículo desde API (no depende de la lista de precios en memoria). */
+async function enrichRowsVariantsFromApi(rows: TemplateRow[]): Promise<TemplateRow[]> {
+  const samples = new Map<string, TemplateRow>();
+  for (const r of rows) {
+    const k = `${r.productId || r.productCode}__${variantColorKey(r.colorCode, r.colorName)}`;
+    if (!samples.has(k)) samples.set(k, r);
+  }
+  const patchByKey = new Map<
+    string,
+    { variantBySize: Record<string, string>; stockBySize: Record<string, number>; productId?: string }
+  >();
+  for (const [, sample] of samples) {
+    const displayCode = resolveDisplayArticleCode(sample.productCode);
+    let product: Awaited<ReturnType<typeof api.getProductBySku>> = null;
+    let allVars: Array<{
+      variant_id: string;
+      product_id?: string;
+      color_code: string;
+      color_name: string;
+      size_code: string;
+      stock?: number;
+      sku?: string;
+      variant_sku?: string;
+    }> = [];
+    for (const candidate of skuLookupCandidates(displayCode)) {
+      product = await api.getProductBySku(candidate);
+      if (product?.variants?.length) {
+        allVars = variantsForPrimaryProduct(product.id, product.variants as typeof allVars);
+        break;
+      }
+    }
+    if (!allVars.length) continue;
+    const varsForColor = allVars.filter((v) => variantMatchesRowColor(v, sample));
+    const vb: Record<string, string> = {};
+    const sb: Record<string, number> = {};
+    assignVariantsToMaps(varsForColor, displayCode, vb, sb);
+    const k = `${sample.productId || sample.productCode}__${variantColorKey(sample.colorCode, sample.colorName)}`;
+    patchByKey.set(k, {
+      variantBySize: vb,
+      stockBySize: sb,
+      productId: product?.id,
+    });
+  }
+  return rows.map((r) => {
+    const k = `${r.productId || r.productCode}__${variantColorKey(r.colorCode, r.colorName)}`;
+    const patch = patchByKey.get(k);
+    if (!patch) return r;
+    return {
+      ...r,
+      productId: r.productId || patch.productId || r.productId,
+      variantBySize: { ...patch.variantBySize, ...r.variantBySize },
+      stockBySize: { ...patch.stockBySize, ...r.stockBySize },
+    };
+  });
 }
 
 const canonicalSizeCode = (value: unknown): string => {
@@ -493,16 +516,14 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         });
       }
       const row = rowsByKey.get(key)!;
-      const parentSku = row.productCode || productCode;
-      if (variantSkuLooksCanonical(rawSku, parentSku) && sizeCode && /^\d{2,3}$/.test(sizeCode)) {
-        if (!row.variantBySize[sizeCode]) row.variantBySize[sizeCode] = variantId;
+      if (sizeCode && /^\d{2,3}$/.test(sizeCode) && !row.variantBySize[sizeCode]) {
+        row.variantBySize[sizeCode] = variantId;
       }
       row.quantitiesBySize[sizeCode] = (row.quantitiesBySize[sizeCode] || 0) + Number(item.quantity || 0);
       if (!row.price && price) row.price = price;
       if (!row.productId && parentProductId) row.productId = parentProductId;
     }
     const sorted = Array.from(rowsByKey.values())
-      .map((row) => mergeCatalogVariantsIntoRow(row, products, resolveDisplayArticleCode(row.productCode)))
       .filter((row) => Object.values(row.quantitiesBySize).some((q) => Number(q) > 0))
       .sort((a, b) => {
       const byCode = a.productCode.localeCompare(b.productCode, undefined, { numeric: true, sensitivity: 'base' });
@@ -510,6 +531,14 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       return a.colorName.localeCompare(b.colorName, undefined, { numeric: true, sensitivity: 'base' });
     });
     setRows(sorted);
+    void enrichRowsVariantsFromApi(sorted).then((enriched) => {
+      setRows((prev) => {
+        if (prev.length !== enriched.length) return prev;
+        const prevIds = prev.map((r) => r.id).join('|');
+        const nextIds = enriched.map((r) => r.id).join('|');
+        return prevIds === nextIds ? enriched : prev;
+      });
+    });
     appliedPriceListForRowsRef.current = undefined;
     if (isDuplicating) pendingNewOrderIdRef.current = null;
   }, [hydrateSourceOrder, products, isDuplicating]);
@@ -605,14 +634,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       let product: Awaited<ReturnType<typeof api.getProductBySku>> = null;
       let variants: Array<{ variant_id: string; product_id?: string; color_code: string; color_name: string; size_code: string; stock?: number }> = [];
       for (const candidate of skuLookupCandidates(code)) {
-        product = await api.getProductBySku(candidate, { includeRelated: false });
-        variants = (product?.variants ?? []) as typeof variants;
-        if (!variants.length) {
-          product = await api.getProductBySku(candidate);
-          variants = variantsForPrimaryProduct(product?.id ?? '', (product?.variants ?? []) as typeof variants);
-        } else {
-          variants = variantsForPrimaryProduct(product!.id, variants);
-        }
+        product = await api.getProductBySku(candidate);
+        variants = variantsForPrimaryProduct(product?.id ?? '', (product?.variants ?? []) as typeof variants);
         if (product && variants.length) break;
         product = null;
         variants = [];
@@ -623,7 +646,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       }
       const byColor = new Map<string, typeof variants>();
       for (const v of variants) {
-        const c = v.color_code ?? '';
+        const c = variantColorKey(v.color_code ?? '', v.color_name ?? '');
         if (!byColor.has(c)) byColor.set(c, []);
         byColor.get(c)!.push(v);
       }
@@ -631,8 +654,9 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       const defaultQtys: Record<string, number> = {};
       sizes.forEach(s => { defaultQtys[s.code] = 0; });
       const price = getPriceFromList(product.id, product.sku, (product as any).base_price);
-      byColor.forEach((vars, colorCode) => {
+      byColor.forEach((vars) => {
         const first = vars[0];
+        const colorCode = String(first?.color_code ?? '').trim();
         const colorName = first?.color_name ?? colorCode;
         const variantBySize: Record<string, string> = {};
         const stockBySize: Record<string, number> = {};
@@ -687,66 +711,30 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     }));
   };
 
-  /** Compatibilidad con borradores viejos + catálogo cargado (todos los talles del artículo/color). */
-  const getVariantIdBySizeCompat = useCallback(
-    (row: TemplateRow, sizeCode: string): string | undefined => {
-      const direct = row.variantBySize?.[sizeCode];
-      if (direct) return direct;
-      const target = canonicalSizeCode(sizeCode);
-      for (const [key, variantId] of Object.entries(row.variantBySize || {})) {
-        const k = canonicalSizeCode(key);
-        if (!k || !variantId) continue;
-        if (k === target) return variantId;
-      }
-      const prefix = rowArticlePrefix(row);
-      const parentSku = prefix || row.productCode;
-      for (const p of products) {
-        if (!rowMatchesCatalogVariant(row, p, prefix)) continue;
-        if (!variantSkuLooksCanonical(p.sku, parentSku)) continue;
-        if (canonicalSizeCode(normalizeSizeCode(p.size, p.sku)) !== target) continue;
-        return p.id;
-      }
-      return undefined;
-    },
-    [products, rowArticlePrefix]
-  );
+  /** Compatibilidad con borradores viejos: talla guardada como letra/nombre en vez de código numérico. */
+  const getVariantIdBySizeCompat = (row: TemplateRow, sizeCode: string): string | undefined => {
+    const direct = row.variantBySize?.[sizeCode];
+    if (direct) return direct;
+    const target = canonicalSizeCode(sizeCode);
+    for (const [key, variantId] of Object.entries(row.variantBySize || {})) {
+      const k = canonicalSizeCode(key);
+      if (!k || !variantId) continue;
+      if (k === target) return variantId;
+    }
+    return undefined;
+  };
 
-  const getStockBySizeCompat = useCallback(
-    (row: TemplateRow, sizeCode: string): number | undefined => {
-      const direct = row.stockBySize?.[sizeCode];
-      if (direct != null) return Number(direct);
-      const target = canonicalSizeCode(sizeCode);
-      for (const [key, stock] of Object.entries(row.stockBySize || {})) {
-        const k = canonicalSizeCode(key);
-        if (!k) continue;
-        if (k === target) return Number(stock);
-      }
-      const prefix = rowArticlePrefix(row);
-      const parentSku = prefix || row.productCode;
-      for (const p of products) {
-        if (!rowMatchesCatalogVariant(row, p, prefix)) continue;
-        if (!variantSkuLooksCanonical(p.sku, parentSku)) continue;
-        if (canonicalSizeCode(normalizeSizeCode(p.size, p.sku)) !== target) continue;
-        return Math.max(0, Number(p.stock ?? 0));
-      }
-      return undefined;
-    },
-    [products, rowArticlePrefix]
-  );
-
-  /** Completa talles habilitados desde el catálogo (p. ej. al editar un pedido ya guardado). */
-  useEffect(() => {
-    if (!products.length || !rows.length) return;
-    setRows((prev) => {
-      let changed = false;
-      const next = prev.map((r) => {
-        const merged = mergeCatalogVariantsIntoRow(r, products, rowArticlePrefix(r));
-        if (merged !== r) changed = true;
-        return merged;
-      });
-      return changed ? next : prev;
-    });
-  }, [products, rows.length, rowArticlePrefix]);
+  const getStockBySizeCompat = (row: TemplateRow, sizeCode: string): number | undefined => {
+    const direct = row.stockBySize?.[sizeCode];
+    if (direct != null) return Number(direct);
+    const target = canonicalSizeCode(sizeCode);
+    for (const [key, stock] of Object.entries(row.stockBySize || {})) {
+      const k = canonicalSizeCode(key);
+      if (!k) continue;
+      if (k === target) return Number(stock);
+    }
+    return undefined;
+  };
 
   /** Aplicar la misma cantidad a todos los talles de la fila. */
   const setRowAllQuantities = (rowId: string, value: number) => {
@@ -954,14 +942,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       let product: Awaited<ReturnType<typeof api.getProductBySku>> = null;
       let variants: Array<{ variant_id: string; product_id?: string; color_code: string; color_name: string; size_code: string; stock?: number }> = [];
       for (const candidate of skuLookupCandidates(lookupSku)) {
-        product = await api.getProductBySku(candidate, { includeRelated: false });
-        variants = (product?.variants ?? []) as typeof variants;
-        if (!variants.length) {
-          product = await api.getProductBySku(candidate);
-          variants = variantsForPrimaryProduct(product?.id ?? '', (product?.variants ?? []) as typeof variants);
-        } else {
-          variants = variantsForPrimaryProduct(product!.id, variants);
-        }
+        product = await api.getProductBySku(candidate);
+        variants = variantsForPrimaryProduct(product?.id ?? '', (product?.variants ?? []) as typeof variants);
         if (product && variants.length) break;
         product = null;
         variants = [];
