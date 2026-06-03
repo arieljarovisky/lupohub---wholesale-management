@@ -539,6 +539,11 @@ const App: React.FC = () => {
     setDuplicateSourceOrder(null);
     editingOrderIdRef.current = order.id;
     setEditingOrder(order);
+    try {
+      localStorage.removeItem(DRAFT_KEY);
+    } catch {
+      /* ignore */
+    }
     setCurrentView('create_order');
   };
 

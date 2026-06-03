@@ -81,6 +81,22 @@ const canonicalSizeCode = (value: unknown): string => {
   return codigoTalleParaSku(raw) || raw;
 };
 
+/** Une filas del mismo artículo+color aunque el productId o colorCode vengan distintos del backend. */
+function findHydrationRowKey(
+  rowsByKey: Map<string, TemplateRow>,
+  productCode: string,
+  colorKey: string
+): string {
+  const normalizedCode = resolveDisplayArticleCode(productCode);
+  for (const [key, row] of rowsByKey) {
+    const rowColorKey = variantColorKey(row.colorCode, row.colorName);
+    if (rowColorKey === colorKey && articleCodesMatch(row.productCode, normalizedCode)) {
+      return key;
+    }
+  }
+  return `${normalizedCode}__${colorKey}`;
+}
+
 /** La rueda del mouse no debe modificar cantidades/precios al hacer scroll en la tabla. */
 const blockWheelOnNumberInput = (e: React.WheelEvent<HTMLInputElement>) => {
   e.preventDefault();
@@ -266,9 +282,9 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     );
   }, [sizes, rows]);
 
-  /** Restaurar borrador cuando haya clientes cargados, para que el cliente guardado exista en la lista y se muestre bien. */
+  /** Restaurar borrador solo en pedido nuevo (no al editar/duplicar un pedido existente). */
   useEffect(() => {
-    if (isEditing) return;
+    if (hydrateSourceOrder) return;
     if (customers.length === 0 || draftRestoredRef.current) return;
     try {
       const raw = localStorage.getItem(DRAFT_KEY);
@@ -286,7 +302,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     } catch {
       localStorage.removeItem(DRAFT_KEY);
     }
-  }, [customers, isEditing, applyCustomerPriceList]);
+  }, [customers, hydrateSourceOrder, applyCustomerPriceList]);
 
   const filteredCustomers = useMemo(() => {
     const q = clientFilter.trim().toLowerCase();
@@ -352,35 +368,51 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     setSelectedCustomerId(hydrateSourceOrder.customerId);
     setOrderDate(isDuplicating ? new Date().toISOString().slice(0, 10) : hydrateSourceOrder.date);
 
-    const productById = new Map<string, Product>();
-    for (const p of products) {
-      const pid = String((p as any).product_id || '').trim();
-      if (pid) productById.set(pid, p);
-      if (p.id) productById.set(p.id, p);
-    }
-
     const rowsByKey = new Map<string, TemplateRow>();
     for (const item of hydrateSourceOrder.items || []) {
       const sizeCode = normalizeSizeCode((item as any).sizeCode, String((item as any).sku || ''));
       const colorName = String((item as any).colorName || '').trim() || 'Color';
       const rawSku = String((item as any).sku || '').trim();
       const price = Number(item.priceAtMoment || 0);
-      const productId = String((item as any).productId || '');
       const variantId = String((item as any).variantId || '').trim();
       if (!variantId) continue;
-      const fromProduct = String((productById.get(productId) as any)?.base_sku || productById.get(productId)?.sku || '').trim();
-      const productCode = fromProduct
-        ? resolveDisplayArticleCode(fromProduct)
-        : resolveDisplayArticleCode(articleCodeForOrderRow(undefined, rawSku) || rawSku || productId);
-      const colorCode = String((item as any).colorCode || '').trim() || colorName;
 
-      const key = `${productId || productCode}__${colorCode}`;
+      const variantInCatalog = products.find((p) => p.id === variantId);
+      const parentProductId = String(
+        (item as any).productId ||
+          (variantInCatalog as any)?.product_id ||
+          ''
+      ).trim();
+
+      let baseSku = String((variantInCatalog as any)?.base_sku || '').trim();
+      if (!baseSku && variantInCatalog?.sku) {
+        baseSku =
+          articleCodeForOrderRow(undefined, variantInCatalog.sku) ||
+          resolveDisplayArticleCode(variantInCatalog.sku);
+      }
+      if (!baseSku && parentProductId) {
+        const sibling = products.find((p) => String((p as any).product_id || '') === parentProductId);
+        baseSku = String((sibling as any)?.base_sku || '').trim();
+        if (!baseSku && sibling?.sku) {
+          baseSku =
+            articleCodeForOrderRow(undefined, sibling.sku) ||
+            resolveDisplayArticleCode(sibling.sku);
+        }
+      }
+
+      const productCode = resolveDisplayArticleCode(
+        baseSku || articleCodeForOrderRow(undefined, rawSku) || rawSku || parentProductId
+      );
+      const colorCode = String((item as any).colorCode || '').trim() || colorName;
+      const colorKey = variantColorKey(colorCode, colorName);
+      const key = findHydrationRowKey(rowsByKey, productCode, colorKey);
+
       if (!rowsByKey.has(key)) {
         rowsByKey.set(key, {
           id: `edit-${key}-${Math.random().toString(36).slice(2, 8)}`,
           productCode,
           productName: String((item as any).productName || productCode),
-          productId,
+          productId: parentProductId,
           colorCode,
           colorName,
           variantBySize: {},
@@ -393,8 +425,11 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       row.variantBySize[sizeCode] = variantId;
       row.quantitiesBySize[sizeCode] = (row.quantitiesBySize[sizeCode] || 0) + Number(item.quantity || 0);
       if (!row.price && price) row.price = price;
+      if (!row.productId && parentProductId) row.productId = parentProductId;
     }
-    const sorted = Array.from(rowsByKey.values()).sort((a, b) => {
+    const sorted = Array.from(rowsByKey.values())
+      .filter((row) => Object.values(row.quantitiesBySize).some((q) => Number(q) > 0))
+      .sort((a, b) => {
       const byCode = a.productCode.localeCompare(b.productCode, undefined, { numeric: true, sensitivity: 'base' });
       if (byCode !== 0) return byCode;
       return a.colorName.localeCompare(b.colorName, undefined, { numeric: true, sensitivity: 'base' });
@@ -1003,7 +1038,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     let current: { productCode: string; productName: string; productId?: string; rows: TemplateRow[] } | null = null;
     for (const row of rows) {
       const prefix = rowArticlePrefix(row);
-      if (!current || current.productCode !== prefix) {
+      if (!current || !articleCodesMatch(current.productCode, prefix)) {
         current = { productCode: prefix, productName: row.productName, productId: row.productId, rows: [row] };
         list.push(current);
       } else {
