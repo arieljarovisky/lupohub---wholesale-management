@@ -1252,19 +1252,19 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
             </div>
           </button>
         ) : (
-          <div className="overflow-x-auto touch-scroll">
+          <div className="touch-scroll">
             <table className="w-full min-w-[640px] text-sm border-collapse">
-              <thead>
-                <tr className="border-b border-slate-600/80 bg-slate-800/90">
-                  <th className="text-left text-slate-400 font-semibold py-3 px-3 sticky left-0 bg-slate-800/95 z-10 rounded-tl-xl">Código</th>
-                  <th className="text-left text-slate-400 font-semibold py-3 px-3">Color</th>
-                  <th className="text-center text-slate-400 font-semibold py-3 px-2 min-w-[70px]" title="Misma cantidad en todos los talles">Todas</th>
+              <thead className="sticky top-0 z-20">
+                <tr className="border-b border-slate-600/80 bg-slate-800/95 shadow-[0_1px_0_0_rgba(71,85,105,0.6)]">
+                  <th className="text-left text-slate-400 font-semibold py-3 px-3 sticky top-0 left-0 bg-slate-800/95 z-30 rounded-tl-xl">Código</th>
+                  <th className="text-left text-slate-400 font-semibold py-3 px-3 bg-slate-800/95">Color</th>
+                  <th className="text-center text-slate-400 font-semibold py-3 px-2 min-w-[70px] bg-slate-800/95" title="Misma cantidad en todos los talles">Todas</th>
                   {sizeColumns.map(s => (
-                    <th key={s.code} className="text-center text-slate-400 font-semibold py-3 px-2 min-w-[48px]">
+                    <th key={s.code} className="text-center text-slate-400 font-semibold py-3 px-2 min-w-[48px] bg-slate-800/95">
                       {labelTalle(s.code) || s.name || s.code}
                     </th>
                   ))}
-                  <th className="text-right text-slate-400 font-semibold py-3 px-3">Precio</th>
+                  <th className="text-right text-slate-400 font-semibold py-3 px-3 bg-slate-800/95">Precio</th>
                   <th className="w-12 py-3 px-2 bg-slate-800/95 rounded-tr-xl"></th>
                 </tr>
               </thead>
