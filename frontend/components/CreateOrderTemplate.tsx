@@ -79,20 +79,38 @@ const canonicalSizeCode = (value: unknown): string => {
   return codigoTalleParaSku(raw) || raw;
 };
 
-/** Une filas del mismo artículo+color aunque el productId o colorCode vengan distintos del backend. */
+/**
+ * Une filas del mismo artículo+color. Si hay dos registros de producto distintos (duplicados SKU),
+ * no fusionar: una fila por product_id para no mezclar variant_id al guardar.
+ */
 function findHydrationRowKey(
   rowsByKey: Map<string, TemplateRow>,
   productCode: string,
-  colorKey: string
+  colorKey: string,
+  parentProductId?: string
 ): string {
   const normalizedCode = resolveDisplayArticleCode(productCode);
+  const pid = String(parentProductId ?? '').trim();
   for (const [key, row] of rowsByKey) {
     const rowColorKey = variantColorKey(row.colorCode, row.colorName);
-    if (rowColorKey === colorKey && articleCodesMatch(row.productCode, normalizedCode)) {
-      return key;
-    }
+    if (rowColorKey !== colorKey) continue;
+    if (!articleCodesMatch(row.productCode, normalizedCode)) continue;
+    const rowPid = String(row.productId ?? '').trim();
+    if (pid && rowPid && pid !== rowPid) continue;
+    return key;
   }
-  return `${normalizedCode}__${colorKey}`;
+  return `${normalizedCode}__${colorKey}${pid ? `__${pid}` : ''}`;
+}
+
+/** Variantes del producto padre resuelto (evita mezclar duplicados al cargar talles en el pedido). */
+function variantsForPrimaryProduct(
+  primaryProductId: string,
+  variants: Array<{ variant_id: string; product_id?: string }>
+): typeof variants {
+  const pid = String(primaryProductId || '').trim();
+  if (!pid) return variants;
+  const own = variants.filter((v) => String(v.product_id ?? pid) === pid);
+  return own.length ? own : variants;
 }
 
 /** La rueda del mouse no debe modificar cantidades/precios al hacer scroll en la tabla. */
@@ -357,7 +375,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       );
       const colorCode = String((item as any).colorCode || '').trim() || colorName;
       const colorKey = variantColorKey(colorCode, colorName);
-      const key = findHydrationRowKey(rowsByKey, productCode, colorKey);
+      const key = findHydrationRowKey(rowsByKey, productCode, colorKey, parentProductId);
 
       if (!rowsByKey.has(key)) {
         rowsByKey.set(key, {
@@ -480,16 +498,24 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     setAddingProduct(true);
     try {
       let product: Awaited<ReturnType<typeof api.getProductBySku>> = null;
+      let variants: Array<{ variant_id: string; product_id?: string; color_code: string; color_name: string; size_code: string; stock?: number }> = [];
       for (const candidate of skuLookupCandidates(code)) {
-        product = await api.getProductBySku(candidate);
-        if (product?.variants?.length) break;
+        product = await api.getProductBySku(candidate, { includeRelated: false });
+        variants = (product?.variants ?? []) as typeof variants;
+        if (!variants.length) {
+          product = await api.getProductBySku(candidate);
+          variants = variantsForPrimaryProduct(product?.id ?? '', (product?.variants ?? []) as typeof variants);
+        } else {
+          variants = variantsForPrimaryProduct(product!.id, variants);
+        }
+        if (product && variants.length) break;
         product = null;
+        variants = [];
       }
-      if (!product || !product.variants?.length) {
+      if (!product || !variants.length) {
         showToast('error', 'Código no encontrado o sin variantes. Probá buscarlo en la lista o verificá que exista en inventario.');
         return;
       }
-      const variants = product.variants as Array<{ variant_id: string; color_code: string; color_name: string; size_code: string; stock?: number }>;
       const byColor = new Map<string, typeof variants>();
       for (const v of variants) {
         const c = v.color_code ?? '';
@@ -794,18 +820,26 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     });
     try {
       let product: Awaited<ReturnType<typeof api.getProductBySku>> = null;
+      let variants: Array<{ variant_id: string; product_id?: string; color_code: string; color_name: string; size_code: string; stock?: number }> = [];
       for (const candidate of skuLookupCandidates(lookupSku)) {
-        product = await api.getProductBySku(candidate);
-        if (product?.variants?.length) break;
+        product = await api.getProductBySku(candidate, { includeRelated: false });
+        variants = (product?.variants ?? []) as typeof variants;
+        if (!variants.length) {
+          product = await api.getProductBySku(candidate);
+          variants = variantsForPrimaryProduct(product?.id ?? '', (product?.variants ?? []) as typeof variants);
+        } else {
+          variants = variantsForPrimaryProduct(product!.id, variants);
+        }
+        if (product && variants.length) break;
         product = null;
+        variants = [];
       }
       if (requestId !== colorPickerRequestRef.current) return;
-      if (!product || !product.variants?.length) {
+      if (!product || !variants.length) {
         showToast('error', 'No se pudo cargar el artículo o no tiene variantes.');
         setColorPicker(null);
         return;
       }
-      const variants = product.variants as Array<{ variant_id: string; color_code: string; color_name: string; size_code: string; stock?: number }>;
       const byColor = new Map<string, typeof variants>();
       for (const v of variants) {
         const key = variantColorKey(v.color_code ?? '', v.color_name ?? '');

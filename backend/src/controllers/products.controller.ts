@@ -371,7 +371,7 @@ export const getProductBySku = async (req: any, res: Response) => {
 
     // Variantes del producto y de registros duplicados del mismo artículo (ej. 0127501 + 1275-11)
     const variantsRows = await query(
-      `SELECT p.sku, pv.sku AS variant_sku, pv.external_sku,
+      `SELECT p.id AS product_id, p.sku, pv.sku AS variant_sku, pv.external_sku,
               c.code AS color_code, c.name AS color_name,
               s.size_code, COALESCE(st.stock,0) AS stock, pv.id AS variant_id,
               pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id

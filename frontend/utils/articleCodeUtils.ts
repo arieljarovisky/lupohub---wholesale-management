@@ -58,9 +58,6 @@ export function articleCodesMatch(a: string, b: string): boolean {
   const ka = mergeGroupKeys(ta);
   const kb = mergeGroupKeys(tb);
   if (ka.some((k) => kb.includes(k))) return true;
-  const da = digitCore(ta);
-  const db = digitCore(tb);
-  if (da.length >= 4 && db.length >= 4 && (da.includes(db) || db.includes(da))) return true;
   return false;
 }
 
