@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { ArrowLeft, Plus, Trash2, Search, Save, Package, ChevronDown, ChevronRight, Check, Palette, FileEdit, List, Upload } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Search, Save, Package, ChevronDown, ChevronRight, Check, Palette, List, Upload } from 'lucide-react';
 import { Order, OrderStatus, Product, Customer, Role } from '../types';
 import type { PriceList } from '../types';
 import { api } from '../services/api';
@@ -7,8 +7,6 @@ import { useNotification } from '../context/NotificationContext';
 import { labelTalle, codigoTalleParaSku } from '../utils/tallesTango';
 import { parseOrderMatrixExcel } from '../utils/orderImportMatrix';
 import { articleCodesMatch, articleCodeForOrderRow, resolveDisplayArticleCode, skuLookupCandidates, variantColorKey } from '../utils/articleCodeUtils';
-
-const DRAFT_KEY = 'lupo_order_template_draft';
 
 interface CreateOrderTemplateProps {
   products: Product[];
@@ -161,7 +159,6 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     );
   }, [readOnly, initialOrder, role]);
   const showPriceListSelector = (role === Role.ADMIN || role === Role.WAREHOUSE) && priceLists.length > 0;
-  const draftRestoredRef = useRef(false);
   /** Evita re-hidratar el pedido (y resetear la lista de precios) cada vez que se recargan productos. */
   const editHydratedOrderIdRef = useRef<string | null>(null);
   /** Invalida respuestas async del modal de colores si el usuario cerró o abrió otro. */
@@ -172,8 +169,17 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   /** Productos vigentes al cambiar la lista; recalcular solo cuando el array se actualiza. */
   const productsAtPriceListChangeRef = useRef<Product[] | null>(null);
   /** ID estable para pedidos nuevos: evita dos POST con distinto O-xxxxxx al confirmar dos veces. */
-  const draftOrderIdRef = useRef<string | null>(null);
+  const pendingNewOrderIdRef = useRef<string | null>(null);
   const savingOrderLockRef = useRef(false);
+
+  /** Limpia borradores viejos guardados en el navegador (funcionalidad eliminada). */
+  useEffect(() => {
+    try {
+      localStorage.removeItem('lupo_order_template_draft');
+    } catch {
+      /* ignore */
+    }
+  }, []);
   const applyCustomerPriceList = useCallback((customerId: string) => {
     const customer = customers.find((c) => c.id === customerId);
     onPriceListChange?.(customer?.priceListId ?? null);
@@ -282,28 +288,6 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     );
   }, [sizes, rows]);
 
-  /** Restaurar borrador solo en pedido nuevo (no al editar/duplicar un pedido existente). */
-  useEffect(() => {
-    if (hydrateSourceOrder) return;
-    if (customers.length === 0 || draftRestoredRef.current) return;
-    try {
-      const raw = localStorage.getItem(DRAFT_KEY);
-      if (!raw) return;
-      const draft = JSON.parse(raw) as { selectedCustomerId?: string; orderDate?: string; rows?: TemplateRow[] };
-      if (!draft || (!draft.rows?.length && !draft.selectedCustomerId)) return;
-      draftRestoredRef.current = true;
-      if (draft.orderDate) setOrderDate(draft.orderDate);
-      if (Array.isArray(draft.rows) && draft.rows.length > 0) setRows(draft.rows);
-      const validCustomerId = draft.selectedCustomerId && customers.some(c => c.id === draft.selectedCustomerId);
-      if (validCustomerId) {
-        setSelectedCustomerId(draft.selectedCustomerId!);
-        applyCustomerPriceList(draft.selectedCustomerId!);
-      }
-    } catch {
-      localStorage.removeItem(DRAFT_KEY);
-    }
-  }, [customers, hydrateSourceOrder, applyCustomerPriceList]);
-
   const filteredCustomers = useMemo(() => {
     const q = clientFilter.trim().toLowerCase();
     if (!q) return customers;
@@ -321,38 +305,6 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
   }, []);
-
-  /** Guardar borrador (debounced) cuando hay cliente o filas. */
-  const saveDraft = useCallback((customerId: string, date: string, draftRows: TemplateRow[]) => {
-    if (!draftRows.length && !customerId) return;
-    try {
-      localStorage.setItem(DRAFT_KEY, JSON.stringify({
-        selectedCustomerId: customerId || '',
-        orderDate: date,
-        rows: draftRows
-      }));
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  useEffect(() => {
-    const t = setTimeout(() => saveDraft(selectedCustomerId, orderDate, rows), 600);
-    if (isEditing) return () => clearTimeout(t);
-    return () => clearTimeout(t);
-  }, [selectedCustomerId, orderDate, rows, saveDraft, isEditing]);
-
-  /** Al cerrar/actualizar la página guardar borrador. */
-  useEffect(() => {
-    if (isEditing) return;
-    const onBeforeUnload = () => {
-      if (rows.length > 0 || selectedCustomerId) {
-        saveDraft(selectedCustomerId, orderDate, rows);
-      }
-    };
-    window.addEventListener('beforeunload', onBeforeUnload);
-    return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [rows, selectedCustomerId, orderDate, saveDraft, isEditing]);
 
   /** Edición o duplicado: convertir ítems del pedido en filas de planilla (una sola vez por pedido origen). */
   useEffect(() => {
@@ -436,14 +388,14 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     });
     setRows(sorted);
     appliedPriceListForRowsRef.current = undefined;
-    if (isDuplicating) draftOrderIdRef.current = null;
+    if (isDuplicating) pendingNewOrderIdRef.current = null;
   }, [hydrateSourceOrder, products, isDuplicating]);
 
   useEffect(() => {
     appliedPriceListForRowsRef.current = undefined;
     priceListRecalcPendingRef.current = false;
     productsAtPriceListChangeRef.current = null;
-    if (!hydrateSourceOrder) draftOrderIdRef.current = null;
+    if (!hydrateSourceOrder) pendingNewOrderIdRef.current = null;
   }, [hydrateSourceOrder?.id, isDuplicating]);
 
   /** Solo al cambiar el selector (no cuando llegan productos): guardar snapshot para detectar recarga. */
@@ -930,7 +882,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     return sum;
   }, [rows]);
 
-  const buildOrderPayload = (asDraft: boolean): Order | null => {
+  const buildOrderPayload = (): Order | null => {
     if (!selectedCustomerId || rows.length === 0) return null;
     const items: Array<{ variantId: string; quantity: number; priceAtMoment: number; isBackorder: boolean }> = [];
     for (const r of rows) {
@@ -949,10 +901,10 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     if (items.length === 0) return null;
     const orderId =
       initialOrder?.id ||
-      draftOrderIdRef.current ||
+      pendingNewOrderIdRef.current ||
       (() => {
         const id = `O-${Date.now().toString().slice(-6)}-${Math.random().toString(36).slice(2, 6)}`;
-        draftOrderIdRef.current = id;
+        pendingNewOrderIdRef.current = id;
         return id;
       })();
     return {
@@ -963,25 +915,18 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       total,
       // Solo ADMIN/Depósito pueden dejarlo confirmado directo.
       status:
-        asDraft
-          ? OrderStatus.DRAFT
-          : ((role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO)
-            ? OrderStatus.CONFIRMED
-            : OrderStatus.PENDING_ADMIN_CONFIRMATION),
+        (role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO)
+          ? OrderStatus.CONFIRMED
+          : OrderStatus.PENDING_ADMIN_CONFIRMATION,
       date: orderDate
     };
   };
 
-  const persistOrder = async (asDraft: boolean) => {
+  const handleSave = async () => {
     if (savingOrderLockRef.current || savingOrder) return;
-    const order = buildOrderPayload(asDraft);
+    const order = buildOrderPayload();
     if (!order) {
-      showToast(
-        'error',
-        asDraft
-          ? 'Agregá al menos una cantidad en algún talle para guardar el borrador.'
-          : 'Agregá al menos una cantidad en algún talle.'
-      );
+      showToast('error', 'Agregá al menos una cantidad en algún talle.');
       return;
     }
     savingOrderLockRef.current = true;
@@ -993,10 +938,6 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       setSavingOrder(false);
     }
   };
-
-  const handleSave = () => persistOrder(false);
-
-  const handleSaveDraft = () => persistOrder(true);
 
   const totalUnits = useMemo(() => {
     let n = 0;
@@ -1490,24 +1431,14 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
             {hasExceededStock && (
               <p className="text-xs text-amber-300 mb-3">Hay cantidades mayores al stock: se guardan igual y quedan como pendientes.</p>
             )}
-            <div className="flex flex-col sm:flex-row gap-3">
-              <button
-                type="button"
-                disabled={!selectedCustomerId || rows.length === 0 || totalUnits === 0 || savingOrder}
-                onClick={handleSaveDraft}
-                className="flex-1 min-h-[52px] py-3.5 rounded-xl font-bold flex items-center justify-center gap-2.5 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 text-slate-200 border border-slate-600 disabled:opacity-60 transition-all touch-manipulation"
-              >
-                <FileEdit size={20} /> {savingOrder ? 'Guardando...' : 'Guardar borrador'}
-              </button>
-              <button
-                type="button"
-                disabled={!selectedCustomerId || rows.length === 0 || totalUnits === 0 || savingOrder}
-                onClick={handleSave}
-                className="flex-1 min-h-[52px] py-3.5 rounded-xl font-bold flex items-center justify-center gap-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white shadow-lg shadow-blue-900/30 disabled:shadow-none disabled:opacity-60 transition-all touch-manipulation"
-              >
-                <Save size={20} /> {savingOrder ? 'Guardando...' : 'Confirmar pedido'}
-              </button>
-            </div>
+            <button
+              type="button"
+              disabled={!selectedCustomerId || rows.length === 0 || totalUnits === 0 || savingOrder}
+              onClick={handleSave}
+              className="w-full min-h-[52px] py-3.5 rounded-xl font-bold flex items-center justify-center gap-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white shadow-lg shadow-blue-900/30 disabled:shadow-none disabled:opacity-60 transition-all touch-manipulation"
+            >
+              <Save size={20} /> {savingOrder ? 'Guardando...' : 'Confirmar pedido'}
+            </button>
           </div>
         </footer>
       )}

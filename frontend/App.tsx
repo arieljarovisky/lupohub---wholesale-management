@@ -127,7 +127,6 @@ const App: React.FC = () => {
   const savingOrderRef = useRef(false);
   const saveOrderInFlightRef = useRef<Promise<void> | null>(null);
   const editingOrderIdRef = useRef<string | null>(null);
-  const DRAFT_KEY = 'lupo_order_template_draft';
   const allowedByRole: Record<string, Role[]> = {
     dashboard: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
     inventory: [Role.ADMIN, Role.WAREHOUSE, Role.DEPOSITO],
@@ -178,11 +177,6 @@ const App: React.FC = () => {
       setEditingOrder(null);
       setDuplicateSourceOrder(null);
       editingOrderIdRef.current = null;
-      try {
-        localStorage.removeItem(DRAFT_KEY);
-      } catch {
-        /* ignore */
-      }
     }
     setCurrentView(nextView);
   }, [currentUser, defaultViewForRole, isViewAccessible]);
@@ -502,11 +496,6 @@ const App: React.FC = () => {
           const warnings = (savedOrder as any).despachoWarnings as string[];
           setDespachoWarningsToShow(warnings);
         }
-        try {
-          localStorage.removeItem('lupo_order_template_draft');
-        } catch {
-          /* ignore */
-        }
       } catch (error) {
         console.error(error);
         showToast('error', wasEditing ? 'Error actualizando el pedido' : 'Error creando el pedido');
@@ -539,11 +528,6 @@ const App: React.FC = () => {
     setDuplicateSourceOrder(null);
     editingOrderIdRef.current = order.id;
     setEditingOrder(order);
-    try {
-      localStorage.removeItem(DRAFT_KEY);
-    } catch {
-      /* ignore */
-    }
     setCurrentView('create_order');
   };
 
@@ -551,11 +535,6 @@ const App: React.FC = () => {
     setEditingOrder(null);
     editingOrderIdRef.current = null;
     setDuplicateSourceOrder(order);
-    try {
-      localStorage.removeItem(DRAFT_KEY);
-    } catch {
-      /* ignore */
-    }
     setCurrentView('create_order');
   };
   
