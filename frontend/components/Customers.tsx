@@ -758,6 +758,27 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     }
   };
 
+  const handleDeleteLedgerManualComprobante = (entry: LedgerEntry) => {
+    const id = entry.manualComprobanteId;
+    if (!id) return;
+    const isNc = normalizeLedgerDocType(entry.tipo, entry.detalle) === 'NC';
+    showConfirm({
+      title: isNc ? 'Eliminar nota de crédito manual' : 'Eliminar comprobante manual',
+      message: `¿Eliminar ${entry.numero ? `el comprobante ${entry.numero}` : 'este comprobante'} del historial y del saldo de ${selectedCustomer?.businessName || selectedCustomer?.name || 'este cliente'}?`,
+      confirmLabel: 'Eliminar',
+      onConfirm: async () => {
+        try {
+          await api.deleteManualComprobante(id);
+          showToast('success', isNc ? 'NC manual eliminada' : 'Comprobante eliminado');
+          setSelectedLedgerNc(null);
+          await reloadSelectedCustomerLedger();
+        } catch (err: any) {
+          showToast('error', err?.response?.data?.message || err?.message || 'No se pudo eliminar');
+        }
+      }
+    });
+  };
+
   const renderLedgerTable = (
     title: string,
     icon: React.ReactNode,
@@ -795,7 +816,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   Saldo corrido
                 </th>
                 <th className="px-3 py-2">Detalle</th>
-                {canViewSaldos && <th className="px-3 py-2 w-10" />}
+                {canViewSaldos && <th className="px-3 py-2 w-10" title="Eliminar comprobante manual" />}
               </tr>
             </thead>
             <tbody className="text-slate-300 divide-y divide-slate-800/80">
@@ -874,7 +895,24 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   >
                     {e.detalle || '—'}
                   </td>
-                  {canViewSaldos && <td className="px-3 py-1.5" />}
+                  {canViewSaldos && (
+                    <td className="px-3 py-1.5 text-right">
+                      {e.manualComprobanteId &&
+                      normalizeLedgerDocType(e.tipo, e.detalle) === 'NC' ? (
+                        <button
+                          type="button"
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            handleDeleteLedgerManualComprobante(e);
+                          }}
+                          className="inline-flex items-center justify-center p-1.5 rounded-lg text-red-400 hover:bg-red-950/40 hover:text-red-300 border border-transparent hover:border-red-800/50"
+                          title="Eliminar NC manual"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      ) : null}
+                    </td>
+                  )}
                 </tr>
               );
               })}

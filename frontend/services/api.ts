@@ -1800,6 +1800,8 @@ export const api = {
         reissueWithIibb: boolean;
         orderId: string | null;
       };
+      /** Comprobante manual (factura o NC cargada a mano). */
+      manualComprobanteId?: string;
     }>;
   }> => {
     return await request(`/customers/${encodeURIComponent(customerId)}/multimedia-ledger`, 'GET');

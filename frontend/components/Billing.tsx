@@ -716,6 +716,32 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     }
   };
 
+  const handleDeleteManualComprobante = (item: {
+    id?: string;
+    tipo?: string;
+    manual?: boolean;
+    customerBusinessName?: string;
+  }) => {
+    if (!item?.manual || !item?.id) return;
+    const tipoLabel = item.tipo === 'NC' ? 'nota de crédito manual' : 'comprobante manual';
+    showConfirm({
+      title: `Eliminar ${tipoLabel}`,
+      message: `¿Eliminar este comprobante${item.customerBusinessName ? ` de ${item.customerBusinessName}` : ''}? Se quitará del saldo y del historial del cliente.`,
+      confirmLabel: 'Eliminar',
+      onConfirm: async () => {
+        try {
+          await api.deleteManualComprobante(String(item.id));
+          showToast('success', 'Comprobante eliminado');
+          setShowManualComprobanteModal(false);
+          resetManualComprobanteForm();
+          await load();
+        } catch (err: any) {
+          showToast('error', err?.response?.data?.message || err?.message || 'No se pudo eliminar');
+        }
+      },
+    });
+  };
+
   const handleDeletePayment = (p: any) => {
     const isImported =
       (p.source === 'imported' || String(p.id || '').startsWith('mm-')) &&
@@ -1471,6 +1497,16 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                         Editar
                       </button>
                     )}
+                    {item.manual && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteManualComprobante(item)}
+                        className="px-3 py-2 rounded-xl bg-red-950/50 text-red-300 text-xs font-bold border border-red-800/60 touch-manipulation inline-flex items-center gap-1"
+                      >
+                        <Trash2 size={14} />
+                        Eliminar
+                      </button>
+                    )}
                     {item.manual && item.hasPdf && (
                       <button
                         type="button"
@@ -1573,6 +1609,16 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                             title="Editar comprobante manual"
                           >
                             <Pencil size={15} />
+                          </button>
+                        )}
+                        {item.manual && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteManualComprobante(item)}
+                            className="inline-flex items-center justify-center p-1.5 rounded-lg bg-red-950/40 text-red-300 hover:bg-red-900/60 border border-red-800/60"
+                            title={item.tipo === 'NC' ? 'Eliminar NC manual' : 'Eliminar comprobante manual'}
+                          >
+                            <Trash2 size={15} />
                           </button>
                         )}
                         {item.manual && item.hasPdf && (
@@ -2448,6 +2494,25 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
               </div>
             </div>
             <div className="p-5 border-t border-slate-800 flex gap-2 shrink-0">
+              {manualEditingId && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleDeleteManualComprobante({
+                      id: manualEditingId,
+                      tipo: manualTipo,
+                      manual: true,
+                      customerBusinessName:
+                        customersFilteredByProvince.find((c) => c.id === manualCustomerId)?.businessName ||
+                        customersFilteredByProvince.find((c) => c.id === manualCustomerId)?.name
+                    })
+                  }
+                  className="px-4 py-3 rounded-2xl font-bold border border-red-800/60 bg-red-950/40 text-red-300 hover:bg-red-900/50 inline-flex items-center justify-center gap-2"
+                >
+                  <Trash2 size={16} />
+                  Eliminar
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
