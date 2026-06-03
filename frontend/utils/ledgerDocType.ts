@@ -20,7 +20,22 @@ export function normalizeLedgerDocType(tipo: string | null | undefined, detalle?
   return t0 || 'OTRO';
 }
 
-export function ledgerTipoDisplay(tipo: string | null | undefined): string {
+export function isVoidedReinvoiceLedgerEntry(entry: {
+  tipo?: string | null;
+  detalle?: string | null;
+  excluirDeSaldo?: boolean;
+  voidedForReinvoice?: boolean;
+}): boolean {
+  if (entry.voidedForReinvoice) return true;
+  if (entry.excluirDeSaldo && normalizeLedgerDocType(entry.tipo) === 'FAC') return true;
+  return /factura anulada/i.test(String(entry.detalle || ''));
+}
+
+export function ledgerTipoDisplay(
+  tipo: string | null | undefined,
+  opts?: { detalle?: string | null; excluirDeSaldo?: boolean; voidedForReinvoice?: boolean }
+): string {
+  if (opts && isVoidedReinvoiceLedgerEntry({ tipo, ...opts })) return 'FAC anulada';
   const norm = normalizeLedgerDocType(tipo);
   if (norm === 'SALDO') return 'Saldo inicial';
   if (norm === 'NC' && String(tipo || '').trim().toUpperCase().startsWith('CDE')) return 'NC (CDE)';

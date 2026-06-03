@@ -1788,6 +1788,9 @@ export const api = {
       saldo: number | null;
       detalle: string | null;
       paginaPdf: string | null;
+      /** Factura anulada por NC de reemisión: visible pero no modifica saldo corrido. */
+      excluirDeSaldo?: boolean;
+      voidedForReinvoice?: boolean;
     }>;
   }> => {
     return await request(`/customers/${encodeURIComponent(customerId)}/multimedia-ledger`, 'GET');

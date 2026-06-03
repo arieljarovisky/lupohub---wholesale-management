@@ -11,7 +11,7 @@ import { orderPedidoImporteDisplay } from '../utils/wholesaleInvoiceHtml';
 import { formatMoneyAr } from '../utils/moneyFormat';
 import { canonicalizeCityInput, cityDisplayLabel, isCabaCity, normalizeCityKey } from '../utils/cityNormalize';
 import { CityInput } from './CityInput';
-import { ledgerTipoDisplay } from '../utils/ledgerDocType';
+import { isVoidedReinvoiceLedgerEntry, ledgerTipoDisplay } from '../utils/ledgerDocType';
 
 interface CustomersProps {
   customers: Customer[];
@@ -766,12 +766,14 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         <div className="px-4 py-3 border-b border-slate-700/70 flex flex-wrap items-center gap-2 bg-gradient-to-r from-slate-900/95 to-slate-950/90">
           {icon}
           <span className="text-xs font-black text-slate-100 uppercase tracking-[0.12em]">{title}</span>
-          <span className="text-[10px] text-slate-500 ml-auto tabular-nums">
+            <span className="text-[10px] text-slate-500 ml-auto tabular-nums">
             {shown.length < rows.length
               ? `Mostrando ${shown.length} de ${rows.length}`
               : `${rows.length} mov.`}
             {' · '}
             <span className="text-amber-400/90">más recientes primero</span>
+            {' · '}
+            <span className="text-violet-400/80">reemisión IIBB agrupada por fecha</span>
           </span>
         </div>
         <div className="overflow-x-auto max-h-[min(70vh,28rem)] mobile-scroll-y touch-scroll">
@@ -790,23 +792,59 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               </tr>
             </thead>
             <tbody className="text-slate-300 divide-y divide-slate-800/80">
-              {shown.map((e, idx) => (
-                <tr key={`${e.lineOrder}-${idx}`} className="hover:bg-slate-800/30">
+              {shown.map((e, idx) => {
+                const voidedReinvoice = isVoidedReinvoiceLedgerEntry(e);
+                return (
+                <tr
+                  key={`${e.lineOrder}-${idx}`}
+                  className={
+                    voidedReinvoice
+                      ? 'bg-violet-950/20 text-slate-500 hover:bg-violet-950/30'
+                      : 'hover:bg-slate-800/30'
+                  }
+                >
                   <td className="px-3 py-1.5 whitespace-nowrap tabular-nums">{formatLedgerDate(e.lineDate)}</td>
-                  <td className="px-3 py-1.5" title={e.tipo}>{ledgerTipoDisplay(e.tipo)}</td>
+                  <td
+                    className="px-3 py-1.5"
+                    title={voidedReinvoice ? 'Factura anulada en AFIP; no suma al saldo corrido' : e.tipo}
+                  >
+                    <span
+                      className={
+                        voidedReinvoice
+                          ? 'inline-flex items-center rounded-md bg-violet-900/40 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-300/90'
+                          : undefined
+                      }
+                    >
+                      {ledgerTipoDisplay(e.tipo, {
+                        detalle: e.detalle,
+                        excluirDeSaldo: e.excluirDeSaldo,
+                        voidedForReinvoice: e.voidedForReinvoice
+                      })}
+                    </span>
+                  </td>
                   <td className="px-3 py-1.5 font-mono text-[11px]">{e.numero ?? '—'}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums">
+                  <td
+                    className={`px-3 py-1.5 text-right tabular-nums ${voidedReinvoice ? 'line-through decoration-violet-400/50' : ''}`}
+                    title={voidedReinvoice ? 'Importe histórico; no suma al saldo' : undefined}
+                  >
                     {e.importe != null ? `$${Number(e.importe).toLocaleString('es-AR')}` : '—'}
                   </td>
-                  <td className="px-3 py-1.5 text-right tabular-nums">
+                  <td
+                    className="px-3 py-1.5 text-right tabular-nums text-slate-500"
+                    title={voidedReinvoice ? 'Sin cambio: la factura fue anulada y reemitida' : undefined}
+                  >
                     {e.saldo != null ? `$${Number(e.saldo).toLocaleString('es-AR')}` : '—'}
                   </td>
-                  <td className="px-3 py-1.5 text-slate-400 max-w-[200px] truncate" title={e.detalle || ''}>
+                  <td
+                    className={`px-3 py-1.5 max-w-[240px] truncate italic ${voidedReinvoice ? 'text-violet-300/70' : 'text-slate-400'}`}
+                    title={e.detalle || ''}
+                  >
                     {e.detalle || '—'}
                   </td>
                   {canViewSaldos && <td className="px-3 py-1.5" />}
                 </tr>
-              ))}
+              );
+              })}
             </tbody>
           </table>
         </div>
@@ -1699,7 +1737,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   </p>
                   <p>
                     <span className="font-bold text-slate-300">Saldo corrido</span> (columna de la tabla) = historial
-                    movimiento por movimiento (solo comprobantes del sistema).
+                    movimiento por movimiento. Las filas <span className="text-violet-300/90">FAC anulada</span> son
+                    referencia AFIP y no mueven el saldo.
                   </p>
                   {carteraById[selectedCustomer.id] &&
                   ledgerSaldoHistorialFinal != null &&

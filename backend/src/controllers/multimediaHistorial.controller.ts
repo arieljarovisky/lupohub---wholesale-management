@@ -638,17 +638,21 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
           Number(cn.voided_invoice_punto_venta || 0),
           Number(cn.voided_invoice_cbte_desde || 0)
         );
+        const pedidoFecha = cn.order_date ? sqlDateToDisplay(cn.order_date) : '';
+        const detallePedido = pedidoFecha ? ` · pedido ${pedidoFecha}` : '';
         return {
           lineOrder: maxLineOrder + 54500 + idx,
-          lineDate: cn.order_date || cn.created_at,
+          /** Misma fecha que la NC/reemisión para agrupar arriba en el historial (no la fecha del pedido). */
+          lineDate: cn.created_at,
           tipo: 'FAC',
           numero,
           edc: null,
           vto: null,
           importe: importe > 0 ? importe : null,
           saldo: null,
-          detalle: `Pedido ${cn.order_id || ''} · Factura AFIP LupoHub`,
+          detalle: `Pedido ${cn.order_id || ''} · Factura anulada ${numero} (reemisión IIBB${detallePedido})`,
           excluirDeSaldo: true,
+          voidedForReinvoice: true,
           paginaPdf: null,
           source: 'system' as const
         };
