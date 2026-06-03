@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Users, Search, Plus, MapPin, Mail, Phone, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, PackageCheck, Star, ChevronRight, Pencil, Trash2, FileSpreadsheet, Loader2, Download, Receipt, FileText, LayoutList, Wallet, ArrowUpDown, Filter, AlertTriangle, ChevronDown, SlidersHorizontal } from 'lucide-react';
+import { Users, Search, Plus, MapPin, Mail, Phone, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, PackageCheck, Star, ChevronRight, Pencil, Trash2, FileSpreadsheet, Loader2, Download, Receipt, FileText, LayoutList, Wallet, ArrowUpDown, Filter, AlertTriangle, ChevronDown, SlidersHorizontal, ExternalLink } from 'lucide-react';
 import { Customer, Role, Order, OrderItem, OrderStatus, Product, Transporte, User, CustomerDeliveryAddress } from '../types';
 import { Truck } from 'lucide-react';
 import { parseCustomersExcel, parseCustomersCuitUpdateExcel } from '../utils/customersUtils';
@@ -135,13 +135,13 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     if (!selectedCustomer?.id || !canViewSaldos) {
       setMultimediaLedger(null);
       setFinancialSummaryMovements([]);
-      setSelectedLedgerNc(null);
+      setSelectedLedgerEntry(null);
       return;
     }
     let cancelled = false;
     setMultimediaLedgerLoading(true);
     setFinancialSummaryMovements([]);
-    setSelectedLedgerNc(null);
+    setSelectedLedgerEntry(null);
     api
       .getCustomerMultimediaLedger(selectedCustomer.id)
       .then((d) => {
@@ -270,7 +270,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [exportingFinancialSummary, setExportingFinancialSummary] = useState(false);
   const [multimediaLedger, setMultimediaLedger] = useState<Awaited<ReturnType<typeof api.getCustomerMultimediaLedger>> | null>(null);
   const [multimediaLedgerLoading, setMultimediaLedgerLoading] = useState(false);
-  const [selectedLedgerNc, setSelectedLedgerNc] = useState<
+  const [selectedLedgerEntry, setSelectedLedgerEntry] = useState<
     NonNullable<Awaited<ReturnType<typeof api.getCustomerMultimediaLedger>>['entries']>[number] | null
   >(null);
   const [financialSummaryMovements, setFinancialSummaryMovements] = useState<
@@ -662,6 +662,36 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
 
   const isLedgerCreditNote = (e: LedgerEntry) => normalizeLedgerDocType(e.tipo, e.detalle) === 'NC';
 
+  const parseOrderIdFromLedgerDetalle = (detalle?: string | null) => {
+    const m = String(detalle || '').match(/Pedido\s+(O-[\w-]+)/i);
+    return m ? m[1] : null;
+  };
+
+  const getLedgerOrderId = (entry: LedgerEntry): string | null =>
+    entry.orderId ||
+    entry.ncLinks?.orderId ||
+    entry.facLinks?.orderId ||
+    parseOrderIdFromLedgerDetalle(entry.detalle) ||
+    null;
+
+  const isLedgerEntryClickable = (entry: LedgerEntry) => {
+    const norm = normalizeLedgerDocType(entry.tipo, entry.detalle);
+    if (norm === 'NC') return true;
+    if (norm === 'FAC' || norm === 'PED') return !!getLedgerOrderId(entry);
+    return false;
+  };
+
+  const goToLedgerOrder = (orderId: string | null | undefined) => {
+    if (!orderId) return;
+    const order = orders.find((o) => o.id === orderId);
+    if (!order) {
+      showToast('error', `No se encontró el pedido ${orderId} en la lista cargada.`);
+      return;
+    }
+    setSelectedLedgerEntry(null);
+    setSelectedOrder(order);
+  };
+
   const financialSummaryAsLedger = useMemo((): LedgerEntry[] => {
     if (!financialSummaryMovements.length) return [];
     const tipoMap: Record<string, string> = {
@@ -770,7 +800,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         try {
           await api.deleteManualComprobante(id);
           showToast('success', isNc ? 'NC manual eliminada' : 'Comprobante eliminado');
-          setSelectedLedgerNc(null);
+          setSelectedLedgerEntry(null);
           await reloadSelectedCustomerLedger();
         } catch (err: any) {
           showToast('error', err?.response?.data?.message || err?.message || 'No se pudo eliminar');
@@ -822,29 +852,36 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             <tbody className="text-slate-300 divide-y divide-slate-800/80">
               {shown.map((e, idx) => {
                 const voidedReinvoice = isVoidedReinvoiceLedgerEntry(e);
-                const isNc = isLedgerCreditNote(e);
-                const ncClickable = isNc;
+                const ledgerNorm = normalizeLedgerDocType(e.tipo, e.detalle);
+                const isFac = ledgerNorm === 'FAC';
+                const isPed = ledgerNorm === 'PED';
+                const ledgerClickable = isLedgerEntryClickable(e);
+                const orderId = getLedgerOrderId(e);
                 return (
                 <tr
                   key={`${e.lineOrder}-${idx}`}
-                  role={ncClickable ? 'button' : undefined}
-                  tabIndex={ncClickable ? 0 : undefined}
-                  onClick={ncClickable ? () => setSelectedLedgerNc(e) : undefined}
+                  role={ledgerClickable ? 'button' : undefined}
+                  tabIndex={ledgerClickable ? 0 : undefined}
+                  onClick={ledgerClickable ? () => setSelectedLedgerEntry(e) : undefined}
                   onKeyDown={
-                    ncClickable
+                    ledgerClickable
                       ? (ev) => {
                           if (ev.key === 'Enter' || ev.key === ' ') {
                             ev.preventDefault();
-                            setSelectedLedgerNc(e);
+                            setSelectedLedgerEntry(e);
                           }
                         }
                       : undefined
                   }
                   className={
                     voidedReinvoice
-                      ? 'bg-violet-950/20 text-slate-500 hover:bg-violet-950/30'
-                      : ncClickable
-                        ? 'hover:bg-violet-950/25 cursor-pointer focus:outline-none focus:bg-violet-950/30'
+                      ? 'bg-violet-950/20 text-slate-500 hover:bg-violet-950/30 cursor-pointer'
+                      : ledgerClickable
+                        ? isPed
+                          ? 'hover:bg-blue-950/25 cursor-pointer focus:outline-none focus:bg-blue-950/30'
+                          : isFac
+                            ? 'hover:bg-emerald-950/20 cursor-pointer focus:outline-none focus:bg-emerald-950/25'
+                            : 'hover:bg-violet-950/25 cursor-pointer focus:outline-none focus:bg-violet-950/30'
                         : 'hover:bg-slate-800/30'
                   }
                 >
@@ -853,18 +890,28 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                     className="px-3 py-1.5"
                     title={
                       voidedReinvoice
-                        ? 'Factura anulada en AFIP; no suma al saldo corrido'
-                        : ncClickable
-                          ? 'Tocá para ver la factura emitida'
+                        ? 'Factura anulada — tocá para ver pedido y factura nueva'
+                        : ledgerClickable
+                          ? isPed
+                            ? 'Tocá para ver el pedido'
+                            : isFac
+                              ? 'Tocá para ver factura y pedido'
+                              : 'Tocá para ver factura emitida'
                           : e.tipo
                     }
                   >
                     <span
                       className={
                         voidedReinvoice
-                          ? 'inline-flex items-center rounded-md bg-violet-900/40 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-300/90'
-                          : isNc
-                            ? 'inline-flex items-center gap-1 rounded-md bg-violet-900/30 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-200/90'
+                          ? 'inline-flex items-center gap-1 rounded-md bg-violet-900/40 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-300/90'
+                          : ledgerClickable
+                            ? `inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                                isPed
+                                  ? 'bg-blue-900/35 text-blue-200/90'
+                                  : isFac
+                                    ? 'bg-emerald-900/35 text-emerald-200/90'
+                                    : 'bg-violet-900/30 text-violet-200/90'
+                              }`
                             : undefined
                       }
                     >
@@ -873,10 +920,15 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                         excluirDeSaldo: e.excluirDeSaldo,
                         voidedForReinvoice: e.voidedForReinvoice
                       })}
-                      {ncClickable ? <ChevronRight size={12} className="opacity-70" aria-hidden /> : null}
+                      {ledgerClickable ? <ChevronRight size={12} className="opacity-70" aria-hidden /> : null}
                     </span>
                   </td>
-                  <td className="px-3 py-1.5 font-mono text-[11px]">{e.numero ?? '—'}</td>
+                  <td
+                    className={`px-3 py-1.5 font-mono text-[11px] ${ledgerClickable && orderId ? 'text-sky-300/90 underline decoration-sky-500/40 underline-offset-2' : ''}`}
+                    title={orderId ? `Pedido ${orderId}` : undefined}
+                  >
+                    {e.numero ?? '—'}
+                  </td>
                   <td
                     className={`px-3 py-1.5 text-right tabular-nums ${voidedReinvoice ? 'line-through decoration-violet-400/50' : ''}`}
                     title={voidedReinvoice ? 'Importe histórico; no suma al saldo' : undefined}
@@ -1482,27 +1534,41 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
           </div>
         )}
 
-        {selectedLedgerNc && (
+        {selectedLedgerEntry && (() => {
+          const entry = selectedLedgerEntry;
+          const kind = normalizeLedgerDocType(entry.tipo, entry.detalle);
+          const orderId = getLedgerOrderId(entry);
+          const title =
+            kind === 'NC'
+              ? 'Nota de crédito'
+              : kind === 'PED'
+                ? 'Pedido'
+                : isVoidedReinvoiceLedgerEntry(entry)
+                  ? 'Factura anulada'
+                  : 'Factura';
+          const borderClass =
+            kind === 'PED' ? 'border-blue-500/30' : kind === 'FAC' ? 'border-emerald-500/30' : 'border-violet-500/30';
+          return (
           <div
             className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-            onClick={() => setSelectedLedgerNc(null)}
+            onClick={() => setSelectedLedgerEntry(null)}
           >
             <div
-              className="w-full max-w-md bg-slate-900 border border-violet-500/30 rounded-2xl shadow-2xl overflow-hidden"
+              className={`w-full max-w-md bg-slate-900 border ${borderClass} rounded-2xl shadow-2xl overflow-hidden`}
               onClick={(ev) => ev.stopPropagation()}
               role="dialog"
-              aria-labelledby="ledger-nc-dialog-title"
+              aria-labelledby="ledger-entry-dialog-title"
             >
               <div className="p-4 border-b border-slate-800 flex items-center justify-between gap-3">
                 <div>
-                  <h3 id="ledger-nc-dialog-title" className="text-white font-bold">
-                    Nota de crédito
+                  <h3 id="ledger-entry-dialog-title" className="text-white font-bold">
+                    {title}
                   </h3>
-                  <p className="text-xs text-slate-400 font-mono mt-0.5">{selectedLedgerNc.numero ?? '—'}</p>
+                  <p className="text-xs text-slate-400 font-mono mt-0.5">{entry.numero ?? '—'}</p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => setSelectedLedgerNc(null)}
+                  onClick={() => setSelectedLedgerEntry(null)}
                   className="text-slate-400 hover:text-white p-1"
                   aria-label="Cerrar"
                 >
@@ -1513,13 +1579,13 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 <div className="grid grid-cols-2 gap-3 text-xs">
                   <div>
                     <p className="text-slate-500 uppercase font-black tracking-wide mb-1">Fecha</p>
-                    <p className="text-slate-200 tabular-nums">{formatLedgerDate(selectedLedgerNc.lineDate)}</p>
+                    <p className="text-slate-200 tabular-nums">{formatLedgerDate(entry.lineDate)}</p>
                   </div>
                   <div>
-                    <p className="text-slate-500 uppercase font-black tracking-wide mb-1">Importe NC</p>
-                    <p className="text-violet-200 font-bold tabular-nums">
-                      {selectedLedgerNc.importe != null
-                        ? `$${Number(selectedLedgerNc.importe).toLocaleString('es-AR', {
+                    <p className="text-slate-500 uppercase font-black tracking-wide mb-1">Importe</p>
+                    <p className="text-white font-bold tabular-nums">
+                      {entry.importe != null
+                        ? `$${Number(entry.importe).toLocaleString('es-AR', {
                             minimumFractionDigits: 2,
                             maximumFractionDigits: 2
                           })}`
@@ -1528,73 +1594,125 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   </div>
                 </div>
 
-                {selectedLedgerNc.ncLinks?.orderId ? (
-                  <div className="rounded-xl border border-slate-700/80 bg-slate-950/60 px-3 py-2.5">
-                    <p className="text-[10px] uppercase font-black text-slate-500 tracking-wide mb-1">Pedido</p>
-                    <p className="text-slate-200 font-mono text-xs">{selectedLedgerNc.ncLinks.orderId}</p>
-                  </div>
+                {orderId ? (
+                  <button
+                    type="button"
+                    onClick={() => goToLedgerOrder(orderId)}
+                    className="w-full rounded-xl border border-blue-500/30 bg-blue-950/30 px-3 py-3 text-left hover:bg-blue-950/50 transition-colors group"
+                  >
+                    <p className="text-[10px] uppercase font-black text-blue-300/80 tracking-wide mb-1">Pedido</p>
+                    <p className="text-blue-100 font-mono text-sm font-bold flex items-center justify-between gap-2">
+                      <span>{orderId}</span>
+                      <ExternalLink size={16} className="text-blue-300/80 group-hover:text-blue-200 shrink-0" />
+                    </p>
+                  </button>
                 ) : null}
 
-                {selectedLedgerNc.ncLinks?.voidedInvoiceNumero ? (
+                {kind === 'NC' && entry.ncLinks?.voidedInvoiceNumero ? (
                   <div className="rounded-xl border border-violet-500/20 bg-violet-950/20 px-3 py-2.5">
                     <p className="text-[10px] uppercase font-black text-violet-300/80 tracking-wide mb-1">
                       Factura anulada por esta NC
                     </p>
-                    <p className="text-violet-100 font-mono text-sm">{selectedLedgerNc.ncLinks.voidedInvoiceNumero}</p>
+                    <p className="text-violet-100 font-mono text-sm">{entry.ncLinks.voidedInvoiceNumero}</p>
                   </div>
                 ) : null}
 
-                {selectedLedgerNc.ncLinks?.issuedInvoiceNumero ? (
+                {kind === 'NC' && entry.ncLinks?.issuedInvoiceNumero ? (
                   <div className="rounded-xl border border-emerald-500/25 bg-emerald-950/20 px-3 py-2.5 space-y-2">
                     <p className="text-[10px] uppercase font-black text-emerald-300/90 tracking-wide">
-                      {selectedLedgerNc.ncLinks.reissueWithIibb
+                      {entry.ncLinks.reissueWithIibb
                         ? 'Factura emitida (reemisión con IIBB)'
                         : 'Factura vigente del pedido'}
                     </p>
                     <p className="text-emerald-100 font-mono text-base font-bold">
-                      {selectedLedgerNc.ncLinks.issuedInvoiceNumero}
+                      {entry.ncLinks.issuedInvoiceNumero}
                     </p>
-                    {selectedLedgerNc.ncLinks.issuedInvoiceImporte != null ? (
+                    {entry.ncLinks.issuedInvoiceImporte != null ? (
                       <p className="text-emerald-200/90 tabular-nums text-xs">
-                        Total factura:{' '}
-                        <span className="font-bold">
-                          $
-                          {Number(selectedLedgerNc.ncLinks.issuedInvoiceImporte).toLocaleString('es-AR', {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2
-                          })}
-                        </span>
-                        {selectedLedgerNc.ncLinks.issuedInvoiceIibb != null &&
-                        selectedLedgerNc.ncLinks.issuedInvoiceIibb > 0.005 ? (
-                          <span className="text-emerald-300/80">
-                            {' '}
-                            (incl. IIBB $
-                            {Number(selectedLedgerNc.ncLinks.issuedInvoiceIibb).toLocaleString('es-AR', {
+                        Total: $
+                        {Number(entry.ncLinks.issuedInvoiceImporte).toLocaleString('es-AR', {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2
+                        })}
+                        {entry.ncLinks.issuedInvoiceIibb != null && entry.ncLinks.issuedInvoiceIibb > 0.005
+                          ? ` (incl. IIBB $${Number(entry.ncLinks.issuedInvoiceIibb).toLocaleString('es-AR', {
                               minimumFractionDigits: 2,
                               maximumFractionDigits: 2
-                            })}
-                            )
-                          </span>
-                        ) : null}
+                            })})`
+                          : ''}
                       </p>
                     ) : null}
                   </div>
-                ) : (
+                ) : null}
+
+                {kind === 'FAC' && entry.facLinks?.voidedInvoiceNumero ? (
+                  <div className="rounded-xl border border-violet-500/20 bg-violet-950/20 px-3 py-2.5">
+                    <p className="text-[10px] uppercase font-black text-violet-300/80 tracking-wide mb-1">
+                      Factura anulada (referencia)
+                    </p>
+                    <p className="text-violet-100 font-mono text-sm">{entry.facLinks.voidedInvoiceNumero}</p>
+                  </div>
+                ) : null}
+
+                {kind === 'FAC' && !entry.facLinks?.voidedForReinvoice && entry.facLinks?.invoiceNumero ? (
+                  <div className="rounded-xl border border-emerald-500/25 bg-emerald-950/20 px-3 py-2.5 space-y-1">
+                    <p className="text-[10px] uppercase font-black text-emerald-300/90 tracking-wide">
+                      Comprobante AFIP
+                    </p>
+                    <p className="text-emerald-100 font-mono text-base font-bold">{entry.facLinks.invoiceNumero}</p>
+                    {entry.facLinks.agipRetPer != null && entry.facLinks.agipRetPer > 0.005 ? (
+                      <p className="text-emerald-200/90 text-xs tabular-nums">
+                        IIBB: $
+                        {Number(entry.facLinks.agipRetPer).toLocaleString('es-AR', {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2
+                        })}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {kind === 'FAC' && entry.facLinks?.voidedForReinvoice && entry.facLinks.invoiceNumero ? (
+                  <div className="rounded-xl border border-emerald-500/25 bg-emerald-950/20 px-3 py-2.5 space-y-1">
+                    <p className="text-[10px] uppercase font-black text-emerald-300/90 tracking-wide">
+                      Factura vigente (reemisión IIBB)
+                    </p>
+                    <p className="text-emerald-100 font-mono text-base font-bold">{entry.facLinks.invoiceNumero}</p>
+                  </div>
+                ) : null}
+
+                {kind === 'PED' ? (
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    Pedido sin factura AFIP con saldo pendiente en cartera.
+                  </p>
+                ) : null}
+
+                {kind === 'NC' && !entry.ncLinks?.issuedInvoiceNumero ? (
                   <p className="text-slate-500 text-xs leading-relaxed">
                     No hay factura vinculada en LupoHub para esta NC.
                   </p>
-                )}
+                ) : null}
 
-                {selectedLedgerNc.detalle ? (
+                {entry.detalle ? (
                   <p className="text-[11px] text-slate-500 leading-relaxed border-t border-slate-800 pt-3">
-                    {selectedLedgerNc.detalle}
+                    {entry.detalle}
                   </p>
                 ) : null}
               </div>
-              <div className="p-4 border-t border-slate-800">
+              <div className="p-4 border-t border-slate-800 flex flex-col gap-2">
+                {orderId ? (
+                  <button
+                    type="button"
+                    onClick={() => goToLedgerOrder(orderId)}
+                    className="w-full bg-blue-700 hover:bg-blue-600 text-white px-4 py-2.5 rounded-xl font-bold inline-flex items-center justify-center gap-2"
+                  >
+                    <ExternalLink size={16} />
+                    Ver pedido {orderId}
+                  </button>
+                ) : null}
                 <button
                   type="button"
-                  onClick={() => setSelectedLedgerNc(null)}
+                  onClick={() => setSelectedLedgerEntry(null)}
                   className="w-full bg-slate-700 hover:bg-slate-600 text-white px-4 py-2.5 rounded-xl font-semibold"
                 >
                   Cerrar
@@ -1602,7 +1720,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
               </div>
             </div>
           </div>
-        )}
+          );
+        })()}
 
         {showExportSheetsModal && (
           <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -1930,9 +2049,10 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   </p>
                   <p>
                     <span className="font-bold text-slate-300">Saldo corrido</span> (columna de la tabla) = historial
-                    movimiento por movimiento. Las filas <span className="text-violet-300/90">FAC anulada</span> son
-                    referencia AFIP y no mueven el saldo. Tocá una <span className="text-violet-300/90">NC</span> para
-                    ver qué factura se emitió.
+                    movimiento por movimiento. Tocá una fila de{' '}
+                    <span className="text-violet-300/90">NC</span>,{' '}
+                    <span className="text-emerald-300/90">factura</span> o{' '}
+                    <span className="text-blue-300/90">pedido</span> para ver el vínculo e ir al pedido.
                   </p>
                   {carteraById[selectedCustomer.id] &&
                   ledgerSaldoHistorialFinal != null &&
