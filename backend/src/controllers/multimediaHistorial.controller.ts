@@ -657,12 +657,48 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
           source: 'system' as const
         };
       });
+    const invoiceByOrderId = new Map<
+      string,
+      { numero: string; agipRetPer: number; importeConIibb: number }
+    >();
+    for (const inv of invoiceRows) {
+      const orderId = String(inv.order_id || '');
+      if (!orderId) continue;
+      const agipRet = Number(inv.agip_ret_per || 0);
+      invoiceByOrderId.set(orderId, {
+        numero: formatAfipComprobanteNumero(Number(inv.punto_venta || 0), Number(inv.cbte_desde || 0)),
+        agipRetPer: agipRet,
+        importeConIibb: invoiceLedgerImporte(Number(inv.total || 0), agipRet)
+      });
+    }
     const creditNoteAsEntries = creditNoteRows
       .filter((cn) => ledgerMovementVisibleAfterOpening(openingBalanceDate, cn.created_at))
       .map((cn, idx) => {
         const importe = ncLedgerImporte(Number(cn.amount_credited || 0));
         const reemision = !!Number(cn.superseded_by_reinvoice);
         const numero = formatAfipComprobanteNumero(Number(cn.punto_venta || 0), Number(cn.cbte_desde || 0));
+        const voidedInvoiceNumero =
+          cn.voided_invoice_cbte_desde != null && Number(cn.voided_invoice_cbte_desde) > 0
+            ? formatAfipComprobanteNumero(
+                Number(cn.voided_invoice_punto_venta || 0),
+                Number(cn.voided_invoice_cbte_desde)
+              )
+            : null;
+        const issuedInv = cn.order_id ? invoiceByOrderId.get(String(cn.order_id)) : undefined;
+        const ncLinks =
+          voidedInvoiceNumero || issuedInv
+            ? {
+                voidedInvoiceNumero,
+                issuedInvoiceNumero: issuedInv?.numero ?? null,
+                issuedInvoiceIibb:
+                  issuedInv && issuedInv.agipRetPer > 0.005
+                    ? Math.round(issuedInv.agipRetPer * 100) / 100
+                    : null,
+                issuedInvoiceImporte: issuedInv?.importeConIibb ?? null,
+                reissueWithIibb: reemision,
+                orderId: cn.order_id ?? null
+              }
+            : undefined;
         return {
           lineOrder: maxLineOrder + 55000 + idx,
           lineDate: cn.created_at,
@@ -676,6 +712,7 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
             ? `Pedido ${cn.order_id || ''} · NC AFIP LupoHub (reemisión IIBB)`
             : `Pedido ${cn.order_id || ''} · NC AFIP LupoHub`,
           paginaPdf: null,
+          ncLinks,
           source: 'system' as const
         };
       });
