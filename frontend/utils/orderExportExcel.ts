@@ -149,8 +149,13 @@ export async function addOrderExportWorksheet(
   ];
 
   const dateLabel = formatShortDateHeader(order.date);
-  const header = ws.addRow(['Artículo', 'Descripción', 'Unidades', 'Precio', 'Total', dateLabel]);
+  const noteLabel = String(order.notes ?? '').trim();
+  const header = ws.addRow(['Artículo', 'Descripción', 'Unidades', 'Precio', 'Total', noteLabel || dateLabel]);
   styleHeaderRow(header);
+  if (noteLabel) {
+    const metaRow = ws.addRow(['', '', '', '', '', dateLabel]);
+    styleDataRow(metaRow);
+  }
 
   const items = sortOrderItemsForPrint(
     order.items.map((i) => enrichOrderItem(i, products)),

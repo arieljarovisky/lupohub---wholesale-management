@@ -535,6 +535,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         (o.customerBusinessName || '').trim(),
         (c?.businessName || '').trim(),
         (c?.name || '').trim(),
+        String(o.notes || '').trim(),
         String(o.id || '').toLowerCase(),
       ]
         .filter(Boolean)
@@ -590,8 +591,9 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   /** Nombre seguro para hoja Excel (máx 31 caracteres, sin caracteres inválidos). */
   const safeSheetName = (order: Order) => {
     const base = `#${order.id}`.replace(/[\\/*?:\[\]]/g, '');
-    const name = getCustomerName(order).replace(/[\\/*?:\[\]]/g, '').slice(0, 12);
-    const sheetName = `${base} ${name}`.trim().slice(0, 31);
+    const name = getCustomerName(order).replace(/[\\/*?:\[\]]/g, '').slice(0, 10);
+    const note = String(order.notes ?? '').replace(/[\\/*?:\[\]]/g, '').trim().slice(0, 10);
+    const sheetName = `${base} ${note || name}`.trim().slice(0, 31);
     return sheetName || `Pedido_${order.id.slice(-8)}`;
   };
 
@@ -1646,7 +1648,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
             enterKeyHint="search"
             value={customerSearchQuery}
             onChange={(e) => setCustomerSearchQuery(e.target.value)}
-            placeholder="Buscar por cliente o nº de pedido…"
+            placeholder="Buscar por cliente, nota o nº de pedido…"
             autoComplete="off"
             className="w-full rounded-xl border border-slate-700/80 bg-slate-950/50 py-2.5 pl-9 pr-9 text-sm text-slate-200 outline-none placeholder:text-slate-500 focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/30"
             aria-label="Buscar pedidos por cliente o número de pedido"
@@ -1832,6 +1834,14 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   <h3 className={`text-lg sm:text-xl font-black leading-tight break-words line-clamp-2 sm:line-clamp-1 ${ncTotalAnnulled ? 'text-slate-400 line-through decoration-slate-600 decoration-2' : 'text-white'}`}>
                     {order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente desconocido'}
                   </h3>
+                  {order.notes?.trim() && (
+                    <p
+                      className="text-sm font-medium text-cyan-200/90 truncate max-w-full"
+                      title={order.notes.trim()}
+                    >
+                      {order.notes.trim()}
+                    </p>
+                  )}
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-semibold text-slate-400">#{order.id}</span>
                     <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${getStatusColor(order.status)}`}>

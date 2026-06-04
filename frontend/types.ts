@@ -249,6 +249,8 @@ export interface Order {
   remitoNumber?: number;
   /** Etiqueta opcional (p. ej. import Excel matriz: a facturar vs pendiente). */
   matrixImportLabel?: string;
+  /** Nota interna (sucursal, referencia) para distinguir pedidos del mismo cliente. */
+  notes?: string;
 }
 
 /** Nota de crédito AFIP asociada a un pedido (lista desde API). */

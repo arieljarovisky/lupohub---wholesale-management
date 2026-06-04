@@ -35,6 +35,13 @@ async function getProductIdForVariant(variantId: string): Promise<string | null>
   return (row?.product_id as string) || null;
 }
 
+function normalizeOrderNotes(raw: unknown): string | null {
+  if (raw == null) return null;
+  const t = String(raw).trim();
+  if (!t) return null;
+  return t.slice(0, 200);
+}
+
 /** ¿La factura vigente del pedido sigue siendo la misma que anuló esta NC total? (snapshot voided_* = invoice actual). */
 function totalCreditNoteStillVoidsCurrentInvoice(invoice: any | undefined, cn: any): boolean {
   if (!cn?.voided_invoice_cae) return true;
@@ -721,6 +728,7 @@ export const getOrders = async (req: any, res: any) => {
       archived: !!(order.archived),
       remitoNumber: order.remito_number != null ? Number(order.remito_number) : undefined,
       matrixImportLabel: order.matrix_import_label ? String(order.matrix_import_label) : undefined,
+      notes: order.notes ? String(order.notes) : undefined,
       items: itemsByOrderId[order.id] || [],
       invoice: inv ?? undefined,
       creditNotesCount: creditNotesCountByOrderId[order.id] ?? 0,
@@ -754,7 +762,7 @@ export const getOrders = async (req: any, res: any) => {
 async function buildPersistedOrderResponse(orderId: string, newOrder: Order, despachoWarnings: string[]): Promise<any> {
   const created = await get(
     `SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
-            o.created_by, o.matrix_import_label, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
+            o.created_by, o.matrix_import_label, o.notes, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
      FROM orders o
      LEFT JOIN users cu ON cu.id = o.created_by
      LEFT JOIN users su ON su.id = o.seller_id
@@ -825,6 +833,7 @@ async function buildPersistedOrderResponse(orderId: string, newOrder: Order, des
     matrixImportLabel: (created as any).matrix_import_label
       ? String((created as any).matrix_import_label)
       : undefined,
+    notes: (created as any).notes ? String((created as any).notes) : undefined,
     despachoWarnings,
   };
 }
@@ -877,6 +886,7 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
     matrixImportLabelRaw != null && String(matrixImportLabelRaw).trim()
       ? String(matrixImportLabelRaw).trim().slice(0, 120)
       : null;
+  const notesForSql = normalizeOrderNotes((newOrder as any).notes);
 
   const skippedNoVariant: string[] = [];
   const despachoWarnings: string[] = [];
@@ -960,8 +970,8 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
   try {
     await conn.beginTransaction();
     await conn.execute(
-      `INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact, created_by, matrix_import_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [orderId, newOrder.customerId, sellerId, sqlDate, statusToSave, totalRecalculated, paymentStatus, noStockImpact, createdBy, matrixImportLabelForSql]
+      `INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact, created_by, matrix_import_label, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [orderId, newOrder.customerId, sellerId, sqlDate, statusToSave, totalRecalculated, paymentStatus, noStockImpact, createdBy, matrixImportLabelForSql, notesForSql]
     );
     for (const pr of preparedRows) {
       for (const alloc of pr.allocations) {
@@ -1420,9 +1430,10 @@ export const updateOrder = async (req: any, res: any) => {
     const paymentStatus =
       (updated as any).paymentStatus === 'pagado' || (updated as any).paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
     const noStockImpact = (updated as any).noStockImpact === true || (updated as any).no_stock_impact === 1 ? 1 : 0;
+    const notesForSql = normalizeOrderNotes((updated as any).notes);
     await execute(
-      'UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ?, payment_status = ?, no_stock_impact = ? WHERE id = ?',
-      [updated.customerId, sellerId, sqlDate, updated.status, updated.total, paymentStatus, noStockImpact, id]
+      'UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ?, payment_status = ?, no_stock_impact = ?, notes = ? WHERE id = ?',
+      [updated.customerId, sellerId, sqlDate, updated.status, updated.total, paymentStatus, noStockImpact, notesForSql, id]
     );
     await execute("DELETE FROM order_items WHERE order_id = ?", [id]);
     for (const item of updated.items as any[]) {
@@ -1468,7 +1479,7 @@ export const updateOrder = async (req: any, res: any) => {
     }
     const created = await get(
       `SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
-              o.created_by, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
+              o.created_by, o.notes, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
        FROM orders o
        LEFT JOIN users cu ON cu.id = o.created_by
        LEFT JOIN users su ON su.id = o.seller_id
@@ -1525,6 +1536,7 @@ export const updateOrder = async (req: any, res: any) => {
       items: itemsMapped,
       paymentStatus: mapPaymentStatus(created),
       noStockImpact: !!created.no_stock_impact,
+      notes: (created as any).notes ? String((created as any).notes) : undefined,
       despachoWarnings
     });
   } catch (error) {

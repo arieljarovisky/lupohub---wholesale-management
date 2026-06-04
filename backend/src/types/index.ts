@@ -58,4 +58,5 @@ export interface Order {
   total: number;
   status: OrderStatus;
   date: string;
+  notes?: string;
 }

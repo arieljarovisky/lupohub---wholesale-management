@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { ArrowLeft, Plus, Trash2, Search, Save, Package, ChevronDown, ChevronRight, Check, Palette, List, Upload, Bookmark } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Search, Save, Package, ChevronDown, ChevronRight, Check, Palette, List, Upload, Bookmark, StickyNote } from 'lucide-react';
 import { Order, OrderStatus, Product, Customer, Role } from '../types';
 import type { PriceList } from '../types';
 import { api } from '../services/api';
@@ -270,6 +270,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const clientDropdownRef = useRef<HTMLDivElement>(null);
   const matrixFileRef = useRef<HTMLInputElement>(null);
   const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0]);
+  /** Referencia interna: sucursal, depósito, etc. */
+  const [orderNotes, setOrderNotes] = useState('');
   const [sizes, setSizes] = useState<Array<{ code: string; name: string }>>([]);
   const [rows, setRows] = useState<TemplateRow[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -506,6 +508,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   useEffect(() => {
     if (!hydrateSourceOrder) {
       editHydratedOrderIdRef.current = null;
+      setOrderNotes('');
       return;
     }
     if (!products.length) return;
@@ -515,6 +518,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
 
     setSelectedCustomerId(hydrateSourceOrder.customerId);
     applyCustomerPriceList(hydrateSourceOrder.customerId);
+    setOrderNotes(isDuplicating ? '' : String(hydrateSourceOrder.notes ?? '').trim());
     setOrderDate(isDuplicating ? new Date().toISOString().slice(0, 10) : hydrateSourceOrder.date);
 
     const rowsByKey = new Map<string, TemplateRow>();
@@ -1140,7 +1144,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         (role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO)
           ? OrderStatus.CONFIRMED
           : OrderStatus.PENDING_ADMIN_CONFIRMATION,
-      date: orderDate
+      date: orderDate,
+      notes: orderNotes.trim() || undefined,
     };
   };
 
@@ -1266,9 +1271,11 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
             {readOnly ? 'Ver pedido' : (isEditing ? 'Editar pedido' : isDuplicating ? 'Duplicar pedido' : 'Nuevo pedido')}
           </h1>
           <p className="text-xs text-slate-500 truncate hidden sm:block">
-            {isDuplicating && duplicateFromOrder
-              ? `Pedido #${duplicateFromOrder.id} · ${new Date(orderDate).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })}`
-              : new Date(orderDate).toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short' })}
+            {orderNotes.trim()
+              ? orderNotes.trim()
+              : isDuplicating && duplicateFromOrder
+                ? `Pedido #${duplicateFromOrder.id} · ${new Date(orderDate).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })}`
+                : new Date(orderDate).toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short' })}
           </p>
         </div>
         <p className="shrink-0 text-xs text-slate-400 tabular-nums hidden md:block">
@@ -1382,6 +1389,20 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
               )}
             </div>
           )}
+        </div>
+
+        <div className="col-span-2 md:col-span-4 xl:col-span-12 min-w-0">
+          <label className="block text-[10px] font-semibold text-slate-500 mb-0.5 flex items-center gap-1">
+            <StickyNote size={12} /> Nota del pedido
+          </label>
+          <input
+            type="text"
+            maxLength={200}
+            value={orderNotes}
+            onChange={(e) => setOrderNotes(e.target.value)}
+            placeholder="Ej: Sucursal Palermo, depósito norte, entrega viernes…"
+            className={orderFieldClass}
+          />
         </div>
 
         <div className="col-span-2 md:col-span-2 xl:col-span-3 flex items-end gap-1.5 min-w-0">
