@@ -10,7 +10,8 @@ function mergeGroupKeys(sku: string): string[] {
   const out = new Set<string>();
   const dc = digitCore(sku);
   if (dc.length >= 4) out.add(`d:${dc}`);
-  if (dc.length >= 6) {
+  /** Solo SKUs cortos/variantes Tango (6 dígitos). Dos artículos de 7 dígitos (ej. 457504 vs 457588) no deben fusionarse. */
+  if (dc.length === 6) {
     const pre = dc.slice(0, -2);
     if (pre.length >= 4) out.add(`dpre:${pre}`);
   }
@@ -43,7 +44,13 @@ export function variantColorKey(colorCode: string, colorName: string): string {
   return `n:${name}`;
 }
 
-/** Mismo artículo aunque el SKU del registro difiera (0127501 vs 1275-11 / 1275111). */
+function isNumericArticleCode(s: string): boolean {
+  const t = String(s ?? '').trim();
+  if (!t || /[A-Za-z]/.test(t)) return false;
+  return t.replace(/\D/g, '').length >= 4;
+}
+
+/** Mismo artículo aunque el SKU del registro difiera (0127501 vs 127501). Códigos de 7 dígitos distintos no se fusionan (457504 ≠ 457588). */
 export function articleCodesMatch(a: string, b: string): boolean {
   const ta = (a || '').trim();
   const tb = (b || '').trim();
@@ -51,13 +58,26 @@ export function articleCodesMatch(a: string, b: string): boolean {
   const normAlpha = (s: string) =>
     s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   if (/[A-Za-z]/.test(ta) || /[A-Za-z]/.test(tb)) {
-    if (normAlpha(ta) === normAlpha(tb)) return true;
-  } else if (padArticleCodeTo7(ta) === padArticleCodeTo7(tb)) {
-    return true;
+    return normAlpha(ta) === normAlpha(tb);
   }
+
+  const pa = padArticleCodeTo7(ta);
+  const pb = padArticleCodeTo7(tb);
+  if (pa === pb) return true;
+
+  if (isNumericArticleCode(ta) && isNumericArticleCode(tb) && pa.length === 7 && pb.length === 7) {
+    return false;
+  }
+
   const ka = mergeGroupKeys(ta);
   const kb = mergeGroupKeys(tb);
   if (ka.some((k) => kb.includes(k))) return true;
+
+  const da = digitCore(ta);
+  const db = digitCore(tb);
+  if (da.length >= 4 && db.length >= 4 && da.length < 7 && db.length < 7 && (da.includes(db) || db.includes(da))) {
+    return true;
+  }
   return false;
 }
 

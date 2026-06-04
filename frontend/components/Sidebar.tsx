@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Package, ShoppingCart, Users, MapPin, LogOut, Shirt, Settings, ShoppingBag, Zap, ChevronRight, History, Ship, BookOpen, DollarSign, FileText, Percent, Wallet } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, MapPin, LogOut, Shirt, Settings, ShoppingBag, Zap, ChevronRight, ChevronLeft, History, Ship, BookOpen, DollarSign, FileText, Percent, Wallet } from 'lucide-react';
 import { Role } from '../types';
 import { isCompanyFinanceUser, COMPANY_FINANCE_VIEW } from '../utils/companyFinanceAccess';
 
@@ -9,9 +9,10 @@ interface SidebarProps {
   userRole: Role;
   userEmail?: string;
   onLogout: () => void;
+  onToggleCollapse?: () => void;
 }
 
-const Sidebar: React.FC<SidebarProps> = React.memo(({ currentView, onChangeView, userRole, userEmail, onLogout }) => {
+const Sidebar: React.FC<SidebarProps> = React.memo(({ currentView, onChangeView, userRole, userEmail, onLogout, onToggleCollapse }) => {
   const menuSections = [
     {
       title: 'Principal',
@@ -94,16 +95,27 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({ currentView, onChangeView,
   };
 
   return (
-    <div className="w-64 bg-gradient-to-b from-slate-950 to-slate-900 text-white flex flex-col h-screen fixed left-0 top-0 shadow-2xl z-20 border-r border-slate-800/50">
+    <div className="hidden md:flex w-64 bg-gradient-to-b from-slate-950 to-slate-900 text-white flex-col h-screen fixed left-0 top-0 shadow-2xl z-20 border-r border-slate-800/50">
       {/* Logo */}
-      <div className="p-5 flex items-center space-x-3 border-b border-slate-800/50">
-        <div className="w-11 h-11 bg-gradient-to-br from-blue-500 to-blue-700 rounded-xl flex items-center justify-center shadow-lg shadow-blue-900/30">
+      <div className="p-5 flex items-center gap-2 border-b border-slate-800/50">
+        <div className="w-11 h-11 shrink-0 bg-gradient-to-br from-blue-500 to-blue-700 rounded-xl flex items-center justify-center shadow-lg shadow-blue-900/30">
           <Shirt className="text-white" size={24} />
         </div>
-        <div>
+        <div className="min-w-0 flex-1">
           <h1 className="text-xl font-black tracking-tight bg-gradient-to-r from-white to-slate-300 bg-clip-text text-transparent">LUPO Hub</h1>
           <p className="text-[10px] text-slate-500 font-medium tracking-wider uppercase">Gestión Mayorista</p>
         </div>
+        {onToggleCollapse && (
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/80 transition"
+            title="Ocultar menú"
+            aria-label="Ocultar menú lateral"
+          >
+            <ChevronLeft size={18} />
+          </button>
+        )}
       </div>
 
       {/* Navigation */}

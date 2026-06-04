@@ -220,6 +220,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [mergeSelected, setMergeSelected] = useState<Array<{ productId: string; baseSku: string; name: string }>>([]);
   const [mergeKeeperProductId, setMergeKeeperProductId] = useState<string | null>(null);
   const [mergeSaving, setMergeSaving] = useState(false);
+  const [mergeSuggestions, setMergeSuggestions] = useState<Array<{ productId: string; baseSku: string; name: string }>>([]);
+  const [mergeSuggestionsLoading, setMergeSuggestionsLoading] = useState(false);
   const mergeSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /** Unificar dos variantes del mismo talle: elegís cuál se absorbe y cuál queda (colores compatibles). */
@@ -1506,6 +1508,59 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     setMergeSelected([]);
     setMergeKeeperProductId(null);
     setMergeSaving(false);
+    setMergeSuggestions([]);
+    setMergeSuggestionsLoading(false);
+  }, []);
+
+  const openMergeManualModalFromGroup = useCallback((groupKey: string, groupVariants: Product[]) => {
+    const gv = groupVariants[0];
+    const productId = String((gv as any)?.product_id || '').trim();
+    const name = String(gv?.name || '').trim();
+    const initial = productId
+      ? [{ productId, baseSku: groupKey, name }]
+      : [];
+    setShowMergeManualModal(true);
+    setMergePickSearch('');
+    setMergePickResults([]);
+    setMergeSelected(initial);
+    setMergeKeeperProductId(productId || null);
+    setMergeSaving(false);
+    setMergeSuggestions([]);
+    setMergeSuggestionsLoading(!!productId);
+
+    if (!productId) {
+      setMergeSuggestionsLoading(false);
+      return;
+    }
+
+    const q = name || groupKey;
+    api
+      .getDuplicateProducts({ q, limit: 80 })
+      .then((res) => {
+        const seen = new Set<string>([productId]);
+        const out: Array<{ productId: string; baseSku: string; name: string }> = [];
+        const groups = [
+          ...(res.duplicateByName || []),
+          ...(res.duplicateBySkuCore || []),
+          ...(res.duplicateBySkuDigitPrefix || []),
+        ];
+        for (const g of groups) {
+          const hasCurrent = g.products.some((p) => p.id === productId);
+          if (!hasCurrent) continue;
+          for (const p of g.products) {
+            if (!p.id || seen.has(p.id)) continue;
+            seen.add(p.id);
+            out.push({
+              productId: p.id,
+              baseSku: String(p.sku || '').trim(),
+              name: String(p.name || '').trim(),
+            });
+          }
+        }
+        setMergeSuggestions(out);
+      })
+      .catch(() => setMergeSuggestions([]))
+      .finally(() => setMergeSuggestionsLoading(false));
   }, []);
 
   useEffect(() => {
@@ -3205,6 +3260,18 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                </button>
                                <button
                                  type="button"
+                                 onClick={(e) => {
+                                   e.stopPropagation();
+                                   setCardDotsOpenKey(null);
+                                   openMergeManualModalFromGroup(groupKey, groupVariants);
+                                 }}
+                                 className="w-full flex items-center gap-3 mx-1.5 px-3 py-2.5 text-left text-sm text-violet-200 hover:bg-violet-500/10 rounded-xl max-w-[calc(100%-12px)]"
+                               >
+                                 <GitMerge size={17} className="shrink-0" />
+                                 Unificar con otro artículo
+                               </button>
+                               <button
+                                 type="button"
                                  onClick={(e) => { e.stopPropagation(); setCardDotsOpenKey(null); handleDeleteProduct((groupVariants[0] as any).product_id, groupKey, displayName); }}
                                  className="w-full flex items-center gap-3 mx-1.5 px-3 py-2.5 text-left text-sm text-red-300/90 hover:bg-red-500/10 rounded-xl max-w-[calc(100%-12px)]"
                                >
@@ -3247,6 +3314,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                   <div className="p-2 sm:p-4 space-y-2">
                     {isAdminOrWarehouse && !loadingVariantsByGroup[groupKey] && variantsToShow.length > 0 && (
                       <div className="flex flex-col sm:flex-row justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); openMergeManualModalFromGroup(groupKey, groupVariants); }}
+                          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-violet-700 hover:bg-violet-600 text-white text-sm font-semibold transition-colors min-h-[44px] touch-manipulation border border-violet-500/40"
+                        >
+                          <GitMerge size={16} />
+                          Unificar con otro artículo
+                        </button>
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); openBulkLinkModal(groupKey); }}
@@ -3657,6 +3732,44 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               </button>
             </div>
             <div className="p-4 space-y-4 overflow-y-auto flex-1 min-h-0">
+              {mergeSelected.length > 0 && (
+                <div className="rounded-xl border border-violet-500/40 bg-violet-950/25 px-3 py-2 text-xs text-violet-100/90">
+                  El artículo marcado como <strong className="text-violet-200">principal</strong> conserva su código; los demás se absorben (stock, variantes y vínculos ML/TN). No se puede deshacer.
+                </div>
+              )}
+
+              {(mergeSuggestionsLoading || mergeSuggestions.length > 0) && (
+                <div>
+                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+                    Posibles duplicados
+                  </p>
+                  {mergeSuggestionsLoading ? (
+                    <div className="p-3 text-slate-500 text-sm flex items-center gap-2">
+                      <Loader2 size={14} className="animate-spin" /> Buscando artículos parecidos…
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-36 overflow-y-auto rounded-lg border border-slate-700 divide-y divide-slate-800">
+                      {mergeSuggestions.map((row) => (
+                        <div key={row.productId} className="flex items-center gap-2 p-2 hover:bg-slate-800/80">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm text-white font-mono truncate">{row.baseSku}</p>
+                            <p className="text-xs text-slate-400 truncate">{row.name || '—'}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => addMergeCandidate(row)}
+                            disabled={mergeSelected.some((s) => s.productId === row.productId)}
+                            className="shrink-0 px-2 py-1 rounded-lg text-xs font-bold bg-violet-600 text-white disabled:opacity-40"
+                          >
+                            Agregar
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div>
                 <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Buscar artículo</label>
                 <input

@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { ArrowLeft, Plus, Trash2, Search, Save, Package, ChevronDown, ChevronRight, Check, Palette, List, Upload } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Search, Save, Package, ChevronDown, ChevronRight, Check, Palette, List, Upload, Bookmark, StickyNote } from 'lucide-react';
 import { Order, OrderStatus, Product, Customer, Role } from '../types';
 import type { PriceList } from '../types';
 import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
-import { labelTalle, codigoTalleParaSku } from '../utils/tallesTango';
+import { labelTalle, codigoTalleParaSku, ORDER_FORM_SIZE_CODES, sortOrderFormSizeCodes } from '../utils/tallesTango';
 import { parseOrderMatrixExcel } from '../utils/orderImportMatrix';
 import { articleCodesMatch, articleCodeForOrderRow, resolveDisplayArticleCode, skuLookupCandidates, variantColorKey } from '../utils/articleCodeUtils';
 
@@ -31,6 +31,8 @@ interface CreateOrderTemplateProps {
    * Tras importar pedidos desde Excel (varios clientes), opcionalmente refrescar lista y volver a pedidos.
    */
   onMatrixImportDone?: () => void | Promise<void>;
+  /** Tras guardar la lista de precios en la ficha del cliente (actualizar estado en App). */
+  onCustomerUpdated?: (customer: Customer) => void;
 }
 
 /** Una fila de la plantilla: un artículo (código) + un color, con cantidades por talle. */
@@ -62,19 +64,19 @@ function formatColorCell(colorCode: string, colorName: string): string {
 function normalizeSizeCode(value: unknown, skuRaw?: string): string {
   const directRaw = String(value ?? '').trim();
   if (directRaw) {
-    const numLead = directRaw.match(/^(\d{2,3})\b/);
+    const numLead = directRaw.match(/^(\d{1,3})\b/);
     if (numLead) return numLead[1];
     const fromName = codigoTalleParaSku(directRaw);
-    if (fromName && /^\d{2,3}$/.test(fromName)) return fromName;
+    if (fromName && /^\d{1,3}$/.test(fromName)) return fromName;
   }
   const sku = String(skuRaw ?? '').trim();
   if (!sku) return '';
   const parts = sku.split('-').filter(Boolean);
-  if (parts.length >= 3 && /^\d{2,3}$/.test(parts[1])) return parts[1];
+  if (parts.length >= 3 && /^\d{1,3}$/.test(parts[1])) return parts[1];
   if (parts.length >= 2) {
     const fromSku = String(parts[parts.length - 2]).trim();
     const norm = codigoTalleParaSku(fromSku) || fromSku;
-    if (/^\d{2,3}$/.test(norm)) return norm;
+    if (/^\d{1,3}$/.test(norm)) return norm;
   }
   return '';
 }
@@ -92,7 +94,7 @@ function variantSkuLooksCanonical(variantSku: string, parentSku: string): boolea
   const v = String(variantSku ?? '').trim();
   const parts = v.split('-').filter(Boolean);
   if (parts.length !== 3) return false;
-  if (!/^\d{2,3}$/.test(parts[1])) return false;
+  if (!/^\d{1,3}$/.test(parts[1])) return false;
   const parent = String(parentSku ?? '').trim();
   return !parent || articleCodesMatch(parts[0], parent);
 }
@@ -131,7 +133,7 @@ function assignVariantsToMaps(
   for (const v of sorted) {
     const variantSkuRef = String((v as { variant_sku?: string }).variant_sku || v.sku || '');
     const sizeCode = normalizeSizeCode(v.size_code, variantSkuRef);
-    if (!sizeCode || !/^\d{2,3}$/.test(sizeCode)) continue;
+    if (!sizeCode || !/^\d{1,3}$/.test(sizeCode)) continue;
     const hasDbSize = Boolean(String(v.size_code ?? '').trim());
     const canonical = variantSkuLooksCanonical(variantSkuRef, parentSku);
     if (!canonical && !hasDbSize) continue;
@@ -259,7 +261,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   selectedPriceListId = null,
   onPriceListChange,
   readOnly = false,
-  onMatrixImportDone
+  onMatrixImportDone,
+  onCustomerUpdated,
 }) => {
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [clientFilter, setClientFilter] = useState('');
@@ -267,6 +270,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const clientDropdownRef = useRef<HTMLDivElement>(null);
   const matrixFileRef = useRef<HTMLInputElement>(null);
   const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0]);
+  /** Referencia interna: sucursal, depósito, etc. */
+  const [orderNotes, setOrderNotes] = useState('');
   const [sizes, setSizes] = useState<Array<{ code: string; name: string }>>([]);
   const [rows, setRows] = useState<TemplateRow[]>([]);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -285,6 +290,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   /** Códigos de artículo colapsados (solo se muestra resumen). */
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [matrixImporting, setMatrixImporting] = useState(false);
+  const [savingCustomerPriceList, setSavingCustomerPriceList] = useState(false);
   /** false = solo la primera hoja del Excel con filas válidas (evita pedidos duplicados por muchas hojas). */
   const [matrixImportAllSheets, setMatrixImportAllSheets] = useState(false);
 
@@ -303,6 +309,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const showPriceListSelector = (role === Role.ADMIN || role === Role.WAREHOUSE) && priceLists.length > 0;
   /** Evita re-hidratar el pedido (y resetear la lista de precios) cada vez que se recargan productos. */
   const editHydratedOrderIdRef = useRef<string | null>(null);
+  /** El usuario eligió otra lista en el selector; no pisar con la del cliente. */
+  const priceListUserOverrideRef = useRef(false);
   /** Invalida respuestas async del modal de colores si el usuario cerró o abrió otro. */
   const colorPickerRequestRef = useRef(0);
   /** En edición: evita pisar priceAtMoment al abrir; permite recalcular si cambia la lista. */
@@ -323,9 +331,63 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     }
   }, []);
   const applyCustomerPriceList = useCallback((customerId: string) => {
+    if (priceListUserOverrideRef.current) return;
     const customer = customers.find((c) => c.id === customerId);
     onPriceListChange?.(customer?.priceListId ?? null);
   }, [customers, onPriceListChange]);
+
+  const handlePriceListSelectChange = useCallback(
+    (value: string) => {
+      priceListUserOverrideRef.current = true;
+      onPriceListChange?.(value || null);
+    },
+    [onPriceListChange]
+  );
+
+  const selectedCustomer = useMemo(
+    () => customers.find((c) => c.id === selectedCustomerId),
+    [customers, selectedCustomerId]
+  );
+
+  const selectedPriceListLabel = useMemo(() => {
+    if (!selectedPriceListId) return 'Precio base';
+    return priceLists.find((pl) => pl.id === selectedPriceListId)?.name ?? 'Lista seleccionada';
+  }, [selectedPriceListId, priceLists]);
+
+  const customerPriceListAlreadySaved = useMemo(() => {
+    const saved = selectedCustomer?.priceListId ?? null;
+    const current = selectedPriceListId ?? null;
+    return saved === current;
+  }, [selectedCustomer?.priceListId, selectedPriceListId]);
+
+  const saveCustomerPriceListPermanent = useCallback(async () => {
+    if (!selectedCustomerId || readOnly || savingCustomerPriceList) return;
+    setSavingCustomerPriceList(true);
+    try {
+      const updated = await api.updateCustomer(selectedCustomerId, {
+        priceListId: selectedPriceListId ?? null,
+      });
+      onCustomerUpdated?.(updated);
+      const name = updated.businessName || updated.name || 'el cliente';
+      showToast(
+        'success',
+        `Lista «${selectedPriceListLabel}» guardada para ${name}. Los próximos pedidos la usarán por defecto.`
+      );
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'No se pudo guardar la lista del cliente';
+      showToast('error', msg);
+    } finally {
+      setSavingCustomerPriceList(false);
+    }
+  }, [
+    selectedCustomerId,
+    readOnly,
+    savingCustomerPriceList,
+    selectedPriceListId,
+    onCustomerUpdated,
+    selectedPriceListLabel,
+    showToast,
+  ]);
 
   const onMatrixImportExcel = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -406,28 +468,31 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const isEditing = !!initialOrder;
   const isDuplicating = !!duplicateFromOrder && !initialOrder;
   const hydrateSourceOrder = initialOrder || duplicateFromOrder;
+
   const sizeColumns = useMemo(() => {
     const map = new Map<string, { code: string; name: string }>();
+    for (const code of ORDER_FORM_SIZE_CODES) {
+      const fromApi = sizes.find((s) => String(s.code).trim() === code);
+      map.set(code, { code, name: fromApi?.name || labelTalle(code) || code });
+    }
     for (const s of sizes) {
       const code = String(s.code || '').trim();
-      if (!code) continue;
-      map.set(code, { code, name: s.name || s.code });
+      if (!code || !/^\d{1,3}$/.test(code)) continue;
+      if (!map.has(code)) map.set(code, { code, name: s.name || labelTalle(code) || code });
     }
     for (const r of rows) {
       for (const code of Object.keys(r.variantBySize || {})) {
         const c = String(code || '').trim();
         if (!c || map.has(c)) continue;
-        map.set(c, { code: c, name: c });
+        map.set(c, { code: c, name: labelTalle(c) || c });
       }
       for (const code of Object.keys(r.quantitiesBySize || {})) {
         const c = String(code || '').trim();
         if (!c || map.has(c)) continue;
-        map.set(c, { code: c, name: c });
+        map.set(c, { code: c, name: labelTalle(c) || c });
       }
     }
-    return Array.from(map.values()).sort((a, b) =>
-      String(a.code).localeCompare(String(b.code), undefined, { numeric: true })
-    );
+    return Array.from(map.values()).sort((a, b) => sortOrderFormSizeCodes(a.code, b.code));
   }, [sizes, rows]);
 
   const filteredCustomers = useMemo(() => {
@@ -452,6 +517,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   useEffect(() => {
     if (!hydrateSourceOrder) {
       editHydratedOrderIdRef.current = null;
+      setOrderNotes('');
       return;
     }
     if (!products.length) return;
@@ -460,6 +526,10 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     editHydratedOrderIdRef.current = hydrateKey;
 
     setSelectedCustomerId(hydrateSourceOrder.customerId);
+    if (!priceListUserOverrideRef.current) {
+      applyCustomerPriceList(hydrateSourceOrder.customerId);
+    }
+    setOrderNotes(isDuplicating ? '' : String(hydrateSourceOrder.notes ?? '').trim());
     setOrderDate(isDuplicating ? new Date().toISOString().slice(0, 10) : hydrateSourceOrder.date);
 
     const rowsByKey = new Map<string, TemplateRow>();
@@ -516,7 +586,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         });
       }
       const row = rowsByKey.get(key)!;
-      if (sizeCode && /^\d{2,3}$/.test(sizeCode) && !row.variantBySize[sizeCode]) {
+      if (sizeCode && /^\d{1,3}$/.test(sizeCode) && !row.variantBySize[sizeCode]) {
         row.variantBySize[sizeCode] = variantId;
       }
       row.quantitiesBySize[sizeCode] = (row.quantitiesBySize[sizeCode] || 0) + Number(item.quantity || 0);
@@ -541,25 +611,26 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     });
     appliedPriceListForRowsRef.current = undefined;
     if (isDuplicating) pendingNewOrderIdRef.current = null;
-  }, [hydrateSourceOrder, products, isDuplicating]);
+  }, [hydrateSourceOrder, products, isDuplicating, applyCustomerPriceList]);
 
   useEffect(() => {
     appliedPriceListForRowsRef.current = undefined;
     priceListRecalcPendingRef.current = false;
     productsAtPriceListChangeRef.current = null;
+    priceListUserOverrideRef.current = false;
     if (!hydrateSourceOrder) pendingNewOrderIdRef.current = null;
   }, [hydrateSourceOrder?.id, isDuplicating]);
 
-  /** Solo al cambiar el selector (no cuando llegan productos): guardar snapshot para detectar recarga. */
+  /** Al cambiar el selector: marcar recálculo cuando llegue el catálogo de esa lista. */
   useEffect(() => {
-    if (!isEditing) return;
     const listId = selectedPriceListId ?? null;
     if (appliedPriceListForRowsRef.current === undefined) return;
     if (appliedPriceListForRowsRef.current !== listId) {
       priceListRecalcPendingRef.current = true;
       productsAtPriceListChangeRef.current = products;
+      appliedPriceListForRowsRef.current = listId;
     }
-  }, [selectedPriceListId, isEditing]);
+  }, [selectedPriceListId, products]);
 
   useEffect(() => {
     if (customers.length === 1 && !selectedCustomerId) {
@@ -577,7 +648,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     api.getSizes().then(list => {
       const withCode = list.filter(s => {
         const code = String(s?.code ?? '').trim();
-        return code !== '' && /^\d{2,3}$/.test(code);
+        return code !== '' && /^\d{1,3}$/.test(code);
       });
       const sorted = [...withCode].sort((a, b) => String(a.code).localeCompare(String(b.code), undefined, { numeric: true }));
       setSizes(sorted);
@@ -1066,7 +1137,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         (role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO)
           ? OrderStatus.CONFIRMED
           : OrderStatus.PENDING_ADMIN_CONFIRMATION,
-      date: orderDate
+      date: orderDate,
+      notes: orderNotes.trim() || undefined,
     };
   };
 
@@ -1168,145 +1240,200 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     return sum;
   };
 
+  const stickyHeadBg = 'bg-slate-900';
+  const stickyCellBg = (highlight: boolean) => (highlight ? 'bg-slate-800' : 'bg-slate-900');
+
+  const orderFieldClass =
+    'w-full h-9 bg-slate-800/90 border border-slate-700/80 rounded-lg px-3 text-sm text-white focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none';
+
   return (
-    <div className="flex flex-col pb-32 md:pb-0 px-3 sm:px-0 max-w-full">
-      {/* Header: queda FUERA del subtree `inert` para que "Volver" siempre funcione, incluso en solo lectura. */}
-      <header className="shrink-0 mb-5">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white transition touch-manipulation"
-            aria-label="Volver"
-          >
-            <ArrowLeft size={22} />
-          </button>
-          <div className="min-w-0 flex-1">
-            <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-              {readOnly ? 'Ver pedido (solo lectura)' : (isEditing ? 'Editar pedido' : isDuplicating ? 'Duplicar pedido' : 'Nuevo pedido')}
-            </h1>
-            <p className="text-sm text-slate-400 mt-0.5">
-              {isDuplicating && duplicateFromOrder ? (
-                <>Basado en pedido #{duplicateFromOrder.id} · {new Date(orderDate).toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })}</>
-              ) : (
-                new Date(orderDate).toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })
-              )}
-            </p>
-          </div>
+    <div className="grid h-full min-h-0 w-full grid-rows-[auto_minmax(0,1fr)_auto] gap-1.5 overflow-hidden">
+      {/* Barra superior compacta (una sola fila del grid) */}
+      <div className="min-w-0 space-y-1.5">
+      <header className="flex items-center gap-2 md:gap-3 min-w-0">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white transition touch-manipulation"
+          aria-label="Volver"
+        >
+          <ArrowLeft size={20} />
+        </button>
+        <div className="min-w-0 flex-1">
+          <h1 className="text-lg md:text-xl font-bold text-white tracking-tight truncate">
+            {readOnly ? 'Ver pedido' : (isEditing ? 'Editar pedido' : isDuplicating ? 'Duplicar pedido' : 'Nuevo pedido')}
+          </h1>
+          <p className="text-xs text-slate-500 truncate hidden sm:block">
+            {orderNotes.trim()
+              ? orderNotes.trim()
+              : isDuplicating && duplicateFromOrder
+                ? `Pedido #${duplicateFromOrder.id} · ${new Date(orderDate).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })}`
+                : new Date(orderDate).toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short' })}
+          </p>
         </div>
+        <p className="shrink-0 text-xs text-slate-400 tabular-nums hidden md:block">
+          <span className="font-semibold text-slate-300">{rows.length}</span> filas ·{' '}
+          <span className="font-semibold text-slate-300">{totalUnits}</span> u.
+        </p>
+        <button
+          type="button"
+          onClick={() => setShowAddModal(true)}
+          disabled={readOnly}
+          className="shrink-0 h-9 px-3 md:px-4 flex items-center justify-center gap-1.5 text-white font-semibold text-sm rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 shadow-md shadow-blue-900/25 transition touch-manipulation"
+        >
+          <Plus size={18} strokeWidth={2.5} />
+          <span className="hidden sm:inline">Agregar</span>
+        </button>
       </header>
 
       {readOnly && (
-        <div className="shrink-0 mb-4 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-          <p className="font-semibold">Este pedido ya está facturado.</p>
-          <p className="text-amber-200/80 text-xs mt-0.5">
-            Podés revisar el detalle, pero no se puede modificar. Si necesitás corregir cantidades o precios, emití una nota de crédito desde la pantalla de pedidos.
-          </p>
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200 -mt-1">
+          <span className="font-semibold">Pedido facturado.</span>{' '}
+          <span className="text-amber-200/80">Solo lectura.</span>
         </div>
       )}
 
-      {/*
-        `inert` (React 19 + browsers modernos) deshabilita focus y clicks dentro del subtree sin alterar
-        el layout ni el scroll. Permite que el usuario lea/scrollee todo el detalle del pedido facturado
-        pero no pueda modificar ningún input ni disparar acciones.
-      */}
+      {/* Barra compacta: lista, cliente, descuento, import (no compite con la matriz en altura) */}
       <div
         inert={readOnly || undefined}
         aria-disabled={readOnly || undefined}
-        className={`contents ${readOnly ? '[&_input]:cursor-not-allowed [&_select]:cursor-not-allowed [&_button]:cursor-not-allowed' : ''}`}
+        className={`grid grid-cols-2 md:grid-cols-4 xl:grid-cols-12 gap-2 items-end min-w-0 ${
+          readOnly ? '[&_input]:cursor-not-allowed [&_select]:cursor-not-allowed [&_button]:cursor-not-allowed' : ''
+        }`}
       >
-
-      {/* Lista de precios: solo ADMIN/WAREHOUSE */}
-      {showPriceListSelector && (
-        <section className="shrink-0 mb-5">
-          <label className="block text-xs font-semibold text-slate-400 mb-2 flex items-center gap-1.5">
-            <List size={14} /> Lista de precios
-          </label>
-          <select
-            className="w-full bg-slate-800/80 border border-slate-700/80 rounded-xl py-3.5 px-4 text-sm text-white min-h-[48px] focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none transition"
-            value={selectedPriceListId ?? ''}
-            onChange={(e) => onPriceListChange?.(e.target.value || null)}
-          >
-            <option value="">Precio base (sin lista)</option>
-            {priceLists.map(pl => (
-              <option key={pl.id} value={pl.id}>{pl.name}</option>
-            ))}
-          </select>
-          <p className="text-slate-500 text-[10px] mt-1">Los precios dependen de la lista elegida.</p>
-        </section>
-      )}
-
-      {/* Cliente */}
-      <section className="shrink-0 mb-5">
-        <label className="block text-xs font-semibold text-slate-400 mb-2">Cliente</label>
-        {isCustomerLocked ? (
-          <div className="w-full bg-slate-800/80 rounded-xl py-3.5 px-4 text-sm text-white border border-slate-700/80 min-h-[48px] flex items-center">
-            {customers.find(c => c.id === selectedCustomerId)?.businessName || customers[0]?.businessName || 'Mi cuenta'}
-          </div>
-        ) : (
-          <div ref={clientDropdownRef} className="relative">
-            <input
-              type="text"
-              className="w-full bg-slate-800/80 border border-slate-700/80 rounded-xl py-3.5 px-4 pr-10 text-sm text-white min-h-[48px] focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none transition"
-              value={clientDropdownOpen || clientFilter ? clientFilter : (customers.find(c => c.id === selectedCustomerId)?.businessName || customers.find(c => c.id === selectedCustomerId)?.name || '')}
-              onChange={(e) => { setClientFilter(e.target.value); setClientDropdownOpen(true); }}
-              onFocus={() => setClientDropdownOpen(true)}
-              onBlur={() => setTimeout(() => setClientDropdownOpen(false), 150)}
-              placeholder="Escribí para filtrar o seleccionar cliente..."
-            />
-            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
-            {clientDropdownOpen && (
-              <ul className="absolute z-50 left-0 right-0 mt-1 max-h-56 overflow-auto rounded-xl border border-slate-700/80 bg-slate-900 shadow-xl py-1">
-                {filteredCustomers.length === 0 ? (
-                  <li className="px-3 py-2.5 text-slate-500 text-sm">Ningún cliente coincide</li>
-                ) : (
-                  filteredCustomers.map(c => (
-                    <li
-                      key={c.id}
-                      className="px-3 py-2.5 text-sm text-white hover:bg-slate-700 cursor-pointer truncate"
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        setSelectedCustomerId(c.id);
-                        applyCustomerPriceList(c.id);
-                        setClientFilter('');
-                        setClientDropdownOpen(false);
-                      }}
-                    >
-                      {c.businessName || c.name || 'Cliente'}
-                    </li>
-                  ))
-                )}
-              </ul>
-            )}
+        {showPriceListSelector && (
+          <div className="col-span-2 md:col-span-2 xl:col-span-3 min-w-0">
+            <label className="block text-[10px] font-semibold text-slate-500 mb-0.5 flex items-center gap-1">
+              <List size={12} /> Lista
+            </label>
+            <div className="flex gap-1.5 items-stretch min-w-0">
+              <select
+                className={`${orderFieldClass} flex-1 min-w-0`}
+                value={selectedPriceListId ?? ''}
+                onChange={(e) => handlePriceListSelectChange(e.target.value)}
+              >
+                <option value="">Precio base</option>
+                {priceLists.map(pl => (
+                  <option key={pl.id} value={pl.id}>{pl.name}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={saveCustomerPriceListPermanent}
+                disabled={!selectedCustomerId || savingCustomerPriceList || customerPriceListAlreadySaved}
+                title={
+                  !selectedCustomerId
+                    ? 'Elegí un cliente primero'
+                    : customerPriceListAlreadySaved
+                      ? 'Esta lista ya es la predeterminada del cliente'
+                      : `Guardar «${selectedPriceListLabel}» como lista del cliente`
+                }
+                className="shrink-0 h-9 px-2.5 flex items-center justify-center gap-1 rounded-lg border border-slate-600 bg-slate-700/90 hover:bg-slate-600 disabled:opacity-45 disabled:hover:bg-slate-700/90 text-slate-200 text-xs font-semibold transition touch-manipulation"
+              >
+                <Bookmark size={14} className={customerPriceListAlreadySaved ? 'text-emerald-400' : ''} />
+                <span className="hidden lg:inline max-w-[5.5rem] truncate">
+                  {savingCustomerPriceList ? '…' : customerPriceListAlreadySaved ? 'Fijada' : 'Fijar'}
+                </span>
+              </button>
+            </div>
           </div>
         )}
-      </section>
 
-      {/* Detalle + botón agregar */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
-        <p className="text-sm text-slate-400">
-          <span className="font-semibold text-slate-300">{rows.length}</span> fila{rows.length !== 1 ? 's' : ''}
-          <span className="mx-1.5">·</span>
-          <span className="font-semibold text-slate-300">{totalUnits}</span> unidades
-        </p>
-        <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:justify-end sm:items-end">
+        <div className={`min-w-0 ${showPriceListSelector ? 'col-span-2 md:col-span-2 xl:col-span-4' : 'col-span-2 md:col-span-2 xl:col-span-5'}`}>
+          <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">Cliente</label>
+          {isCustomerLocked ? (
+            <div className={`${orderFieldClass} flex items-center truncate`}>
+              {customers.find(c => c.id === selectedCustomerId)?.businessName || customers[0]?.businessName || 'Mi cuenta'}
+            </div>
+          ) : (
+            <div ref={clientDropdownRef} className="relative">
+              <input
+                type="text"
+                className={`${orderFieldClass} pr-8`}
+                value={clientDropdownOpen || clientFilter ? clientFilter : (customers.find(c => c.id === selectedCustomerId)?.businessName || customers.find(c => c.id === selectedCustomerId)?.name || '')}
+                onChange={(e) => { setClientFilter(e.target.value); setClientDropdownOpen(true); }}
+                onFocus={() => setClientDropdownOpen(true)}
+                onBlur={() => setTimeout(() => setClientDropdownOpen(false), 150)}
+                placeholder="Cliente..."
+              />
+              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+              {clientDropdownOpen && (
+                <ul className="absolute z-50 left-0 right-0 mt-1 max-h-48 overflow-auto rounded-lg border border-slate-700/80 bg-slate-900 shadow-xl py-1">
+                  {filteredCustomers.length === 0 ? (
+                    <li className="px-3 py-2 text-slate-500 text-sm">Sin coincidencias</li>
+                  ) : (
+                    filteredCustomers.map(c => (
+                      <li
+                        key={c.id}
+                        className="px-3 py-2 text-sm text-white hover:bg-slate-700 cursor-pointer truncate"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          priceListUserOverrideRef.current = false;
+                          setSelectedCustomerId(c.id);
+                          applyCustomerPriceList(c.id);
+                          setClientFilter('');
+                          setClientDropdownOpen(false);
+                        }}
+                      >
+                        {c.businessName || c.name || 'Cliente'}
+                      </li>
+                    ))
+                  )}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="col-span-2 md:col-span-4 xl:col-span-12 min-w-0">
+          <label className="block text-[10px] font-semibold text-slate-500 mb-0.5 flex items-center gap-1">
+            <StickyNote size={12} /> Nota del pedido
+          </label>
+          <input
+            type="text"
+            maxLength={200}
+            value={orderNotes}
+            onChange={(e) => setOrderNotes(e.target.value)}
+            placeholder="Ej: Sucursal Palermo, depósito norte, entrega viernes…"
+            className={orderFieldClass}
+          />
+        </div>
+
+        <div className="col-span-2 md:col-span-2 xl:col-span-3 flex items-end gap-1.5 min-w-0">
+          <div className="flex-1 min-w-0">
+            <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">Dto. global %</label>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step="0.01"
+              value={globalDiscountPercent}
+              onChange={(e) => setGlobalDiscountPercent(e.target.value)}
+              onWheel={blockWheelOnNumberInput}
+              placeholder="Ej: 10"
+              className={`${orderFieldClass} font-mono tabular-nums ${numberInputNoSpinClass}`}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={applyGlobalDiscount}
+            disabled={!rows.length}
+            className="shrink-0 h-9 px-2.5 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 text-slate-200 text-xs font-semibold border border-slate-600 transition"
+            title="Aplicar descuento a todos"
+          >
+            Aplicar
+          </button>
+        </div>
+
+        <div className={`col-span-2 flex flex-wrap items-center gap-2 justify-between md:justify-end min-w-0 ${
+          showPriceListSelector ? 'md:col-span-4 xl:col-span-2' : 'md:col-span-4 xl:col-span-4'
+        }`}>
+          <p className="text-xs text-slate-400 tabular-nums md:hidden">
+            <span className="font-semibold text-slate-300">{rows.length}</span> filas ·{' '}
+            <span className="font-semibold text-slate-300">{totalUnits}</span> u.
+          </p>
           {canMatrixImport && (
-            <>
-              <label className="flex items-start gap-2 text-xs text-slate-400 cursor-pointer select-none max-w-[min(100%,280px)] sm:mr-1">
-                <input
-                  type="checkbox"
-                  className="mt-0.5 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500/40 shrink-0"
-                  checked={matrixImportAllSheets}
-                  onChange={(e) => setMatrixImportAllSheets(e.target.checked)}
-                  disabled={matrixImporting || savingOrder}
-                />
-                <span>
-                  Importar <span className="text-slate-300 font-semibold">todas</span> las hojas del libro
-                  <span className="block text-[10px] text-slate-500 font-normal mt-0.5 leading-snug">
-                    Desmarcado: solo la primera hoja con datos (recomendado si el archivo tiene muchas hojas copiadas y se generaban pedidos duplicados).
-                  </span>
-                </span>
-              </label>
+            <div className="flex items-center gap-1.5">
               <input
                 ref={matrixFileRef}
                 type="file"
@@ -1314,58 +1441,45 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                 className="hidden"
                 onChange={onMatrixImportExcel}
               />
+              <label className="hidden lg:flex items-center gap-1 text-[10px] text-slate-500 cursor-pointer select-none" title="Importar todas las hojas del Excel">
+                <input
+                  type="checkbox"
+                  className="rounded border-slate-600 bg-slate-800 text-emerald-600 shrink-0"
+                  checked={matrixImportAllSheets}
+                  onChange={(e) => setMatrixImportAllSheets(e.target.checked)}
+                  disabled={matrixImporting || savingOrder}
+                />
+                Todas las hojas
+              </label>
               <button
                 type="button"
                 onClick={() => matrixFileRef.current?.click()}
                 disabled={matrixImporting || savingOrder}
-                className="min-h-[48px] px-5 py-3 flex items-center justify-center gap-2.5 text-white font-semibold text-sm rounded-xl bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 disabled:pointer-events-none shadow-lg shadow-emerald-900/25 active:scale-[0.98] transition touch-manipulation"
-                title="Por defecto: una sola hoja con datos y un solo pedido por cliente. Opción: todas las hojas. Columnas Cliente, Código, Color, talles. Sin columna cliente se usa el nombre de la hoja."
+                className="h-9 px-2.5 flex items-center justify-center gap-1.5 text-white font-semibold text-xs rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 transition touch-manipulation"
+                title="Importar matriz Excel"
               >
-                <Upload size={20} strokeWidth={2.5} />
-                {matrixImporting ? 'Importando…' : 'Importar Excel (matriz)'}
+                <Upload size={16} />
+                <span className="hidden sm:inline">{matrixImporting ? '…' : 'Excel'}</span>
               </button>
-            </>
+            </div>
           )}
-          <button
-            type="button"
-            onClick={() => setShowAddModal(true)}
-            className="min-h-[48px] px-5 py-3 flex items-center justify-center gap-2.5 text-white font-semibold text-sm rounded-xl bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-900/30 active:scale-[0.98] transition touch-manipulation"
-          >
-            <Plus size={22} strokeWidth={2.5} /> Agregar artículo
-          </button>
         </div>
       </div>
-
-      <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-3">
-        <label className="text-xs font-semibold text-slate-400 whitespace-nowrap">Descuento global (%)</label>
-        <input
-          type="number"
-          min={0}
-          max={100}
-          step="0.01"
-          value={globalDiscountPercent}
-          onChange={(e) => setGlobalDiscountPercent(e.target.value)}
-          onWheel={blockWheelOnNumberInput}
-          placeholder="Ej: 10"
-          className={`w-full sm:w-36 h-10 bg-slate-800/80 border border-slate-700/80 rounded-xl px-3 text-sm text-white font-mono tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none ${numberInputNoSpinClass}`}
-        />
-        <button
-          type="button"
-          onClick={applyGlobalDiscount}
-          disabled={!rows.length}
-          className="h-10 px-4 rounded-xl bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 text-slate-200 text-sm font-semibold border border-slate-600 transition"
-        >
-          Aplicar a todos
-        </button>
       </div>
 
-      {/* Tabla: crece con el contenido; el scroll es el de la página (<main>) */}
-      <div className="rounded-2xl border border-slate-700/80 bg-slate-800/40 shadow-inner">
+      {/* Matriz: fila flexible del grid — ocupa todo el alto restante */}
+      <div
+        inert={readOnly || undefined}
+        aria-disabled={readOnly || undefined}
+        className={`min-h-0 h-full flex flex-col w-full border border-slate-700/70 bg-slate-800/25 overflow-hidden ${
+          readOnly ? '[&_input]:cursor-not-allowed [&_button]:cursor-not-allowed' : ''
+        }`}
+      >
         {rows.length === 0 ? (
           <button
             type="button"
             onClick={() => setShowAddModal(true)}
-            className="w-full min-h-[280px] flex flex-col items-center justify-center gap-4 py-12 px-4 rounded-2xl border-2 border-dashed border-slate-600/80 hover:border-blue-500/50 hover:bg-slate-800/60 transition-colors group"
+            className="w-full h-full min-h-[12rem] flex flex-col items-center justify-center gap-4 py-12 px-4 border-2 border-dashed border-slate-600/80 hover:border-blue-500/50 hover:bg-slate-800/60 transition-colors group"
           >
             <span className="w-16 h-16 rounded-2xl bg-slate-700/80 group-hover:bg-blue-500/20 flex items-center justify-center transition-colors">
               <Plus size={32} className="text-slate-400 group-hover:text-blue-400" strokeWidth={2} />
@@ -1376,23 +1490,23 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
             </div>
           </button>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-sm border-separate border-spacing-0">
-              <thead>
-                <tr className="border-b border-slate-600/80">
-                  <th className="text-left text-slate-400 font-semibold py-3 px-3 sticky top-0 left-0 bg-slate-800 z-30 rounded-tl-xl border-b border-slate-600/80 shadow-[0_1px_0_0_rgba(71,85,105,0.6)]">Código</th>
-                  <th className="text-left text-slate-400 font-semibold py-3 px-3 sticky top-0 bg-slate-800 z-20 border-b border-slate-600/80 shadow-[0_1px_0_0_rgba(71,85,105,0.6)]">Color</th>
-                  <th className="text-center text-slate-400 font-semibold py-3 px-2 min-w-[70px] sticky top-0 bg-slate-800 z-20 border-b border-slate-600/80 shadow-[0_1px_0_0_rgba(71,85,105,0.6)]" title="Misma cantidad en todos los talles">Todas</th>
-                  {sizeColumns.map(s => (
-                    <th key={s.code} className="text-center text-slate-400 font-semibold py-3 px-2 min-w-[48px] sticky top-0 bg-slate-800 z-20 border-b border-slate-600/80 shadow-[0_1px_0_0_rgba(71,85,105,0.6)]">
-                      {labelTalle(s.code) || s.name || s.code}
-                    </th>
-                  ))}
-                  <th className="text-right text-slate-400 font-semibold py-3 px-3 sticky top-0 bg-slate-800 z-20 border-b border-slate-600/80 shadow-[0_1px_0_0_rgba(71,85,105,0.6)]">Precio</th>
-                  <th className="w-12 py-3 px-2 sticky top-0 bg-slate-800 z-20 rounded-tr-xl border-b border-slate-600/80 shadow-[0_1px_0_0_rgba(71,85,105,0.6)]"></th>
-                </tr>
-              </thead>
-              <tbody>
+            <div className="flex-1 min-h-0 h-full w-full overflow-auto touch-scroll overscroll-contain scroll-area-ios">
+              <table className="w-full min-w-max text-sm border-separate border-spacing-0">
+                <thead className="sticky top-0 z-30">
+                  <tr className={`border-b border-slate-600/90 shadow-[0_2px_8px_rgba(15,23,42,0.85)] ${stickyHeadBg}`}>
+                    <th className={`text-left text-[10px] uppercase tracking-wide text-slate-400 font-bold py-2 px-2.5 sticky left-0 z-50 ${stickyHeadBg} shadow-[2px_0_6px_rgba(15,23,42,0.6)]`}>Código</th>
+                    <th className={`text-left text-[10px] uppercase tracking-wide text-slate-400 font-bold py-2 px-2.5 sticky left-[7.25rem] z-40 ${stickyHeadBg} shadow-[2px_0_6px_rgba(15,23,42,0.4)] min-w-[6.5rem]`}>Color</th>
+                    <th className={`text-center text-[10px] uppercase tracking-wide text-slate-400 font-bold py-2 px-1.5 w-[4.5rem] ${stickyHeadBg}`} title="Misma cantidad en todos los talles">Todas</th>
+                    {sizeColumns.map(s => (
+                      <th key={s.code} className={`text-center text-[10px] uppercase tracking-wide text-slate-400 font-bold py-2 px-1 min-w-[2.75rem] whitespace-nowrap ${stickyHeadBg}`}>
+                        {labelTalle(s.code) || s.name || s.code}
+                      </th>
+                    ))}
+                    <th className={`text-right text-[10px] uppercase tracking-wide text-slate-400 font-bold py-2 px-2.5 min-w-[5rem] ${stickyHeadBg}`}>Precio</th>
+                    <th className={`w-10 py-2 px-1 ${stickyHeadBg}`} />
+                  </tr>
+                </thead>
+                <tbody>
                 {groups.map((group, groupIndex) => {
                   const isNewArticle = groupIndex > 0;
                   const collapsed = collapsedGroups[group.productCode];
@@ -1405,7 +1519,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                         key={`group-${group.productCode}`}
                         className={`border-b border-slate-700/50 hover:bg-slate-700/30 ${isNewArticle ? 'border-t-2 border-slate-500/70 bg-slate-700/20' : ''}`}
                       >
-                        <td className={`py-3 px-3 font-mono text-sm text-blue-300 sticky left-0 z-10 ${isNewArticle ? 'bg-slate-700/40' : 'bg-slate-800/80'}`}>
+                        <td className={`py-2 px-2.5 font-mono text-xs text-blue-300 sticky left-0 z-20 shadow-[2px_0_6px_rgba(15,23,42,0.35)] ${stickyCellBg(isNewArticle)}`}>
                           <button
                             type="button"
                             onClick={() => toggleGroup(group.productCode)}
@@ -1415,19 +1529,19 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                             {group.productCode}
                           </button>
                         </td>
-                        <td className="py-3 px-3 text-slate-400 text-sm">
+                        <td className={`py-2 px-2.5 text-slate-400 text-xs sticky left-[7.25rem] z-10 ${stickyCellBg(isNewArticle)}`}>
                           {group.rows.length} colores · {groupUnits} un.
                         </td>
-                        <td className="py-3 px-2">—</td>
+                        <td className="py-2 px-1.5">—</td>
                         {sizeColumns.map(s => (
-                          <td key={s.code} className="py-3 px-2 text-center text-slate-500">—</td>
+                          <td key={s.code} className="py-2 px-1 text-center text-slate-500 text-xs">—</td>
                         ))}
-                        <td className="py-3 px-3 text-right font-mono text-sm text-emerald-400">${groupTotal.toLocaleString()}</td>
-                        <td className="py-3 px-2">
+                        <td className="py-2 px-2.5 text-right font-mono text-xs text-emerald-400">${groupTotal.toLocaleString()}</td>
+                        <td className="py-2 px-1">
                           <button
                             type="button"
                             onClick={() => removeGroup(group.productCode)}
-                            className="w-10 h-10 flex items-center justify-center rounded-xl text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition touch-manipulation"
+                            className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition touch-manipulation"
                             aria-label="Quitar artículo"
                           >
                             <Trash2 size={18} />
@@ -1445,9 +1559,9 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                         return (
                           <tr
                             key={row.id}
-                            className={`border-b border-slate-700/40 hover:bg-slate-700/20 ${isFirstRowAndNewArticle ? 'border-t-2 border-slate-500/70 bg-slate-700/20' : ''}`}
+                            className={`border-b border-slate-700/35 hover:bg-slate-700/15 ${isFirstRowAndNewArticle ? 'border-t border-slate-500/50' : ''}`}
                           >
-                            <td className={`py-2.5 px-3 font-mono text-sm text-blue-300 sticky left-0 z-10 ${isFirstRowAndNewArticle ? 'bg-slate-700/40' : 'bg-slate-800/80'}`}>
+                            <td className={`py-1.5 px-2.5 font-mono text-xs text-blue-300 sticky left-0 z-20 shadow-[2px_0_6px_rgba(15,23,42,0.35)] ${stickyCellBg(isFirstRowAndNewArticle)}`}>
                               {isFirstRowOfArticle ? (
                                 <button
                                   type="button"
@@ -1459,15 +1573,15 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                                 </button>
                               ) : null}
                             </td>
-                            <td className="py-2.5 px-3 text-slate-200 text-sm font-mono">{formatColorCell(row.colorCode, row.colorName)}</td>
-                            <td className="py-2 px-2">
-                              <div className="flex items-center gap-1.5 justify-center">
+                            <td className={`py-1.5 px-2.5 text-slate-200 text-xs sticky left-[7.25rem] z-10 max-w-[8.5rem] truncate ${stickyCellBg(isFirstRowAndNewArticle)}`} title={formatColorCell(row.colorCode, row.colorName)}>{formatColorCell(row.colorCode, row.colorName)}</td>
+                            <td className="py-1 px-1.5">
+                              <div className="flex items-center gap-1 justify-center">
                                 <input
                                   type="number"
                                   min={0}
                                   placeholder="0"
                                   onWheel={blockWheelOnNumberInput}
-                                  className={`w-11 h-9 bg-slate-700/80 border border-slate-600 rounded-lg px-1.5 py-1 text-center text-white text-xs font-mono tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none ${numberInputNoSpinClass}`}
+                                  className={`w-9 h-8 bg-slate-700/80 border border-slate-600 rounded-md px-1 py-0.5 text-center text-white text-xs font-mono tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none ${numberInputNoSpinClass}`}
                                   onBlur={(e) => {
                                     const v = parseInt(e.target.value, 10);
                                     if (!isNaN(v) && v >= 0) setRowAllQuantities(row.id, v);
@@ -1483,11 +1597,11 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                                       if (!isNaN(v) && v >= 0) setRowAllQuantities(row.id, v);
                                     }
                                   }}
-                                  className="shrink-0 w-9 h-9 flex items-center justify-center rounded-lg bg-blue-600 hover:bg-blue-500 text-white touch-manipulation shadow-sm"
+                                  className="shrink-0 w-7 h-8 flex items-center justify-center rounded-md bg-blue-600 hover:bg-blue-500 text-white touch-manipulation"
                                   title="Aplicar a todos los talles"
                                   aria-label="Aplicar a todos los talles"
                                 >
-                                  <Check size={18} />
+                                  <Check size={14} />
                                 </button>
                               </div>
                             </td>
@@ -1499,9 +1613,9 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                               const exceeds = stock != null && qtyVal > stock;
                               const disabled = !hasVariant;
                               return (
-                                <td key={s.code} className="py-2 px-1.5">
+                                <td key={s.code} className="py-1 px-1">
                                   {disabled ? (
-                                    <span className="block w-full max-w-[52px] mx-auto text-center text-slate-600 text-sm py-2 rounded-lg bg-slate-800/50" title={!hasVariant ? 'Sin variante' : 'Sin stock'}>
+                                    <span className="block w-10 mx-auto text-center text-slate-600 text-xs py-1.5 rounded-md bg-slate-800/50" title={!hasVariant ? 'Sin variante' : 'Sin stock'}>
                                       {noStock ? '0' : '—'}
                                     </span>
                                   ) : (
@@ -1511,7 +1625,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                                       value={qtyVal === 0 ? '' : qtyVal}
                                       onWheel={blockWheelOnNumberInput}
                                       onChange={(e) => updateQuantity(row.id, s.code, e.target.value === '' ? 0 : parseInt(e.target.value, 10))}
-                                      className={`w-full max-w-[52px] h-9 mx-auto block border rounded-lg px-1.5 py-1 text-center text-white text-sm font-mono tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none ${numberInputNoSpinClass} ${
+                                      className={`w-10 h-8 mx-auto block border rounded-md px-1 py-0.5 text-center text-white text-xs font-mono tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none ${numberInputNoSpinClass} ${
                                         noStock || exceeds
                                           ? 'bg-red-950/30 border-red-700/70'
                                           : 'bg-slate-700/80 border-slate-600'
@@ -1522,7 +1636,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                                 </td>
                               );
                             })}
-                            <td className="py-2.5 px-3 text-right">
+                            <td className="py-1.5 px-2 text-right">
                               <input
                                 type="number"
                                 min={0}
@@ -1530,24 +1644,24 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                                 value={row.price}
                                 onWheel={blockWheelOnNumberInput}
                                 onChange={(e) => updateRowPrice(row.id, e.target.value === '' ? 0 : parseFloat(e.target.value))}
-                                className={`w-20 min-w-[72px] h-9 bg-slate-700/80 border border-slate-600 rounded-lg px-2 py-1 text-right text-emerald-400 font-mono text-sm tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none ${numberInputNoSpinClass}`}
+                                className={`w-[4.5rem] h-8 bg-slate-700/80 border border-slate-600 rounded-md px-1.5 py-0.5 text-right text-emerald-400 font-mono text-xs tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none ${numberInputNoSpinClass}`}
                               />
                             </td>
-                            <td className="py-2.5 px-2">
+                            <td className="py-1.5 px-1">
                               <button
                                 type="button"
                                 onClick={() => removeRow(row.id)}
-                                className="w-10 h-10 flex items-center justify-center rounded-xl text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition touch-manipulation"
+                                className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition touch-manipulation"
                                 aria-label="Quitar fila"
                               >
-                                <Trash2 size={18} />
+                                <Trash2 size={16} />
                               </button>
                             </td>
                           </tr>
                         );
                       })}
-                      <tr className="border-b border-slate-700/30 bg-slate-800/30">
-                        <td colSpan={3 + sizeColumns.length + 2} className="py-2 px-3">
+                      <tr className="border-b border-slate-700/25 bg-slate-800/20">
+                        <td colSpan={3 + sizeColumns.length + 2} className="py-1.5 px-2.5">
                           <button
                             type="button"
                             onClick={() => openColorPickerForArticle(group.productCode, group.productId)}
@@ -1562,45 +1676,43 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                     </React.Fragment>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
+                </tbody>
+              </table>
+            </div>
         )}
       </div>
 
-      {/* Pie: subtotal + confirmar. Se oculta en modo solo lectura para no inducir a guardar cambios. */}
+      {/* Pie compacto: subtotal + confirmar */}
       {!readOnly && (
-        <footer className="fixed bottom-0 left-0 right-0 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:relative md:p-0 md:pb-0 z-[60] md:z-auto mt-5 bg-slate-950/95 md:bg-transparent backdrop-blur-md md:backdrop-blur-none">
-          <div className="rounded-2xl border border-slate-700/80 bg-slate-800/95 backdrop-blur-sm p-4 shadow-xl shadow-black/20">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-sm font-semibold text-slate-400">Subtotal</span>
-              <span className="text-2xl font-bold text-emerald-400 tabular-nums">${total.toLocaleString()}</span>
+        <footer className="min-w-0 border-t border-slate-700/80 bg-slate-950 pb-[max(0.25rem,env(safe-area-inset-bottom))] pt-1.5">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+            <div className="flex-1 min-w-0 flex items-baseline justify-between sm:justify-start sm:gap-3">
+              <span className="text-xs font-semibold text-slate-400">Subtotal</span>
+              <span className="text-lg md:text-xl font-bold text-emerald-400 tabular-nums">${total.toLocaleString()}</span>
             </div>
             {hasExceededStock && (
-              <p className="text-xs text-amber-300 mb-3">Hay cantidades mayores al stock: se guardan igual y quedan como pendientes.</p>
+              <p className="text-[10px] text-amber-300 sm:max-w-[14rem] sm:leading-tight order-last sm:order-none w-full sm:w-auto">
+                Cantidades &gt; stock: quedan pendientes.
+              </p>
             )}
             <button
               type="button"
               disabled={!selectedCustomerId || rows.length === 0 || totalUnits === 0 || savingOrder}
               onClick={handleSave}
-              className="w-full min-h-[52px] py-3.5 rounded-xl font-bold flex items-center justify-center gap-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white shadow-lg shadow-blue-900/30 disabled:shadow-none disabled:opacity-60 transition-all touch-manipulation"
+              className="w-full sm:w-auto sm:min-w-[200px] shrink-0 h-10 px-5 rounded-lg font-bold flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-sm shadow-md shadow-blue-900/30 disabled:opacity-60 transition touch-manipulation"
             >
-              <Save size={20} /> {savingOrder ? 'Guardando...' : 'Confirmar pedido'}
+              <Save size={18} /> {savingOrder ? 'Guardando...' : 'Confirmar pedido'}
             </button>
           </div>
         </footer>
       )}
 
       {readOnly && (
-        <div className="shrink-0 mt-5 rounded-2xl border border-slate-700/80 bg-slate-800/60 p-4">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold text-slate-400">Subtotal</span>
-            <span className="text-2xl font-bold text-emerald-400 tabular-nums">${total.toLocaleString()}</span>
-          </div>
+        <div className="flex items-center justify-between border-t border-slate-700/80 pt-1.5 px-1">
+          <span className="text-xs font-semibold text-slate-400">Subtotal</span>
+          <span className="text-lg font-bold text-emerald-400 tabular-nums">${total.toLocaleString()}</span>
         </div>
       )}
-
-      </div>{/* /inert subtree */}
 
       {colorPicker && (
         <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-sm z-[110] flex flex-col pt-[env(safe-area-inset-top)] px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]">

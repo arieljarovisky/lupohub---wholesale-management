@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, ChevronRight, ChevronDown, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, AlertTriangle, XCircle, FileSpreadsheet, Receipt, FileMinus, Archive, ArchiveRestore, Wallet, ArrowDownToLine, ArrowUpToLine, Loader2, Ship, Percent, RefreshCcw, ArrowRight, Eye, Copy } from 'lucide-react';
+import { Search, ChevronRight, ChevronDown, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, AlertTriangle, XCircle, FileSpreadsheet, Receipt, FileMinus, Archive, ArchiveRestore, Wallet, ArrowDownToLine, ArrowUpToLine, Loader2, Ship, Percent, RefreshCcw, ArrowRight, Eye, Copy, ChevronUp, SlidersHorizontal } from 'lucide-react';
 import { Order, OrderStatus, Role, Product, Customer, OrderItem, User, OrderInvoice, Transporte, CreditNote } from '../types';
 import { useNotification } from '../context/NotificationContext';
 import { getRemitente } from '../services/apiIntegration';
@@ -32,6 +32,7 @@ import {
   type OrdersInvoiceListFilter,
 } from '../utils/ordersListFilters';
 import { downloadOneOrderExcel, downloadOrdersExcel } from '../utils/orderExportExcel';
+import { applyPriceListToOrder } from '../utils/priceListPricing';
 
 /** Acción en tarjeta de pedido: ícono + texto corto (siempre visible). */
 function OrderCardActionButton(props: {
@@ -358,6 +359,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   /** Filtro por comprobante AFIP y por percepción IIBB persistida en la factura. */
   const [invoiceFilter, setInvoiceFilter] = useState<OrdersInvoiceListFilter>(storedListFilters.invoiceFilter);
   const [customerSearchQuery, setCustomerSearchQuery] = useState(storedListFilters.customerSearchQuery);
+  const [ordersLegendOpen, setOrdersLegendOpen] = useState(false);
+  const [ordersAdvancedFiltersOpen, setOrdersAdvancedFiltersOpen] = useState(
+    () => storedListFilters.invoiceFilter !== 'all' || orderArchivedFilter !== 'no'
+  );
   const [remitoOrder, setRemitoOrder] = useState<Order | null>(null);
   const [remitoTransporteId, setRemitoTransporteId] = useState<string>('');
   const [remitoEntregaId, setRemitoEntregaId] = useState<string>(REMITO_ENTREGA_PRINCIPAL);
@@ -530,6 +535,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         (o.customerBusinessName || '').trim(),
         (c?.businessName || '').trim(),
         (c?.name || '').trim(),
+        String(o.notes || '').trim(),
         String(o.id || '').toLowerCase(),
       ]
         .filter(Boolean)
@@ -585,8 +591,9 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   /** Nombre seguro para hoja Excel (máx 31 caracteres, sin caracteres inválidos). */
   const safeSheetName = (order: Order) => {
     const base = `#${order.id}`.replace(/[\\/*?:\[\]]/g, '');
-    const name = getCustomerName(order).replace(/[\\/*?:\[\]]/g, '').slice(0, 12);
-    const sheetName = `${base} ${name}`.trim().slice(0, 31);
+    const name = getCustomerName(order).replace(/[\\/*?:\[\]]/g, '').slice(0, 10);
+    const note = String(order.notes ?? '').replace(/[\\/*?:\[\]]/g, '').trim().slice(0, 10);
+    const sheetName = `${base} ${note || name}`.trim().slice(0, 31);
     return sheetName || `Pedido_${order.id.slice(-8)}`;
   };
 
@@ -1509,12 +1516,39 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     [products]
   );
 
+  /** Precios del Excel según la lista actual del cliente (no el snapshot guardado al crear el pedido). */
+  const prepareOrdersForExcelExport = async (list: Order[]): Promise<Order[]> => {
+    const listIds = new Set<string | null>();
+    for (const o of list) {
+      const c = customers.find((x) => x.id === o.customerId);
+      listIds.add(c?.priceListId ?? null);
+    }
+    const productsByListId = new Map<string, Product[]>();
+    const cacheKey = (id: string | null) => (id ? `pl:${id}` : 'base');
+    await Promise.all(
+      [...listIds].map(async (priceListId) => {
+        const key = cacheKey(priceListId);
+        const prods = priceListId
+          ? await api.getProductsAll({ priceListId })
+          : await api.getProductsAll();
+        productsByListId.set(key, prods);
+      })
+    );
+    return list.map((o) => {
+      const c = customers.find((x) => x.id === o.customerId);
+      const priceListId = c?.priceListId ?? null;
+      const listProducts = productsByListId.get(cacheKey(priceListId)) ?? products;
+      return applyPriceListToOrder(o, listProducts);
+    });
+  };
+
   /** Exportar pedidos filtrados: una hoja por pedido (formato planilla cliente). */
   const exportOrdersToExcel = async () => {
     const list = filteredOrders.length > 0 ? filteredOrders : orders;
     if (list.length === 0) return;
     try {
-      await downloadOrdersExcel(list, {
+      const prepared = await prepareOrdersForExcelExport(list);
+      await downloadOrdersExcel(prepared, {
         ...orderExportExcelOptions,
         sheetNameForOrder: (order) => safeSheetName(order),
         filename: `pedidos_mayoristas_${new Date().toISOString().slice(0, 10)}.xlsx`,
@@ -1530,7 +1564,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const clientNameForFile = getCustomerName(order).replace(/[\\/*?:\[\]"]/g, '').replace(/\s+/g, '_').slice(0, 40) || 'cliente';
     const dateStr = new Date().toISOString().slice(0, 10);
     try {
-      await downloadOneOrderExcel(order, {
+      const [prepared] = await prepareOrdersForExcelExport([order]);
+      await downloadOneOrderExcel(prepared, {
         ...orderExportExcelOptions,
         sheetName: safeSheetName(order),
         filename: `pedido_${order.id}_${clientNameForFile}_${dateStr}.xlsx`,
@@ -1540,75 +1575,89 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     }
   };
 
+  const ordersAdvancedFiltersActive =
+    invoiceFilter !== 'all' || orderArchivedFilter !== 'no';
+
   return (
-    <div className="space-y-6">
-       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-white">Gestión de Pedidos</h2>
-          <p className="text-[11px] text-slate-500 mt-1 max-w-xl leading-relaxed">
-            Cada pedido tiene un <strong className="text-slate-400">borde a la izquierda</strong>: verde = stock ya descontado; ámbar
-            = borrador o pendiente de admin (sin impacto de stock); naranja = confirmado pero el movimiento de stock todavía no se aplicó; gris = cancelado;
-            <strong className="text-orange-300/90"> naranja intenso (doble señal)</strong> = el comprobante AFIP del pedido sigue anulado por una <strong className="text-slate-300">NC por el total</strong> sin factura nueva registrada (o datos viejos sin migración).
-            Si ya reemitiste con IIBB y sigue en naranja, en MySQL podés marcar la NC como reemplazada: <code className="text-slate-400 bg-slate-900/80 px-1 rounded">UPDATE credit_notes SET superseded_by_reinvoice = 1 WHERE order_id = '…' AND scope = 'total' LIMIT 1;</code>.
-            En la fila de chips, <strong className="text-amber-200/90">ámbar “Con IIBB”</strong> indica que en la factura guardada figura percepción de ingresos brutos; <strong className="text-slate-400">gris “Sin percepción IIBB”</strong> = facturado AFIP pero sin ese importe en el comprobante (0 o no cargado).
-            Usá el botón de descontar stock si hace falta. Pasá el mouse por el chip para leer el detalle.
-          </p>
+    <div className="space-y-5">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h2 className="text-2xl font-bold text-white tracking-tight">Gestión de Pedidos</h2>
+            <span className="inline-flex items-center rounded-full border border-slate-700 bg-slate-800/60 px-2.5 py-0.5 text-xs font-medium text-slate-400">
+              {filteredOrders.length} {filteredOrders.length === 1 ? 'pedido' : 'pedidos'}
+            </span>
+          </div>
+          <p className="mt-1 text-sm text-slate-500">Armá, confirmá y facturá pedidos mayoristas.</p>
+          <button
+            type="button"
+            onClick={() => setOrdersLegendOpen((v) => !v)}
+            className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-300 transition"
+            aria-expanded={ordersLegendOpen}
+          >
+            {ordersLegendOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            Guía de colores en la lista
+          </button>
+          {ordersLegendOpen && (
+            <div className="mt-3 grid gap-2 sm:grid-cols-2 max-w-2xl rounded-xl border border-slate-800 bg-slate-900/40 p-3 text-xs text-slate-400">
+              {[
+                { swatch: 'bg-emerald-500', label: 'Verde', desc: 'Stock ya descontado del inventario.' },
+                { swatch: 'bg-amber-500', label: 'Ámbar', desc: 'Borrador, pendiente de admin o sin impacto de stock.' },
+                { swatch: 'bg-orange-500', label: 'Naranja', desc: 'Confirmado: el stock todavía no se descontó.' },
+                { swatch: 'bg-slate-500', label: 'Gris', desc: 'Pedido cancelado.' },
+                { swatch: 'bg-orange-600 ring-2 ring-orange-400/50', label: 'Naranja intenso', desc: 'NC total emitida; falta factura nueva registrada.' },
+              ].map(({ swatch, label, desc }) => (
+                <div key={label} className="flex gap-2.5 items-start">
+                  <span className={`mt-0.5 h-3 w-1 shrink-0 rounded-full ${swatch}`} aria-hidden />
+                  <span>
+                    <span className="font-semibold text-slate-300">{label}</span>
+                    <span className="text-slate-500"> — {desc}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 w-full lg:w-auto">
           <button
             type="button"
             onClick={exportOrdersToExcel}
-            className="w-full sm:w-auto bg-slate-700 hover:bg-slate-600 text-white px-4 py-3 rounded-2xl transition flex items-center justify-center gap-2 border border-slate-600 font-semibold active:scale-95"
+            className="flex flex-1 sm:flex-none items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-2.5 text-sm font-semibold text-slate-200 transition hover:bg-slate-700 active:scale-[0.98]"
           >
-            <FileSpreadsheet size={20} />
-            <span>Exportar a Excel</span>
+            <FileSpreadsheet size={18} className="text-slate-400" />
+            <span>Excel</span>
           </button>
           {(role === Role.SELLER || role === Role.ADMIN || role === Role.CUSTOMER) && (
             <button
+              type="button"
               onClick={() => onNavigate('create_order')}
-              className="w-full sm:w-auto bg-blue-600 text-white px-6 py-3 rounded-2xl hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-lg shadow-blue-900/50 font-bold active:scale-95"
+              className="flex flex-1 sm:flex-none items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-blue-900/40 transition hover:bg-blue-500 active:scale-[0.98]"
             >
-              <Plus size={20} />
-              <span>Nuevo Pedido</span>
+              <Plus size={18} />
+              <span>Nuevo pedido</span>
             </button>
           )}
         </div>
       </div>
 
-      <div className="space-y-4">
-        <div className="flex gap-2 overflow-x-auto touch-scroll pb-2 scrollbar-hide -mx-1 px-1 sm:mx-0 sm:px-0 touch-manipulation">
-          {['ALL', ...Object.values(OrderStatus)].map((status) => (
-            <button
-              key={status}
-              onClick={() => setFilterStatus(status as OrderStatus | 'ALL')}
-              className={`px-4 sm:px-5 py-3 sm:py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all border min-h-[44px] ${
-                filterStatus === status 
-                ? 'bg-blue-600 text-white border-blue-500 shadow-lg shadow-blue-900/30' 
-                : 'bg-slate-800 text-slate-400 border-slate-700 active:bg-slate-700'
-              }`}
-            >
-              {status === 'ALL' ? 'Todos' : status}
-            </button>
-          ))}
-        </div>
-
+      <div className="rounded-2xl border border-slate-800/80 bg-slate-900/30 p-3 sm:p-4 space-y-3">
         <div className="relative">
-          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" aria-hidden />
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" aria-hidden />
           <input
             type="search"
             enterKeyHint="search"
             value={customerSearchQuery}
             onChange={(e) => setCustomerSearchQuery(e.target.value)}
-            placeholder="Buscar por cliente o nº de pedido…"
+            placeholder="Buscar por cliente, nota o nº de pedido…"
             autoComplete="off"
-            className="w-full bg-slate-900 border border-slate-800 text-slate-200 text-sm rounded-xl py-3 pl-10 pr-10 outline-none placeholder:text-slate-500 focus:border-slate-600 focus:ring-1 focus:ring-slate-600"
+            className="w-full rounded-xl border border-slate-700/80 bg-slate-950/50 py-2.5 pl-9 pr-9 text-sm text-slate-200 outline-none placeholder:text-slate-500 focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/30"
             aria-label="Buscar pedidos por cliente o número de pedido"
           />
           {customerSearchQuery.trim() !== '' && (
             <button
               type="button"
               onClick={() => setCustomerSearchQuery('')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-slate-500 hover:bg-slate-800 hover:text-slate-300"
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1 text-slate-500 hover:bg-slate-800 hover:text-slate-300"
               title="Limpiar búsqueda"
               aria-label="Limpiar búsqueda"
             >
@@ -1617,78 +1666,117 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           )}
         </div>
 
-        <div className="flex flex-col gap-2">
-          <div className="flex flex-wrap gap-2 items-center">
-            <span className="text-xs font-semibold text-slate-500 uppercase shrink-0">Comprobante AFIP:</span>
-            {(
-              [
-                { key: 'all' as const, label: 'Todos' },
-                { key: 'uninvoiced' as const, label: 'Sin facturar' },
-                { key: 'invoiced' as const, label: 'Facturados' },
-              ] as const
-            ).map(({ key, label }) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setInvoiceFilter(key)}
-                className={`px-3 py-2 rounded-xl text-sm font-semibold border transition touch-manipulation min-h-[40px] ${
-                  invoiceFilter === key
-                    ? 'bg-emerald-800/90 text-white border-emerald-600 shadow-md shadow-emerald-950/30'
-                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-750'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <div className="flex flex-wrap gap-2 items-center">
-            <span className="text-xs font-semibold text-slate-500 uppercase shrink-0">Ingresos brutos (solo ya facturados):</span>
-            {(
-              [
-                { key: 'invoiced_with_iibb' as const, label: 'Con percepción IIBB' },
-                { key: 'invoiced_no_iibb' as const, label: 'Sin percepción IIBB' },
-              ] as const
-            ).map(({ key, label }) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setInvoiceFilter(key)}
-                className={`px-3 py-2 rounded-xl text-sm font-semibold border transition touch-manipulation min-h-[40px] ${
-                  invoiceFilter === key
-                    ? 'bg-amber-900/85 text-amber-50 border-amber-600 shadow-md shadow-amber-950/25'
-                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-750'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+        <div className="flex gap-1.5 overflow-x-auto touch-scroll pb-0.5 scrollbar-hide touch-manipulation -mx-0.5 px-0.5">
+          {['ALL', ...Object.values(OrderStatus)].map((status) => (
+            <button
+              key={status}
+              type="button"
+              onClick={() => setFilterStatus(status as OrderStatus | 'ALL')}
+              className={`shrink-0 rounded-lg px-3 py-2 text-xs font-semibold whitespace-nowrap transition border ${
+                filterStatus === status
+                  ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-900/25'
+                  : 'bg-slate-800/80 text-slate-400 border-slate-700 hover:border-slate-600 hover:text-slate-300'
+              }`}
+            >
+              {status === 'ALL' ? 'Todos' : status}
+            </button>
+          ))}
         </div>
 
-        {setOrderArchivedFilter && (role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO) && (
-          <div className="flex flex-wrap gap-2 items-center">
-            <span className="text-xs font-semibold text-slate-500 uppercase">Archivados:</span>
+        <div className="flex flex-wrap items-center gap-2 border-t border-slate-800/80 pt-3">
+          <button
+            type="button"
+            onClick={() => setOrdersAdvancedFiltersOpen((v) => !v)}
+            className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
+              ordersAdvancedFiltersOpen || ordersAdvancedFiltersActive
+                ? 'border-slate-600 bg-slate-800 text-slate-200'
+                : 'border-slate-700/80 bg-transparent text-slate-500 hover:text-slate-300'
+            }`}
+            aria-expanded={ordersAdvancedFiltersOpen}
+          >
+            <SlidersHorizontal size={14} />
+            Más filtros
+            {ordersAdvancedFiltersActive && !ordersAdvancedFiltersOpen && (
+              <span className="rounded-full bg-blue-600/90 px-1.5 py-px text-[10px] text-white">activos</span>
+            )}
+            {ordersAdvancedFiltersOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+          {(customerSearchQuery.trim() || filterStatus !== 'ALL' || ordersAdvancedFiltersActive) && (
             <button
               type="button"
-              onClick={() => setOrderArchivedFilter('no')}
-              className={`px-3 py-2 rounded-xl text-sm font-medium border transition ${orderArchivedFilter === 'no' ? 'bg-slate-600 text-white border-slate-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700'}`}
+              onClick={() => {
+                setCustomerSearchQuery('');
+                setFilterStatus('ALL');
+                setInvoiceFilter('all');
+                setOrderArchivedFilter?.('no');
+              }}
+              className="text-xs font-medium text-slate-500 hover:text-slate-300 transition"
             >
-              Ocultar archivados
+              Limpiar filtros
             </button>
-            <button
-              type="button"
-              onClick={() => setOrderArchivedFilter('yes')}
-              className={`px-3 py-2 rounded-xl text-sm font-medium border transition ${orderArchivedFilter === 'yes' ? 'bg-slate-600 text-white border-slate-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700'}`}
-            >
-              Ver todos
-            </button>
-            <button
-              type="button"
-              onClick={() => setOrderArchivedFilter('only')}
-              className={`px-3 py-2 rounded-xl text-sm font-medium border transition ${orderArchivedFilter === 'only' ? 'bg-slate-600 text-white border-slate-500' : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700'}`}
-            >
-              Solo archivados
-            </button>
+          )}
+        </div>
+
+        {ordersAdvancedFiltersOpen && (
+          <div className="space-y-3 rounded-xl border border-slate-800/60 bg-slate-950/30 p-3">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2">Comprobante AFIP</p>
+              <div className="flex flex-wrap gap-1.5">
+                {(
+                  [
+                    { key: 'all' as const, label: 'Todos' },
+                    { key: 'uninvoiced' as const, label: 'Sin facturar' },
+                    { key: 'invoiced' as const, label: 'Facturados' },
+                    { key: 'invoiced_with_iibb' as const, label: 'Con IIBB' },
+                    { key: 'invoiced_no_iibb' as const, label: 'Sin IIBB' },
+                  ] as const
+                ).map(({ key, label }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setInvoiceFilter(key)}
+                    className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold border transition ${
+                      invoiceFilter === key
+                        ? key === 'invoiced_with_iibb'
+                          ? 'bg-amber-900/70 text-amber-100 border-amber-600'
+                          : key === 'uninvoiced'
+                            ? 'bg-slate-600 text-white border-slate-500'
+                            : 'bg-emerald-900/60 text-emerald-100 border-emerald-700'
+                        : 'bg-slate-800/60 text-slate-400 border-slate-700 hover:border-slate-600'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {setOrderArchivedFilter && (role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO) && (
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2">Archivados</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {(
+                    [
+                      { key: 'no' as const, label: 'Ocultar archivados' },
+                      { key: 'yes' as const, label: 'Ver todos' },
+                      { key: 'only' as const, label: 'Solo archivados' },
+                    ] as const
+                  ).map(({ key, label }) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setOrderArchivedFilter(key)}
+                      className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold border transition ${
+                        orderArchivedFilter === key
+                          ? 'bg-slate-600 text-white border-slate-500'
+                          : 'bg-slate-800/60 text-slate-400 border-slate-700 hover:border-slate-600'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -1746,6 +1834,14 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   <h3 className={`text-lg sm:text-xl font-black leading-tight break-words line-clamp-2 sm:line-clamp-1 ${ncTotalAnnulled ? 'text-slate-400 line-through decoration-slate-600 decoration-2' : 'text-white'}`}>
                     {order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente desconocido'}
                   </h3>
+                  {order.notes?.trim() && (
+                    <p
+                      className="text-sm font-medium text-cyan-200/90 truncate max-w-full"
+                      title={order.notes.trim()}
+                    >
+                      {order.notes.trim()}
+                    </p>
+                  )}
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-semibold text-slate-400">#{order.id}</span>
                     <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${getStatusColor(order.status)}`}>

@@ -59,6 +59,7 @@ import { addLupoStockWebhookConfigTable } from './database/add_lupo_stock_webhoo
 import { addVariantLuposhopStockTable } from './database/add_variant_luposhop_stock_table';
 import { addOrderCreatedBy } from './database/add_order_created_by';
 import { addOrderMatrixImportLabel } from './database/add_order_matrix_import_label';
+import { addOrderNotes } from './database/add_order_notes';
 import { addUserTasksTable } from './database/add_user_tasks_table';
 import { addCompanyFinanceTable } from './database/add_company_finance_table';
 import { addCompanyFinanceFixedExpensesTable } from './database/add_company_finance_fixed_expenses_table';
@@ -213,6 +214,7 @@ async function initDatabase() {
       await addVariantLuposhopStockTable();
       await addOrderCreatedBy();
       await addOrderMatrixImportLabel();
+      await addOrderNotes();
       await addUserTasksTable();
       await addCompanyFinanceTable();
       await addCompanyFinanceFixedExpensesTable();

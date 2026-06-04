@@ -268,6 +268,26 @@ export async function resolveMercadoLibreUserProductItems(
 
 type MlVariationRow = { variationId: string; sku: string; color: string; size: string; stock: number };
 
+/** Una fila por SKU (o color+talle); evita duplicados al agregar varios ítems ML. */
+function dedupeMlVariationRows(rows: MlVariationRow[]): MlVariationRow[] {
+  const byKey = new Map<string, MlVariationRow>();
+  for (const row of rows) {
+    const skuKey = normSkuForMlStockMatch(row.sku);
+    const attrKey =
+      skuKey ||
+      `${normTextForMlStockMatch(row.color)}|${normTextForMlStockMatch(row.size)}`;
+    const key = attrKey || String(row.variationId || '').trim();
+    if (!key) continue;
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, row);
+      continue;
+    }
+    if (!prev.sku && row.sku) byKey.set(key, row);
+  }
+  return Array.from(byKey.values());
+}
+
 /** Extrae filas de variación desde un ítem ML (con o sin array item.variations). */
 function extractMlVariationsFromItemData(it: any): MlVariationRow[] {
   if (!it || it.error) return [];
@@ -293,7 +313,7 @@ function extractMlVariationsFromItemData(it: any): MlVariationRow[] {
         stock: v.available_quantity || 0
       });
     }
-    return out;
+    return dedupeMlVariationRows(out);
   }
   const attrs = Array.isArray(it.attributes) ? it.attributes : [];
   const skuAttr = attrs.find((a: any) => (a?.id || '').toString().toUpperCase() === 'SELLER_SKU');
@@ -308,7 +328,85 @@ function extractMlVariationsFromItemData(it: any): MlVariationRow[] {
     size: (sizeAttr ? (sizeAttr.value_name ?? sizeAttr.value ?? '') : parsed.size).toString().trim(),
     stock: it.available_quantity || 0
   });
-  return out;
+  return dedupeMlVariationRows(out);
+}
+
+type VariantMlStockLink = {
+  variantId: string;
+  variationId: string | null;
+  sku: string;
+  color: string;
+  size: string;
+};
+
+function normSkuForMlStockMatch(s: string): string {
+  const d = String(s ?? '').replace(/\D/g, '');
+  return (d.replace(/^0+/, '') || '0').toUpperCase();
+}
+
+function normTextForMlStockMatch(s: string): string {
+  return String(s ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function mlVariationSkuFromApi(v: any): string {
+  const skuAttr =
+    Array.isArray(v?.attributes) &&
+    v.attributes.find((a: any) => (a?.id || '').toString().toUpperCase() === 'SELLER_SKU');
+  const skuFromAttr = skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '').toString().trim() : '';
+  return skuFromAttr || (v?.seller_sku ?? v?.seller_custom_field ?? '').toString().trim();
+}
+
+function mlVariationColorSizeFromApi(v: any): { color: string; size: string } {
+  let color = '';
+  let size = '';
+  (v?.attribute_combinations || []).forEach((attr: any) => {
+    const id = (attr.id || '').toString().toUpperCase();
+    const name = (attr.value_name || attr.name || '').toString().trim();
+    if (id === 'COLOR' || id === 'COLOUR' || id === 'COR') color = name;
+    if (id === 'SIZE' || id === 'SIZE_TYPE' || id === 'TALLE' || id === 'Talla') size = name;
+  });
+  return { color, size };
+}
+
+/** Empareja la variación ML correcta (evita usar el stock total del ítem cuando hay varias). */
+function matchMlVariationForVariantLink(variations: any[], link: VariantMlStockLink): any | null {
+  if (!variations.length) return null;
+  const varId = link.variationId != null ? String(link.variationId).trim() : '';
+  if (varId) {
+    const byId = variations.find((x: any) => String(x?.id) === varId);
+    if (byId) return byId;
+  }
+  const localSku = normSkuForMlStockMatch(link.sku);
+  if (localSku) {
+    const bySku = variations.find((v: any) => normSkuForMlStockMatch(mlVariationSkuFromApi(v)) === localSku);
+    if (bySku) return bySku;
+  }
+  const colorN = normTextForMlStockMatch(link.color);
+  const sizeN = normTextForMlStockMatch(link.size);
+  if (colorN || sizeN) {
+    const byAttrs = variations.find((v: any) => {
+      const { color, size } = mlVariationColorSizeFromApi(v);
+      const c = normTextForMlStockMatch(color);
+      const s = normTextForMlStockMatch(size);
+      return (!colorN || c === colorN) && (!sizeN || s === sizeN);
+    });
+    if (byAttrs) return byAttrs;
+  }
+  return null;
+}
+
+function resolveMlStockForVariantLink(item: any, link: VariantMlStockLink): number | undefined {
+  const variations: any[] = Array.isArray(item?.variations) ? item.variations : [];
+  if (!variations.length) {
+    return typeof item?.available_quantity === 'number' ? Number(item.available_quantity) : undefined;
+  }
+  const matched = matchMlVariationForVariantLink(variations, link);
+  if (!matched) return undefined;
+  return Number(matched.available_quantity ?? 0);
 }
 
 /** ID de producto de catálogo (/p/MLA...) desde el permalink del ítem. */
@@ -400,20 +498,18 @@ async function aggregateMercadoLibreVariationsFromItemIds(
   itemIds: string[],
   accessToken: string
 ): Promise<MlVariationRow[]> {
-  const byVariationId: Record<string, MlVariationRow> = {};
+  const merged: MlVariationRow[] = [];
   for (const candidate of itemIds) {
     try {
       const itemRes = await axios.get(`https://api.mercadolibre.com/items/${candidate}?include_attributes=all`, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
-      for (const row of extractMlVariationsFromItemData(itemRes?.data)) {
-        byVariationId[row.variationId] = row;
-      }
+      merged.push(...extractMlVariationsFromItemData(itemRes?.data));
     } catch {
       // ignorar ítem inválido
     }
   }
-  return Object.values(byVariationId);
+  return dedupeMlVariationRows(merged);
 }
 
 /** Publicaciones del mismo vendedor con el mismo título base (un listing por talle/color). */
@@ -3144,14 +3240,42 @@ export const getVariantExternalStocks = async (req: Request, res: Response) => {
     const placeholders = variantIds.map(() => '?').join(',');
     const rows = await query(
       `SELECT pv.id AS variant_id,
+              COALESCE(pv.external_sku, pv.sku) AS sku,
+              c.code AS color_code, c.name AS color_name,
+              s.size_code,
               p.mercado_libre_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
               p.tienda_nube_id, pv.tienda_nube_variant_id
        FROM product_variants pv
        JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN colors c ON c.id = pc.color_id
        JOIN products p ON p.id = pc.product_id
+       LEFT JOIN sizes s ON s.id = pv.size_id
        WHERE pv.id IN (${placeholders})`,
       variantIds
     );
+
+    const pubsByVariant = new Map<string, Array<{ itemId: string; variationId: string | null }>>();
+    try {
+      const pubRows = await query(
+        `SELECT variant_id, external_product_id, external_variant_id
+         FROM variant_publications
+         WHERE platform = 'mercadolibre' AND variant_id IN (${placeholders})`,
+        variantIds
+      );
+      for (const pr of pubRows || []) {
+        const vid = String((pr as any).variant_id || '');
+        const itemId = String((pr as any).external_product_id || '').trim();
+        if (!vid || !itemId) continue;
+        if (!pubsByVariant.has(vid)) pubsByVariant.set(vid, []);
+        const extVar = (pr as any).external_variant_id;
+        pubsByVariant.get(vid)!.push({
+          itemId,
+          variationId: extVar != null && String(extVar).trim() !== '' ? String(extVar).trim() : null
+        });
+      }
+    } catch {
+      /* variant_publications opcional */
+    }
 
     const stocks: Record<string, { stockML?: number; stockTN?: number; stockLupoShop?: number }> = {};
     for (const id of variantIds) stocks[id] = {};
@@ -3186,39 +3310,59 @@ export const getVariantExternalStocks = async (req: Request, res: Response) => {
     const tnIntegration = await get(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
 
     if (mlToken?.access_token) {
-      const mlHeaders = { 'Authorization': `Bearer ${mlToken.access_token}` };
-      const mlItemIds = new Map<string, { variantId: string; variationId: string | null }[]>();
+      const mlHeaders = { Authorization: `Bearer ${mlToken.access_token}` };
+      const mlItemLinks = new Map<string, VariantMlStockLink[]>();
+
+      const pushMlLink = (itemId: string, link: VariantMlStockLink) => {
+        const id = String(itemId || '').trim();
+        if (!id) return;
+        if (!mlItemLinks.has(id)) mlItemLinks.set(id, []);
+        mlItemLinks.get(id)!.push(link);
+      };
+
       for (const r of rows || []) {
-        const variantId = (r as any).variant_id;
-        const ownItemId =
-          (r as any).mercado_libre_item_id != null && String((r as any).mercado_libre_item_id).trim() !== ''
-            ? String((r as any).mercado_libre_item_id).trim()
-            : null;
-        const mlItemId = ownItemId || (r as any).mercado_libre_id;
-        const variationId =
-          ownItemId
-            ? null
-            : (r as any).mercado_libre_variant_id
-              ? String((r as any).mercado_libre_variant_id)
+        const variantId = String((r as any).variant_id || '');
+        if (!variantId) continue;
+        const baseLink: VariantMlStockLink = {
+          variantId,
+          variationId: null,
+          sku: String((r as any).sku || '').trim(),
+          color: String((r as any).color_name || (r as any).color_code || '').trim(),
+          size: String((r as any).size_code || '').trim()
+        };
+
+        const pubs = pubsByVariant.get(variantId) || [];
+        for (const pub of pubs) {
+          pushMlLink(pub.itemId, { ...baseLink, variationId: pub.variationId });
+        }
+
+        if (pubs.length === 0) {
+          const ownItemId =
+            (r as any).mercado_libre_item_id != null && String((r as any).mercado_libre_item_id).trim() !== ''
+              ? String((r as any).mercado_libre_item_id).trim()
               : null;
-        if (!mlItemId) continue;
-        if (!mlItemIds.has(mlItemId)) mlItemIds.set(mlItemId, []);
-        mlItemIds.get(mlItemId)!.push({ variantId, variationId });
+          const mlItemId = ownItemId || String((r as any).mercado_libre_id || '').trim();
+          const mlVarId =
+            (r as any).mercado_libre_variant_id != null && String((r as any).mercado_libre_variant_id).trim() !== ''
+              ? String((r as any).mercado_libre_variant_id).trim()
+              : null;
+          if (mlItemId) {
+            pushMlLink(mlItemId, { ...baseLink, variationId: mlVarId });
+          }
+        }
       }
-      for (const [itemId, variants] of mlItemIds) {
+
+      for (const [itemId, links] of mlItemLinks) {
         try {
-          const itemRes = await axios.get(`https://api.mercadolibre.com/items/${itemId}`, { headers: mlHeaders });
+          const itemRes = await axios.get(
+            `https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}?include_attributes=all`,
+            { headers: mlHeaders, validateStatus: () => true }
+          );
+          if (itemRes.status !== 200 || !itemRes.data) continue;
           const item = itemRes.data;
-          const variations: any[] = item.variations || [];
-          for (const { variantId, variationId } of variants) {
-            if (variations.length === 0) {
-              stocks[variantId].stockML = item.available_quantity ?? 0;
-            } else if (variationId) {
-              const v = variations.find((x: any) => String(x.id) === String(variationId));
-              stocks[variantId].stockML = v ? (v.available_quantity ?? 0) : undefined;
-            } else {
-              stocks[variantId].stockML = item.available_quantity ?? 0;
-            }
+          for (const link of links) {
+            const qty = resolveMlStockForVariantLink(item, link);
+            if (qty !== undefined) stocks[link.variantId].stockML = qty;
           }
         } catch {
           // ignore per-item errors
@@ -5248,6 +5392,25 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
     }
 
     const singleItemVariations = extractMlVariationsFromItemData(item);
+    const requestRaw = String(req.params.itemId || '');
+    const requestLooksLikeCatalog =
+      /\/p\/MLA/i.test(requestRaw) ||
+      shouldResolveAsUserProduct ||
+      /^MLAU\d+$/i.test(requestedNormalized);
+    const itemHasVariationArray = Array.isArray(item.variations) && item.variations.length > 0;
+
+    // Publicación única con item.variations: usar solo ese ítem (evita 4×N duplicados al mezclar hermanos/UP).
+    if (itemHasVariationArray && singleItemVariations.length > 0 && !requestLooksLikeCatalog) {
+      return res.json({
+        variations: singleItemVariations,
+        singleProduct: singleItemVariations.length === 1,
+        itemId: item.id,
+        requestedItemId: requestRaw,
+        resolvedItemId,
+        resolvedFromItemVariationsOnly: true
+      });
+    }
+
     const allItemIds = await gatherMercadoLibreItemIdsForAllVariations({
       requestedRaw: String(req.params.itemId || ''),
       requestedNormalized,
@@ -5389,7 +5552,7 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
       });
       if (catalogVariations.length > 1) {
         return res.json({
-          variations: catalogVariations,
+          variations: dedupeMlVariationRows(catalogVariations),
           singleProduct: false,
           itemId: item.id,
           requestedItemId: String(req.params.itemId || ''),
@@ -5432,9 +5595,10 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
             merged.push(row);
           }
         }
-        if (merged.length > singleItemVariations.length) {
+        const mergedDeduped = dedupeMlVariationRows(merged);
+        if (mergedDeduped.length > singleItemVariations.length) {
           return res.json({
-            variations: merged,
+            variations: mergedDeduped,
             singleProduct: false,
             itemId: item.id,
             requestedItemId: String(req.params.itemId || ''),

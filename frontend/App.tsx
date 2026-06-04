@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, lazy, Suspense, useCallback, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
-import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Percent, Megaphone, Wallet } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Percent, Megaphone, Wallet, ChevronRight } from 'lucide-react';
 import { isCompanyFinanceUser, COMPANY_FINANCE_VIEW } from './utils/companyFinanceAccess';
 import {
   MOCK_VISITS,
@@ -114,6 +114,13 @@ const App: React.FC = () => {
   const [editingOrder, setEditingOrder] = useState<Order | null>(null);
   const [duplicateSourceOrder, setDuplicateSourceOrder] = useState<Order | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('lupo_sidebar_collapsed') === '1';
+    } catch {
+      return false;
+    }
+  });
   /** Modal de aviso post-guardado: artículos cuyas unidades quedaron sin número de despacho. */
   const [despachoWarningsToShow, setDespachoWarningsToShow] = useState<string[] | null>(null);
   /** Filtro de archivados en pedidos: 'no' = ocultar archivados, 'yes' = ver todos, 'only' = solo archivados */
@@ -123,6 +130,14 @@ const App: React.FC = () => {
   /** Lista de precios elegida al crear/editar pedido (null = precio base). Solo aplica para ADMIN/WAREHOUSE. */
   const [createOrderPriceListId, setCreateOrderPriceListId] = useState<string | null>(null);
   const [myUserTasks, setMyUserTasks] = useState<UserTask[]>([]);
+  useEffect(() => {
+    try {
+      localStorage.setItem('lupo_sidebar_collapsed', sidebarCollapsed ? '1' : '0');
+    } catch {
+      /* ignore */
+    }
+  }, [sidebarCollapsed]);
+
   const prevCreateOrderViewRef = useRef(false);
   const savingOrderRef = useRef(false);
   const saveOrderInFlightRef = useRef<Promise<void> | null>(null);
@@ -177,6 +192,7 @@ const App: React.FC = () => {
       setEditingOrder(null);
       setDuplicateSourceOrder(null);
       editingOrderIdRef.current = null;
+      setCreateOrderPriceListId(null);
     }
     setCurrentView(nextView);
   }, [currentUser, defaultViewForRole, isViewAccessible]);
@@ -371,6 +387,7 @@ const App: React.FC = () => {
 
   /** Al entrar a crear/editar pedido, cargar productos con la lista de precios elegida; al salir, restaurar productos del contexto normal. */
   const inCreateOrderView = baseView === 'create_order' || !!editingOrder;
+  const isOrderFormView = baseView === 'create_order' || baseView === 'create_order_template';
   useEffect(() => {
     if (!currentUser) return;
     if (inCreateOrderView) {
@@ -524,9 +541,15 @@ const App: React.FC = () => {
     setCurrentView('orders');
   }, [showToast]);
 
+  const resolveCustomerPriceListId = (customerId: string): string | null => {
+    const c = customers.find((x) => x.id === customerId);
+    return c?.priceListId ?? null;
+  };
+
   const handleEditOrder = (order: Order) => {
     setDuplicateSourceOrder(null);
     editingOrderIdRef.current = order.id;
+    setCreateOrderPriceListId(resolveCustomerPriceListId(order.customerId));
     setEditingOrder(order);
     setCurrentView('create_order');
   };
@@ -534,6 +557,7 @@ const App: React.FC = () => {
   const handleDuplicateOrder = (order: Order) => {
     setEditingOrder(null);
     editingOrderIdRef.current = null;
+    setCreateOrderPriceListId(resolveCustomerPriceListId(order.customerId));
     setDuplicateSourceOrder(order);
     setCurrentView('create_order');
   };
@@ -948,17 +972,38 @@ const App: React.FC = () => {
 
   return (
     <div className="flex w-full bg-slate-950 text-slate-200 flex-col md:flex-row min-h-[100dvh] h-[100dvh] md:h-screen overflow-hidden">
-      <div className="hidden md:block shrink-0">
-        <Sidebar 
-          currentView={baseView} 
-          onChangeView={handleChangeView} 
+      {!sidebarCollapsed && (
+        <Sidebar
+          currentView={baseView}
+          onChangeView={handleChangeView}
           userRole={currentUser.role}
           userEmail={currentUser.email}
           onLogout={handleLogout}
+          onToggleCollapse={() => setSidebarCollapsed(true)}
         />
-      </div>
-      
-      <main className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto pl-3 pr-3 pb-4 pt-[max(0.75rem,env(safe-area-inset-top))] md:p-8 md:ml-64 relative scroll-area-ios mobile-main-scroll">
+      )}
+
+      {sidebarCollapsed && (
+        <button
+          type="button"
+          onClick={() => setSidebarCollapsed(false)}
+          className="hidden md:flex fixed left-0 top-[4.25rem] z-30 w-9 h-10 items-center justify-center rounded-r-lg bg-slate-800/95 border border-slate-700/80 border-l-0 text-slate-300 hover:text-white hover:bg-slate-700 shadow-lg transition touch-manipulation"
+          title="Mostrar menú"
+          aria-label="Mostrar menú lateral"
+        >
+          <ChevronRight size={18} />
+        </button>
+      )}
+
+      <main
+        className={`flex-1 min-h-0 relative scroll-area-ios mobile-main-scroll transition-[margin] duration-200 ${
+          sidebarCollapsed ? 'md:ml-0' : 'md:ml-64'
+        } ${
+          isOrderFormView
+            ? 'flex flex-col h-full min-h-0 overflow-hidden overflow-x-hidden p-2 md:p-3 pt-[max(0.5rem,env(safe-area-inset-top))]'
+            : 'overflow-x-hidden overflow-y-auto pl-3 pr-3 pb-4 pt-[max(0.75rem,env(safe-area-inset-top))] md:p-8'
+        }`}
+      >
         {isLoading && (
           <div className="fixed inset-0 bg-slate-950/80 z-[200] flex flex-col items-center justify-center backdrop-blur-sm pt-[env(safe-area-inset-top)] pointer-events-auto">
              <Loader2 size={48} className="text-blue-500 animate-spin mb-4" />
@@ -966,8 +1011,14 @@ const App: React.FC = () => {
           </div>
         )}
 
-        <div className="max-w-6xl mx-auto pb-24 md:pb-8 w-full overflow-x-hidden px-1 sm:px-0">
-          {showDamianTasksBanner && (
+        <div
+          className={`mx-auto w-full ${
+            isOrderFormView
+              ? 'flex flex-col flex-1 min-h-0 h-full max-w-none overflow-hidden'
+              : `max-w-6xl pb-24 md:pb-8 px-1 sm:px-0 ${inCreateOrderView ? 'overflow-x-clip' : 'overflow-x-hidden'}`
+          }`}
+        >
+          {showDamianTasksBanner && !isOrderFormView && (
             <div
               role="status"
               aria-live="polite"
@@ -1009,7 +1060,7 @@ const App: React.FC = () => {
               </div>
             </div>
           )}
-          {myUserTasks.length > 0 && (
+          {myUserTasks.length > 0 && !isOrderFormView && (
             <div className="mb-5 space-y-2">
               {myUserTasks.map((t) => (
                 <div
@@ -1024,6 +1075,7 @@ const App: React.FC = () => {
               ))}
             </div>
           )}
+          {!isOrderFormView && (
           <header className="mb-4 md:mb-6 flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
              <div className="min-w-0">
                <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-white truncate">
@@ -1062,6 +1114,7 @@ const App: React.FC = () => {
                </button>
              )}
           </header>
+          )}
 
           {baseView === 'dashboard' && (
             <Suspense fallback={<ViewFallback />}>
@@ -1188,13 +1241,20 @@ const App: React.FC = () => {
               </>
             </Suspense>
           )}
-          {baseView === 'create_order' || baseView === 'create_order_template' ? (
+          {isOrderFormView ? (
             <Suspense fallback={<ViewFallback />}>
+              <div className="flex flex-col flex-1 min-h-0 h-full w-full max-w-none">
               <CreateOrderTemplate
                 products={products}
                 customers={getVisibleCustomers}
                 onSave={handleCreateOrder}
-                onCancel={() => { setEditingOrder(null); setDuplicateSourceOrder(null); editingOrderIdRef.current = null; setCurrentView('orders'); }}
+                onCancel={() => {
+                  setEditingOrder(null);
+                  setDuplicateSourceOrder(null);
+                  editingOrderIdRef.current = null;
+                  setCreateOrderPriceListId(null);
+                  setCurrentView('orders');
+                }}
                 sellerId={currentUser.role === Role.CUSTOMER ? undefined : currentUser.id}
                 initialOrder={editingOrder}
                 duplicateFromOrder={duplicateSourceOrder}
@@ -1204,7 +1264,14 @@ const App: React.FC = () => {
                 onPriceListChange={setCreateOrderPriceListId}
                 readOnly={!!editingOrder?.invoice}
                 onMatrixImportDone={handleMatrixImportDone}
+                onCustomerUpdated={(updated) => {
+                  setCustomers((prev) => prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)));
+                  if (myCustomer?.id === updated.id) {
+                    setMyCustomer((prev) => (prev ? { ...prev, ...updated } : null));
+                  }
+                }}
               />
+              </div>
             </Suspense>
           ) : null}
           {baseView === 'order_picking' && activePickingOrder && (
