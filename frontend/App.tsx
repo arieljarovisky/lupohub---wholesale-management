@@ -960,10 +960,10 @@ const App: React.FC = () => {
       </div>
       
       <main
-        className={`flex-1 min-h-0 pl-3 pr-3 pb-4 pt-[max(0.75rem,env(safe-area-inset-top))] md:p-8 md:ml-64 relative scroll-area-ios mobile-main-scroll ${
+        className={`flex-1 min-h-0 md:ml-64 relative scroll-area-ios mobile-main-scroll ${
           isOrderFormView
-            ? 'flex flex-col overflow-hidden overflow-x-hidden'
-            : 'overflow-x-hidden overflow-y-auto'
+            ? 'flex flex-col h-full min-h-0 overflow-hidden overflow-x-hidden p-3 md:p-4 pt-[max(0.75rem,env(safe-area-inset-top))]'
+            : 'overflow-x-hidden overflow-y-auto pl-3 pr-3 pb-4 pt-[max(0.75rem,env(safe-area-inset-top))] md:p-8'
         }`}
       >
         {isLoading && (
@@ -974,13 +974,13 @@ const App: React.FC = () => {
         )}
 
         <div
-          className={`max-w-6xl mx-auto w-full px-1 sm:px-0 ${
+          className={`mx-auto w-full ${
             isOrderFormView
-              ? 'flex flex-col flex-1 min-h-0 pb-2 md:pb-4 overflow-hidden'
-              : `pb-24 md:pb-8 ${inCreateOrderView ? 'overflow-x-clip' : 'overflow-x-hidden'}`
+              ? 'flex flex-col flex-1 min-h-0 h-full max-w-none overflow-hidden'
+              : `max-w-6xl pb-24 md:pb-8 px-1 sm:px-0 ${inCreateOrderView ? 'overflow-x-clip' : 'overflow-x-hidden'}`
           }`}
         >
-          {showDamianTasksBanner && (
+          {showDamianTasksBanner && !isOrderFormView && (
             <div
               role="status"
               aria-live="polite"
@@ -1022,7 +1022,7 @@ const App: React.FC = () => {
               </div>
             </div>
           )}
-          {myUserTasks.length > 0 && (
+          {myUserTasks.length > 0 && !isOrderFormView && (
             <div className="mb-5 space-y-2">
               {myUserTasks.map((t) => (
                 <div
@@ -1205,7 +1205,7 @@ const App: React.FC = () => {
           )}
           {isOrderFormView ? (
             <Suspense fallback={<ViewFallback />}>
-              <div className="flex flex-col flex-1 min-h-0">
+              <div className="flex flex-col flex-1 min-h-0 h-full w-full">
               <CreateOrderTemplate
                 products={products}
                 customers={getVisibleCustomers}

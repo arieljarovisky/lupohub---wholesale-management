@@ -1173,9 +1173,9 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const stickyCellBg = (highlight: boolean) => (highlight ? 'bg-slate-800' : 'bg-slate-900');
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 h-full max-w-full px-3 sm:px-0 pb-[calc(9rem+env(safe-area-inset-bottom))] md:pb-0">
+    <div className="flex flex-col flex-1 min-h-0 h-full w-full overflow-hidden">
       {/* Header: queda FUERA del subtree `inert` para que "Volver" siempre funcione, incluso en solo lectura. */}
-      <header className="shrink-0 mb-5">
+      <header className="shrink-0 mb-3">
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -1217,12 +1217,12 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       <div
         inert={readOnly || undefined}
         aria-disabled={readOnly || undefined}
-        className={`flex flex-col flex-1 min-h-0 ${readOnly ? '[&_input]:cursor-not-allowed [&_select]:cursor-not-allowed [&_button]:cursor-not-allowed' : ''}`}
+        className={`flex flex-col flex-1 min-h-0 overflow-hidden ${readOnly ? '[&_input]:cursor-not-allowed [&_select]:cursor-not-allowed [&_button]:cursor-not-allowed' : ''}`}
       >
 
       {/* Lista de precios: solo ADMIN/WAREHOUSE */}
       {showPriceListSelector && (
-        <section className="shrink-0 mb-5">
+        <section className="shrink-0 mb-3">
           <label className="block text-xs font-semibold text-slate-400 mb-2 flex items-center gap-1.5">
             <List size={14} /> Lista de precios
           </label>
@@ -1241,7 +1241,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       )}
 
       {/* Cliente */}
-      <section className="shrink-0 mb-5">
+      <section className="shrink-0 mb-3">
         <label className="block text-xs font-semibold text-slate-400 mb-2">Cliente</label>
         {isCustomerLocked ? (
           <div className="w-full bg-slate-800/80 rounded-xl py-3.5 px-4 text-sm text-white border border-slate-700/80 min-h-[48px] flex items-center">
@@ -1363,8 +1363,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         </button>
       </div>
 
-      {/* Matriz: scroll vertical/horizontal acá; encabezado de talles sticky dentro del contenedor */}
-      <div className="flex-1 min-h-[200px] min-h-0 flex flex-col rounded-2xl border border-slate-700/80 bg-slate-800/30 shadow-inner overflow-hidden">
+      {/* Matriz: ocupa el espacio libre; scroll acá; encabezado de talles sticky */}
+      <div className="flex-1 min-h-0 flex flex-col rounded-xl md:rounded-2xl border border-slate-700/80 bg-slate-800/30 shadow-inner overflow-hidden">
         {rows.length === 0 ? (
           <button
             type="button"
@@ -1380,7 +1380,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
             </div>
           </button>
         ) : (
-            <div className="flex-1 min-h-0 overflow-auto touch-scroll overscroll-contain scroll-area-ios max-h-[calc(100dvh-19rem-env(safe-area-inset-bottom))] md:max-h-none">
+            <div className="flex-1 min-h-0 overflow-auto touch-scroll overscroll-contain scroll-area-ios">
               <table className="w-full min-w-max text-sm border-separate border-spacing-0">
                 <thead className="sticky top-0 z-30">
                   <tr className={`border-b border-slate-600/90 shadow-[0_2px_8px_rgba(15,23,42,0.85)] ${stickyHeadBg}`}>
@@ -1572,22 +1572,24 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         )}
       </div>
 
-      {/* Pie: subtotal + confirmar. Se oculta en modo solo lectura para no inducir a guardar cambios. */}
+      </div>{/* /inert subtree */}
+
+      {/* Pie fijo al fondo del panel: subtotal + confirmar siempre visible */}
       {!readOnly && (
-        <footer className="shrink-0 fixed bottom-0 left-0 right-0 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:relative md:p-0 md:pb-0 z-[60] md:z-auto mt-3 bg-slate-950/95 md:bg-transparent backdrop-blur-md md:backdrop-blur-none">
-          <div className="rounded-2xl border border-slate-700/80 bg-slate-800/95 backdrop-blur-sm p-4 shadow-xl shadow-black/20">
-            <div className="flex items-center justify-between mb-3">
+        <footer className="shrink-0 z-40 mt-2 pt-2 border-t border-slate-700/80 bg-slate-950 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+          <div className="rounded-xl border border-slate-700/80 bg-slate-800/95 p-3 md:p-4 shadow-lg shadow-black/20">
+            <div className="flex items-center justify-between gap-3 mb-2">
               <span className="text-sm font-semibold text-slate-400">Subtotal</span>
-              <span className="text-2xl font-bold text-emerald-400 tabular-nums">${total.toLocaleString()}</span>
+              <span className="text-xl md:text-2xl font-bold text-emerald-400 tabular-nums">${total.toLocaleString()}</span>
             </div>
             {hasExceededStock && (
-              <p className="text-xs text-amber-300 mb-3">Hay cantidades mayores al stock: se guardan igual y quedan como pendientes.</p>
+              <p className="text-xs text-amber-300 mb-2">Hay cantidades mayores al stock: se guardan igual y quedan como pendientes.</p>
             )}
             <button
               type="button"
               disabled={!selectedCustomerId || rows.length === 0 || totalUnits === 0 || savingOrder}
               onClick={handleSave}
-              className="w-full min-h-[52px] py-3.5 rounded-xl font-bold flex items-center justify-center gap-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white shadow-lg shadow-blue-900/30 disabled:shadow-none disabled:opacity-60 transition-all touch-manipulation"
+              className="w-full min-h-[48px] py-3 rounded-xl font-bold flex items-center justify-center gap-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white shadow-lg shadow-blue-900/30 disabled:shadow-none disabled:opacity-60 transition-all touch-manipulation"
             >
               <Save size={20} /> {savingOrder ? 'Guardando...' : 'Confirmar pedido'}
             </button>
@@ -1596,15 +1598,13 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       )}
 
       {readOnly && (
-        <div className="shrink-0 mt-5 rounded-2xl border border-slate-700/80 bg-slate-800/60 p-4">
+        <div className="shrink-0 mt-2 pt-2 border-t border-slate-700/80 bg-slate-800/60 rounded-xl p-3 md:p-4">
           <div className="flex items-center justify-between">
             <span className="text-sm font-semibold text-slate-400">Subtotal</span>
-            <span className="text-2xl font-bold text-emerald-400 tabular-nums">${total.toLocaleString()}</span>
+            <span className="text-xl md:text-2xl font-bold text-emerald-400 tabular-nums">${total.toLocaleString()}</span>
           </div>
         </div>
       )}
-
-      </div>{/* /inert subtree */}
 
       {colorPicker && (
         <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-sm z-[110] flex flex-col pt-[env(safe-area-inset-top)] px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
