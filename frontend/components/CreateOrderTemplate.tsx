@@ -266,9 +266,6 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const [clientDropdownOpen, setClientDropdownOpen] = useState(false);
   const clientDropdownRef = useRef<HTMLDivElement>(null);
   const matrixFileRef = useRef<HTMLInputElement>(null);
-  const tableHeaderScrollRef = useRef<HTMLDivElement>(null);
-  const tableBodyScrollRef = useRef<HTMLDivElement>(null);
-  const tableScrollSyncLockRef = useRef(false);
   const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0]);
   const [sizes, setSizes] = useState<Array<{ code: string; name: string }>>([]);
   const [rows, setRows] = useState<TemplateRow[]>([]);
@@ -410,27 +407,6 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const isDuplicating = !!duplicateFromOrder && !initialOrder;
   const hydrateSourceOrder = initialOrder || duplicateFromOrder;
 
-  const syncTableScrollFromBody = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    if (tableScrollSyncLockRef.current) return;
-    tableScrollSyncLockRef.current = true;
-    if (tableHeaderScrollRef.current) {
-      tableHeaderScrollRef.current.scrollLeft = e.currentTarget.scrollLeft;
-    }
-    requestAnimationFrame(() => {
-      tableScrollSyncLockRef.current = false;
-    });
-  }, []);
-
-  const syncTableScrollFromHeader = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    if (tableScrollSyncLockRef.current) return;
-    tableScrollSyncLockRef.current = true;
-    if (tableBodyScrollRef.current) {
-      tableBodyScrollRef.current.scrollLeft = e.currentTarget.scrollLeft;
-    }
-    requestAnimationFrame(() => {
-      tableScrollSyncLockRef.current = false;
-    });
-  }, []);
   const sizeColumns = useMemo(() => {
     const map = new Map<string, { code: string; name: string }>();
     for (const s of sizes) {
@@ -1193,8 +1169,11 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     return sum;
   };
 
+  const stickyHeadBg = 'bg-slate-900';
+  const stickyCellBg = (highlight: boolean) => (highlight ? 'bg-slate-800' : 'bg-slate-900');
+
   return (
-    <div className="flex flex-col pb-32 md:pb-0 px-3 sm:px-0 max-w-full">
+    <div className="flex flex-col flex-1 min-h-0 h-full max-w-full px-3 sm:px-0 pb-[calc(9rem+env(safe-area-inset-bottom))] md:pb-0">
       {/* Header: queda FUERA del subtree `inert` para que "Volver" siempre funcione, incluso en solo lectura. */}
       <header className="shrink-0 mb-5">
         <div className="flex items-center gap-3">
@@ -1238,7 +1217,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       <div
         inert={readOnly || undefined}
         aria-disabled={readOnly || undefined}
-        className={`contents ${readOnly ? '[&_input]:cursor-not-allowed [&_select]:cursor-not-allowed [&_button]:cursor-not-allowed' : ''}`}
+        className={`flex flex-col flex-1 min-h-0 ${readOnly ? '[&_input]:cursor-not-allowed [&_select]:cursor-not-allowed [&_button]:cursor-not-allowed' : ''}`}
       >
 
       {/* Lista de precios: solo ADMIN/WAREHOUSE */}
@@ -1308,7 +1287,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       </section>
 
       {/* Detalle + botón agregar */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
+      <div className="shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
         <p className="text-sm text-slate-400">
           <span className="font-semibold text-slate-300">{rows.length}</span> fila{rows.length !== 1 ? 's' : ''}
           <span className="mx-1.5">·</span>
@@ -1361,7 +1340,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         </div>
       </div>
 
-      <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-3">
+      <div className="shrink-0 flex flex-col sm:flex-row sm:items-center gap-2 mb-3">
         <label className="text-xs font-semibold text-slate-400 whitespace-nowrap">Descuento global (%)</label>
         <input
           type="number"
@@ -1384,13 +1363,13 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         </button>
       </div>
 
-      {/* Tabla: encabezado de talles fijo al scrollear la página; cuerpo con scroll horizontal sincronizado */}
-      <div className="rounded-2xl border border-slate-700/80 bg-slate-800/40 shadow-inner overflow-hidden">
+      {/* Matriz: scroll vertical/horizontal acá; encabezado de talles sticky dentro del contenedor */}
+      <div className="flex-1 min-h-[200px] min-h-0 flex flex-col rounded-2xl border border-slate-700/80 bg-slate-800/30 shadow-inner overflow-hidden">
         {rows.length === 0 ? (
           <button
             type="button"
             onClick={() => setShowAddModal(true)}
-            className="w-full min-h-[280px] flex flex-col items-center justify-center gap-4 py-12 px-4 rounded-2xl border-2 border-dashed border-slate-600/80 hover:border-blue-500/50 hover:bg-slate-800/60 transition-colors group"
+            className="w-full flex-1 min-h-[200px] flex flex-col items-center justify-center gap-4 py-12 px-4 rounded-2xl border-2 border-dashed border-slate-600/80 hover:border-blue-500/50 hover:bg-slate-800/60 transition-colors group"
           >
             <span className="w-16 h-16 rounded-2xl bg-slate-700/80 group-hover:bg-blue-500/20 flex items-center justify-center transition-colors">
               <Plus size={32} className="text-slate-400 group-hover:text-blue-400" strokeWidth={2} />
@@ -1401,37 +1380,22 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
             </div>
           </button>
         ) : (
-          <>
-            <div className="sticky top-0 z-40 bg-slate-800/98 backdrop-blur-md border-b border-slate-600/80 shadow-[0_4px_14px_rgba(15,23,42,0.9)]">
-              <div
-                ref={tableHeaderScrollRef}
-                className="overflow-x-auto touch-scroll overscroll-x-contain"
-                onScroll={syncTableScrollFromHeader}
-              >
-                <table className="w-full min-w-[640px] text-sm border-separate border-spacing-0">
-                  <thead>
-                    <tr>
-                      <th className="text-left text-slate-400 font-semibold py-3 px-3 sticky left-0 bg-slate-800 z-10 rounded-tl-xl">Código</th>
-                      <th className="text-left text-slate-400 font-semibold py-3 px-3 bg-slate-800">Color</th>
-                      <th className="text-center text-slate-400 font-semibold py-3 px-2 min-w-[70px] bg-slate-800" title="Misma cantidad en todos los talles">Todas</th>
-                      {sizeColumns.map(s => (
-                        <th key={s.code} className="text-center text-slate-400 font-semibold py-3 px-2 min-w-[48px] bg-slate-800">
-                          {labelTalle(s.code) || s.name || s.code}
-                        </th>
-                      ))}
-                      <th className="text-right text-slate-400 font-semibold py-3 px-3 bg-slate-800">Precio</th>
-                      <th className="w-12 py-3 px-2 bg-slate-800 rounded-tr-xl" />
-                    </tr>
-                  </thead>
-                </table>
-              </div>
-            </div>
-            <div
-              ref={tableBodyScrollRef}
-              className="overflow-x-auto touch-scroll overscroll-x-contain"
-              onScroll={syncTableScrollFromBody}
-            >
-              <table className="w-full min-w-[640px] text-sm border-separate border-spacing-0">
+            <div className="flex-1 min-h-0 overflow-auto touch-scroll overscroll-contain scroll-area-ios max-h-[calc(100dvh-19rem-env(safe-area-inset-bottom))] md:max-h-none">
+              <table className="w-full min-w-max text-sm border-separate border-spacing-0">
+                <thead className="sticky top-0 z-30">
+                  <tr className={`border-b border-slate-600/90 shadow-[0_2px_8px_rgba(15,23,42,0.85)] ${stickyHeadBg}`}>
+                    <th className={`text-left text-[10px] uppercase tracking-wide text-slate-400 font-bold py-2 px-2.5 sticky left-0 z-50 ${stickyHeadBg} shadow-[2px_0_6px_rgba(15,23,42,0.6)]`}>Código</th>
+                    <th className={`text-left text-[10px] uppercase tracking-wide text-slate-400 font-bold py-2 px-2.5 sticky left-[7.25rem] z-40 ${stickyHeadBg} shadow-[2px_0_6px_rgba(15,23,42,0.4)] min-w-[6.5rem]`}>Color</th>
+                    <th className={`text-center text-[10px] uppercase tracking-wide text-slate-400 font-bold py-2 px-1.5 w-[4.5rem] ${stickyHeadBg}`} title="Misma cantidad en todos los talles">Todas</th>
+                    {sizeColumns.map(s => (
+                      <th key={s.code} className={`text-center text-[10px] uppercase tracking-wide text-slate-400 font-bold py-2 px-1 min-w-[2.75rem] whitespace-nowrap ${stickyHeadBg}`}>
+                        {labelTalle(s.code) || s.name || s.code}
+                      </th>
+                    ))}
+                    <th className={`text-right text-[10px] uppercase tracking-wide text-slate-400 font-bold py-2 px-2.5 min-w-[5rem] ${stickyHeadBg}`}>Precio</th>
+                    <th className={`w-10 py-2 px-1 ${stickyHeadBg}`} />
+                  </tr>
+                </thead>
                 <tbody>
                 {groups.map((group, groupIndex) => {
                   const isNewArticle = groupIndex > 0;
@@ -1445,7 +1409,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                         key={`group-${group.productCode}`}
                         className={`border-b border-slate-700/50 hover:bg-slate-700/30 ${isNewArticle ? 'border-t-2 border-slate-500/70 bg-slate-700/20' : ''}`}
                       >
-                        <td className={`py-3 px-3 font-mono text-sm text-blue-300 sticky left-0 z-10 ${isNewArticle ? 'bg-slate-700/40' : 'bg-slate-800/80'}`}>
+                        <td className={`py-2 px-2.5 font-mono text-xs text-blue-300 sticky left-0 z-20 shadow-[2px_0_6px_rgba(15,23,42,0.35)] ${stickyCellBg(isNewArticle)}`}>
                           <button
                             type="button"
                             onClick={() => toggleGroup(group.productCode)}
@@ -1455,19 +1419,19 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                             {group.productCode}
                           </button>
                         </td>
-                        <td className="py-3 px-3 text-slate-400 text-sm">
+                        <td className={`py-2 px-2.5 text-slate-400 text-xs sticky left-[7.25rem] z-10 ${stickyCellBg(isNewArticle)}`}>
                           {group.rows.length} colores · {groupUnits} un.
                         </td>
-                        <td className="py-3 px-2">—</td>
+                        <td className="py-2 px-1.5">—</td>
                         {sizeColumns.map(s => (
-                          <td key={s.code} className="py-3 px-2 text-center text-slate-500">—</td>
+                          <td key={s.code} className="py-2 px-1 text-center text-slate-500 text-xs">—</td>
                         ))}
-                        <td className="py-3 px-3 text-right font-mono text-sm text-emerald-400">${groupTotal.toLocaleString()}</td>
-                        <td className="py-3 px-2">
+                        <td className="py-2 px-2.5 text-right font-mono text-xs text-emerald-400">${groupTotal.toLocaleString()}</td>
+                        <td className="py-2 px-1">
                           <button
                             type="button"
                             onClick={() => removeGroup(group.productCode)}
-                            className="w-10 h-10 flex items-center justify-center rounded-xl text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition touch-manipulation"
+                            className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition touch-manipulation"
                             aria-label="Quitar artículo"
                           >
                             <Trash2 size={18} />
@@ -1485,9 +1449,9 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                         return (
                           <tr
                             key={row.id}
-                            className={`border-b border-slate-700/40 hover:bg-slate-700/20 ${isFirstRowAndNewArticle ? 'border-t-2 border-slate-500/70 bg-slate-700/20' : ''}`}
+                            className={`border-b border-slate-700/35 hover:bg-slate-700/15 ${isFirstRowAndNewArticle ? 'border-t border-slate-500/50' : ''}`}
                           >
-                            <td className={`py-2.5 px-3 font-mono text-sm text-blue-300 sticky left-0 z-10 ${isFirstRowAndNewArticle ? 'bg-slate-700/40' : 'bg-slate-800/80'}`}>
+                            <td className={`py-1.5 px-2.5 font-mono text-xs text-blue-300 sticky left-0 z-20 shadow-[2px_0_6px_rgba(15,23,42,0.35)] ${stickyCellBg(isFirstRowAndNewArticle)}`}>
                               {isFirstRowOfArticle ? (
                                 <button
                                   type="button"
@@ -1499,15 +1463,15 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                                 </button>
                               ) : null}
                             </td>
-                            <td className="py-2.5 px-3 text-slate-200 text-sm font-mono">{formatColorCell(row.colorCode, row.colorName)}</td>
-                            <td className="py-2 px-2">
-                              <div className="flex items-center gap-1.5 justify-center">
+                            <td className={`py-1.5 px-2.5 text-slate-200 text-xs sticky left-[7.25rem] z-10 max-w-[8.5rem] truncate ${stickyCellBg(isFirstRowAndNewArticle)}`} title={formatColorCell(row.colorCode, row.colorName)}>{formatColorCell(row.colorCode, row.colorName)}</td>
+                            <td className="py-1 px-1.5">
+                              <div className="flex items-center gap-1 justify-center">
                                 <input
                                   type="number"
                                   min={0}
                                   placeholder="0"
                                   onWheel={blockWheelOnNumberInput}
-                                  className={`w-11 h-9 bg-slate-700/80 border border-slate-600 rounded-lg px-1.5 py-1 text-center text-white text-xs font-mono tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none ${numberInputNoSpinClass}`}
+                                  className={`w-9 h-8 bg-slate-700/80 border border-slate-600 rounded-md px-1 py-0.5 text-center text-white text-xs font-mono tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none ${numberInputNoSpinClass}`}
                                   onBlur={(e) => {
                                     const v = parseInt(e.target.value, 10);
                                     if (!isNaN(v) && v >= 0) setRowAllQuantities(row.id, v);
@@ -1523,11 +1487,11 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                                       if (!isNaN(v) && v >= 0) setRowAllQuantities(row.id, v);
                                     }
                                   }}
-                                  className="shrink-0 w-9 h-9 flex items-center justify-center rounded-lg bg-blue-600 hover:bg-blue-500 text-white touch-manipulation shadow-sm"
+                                  className="shrink-0 w-7 h-8 flex items-center justify-center rounded-md bg-blue-600 hover:bg-blue-500 text-white touch-manipulation"
                                   title="Aplicar a todos los talles"
                                   aria-label="Aplicar a todos los talles"
                                 >
-                                  <Check size={18} />
+                                  <Check size={14} />
                                 </button>
                               </div>
                             </td>
@@ -1539,9 +1503,9 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                               const exceeds = stock != null && qtyVal > stock;
                               const disabled = !hasVariant;
                               return (
-                                <td key={s.code} className="py-2 px-1.5">
+                                <td key={s.code} className="py-1 px-1">
                                   {disabled ? (
-                                    <span className="block w-full max-w-[52px] mx-auto text-center text-slate-600 text-sm py-2 rounded-lg bg-slate-800/50" title={!hasVariant ? 'Sin variante' : 'Sin stock'}>
+                                    <span className="block w-10 mx-auto text-center text-slate-600 text-xs py-1.5 rounded-md bg-slate-800/50" title={!hasVariant ? 'Sin variante' : 'Sin stock'}>
                                       {noStock ? '0' : '—'}
                                     </span>
                                   ) : (
@@ -1551,7 +1515,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                                       value={qtyVal === 0 ? '' : qtyVal}
                                       onWheel={blockWheelOnNumberInput}
                                       onChange={(e) => updateQuantity(row.id, s.code, e.target.value === '' ? 0 : parseInt(e.target.value, 10))}
-                                      className={`w-full max-w-[52px] h-9 mx-auto block border rounded-lg px-1.5 py-1 text-center text-white text-sm font-mono tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none ${numberInputNoSpinClass} ${
+                                      className={`w-10 h-8 mx-auto block border rounded-md px-1 py-0.5 text-center text-white text-xs font-mono tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none ${numberInputNoSpinClass} ${
                                         noStock || exceeds
                                           ? 'bg-red-950/30 border-red-700/70'
                                           : 'bg-slate-700/80 border-slate-600'
@@ -1562,7 +1526,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                                 </td>
                               );
                             })}
-                            <td className="py-2.5 px-3 text-right">
+                            <td className="py-1.5 px-2 text-right">
                               <input
                                 type="number"
                                 min={0}
@@ -1570,24 +1534,24 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                                 value={row.price}
                                 onWheel={blockWheelOnNumberInput}
                                 onChange={(e) => updateRowPrice(row.id, e.target.value === '' ? 0 : parseFloat(e.target.value))}
-                                className={`w-20 min-w-[72px] h-9 bg-slate-700/80 border border-slate-600 rounded-lg px-2 py-1 text-right text-emerald-400 font-mono text-sm tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none ${numberInputNoSpinClass}`}
+                                className={`w-[4.5rem] h-8 bg-slate-700/80 border border-slate-600 rounded-md px-1.5 py-0.5 text-right text-emerald-400 font-mono text-xs tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none ${numberInputNoSpinClass}`}
                               />
                             </td>
-                            <td className="py-2.5 px-2">
+                            <td className="py-1.5 px-1">
                               <button
                                 type="button"
                                 onClick={() => removeRow(row.id)}
-                                className="w-10 h-10 flex items-center justify-center rounded-xl text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition touch-manipulation"
+                                className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition touch-manipulation"
                                 aria-label="Quitar fila"
                               >
-                                <Trash2 size={18} />
+                                <Trash2 size={16} />
                               </button>
                             </td>
                           </tr>
                         );
                       })}
-                      <tr className="border-b border-slate-700/30 bg-slate-800/30">
-                        <td colSpan={3 + sizeColumns.length + 2} className="py-2 px-3">
+                      <tr className="border-b border-slate-700/25 bg-slate-800/20">
+                        <td colSpan={3 + sizeColumns.length + 2} className="py-1.5 px-2.5">
                           <button
                             type="button"
                             onClick={() => openColorPickerForArticle(group.productCode, group.productId)}
@@ -1605,13 +1569,12 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                 </tbody>
               </table>
             </div>
-          </>
         )}
       </div>
 
       {/* Pie: subtotal + confirmar. Se oculta en modo solo lectura para no inducir a guardar cambios. */}
       {!readOnly && (
-        <footer className="fixed bottom-0 left-0 right-0 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:relative md:p-0 md:pb-0 z-[60] md:z-auto mt-5 bg-slate-950/95 md:bg-transparent backdrop-blur-md md:backdrop-blur-none">
+        <footer className="shrink-0 fixed bottom-0 left-0 right-0 p-4 pb-[max(1rem,env(safe-area-inset-bottom))] md:relative md:p-0 md:pb-0 z-[60] md:z-auto mt-3 bg-slate-950/95 md:bg-transparent backdrop-blur-md md:backdrop-blur-none">
           <div className="rounded-2xl border border-slate-700/80 bg-slate-800/95 backdrop-blur-sm p-4 shadow-xl shadow-black/20">
             <div className="flex items-center justify-between mb-3">
               <span className="text-sm font-semibold text-slate-400">Subtotal</span>

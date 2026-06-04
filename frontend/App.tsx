@@ -371,6 +371,7 @@ const App: React.FC = () => {
 
   /** Al entrar a crear/editar pedido, cargar productos con la lista de precios elegida; al salir, restaurar productos del contexto normal. */
   const inCreateOrderView = baseView === 'create_order' || !!editingOrder;
+  const isOrderFormView = baseView === 'create_order' || baseView === 'create_order_template';
   useEffect(() => {
     if (!currentUser) return;
     if (inCreateOrderView) {
@@ -958,7 +959,13 @@ const App: React.FC = () => {
         />
       </div>
       
-      <main className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto pl-3 pr-3 pb-4 pt-[max(0.75rem,env(safe-area-inset-top))] md:p-8 md:ml-64 relative scroll-area-ios mobile-main-scroll">
+      <main
+        className={`flex-1 min-h-0 pl-3 pr-3 pb-4 pt-[max(0.75rem,env(safe-area-inset-top))] md:p-8 md:ml-64 relative scroll-area-ios mobile-main-scroll ${
+          isOrderFormView
+            ? 'flex flex-col overflow-hidden overflow-x-hidden'
+            : 'overflow-x-hidden overflow-y-auto'
+        }`}
+      >
         {isLoading && (
           <div className="fixed inset-0 bg-slate-950/80 z-[200] flex flex-col items-center justify-center backdrop-blur-sm pt-[env(safe-area-inset-top)] pointer-events-auto">
              <Loader2 size={48} className="text-blue-500 animate-spin mb-4" />
@@ -967,8 +974,10 @@ const App: React.FC = () => {
         )}
 
         <div
-          className={`max-w-6xl mx-auto pb-24 md:pb-8 w-full px-1 sm:px-0 ${
-            inCreateOrderView ? 'overflow-x-clip' : 'overflow-x-hidden'
+          className={`max-w-6xl mx-auto w-full px-1 sm:px-0 ${
+            isOrderFormView
+              ? 'flex flex-col flex-1 min-h-0 pb-2 md:pb-4 overflow-hidden'
+              : `pb-24 md:pb-8 ${inCreateOrderView ? 'overflow-x-clip' : 'overflow-x-hidden'}`
           }`}
         >
           {showDamianTasksBanner && (
@@ -1028,6 +1037,7 @@ const App: React.FC = () => {
               ))}
             </div>
           )}
+          {!isOrderFormView && (
           <header className="mb-4 md:mb-6 flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
              <div className="min-w-0">
                <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-white truncate">
@@ -1066,6 +1076,7 @@ const App: React.FC = () => {
                </button>
              )}
           </header>
+          )}
 
           {baseView === 'dashboard' && (
             <Suspense fallback={<ViewFallback />}>
@@ -1192,8 +1203,9 @@ const App: React.FC = () => {
               </>
             </Suspense>
           )}
-          {baseView === 'create_order' || baseView === 'create_order_template' ? (
+          {isOrderFormView ? (
             <Suspense fallback={<ViewFallback />}>
+              <div className="flex flex-col flex-1 min-h-0">
               <CreateOrderTemplate
                 products={products}
                 customers={getVisibleCustomers}
@@ -1209,6 +1221,7 @@ const App: React.FC = () => {
                 readOnly={!!editingOrder?.invoice}
                 onMatrixImportDone={handleMatrixImportDone}
               />
+              </div>
             </Suspense>
           ) : null}
           {baseView === 'order_picking' && activePickingOrder && (

@@ -1169,6 +1169,36 @@ export const api = {
     await request<void>(`/products/${encodeURIComponent(productId)}`, 'DELETE');
   },
 
+  /** Grupos de artículos duplicados (mismo nombre, SKU parecido, etc.) para revisar antes de fusionar. */
+  getDuplicateProducts: async (params?: { q?: string; limit?: number }): Promise<{
+    filter: string | null;
+    totalProducts: number;
+    duplicateByName: Array<{
+      kind: string;
+      key: string;
+      productCount: number;
+      products: Array<{ id: string; sku: string; name: string; colorCount: number; variantCount: number; stockTotal: number }>;
+    }>;
+    duplicateBySkuCore: Array<{
+      kind: string;
+      key: string;
+      productCount: number;
+      products: Array<{ id: string; sku: string; name: string; colorCount: number; variantCount: number; stockTotal: number }>;
+    }>;
+    duplicateBySkuDigitPrefix: Array<{
+      kind: string;
+      key: string;
+      productCount: number;
+      products: Array<{ id: string; sku: string; name: string; colorCount: number; variantCount: number; stockTotal: number }>;
+    }>;
+  }> => {
+    const sp = new URLSearchParams();
+    if (params?.q) sp.set('q', params.q);
+    if (params?.limit != null) sp.set('limit', String(params.limit));
+    const qs = sp.toString();
+    return request(`/products/duplicates${qs ? `?${qs}` : ''}`, 'GET');
+  },
+
   /** Fusiona varios artículos (padre) en uno principal: suma stock, mueve variantes y borra duplicados. Solo admin/deposito. */
   mergeManualProducts: async (payload: {
     keeperProductId: string;
