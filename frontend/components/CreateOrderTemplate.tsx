@@ -309,8 +309,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const showPriceListSelector = (role === Role.ADMIN || role === Role.WAREHOUSE) && priceLists.length > 0;
   /** Evita re-hidratar el pedido (y resetear la lista de precios) cada vez que se recargan productos. */
   const editHydratedOrderIdRef = useRef<string | null>(null);
-  /** Detecta cambio de lista tras abrir edición (p. ej. catálogo base → lista del cliente). */
-  const editPriceListAtHydrationRef = useRef<string | null | undefined>(undefined);
+  /** El usuario eligió otra lista en el selector; no pisar con la del cliente. */
+  const priceListUserOverrideRef = useRef(false);
   /** Invalida respuestas async del modal de colores si el usuario cerró o abrió otro. */
   const colorPickerRequestRef = useRef(0);
   /** En edición: evita pisar priceAtMoment al abrir; permite recalcular si cambia la lista. */
@@ -331,9 +331,18 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     }
   }, []);
   const applyCustomerPriceList = useCallback((customerId: string) => {
+    if (priceListUserOverrideRef.current) return;
     const customer = customers.find((c) => c.id === customerId);
     onPriceListChange?.(customer?.priceListId ?? null);
   }, [customers, onPriceListChange]);
+
+  const handlePriceListSelectChange = useCallback(
+    (value: string) => {
+      priceListUserOverrideRef.current = true;
+      onPriceListChange?.(value || null);
+    },
+    [onPriceListChange]
+  );
 
   const selectedCustomer = useMemo(
     () => customers.find((c) => c.id === selectedCustomerId),
@@ -517,7 +526,9 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     editHydratedOrderIdRef.current = hydrateKey;
 
     setSelectedCustomerId(hydrateSourceOrder.customerId);
-    applyCustomerPriceList(hydrateSourceOrder.customerId);
+    if (!priceListUserOverrideRef.current) {
+      applyCustomerPriceList(hydrateSourceOrder.customerId);
+    }
     setOrderNotes(isDuplicating ? '' : String(hydrateSourceOrder.notes ?? '').trim());
     setOrderDate(isDuplicating ? new Date().toISOString().slice(0, 10) : hydrateSourceOrder.date);
 
@@ -606,38 +617,20 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     appliedPriceListForRowsRef.current = undefined;
     priceListRecalcPendingRef.current = false;
     productsAtPriceListChangeRef.current = null;
-    editPriceListAtHydrationRef.current = undefined;
+    priceListUserOverrideRef.current = false;
     if (!hydrateSourceOrder) pendingNewOrderIdRef.current = null;
   }, [hydrateSourceOrder?.id, isDuplicating]);
 
-  /** Si la lista del cliente llega después de la primera hidratación, volver a enlazar variantes con el catálogo correcto. */
+  /** Al cambiar el selector: marcar recálculo cuando llegue el catálogo de esa lista. */
   useEffect(() => {
-    if (!isEditing || !initialOrder?.id) return;
-    const listId = selectedPriceListId ?? null;
-    const prev = editPriceListAtHydrationRef.current;
-    if (prev === undefined) {
-      editPriceListAtHydrationRef.current = listId;
-      return;
-    }
-    if (prev === listId) return;
-    editPriceListAtHydrationRef.current = listId;
-    if (editHydratedOrderIdRef.current === initialOrder.id) {
-      editHydratedOrderIdRef.current = null;
-      appliedPriceListForRowsRef.current = undefined;
-      priceListRecalcPendingRef.current = true;
-    }
-  }, [selectedPriceListId, isEditing, initialOrder?.id]);
-
-  /** Solo al cambiar el selector (no cuando llegan productos): guardar snapshot para detectar recarga. */
-  useEffect(() => {
-    if (!isEditing) return;
     const listId = selectedPriceListId ?? null;
     if (appliedPriceListForRowsRef.current === undefined) return;
     if (appliedPriceListForRowsRef.current !== listId) {
       priceListRecalcPendingRef.current = true;
       productsAtPriceListChangeRef.current = products;
+      appliedPriceListForRowsRef.current = listId;
     }
-  }, [selectedPriceListId, isEditing]);
+  }, [selectedPriceListId, products]);
 
   useEffect(() => {
     if (customers.length === 1 && !selectedCustomerId) {
@@ -1317,7 +1310,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
               <select
                 className={`${orderFieldClass} flex-1 min-w-0`}
                 value={selectedPriceListId ?? ''}
-                onChange={(e) => onPriceListChange?.(e.target.value || null)}
+                onChange={(e) => handlePriceListSelectChange(e.target.value)}
               >
                 <option value="">Precio base</option>
                 {priceLists.map(pl => (
@@ -1375,6 +1368,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                         className="px-3 py-2 text-sm text-white hover:bg-slate-700 cursor-pointer truncate"
                         onMouseDown={(e) => {
                           e.preventDefault();
+                          priceListUserOverrideRef.current = false;
                           setSelectedCustomerId(c.id);
                           applyCustomerPriceList(c.id);
                           setClientFilter('');
