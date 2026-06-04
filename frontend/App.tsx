@@ -966,7 +966,11 @@ const App: React.FC = () => {
           </div>
         )}
 
-        <div className="max-w-6xl mx-auto pb-24 md:pb-8 w-full overflow-x-hidden px-1 sm:px-0">
+        <div
+          className={`max-w-6xl mx-auto pb-24 md:pb-8 w-full px-1 sm:px-0 ${
+            inCreateOrderView ? 'overflow-x-clip' : 'overflow-x-hidden'
+          }`}
+        >
           {showDamianTasksBanner && (
             <div
               role="status"

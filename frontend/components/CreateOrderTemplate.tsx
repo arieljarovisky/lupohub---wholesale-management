@@ -266,6 +266,9 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const [clientDropdownOpen, setClientDropdownOpen] = useState(false);
   const clientDropdownRef = useRef<HTMLDivElement>(null);
   const matrixFileRef = useRef<HTMLInputElement>(null);
+  const tableHeaderScrollRef = useRef<HTMLDivElement>(null);
+  const tableBodyScrollRef = useRef<HTMLDivElement>(null);
+  const tableScrollSyncLockRef = useRef(false);
   const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0]);
   const [sizes, setSizes] = useState<Array<{ code: string; name: string }>>([]);
   const [rows, setRows] = useState<TemplateRow[]>([]);
@@ -406,6 +409,28 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const isEditing = !!initialOrder;
   const isDuplicating = !!duplicateFromOrder && !initialOrder;
   const hydrateSourceOrder = initialOrder || duplicateFromOrder;
+
+  const syncTableScrollFromBody = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    if (tableScrollSyncLockRef.current) return;
+    tableScrollSyncLockRef.current = true;
+    if (tableHeaderScrollRef.current) {
+      tableHeaderScrollRef.current.scrollLeft = e.currentTarget.scrollLeft;
+    }
+    requestAnimationFrame(() => {
+      tableScrollSyncLockRef.current = false;
+    });
+  }, []);
+
+  const syncTableScrollFromHeader = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    if (tableScrollSyncLockRef.current) return;
+    tableScrollSyncLockRef.current = true;
+    if (tableBodyScrollRef.current) {
+      tableBodyScrollRef.current.scrollLeft = e.currentTarget.scrollLeft;
+    }
+    requestAnimationFrame(() => {
+      tableScrollSyncLockRef.current = false;
+    });
+  }, []);
   const sizeColumns = useMemo(() => {
     const map = new Map<string, { code: string; name: string }>();
     for (const s of sizes) {
@@ -1359,8 +1384,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         </button>
       </div>
 
-      {/* Tabla: crece con el contenido; el scroll es el de la página (<main>) */}
-      <div className="rounded-2xl border border-slate-700/80 bg-slate-800/40 shadow-inner">
+      {/* Tabla: encabezado de talles fijo al scrollear la página; cuerpo con scroll horizontal sincronizado */}
+      <div className="rounded-2xl border border-slate-700/80 bg-slate-800/40 shadow-inner overflow-hidden">
         {rows.length === 0 ? (
           <button
             type="button"
@@ -1376,23 +1401,38 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
             </div>
           </button>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-sm border-separate border-spacing-0">
-              <thead>
-                <tr className="border-b border-slate-600/80">
-                  <th className="text-left text-slate-400 font-semibold py-3 px-3 sticky top-0 left-0 bg-slate-800 z-30 rounded-tl-xl border-b border-slate-600/80 shadow-[0_1px_0_0_rgba(71,85,105,0.6)]">Código</th>
-                  <th className="text-left text-slate-400 font-semibold py-3 px-3 sticky top-0 bg-slate-800 z-20 border-b border-slate-600/80 shadow-[0_1px_0_0_rgba(71,85,105,0.6)]">Color</th>
-                  <th className="text-center text-slate-400 font-semibold py-3 px-2 min-w-[70px] sticky top-0 bg-slate-800 z-20 border-b border-slate-600/80 shadow-[0_1px_0_0_rgba(71,85,105,0.6)]" title="Misma cantidad en todos los talles">Todas</th>
-                  {sizeColumns.map(s => (
-                    <th key={s.code} className="text-center text-slate-400 font-semibold py-3 px-2 min-w-[48px] sticky top-0 bg-slate-800 z-20 border-b border-slate-600/80 shadow-[0_1px_0_0_rgba(71,85,105,0.6)]">
-                      {labelTalle(s.code) || s.name || s.code}
-                    </th>
-                  ))}
-                  <th className="text-right text-slate-400 font-semibold py-3 px-3 sticky top-0 bg-slate-800 z-20 border-b border-slate-600/80 shadow-[0_1px_0_0_rgba(71,85,105,0.6)]">Precio</th>
-                  <th className="w-12 py-3 px-2 sticky top-0 bg-slate-800 z-20 rounded-tr-xl border-b border-slate-600/80 shadow-[0_1px_0_0_rgba(71,85,105,0.6)]"></th>
-                </tr>
-              </thead>
-              <tbody>
+          <>
+            <div className="sticky top-0 z-40 bg-slate-800/98 backdrop-blur-md border-b border-slate-600/80 shadow-[0_4px_14px_rgba(15,23,42,0.9)]">
+              <div
+                ref={tableHeaderScrollRef}
+                className="overflow-x-auto touch-scroll overscroll-x-contain"
+                onScroll={syncTableScrollFromHeader}
+              >
+                <table className="w-full min-w-[640px] text-sm border-separate border-spacing-0">
+                  <thead>
+                    <tr>
+                      <th className="text-left text-slate-400 font-semibold py-3 px-3 sticky left-0 bg-slate-800 z-10 rounded-tl-xl">Código</th>
+                      <th className="text-left text-slate-400 font-semibold py-3 px-3 bg-slate-800">Color</th>
+                      <th className="text-center text-slate-400 font-semibold py-3 px-2 min-w-[70px] bg-slate-800" title="Misma cantidad en todos los talles">Todas</th>
+                      {sizeColumns.map(s => (
+                        <th key={s.code} className="text-center text-slate-400 font-semibold py-3 px-2 min-w-[48px] bg-slate-800">
+                          {labelTalle(s.code) || s.name || s.code}
+                        </th>
+                      ))}
+                      <th className="text-right text-slate-400 font-semibold py-3 px-3 bg-slate-800">Precio</th>
+                      <th className="w-12 py-3 px-2 bg-slate-800 rounded-tr-xl" />
+                    </tr>
+                  </thead>
+                </table>
+              </div>
+            </div>
+            <div
+              ref={tableBodyScrollRef}
+              className="overflow-x-auto touch-scroll overscroll-x-contain"
+              onScroll={syncTableScrollFromBody}
+            >
+              <table className="w-full min-w-[640px] text-sm border-separate border-spacing-0">
+                <tbody>
                 {groups.map((group, groupIndex) => {
                   const isNewArticle = groupIndex > 0;
                   const collapsed = collapsedGroups[group.productCode];
@@ -1562,9 +1602,10 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                     </React.Fragment>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
 
