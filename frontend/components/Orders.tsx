@@ -32,6 +32,7 @@ import {
   type OrdersInvoiceListFilter,
 } from '../utils/ordersListFilters';
 import { downloadOneOrderExcel, downloadOrdersExcel } from '../utils/orderExportExcel';
+import { applyPriceListToOrder } from '../utils/priceListPricing';
 
 /** Acción en tarjeta de pedido: ícono + texto corto (siempre visible). */
 function OrderCardActionButton(props: {
@@ -1509,12 +1510,39 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     [products]
   );
 
+  /** Precios del Excel según la lista actual del cliente (no el snapshot guardado al crear el pedido). */
+  const prepareOrdersForExcelExport = async (list: Order[]): Promise<Order[]> => {
+    const listIds = new Set<string | null>();
+    for (const o of list) {
+      const c = customers.find((x) => x.id === o.customerId);
+      listIds.add(c?.priceListId ?? null);
+    }
+    const productsByListId = new Map<string, Product[]>();
+    const cacheKey = (id: string | null) => (id ? `pl:${id}` : 'base');
+    await Promise.all(
+      [...listIds].map(async (priceListId) => {
+        const key = cacheKey(priceListId);
+        const prods = priceListId
+          ? await api.getProductsAll({ priceListId })
+          : await api.getProductsAll();
+        productsByListId.set(key, prods);
+      })
+    );
+    return list.map((o) => {
+      const c = customers.find((x) => x.id === o.customerId);
+      const priceListId = c?.priceListId ?? null;
+      const listProducts = productsByListId.get(cacheKey(priceListId)) ?? products;
+      return applyPriceListToOrder(o, listProducts);
+    });
+  };
+
   /** Exportar pedidos filtrados: una hoja por pedido (formato planilla cliente). */
   const exportOrdersToExcel = async () => {
     const list = filteredOrders.length > 0 ? filteredOrders : orders;
     if (list.length === 0) return;
     try {
-      await downloadOrdersExcel(list, {
+      const prepared = await prepareOrdersForExcelExport(list);
+      await downloadOrdersExcel(prepared, {
         ...orderExportExcelOptions,
         sheetNameForOrder: (order) => safeSheetName(order),
         filename: `pedidos_mayoristas_${new Date().toISOString().slice(0, 10)}.xlsx`,
@@ -1530,7 +1558,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const clientNameForFile = getCustomerName(order).replace(/[\\/*?:\[\]"]/g, '').replace(/\s+/g, '_').slice(0, 40) || 'cliente';
     const dateStr = new Date().toISOString().slice(0, 10);
     try {
-      await downloadOneOrderExcel(order, {
+      const [prepared] = await prepareOrdersForExcelExport([order]);
+      await downloadOneOrderExcel(prepared, {
         ...orderExportExcelOptions,
         sheetName: safeSheetName(order),
         filename: `pedido_${order.id}_${clientNameForFile}_${dateStr}.xlsx`,
