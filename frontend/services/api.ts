@@ -3528,5 +3528,46 @@ export const api = {
   },
   getCatalogFileBlob: async (id: string): Promise<Blob> => {
     return getBlob(`/catalogs/${id}/file`);
+  },
+
+  // --- CATÁLOGO TIENDA NUBE (generado en vivo desde la tienda) ---
+  getTiendaNubeCatalog: async (categoryIds?: number[]): Promise<TiendaNubeCatalog> => {
+    const qs = categoryIds && categoryIds.length > 0 ? `?categoryIds=${categoryIds.join(',')}` : '';
+    return request<TiendaNubeCatalog>(
+      `/integrations/tiendanube/catalog${qs}`,
+      'GET',
+      undefined,
+      undefined,
+      300000
+    );
   }
 };
+
+export interface TiendaNubeCatalogProduct {
+  id: number;
+  name: string;
+  description: string;
+  images: string[];
+  sizes: string[];
+  colors: string[];
+  price: number | null;
+  promotionalPrice: number | null;
+  permalink: string | null;
+  totalStock: number;
+  categoryIds: number[];
+}
+
+export interface TiendaNubeCatalogSection {
+  id: number;
+  name: string;
+  parent: number | null;
+  productCount: number;
+  products: TiendaNubeCatalogProduct[];
+}
+
+export interface TiendaNubeCatalog {
+  storeId: string;
+  generatedAt: string;
+  productCount: number;
+  sections: TiendaNubeCatalogSection[];
+}
