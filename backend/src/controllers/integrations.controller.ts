@@ -268,6 +268,26 @@ export async function resolveMercadoLibreUserProductItems(
 
 type MlVariationRow = { variationId: string; sku: string; color: string; size: string; stock: number };
 
+/** Una fila por SKU (o color+talle); evita duplicados al agregar varios ítems ML. */
+function dedupeMlVariationRows(rows: MlVariationRow[]): MlVariationRow[] {
+  const byKey = new Map<string, MlVariationRow>();
+  for (const row of rows) {
+    const skuKey = normSkuForMlStockMatch(row.sku);
+    const attrKey =
+      skuKey ||
+      `${normTextForMlStockMatch(row.color)}|${normTextForMlStockMatch(row.size)}`;
+    const key = attrKey || String(row.variationId || '').trim();
+    if (!key) continue;
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, row);
+      continue;
+    }
+    if (!prev.sku && row.sku) byKey.set(key, row);
+  }
+  return Array.from(byKey.values());
+}
+
 /** Extrae filas de variación desde un ítem ML (con o sin array item.variations). */
 function extractMlVariationsFromItemData(it: any): MlVariationRow[] {
   if (!it || it.error) return [];
@@ -293,7 +313,7 @@ function extractMlVariationsFromItemData(it: any): MlVariationRow[] {
         stock: v.available_quantity || 0
       });
     }
-    return out;
+    return dedupeMlVariationRows(out);
   }
   const attrs = Array.isArray(it.attributes) ? it.attributes : [];
   const skuAttr = attrs.find((a: any) => (a?.id || '').toString().toUpperCase() === 'SELLER_SKU');
@@ -308,7 +328,7 @@ function extractMlVariationsFromItemData(it: any): MlVariationRow[] {
     size: (sizeAttr ? (sizeAttr.value_name ?? sizeAttr.value ?? '') : parsed.size).toString().trim(),
     stock: it.available_quantity || 0
   });
-  return out;
+  return dedupeMlVariationRows(out);
 }
 
 type VariantMlStockLink = {
@@ -478,20 +498,18 @@ async function aggregateMercadoLibreVariationsFromItemIds(
   itemIds: string[],
   accessToken: string
 ): Promise<MlVariationRow[]> {
-  const byVariationId: Record<string, MlVariationRow> = {};
+  const merged: MlVariationRow[] = [];
   for (const candidate of itemIds) {
     try {
       const itemRes = await axios.get(`https://api.mercadolibre.com/items/${candidate}?include_attributes=all`, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
-      for (const row of extractMlVariationsFromItemData(itemRes?.data)) {
-        byVariationId[row.variationId] = row;
-      }
+      merged.push(...extractMlVariationsFromItemData(itemRes?.data));
     } catch {
       // ignorar ítem inválido
     }
   }
-  return Object.values(byVariationId);
+  return dedupeMlVariationRows(merged);
 }
 
 /** Publicaciones del mismo vendedor con el mismo título base (un listing por talle/color). */
@@ -5374,6 +5392,25 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
     }
 
     const singleItemVariations = extractMlVariationsFromItemData(item);
+    const requestRaw = String(req.params.itemId || '');
+    const requestLooksLikeCatalog =
+      /\/p\/MLA/i.test(requestRaw) ||
+      shouldResolveAsUserProduct ||
+      /^MLAU\d+$/i.test(requestedNormalized);
+    const itemHasVariationArray = Array.isArray(item.variations) && item.variations.length > 0;
+
+    // Publicación única con item.variations: usar solo ese ítem (evita 4×N duplicados al mezclar hermanos/UP).
+    if (itemHasVariationArray && singleItemVariations.length > 0 && !requestLooksLikeCatalog) {
+      return res.json({
+        variations: singleItemVariations,
+        singleProduct: singleItemVariations.length === 1,
+        itemId: item.id,
+        requestedItemId: requestRaw,
+        resolvedItemId,
+        resolvedFromItemVariationsOnly: true
+      });
+    }
+
     const allItemIds = await gatherMercadoLibreItemIdsForAllVariations({
       requestedRaw: String(req.params.itemId || ''),
       requestedNormalized,
@@ -5515,7 +5552,7 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
       });
       if (catalogVariations.length > 1) {
         return res.json({
-          variations: catalogVariations,
+          variations: dedupeMlVariationRows(catalogVariations),
           singleProduct: false,
           itemId: item.id,
           requestedItemId: String(req.params.itemId || ''),
@@ -5558,9 +5595,10 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
             merged.push(row);
           }
         }
-        if (merged.length > singleItemVariations.length) {
+        const mergedDeduped = dedupeMlVariationRows(merged);
+        if (mergedDeduped.length > singleItemVariations.length) {
           return res.json({
-            variations: merged,
+            variations: mergedDeduped,
             singleProduct: false,
             itemId: item.id,
             requestedItemId: String(req.params.itemId || ''),
