@@ -1172,145 +1172,160 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const stickyHeadBg = 'bg-slate-900';
   const stickyCellBg = (highlight: boolean) => (highlight ? 'bg-slate-800' : 'bg-slate-900');
 
+  const orderFieldClass =
+    'w-full h-9 bg-slate-800/90 border border-slate-700/80 rounded-lg px-3 text-sm text-white focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none';
+
   return (
-    <div className="flex flex-col flex-1 min-h-0 h-full w-full overflow-hidden">
-      {/* Header: queda FUERA del subtree `inert` para que "Volver" siempre funcione, incluso en solo lectura. */}
-      <header className="shrink-0 mb-3">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white transition touch-manipulation"
-            aria-label="Volver"
-          >
-            <ArrowLeft size={22} />
-          </button>
-          <div className="min-w-0 flex-1">
-            <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-              {readOnly ? 'Ver pedido (solo lectura)' : (isEditing ? 'Editar pedido' : isDuplicating ? 'Duplicar pedido' : 'Nuevo pedido')}
-            </h1>
-            <p className="text-sm text-slate-400 mt-0.5">
-              {isDuplicating && duplicateFromOrder ? (
-                <>Basado en pedido #{duplicateFromOrder.id} · {new Date(orderDate).toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })}</>
-              ) : (
-                new Date(orderDate).toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })
-              )}
-            </p>
-          </div>
+    <div className="grid h-full min-h-0 w-full grid-rows-[auto_minmax(0,1fr)_auto] gap-1.5 overflow-hidden">
+      {/* Barra superior compacta (una sola fila del grid) */}
+      <div className="min-w-0 space-y-1.5">
+      <header className="flex items-center gap-2 md:gap-3 min-w-0">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white transition touch-manipulation"
+          aria-label="Volver"
+        >
+          <ArrowLeft size={20} />
+        </button>
+        <div className="min-w-0 flex-1">
+          <h1 className="text-lg md:text-xl font-bold text-white tracking-tight truncate">
+            {readOnly ? 'Ver pedido' : (isEditing ? 'Editar pedido' : isDuplicating ? 'Duplicar pedido' : 'Nuevo pedido')}
+          </h1>
+          <p className="text-xs text-slate-500 truncate hidden sm:block">
+            {isDuplicating && duplicateFromOrder
+              ? `Pedido #${duplicateFromOrder.id} · ${new Date(orderDate).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })}`
+              : new Date(orderDate).toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short' })}
+          </p>
         </div>
+        <p className="shrink-0 text-xs text-slate-400 tabular-nums hidden md:block">
+          <span className="font-semibold text-slate-300">{rows.length}</span> filas ·{' '}
+          <span className="font-semibold text-slate-300">{totalUnits}</span> u.
+        </p>
+        <button
+          type="button"
+          onClick={() => setShowAddModal(true)}
+          disabled={readOnly}
+          className="shrink-0 h-9 px-3 md:px-4 flex items-center justify-center gap-1.5 text-white font-semibold text-sm rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 shadow-md shadow-blue-900/25 transition touch-manipulation"
+        >
+          <Plus size={18} strokeWidth={2.5} />
+          <span className="hidden sm:inline">Agregar</span>
+        </button>
       </header>
 
       {readOnly && (
-        <div className="shrink-0 mb-4 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
-          <p className="font-semibold">Este pedido ya está facturado.</p>
-          <p className="text-amber-200/80 text-xs mt-0.5">
-            Podés revisar el detalle, pero no se puede modificar. Si necesitás corregir cantidades o precios, emití una nota de crédito desde la pantalla de pedidos.
-          </p>
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200 -mt-1">
+          <span className="font-semibold">Pedido facturado.</span>{' '}
+          <span className="text-amber-200/80">Solo lectura.</span>
         </div>
       )}
 
-      {/*
-        `inert` (React 19 + browsers modernos) deshabilita focus y clicks dentro del subtree sin alterar
-        el layout ni el scroll. Permite que el usuario lea/scrollee todo el detalle del pedido facturado
-        pero no pueda modificar ningún input ni disparar acciones.
-      */}
+      {/* Barra compacta: lista, cliente, descuento, import (no compite con la matriz en altura) */}
       <div
         inert={readOnly || undefined}
         aria-disabled={readOnly || undefined}
-        className={`flex flex-col flex-1 min-h-0 overflow-hidden ${readOnly ? '[&_input]:cursor-not-allowed [&_select]:cursor-not-allowed [&_button]:cursor-not-allowed' : ''}`}
+        className={`grid grid-cols-2 md:grid-cols-4 xl:grid-cols-12 gap-2 items-end min-w-0 ${
+          readOnly ? '[&_input]:cursor-not-allowed [&_select]:cursor-not-allowed [&_button]:cursor-not-allowed' : ''
+        }`}
       >
-
-      {/* Lista de precios: solo ADMIN/WAREHOUSE */}
-      {showPriceListSelector && (
-        <section className="shrink-0 mb-3">
-          <label className="block text-xs font-semibold text-slate-400 mb-2 flex items-center gap-1.5">
-            <List size={14} /> Lista de precios
-          </label>
-          <select
-            className="w-full bg-slate-800/80 border border-slate-700/80 rounded-xl py-3.5 px-4 text-sm text-white min-h-[48px] focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none transition"
-            value={selectedPriceListId ?? ''}
-            onChange={(e) => onPriceListChange?.(e.target.value || null)}
-          >
-            <option value="">Precio base (sin lista)</option>
-            {priceLists.map(pl => (
-              <option key={pl.id} value={pl.id}>{pl.name}</option>
-            ))}
-          </select>
-          <p className="text-slate-500 text-[10px] mt-1">Los precios dependen de la lista elegida.</p>
-        </section>
-      )}
-
-      {/* Cliente */}
-      <section className="shrink-0 mb-3">
-        <label className="block text-xs font-semibold text-slate-400 mb-2">Cliente</label>
-        {isCustomerLocked ? (
-          <div className="w-full bg-slate-800/80 rounded-xl py-3.5 px-4 text-sm text-white border border-slate-700/80 min-h-[48px] flex items-center">
-            {customers.find(c => c.id === selectedCustomerId)?.businessName || customers[0]?.businessName || 'Mi cuenta'}
-          </div>
-        ) : (
-          <div ref={clientDropdownRef} className="relative">
-            <input
-              type="text"
-              className="w-full bg-slate-800/80 border border-slate-700/80 rounded-xl py-3.5 px-4 pr-10 text-sm text-white min-h-[48px] focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none transition"
-              value={clientDropdownOpen || clientFilter ? clientFilter : (customers.find(c => c.id === selectedCustomerId)?.businessName || customers.find(c => c.id === selectedCustomerId)?.name || '')}
-              onChange={(e) => { setClientFilter(e.target.value); setClientDropdownOpen(true); }}
-              onFocus={() => setClientDropdownOpen(true)}
-              onBlur={() => setTimeout(() => setClientDropdownOpen(false), 150)}
-              placeholder="Escribí para filtrar o seleccionar cliente..."
-            />
-            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
-            {clientDropdownOpen && (
-              <ul className="absolute z-50 left-0 right-0 mt-1 max-h-56 overflow-auto rounded-xl border border-slate-700/80 bg-slate-900 shadow-xl py-1">
-                {filteredCustomers.length === 0 ? (
-                  <li className="px-3 py-2.5 text-slate-500 text-sm">Ningún cliente coincide</li>
-                ) : (
-                  filteredCustomers.map(c => (
-                    <li
-                      key={c.id}
-                      className="px-3 py-2.5 text-sm text-white hover:bg-slate-700 cursor-pointer truncate"
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        setSelectedCustomerId(c.id);
-                        applyCustomerPriceList(c.id);
-                        setClientFilter('');
-                        setClientDropdownOpen(false);
-                      }}
-                    >
-                      {c.businessName || c.name || 'Cliente'}
-                    </li>
-                  ))
-                )}
-              </ul>
-            )}
+        {showPriceListSelector && (
+          <div className="col-span-2 md:col-span-2 xl:col-span-3 min-w-0">
+            <label className="block text-[10px] font-semibold text-slate-500 mb-0.5 flex items-center gap-1">
+              <List size={12} /> Lista
+            </label>
+            <select
+              className={orderFieldClass}
+              value={selectedPriceListId ?? ''}
+              onChange={(e) => onPriceListChange?.(e.target.value || null)}
+            >
+              <option value="">Precio base</option>
+              {priceLists.map(pl => (
+                <option key={pl.id} value={pl.id}>{pl.name}</option>
+              ))}
+            </select>
           </div>
         )}
-      </section>
 
-      {/* Detalle + botón agregar */}
-      <div className="shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-3">
-        <p className="text-sm text-slate-400">
-          <span className="font-semibold text-slate-300">{rows.length}</span> fila{rows.length !== 1 ? 's' : ''}
-          <span className="mx-1.5">·</span>
-          <span className="font-semibold text-slate-300">{totalUnits}</span> unidades
-        </p>
-        <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:justify-end sm:items-end">
+        <div className={`min-w-0 ${showPriceListSelector ? 'col-span-2 md:col-span-2 xl:col-span-4' : 'col-span-2 md:col-span-2 xl:col-span-5'}`}>
+          <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">Cliente</label>
+          {isCustomerLocked ? (
+            <div className={`${orderFieldClass} flex items-center truncate`}>
+              {customers.find(c => c.id === selectedCustomerId)?.businessName || customers[0]?.businessName || 'Mi cuenta'}
+            </div>
+          ) : (
+            <div ref={clientDropdownRef} className="relative">
+              <input
+                type="text"
+                className={`${orderFieldClass} pr-8`}
+                value={clientDropdownOpen || clientFilter ? clientFilter : (customers.find(c => c.id === selectedCustomerId)?.businessName || customers.find(c => c.id === selectedCustomerId)?.name || '')}
+                onChange={(e) => { setClientFilter(e.target.value); setClientDropdownOpen(true); }}
+                onFocus={() => setClientDropdownOpen(true)}
+                onBlur={() => setTimeout(() => setClientDropdownOpen(false), 150)}
+                placeholder="Cliente..."
+              />
+              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+              {clientDropdownOpen && (
+                <ul className="absolute z-50 left-0 right-0 mt-1 max-h-48 overflow-auto rounded-lg border border-slate-700/80 bg-slate-900 shadow-xl py-1">
+                  {filteredCustomers.length === 0 ? (
+                    <li className="px-3 py-2 text-slate-500 text-sm">Sin coincidencias</li>
+                  ) : (
+                    filteredCustomers.map(c => (
+                      <li
+                        key={c.id}
+                        className="px-3 py-2 text-sm text-white hover:bg-slate-700 cursor-pointer truncate"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setSelectedCustomerId(c.id);
+                          applyCustomerPriceList(c.id);
+                          setClientFilter('');
+                          setClientDropdownOpen(false);
+                        }}
+                      >
+                        {c.businessName || c.name || 'Cliente'}
+                      </li>
+                    ))
+                  )}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="col-span-2 md:col-span-2 xl:col-span-3 flex items-end gap-1.5 min-w-0">
+          <div className="flex-1 min-w-0">
+            <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">Dto. global %</label>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step="0.01"
+              value={globalDiscountPercent}
+              onChange={(e) => setGlobalDiscountPercent(e.target.value)}
+              onWheel={blockWheelOnNumberInput}
+              placeholder="Ej: 10"
+              className={`${orderFieldClass} font-mono tabular-nums ${numberInputNoSpinClass}`}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={applyGlobalDiscount}
+            disabled={!rows.length}
+            className="shrink-0 h-9 px-2.5 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 text-slate-200 text-xs font-semibold border border-slate-600 transition"
+            title="Aplicar descuento a todos"
+          >
+            Aplicar
+          </button>
+        </div>
+
+        <div className={`col-span-2 flex flex-wrap items-center gap-2 justify-between md:justify-end min-w-0 ${
+          showPriceListSelector ? 'md:col-span-4 xl:col-span-2' : 'md:col-span-4 xl:col-span-4'
+        }`}>
+          <p className="text-xs text-slate-400 tabular-nums md:hidden">
+            <span className="font-semibold text-slate-300">{rows.length}</span> filas ·{' '}
+            <span className="font-semibold text-slate-300">{totalUnits}</span> u.
+          </p>
           {canMatrixImport && (
-            <>
-              <label className="flex items-start gap-2 text-xs text-slate-400 cursor-pointer select-none max-w-[min(100%,280px)] sm:mr-1">
-                <input
-                  type="checkbox"
-                  className="mt-0.5 rounded border-slate-600 bg-slate-800 text-emerald-600 focus:ring-emerald-500/40 shrink-0"
-                  checked={matrixImportAllSheets}
-                  onChange={(e) => setMatrixImportAllSheets(e.target.checked)}
-                  disabled={matrixImporting || savingOrder}
-                />
-                <span>
-                  Importar <span className="text-slate-300 font-semibold">todas</span> las hojas del libro
-                  <span className="block text-[10px] text-slate-500 font-normal mt-0.5 leading-snug">
-                    Desmarcado: solo la primera hoja con datos (recomendado si el archivo tiene muchas hojas copiadas y se generaban pedidos duplicados).
-                  </span>
-                </span>
-              </label>
+            <div className="flex items-center gap-1.5">
               <input
                 ref={matrixFileRef}
                 type="file"
@@ -1318,58 +1333,45 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                 className="hidden"
                 onChange={onMatrixImportExcel}
               />
+              <label className="hidden lg:flex items-center gap-1 text-[10px] text-slate-500 cursor-pointer select-none" title="Importar todas las hojas del Excel">
+                <input
+                  type="checkbox"
+                  className="rounded border-slate-600 bg-slate-800 text-emerald-600 shrink-0"
+                  checked={matrixImportAllSheets}
+                  onChange={(e) => setMatrixImportAllSheets(e.target.checked)}
+                  disabled={matrixImporting || savingOrder}
+                />
+                Todas las hojas
+              </label>
               <button
                 type="button"
                 onClick={() => matrixFileRef.current?.click()}
                 disabled={matrixImporting || savingOrder}
-                className="min-h-[48px] px-5 py-3 flex items-center justify-center gap-2.5 text-white font-semibold text-sm rounded-xl bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 disabled:pointer-events-none shadow-lg shadow-emerald-900/25 active:scale-[0.98] transition touch-manipulation"
-                title="Por defecto: una sola hoja con datos y un solo pedido por cliente. Opción: todas las hojas. Columnas Cliente, Código, Color, talles. Sin columna cliente se usa el nombre de la hoja."
+                className="h-9 px-2.5 flex items-center justify-center gap-1.5 text-white font-semibold text-xs rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 transition touch-manipulation"
+                title="Importar matriz Excel"
               >
-                <Upload size={20} strokeWidth={2.5} />
-                {matrixImporting ? 'Importando…' : 'Importar Excel (matriz)'}
+                <Upload size={16} />
+                <span className="hidden sm:inline">{matrixImporting ? '…' : 'Excel'}</span>
               </button>
-            </>
+            </div>
           )}
-          <button
-            type="button"
-            onClick={() => setShowAddModal(true)}
-            className="min-h-[48px] px-5 py-3 flex items-center justify-center gap-2.5 text-white font-semibold text-sm rounded-xl bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-900/30 active:scale-[0.98] transition touch-manipulation"
-          >
-            <Plus size={22} strokeWidth={2.5} /> Agregar artículo
-          </button>
         </div>
       </div>
-
-      <div className="shrink-0 flex flex-col sm:flex-row sm:items-center gap-2 mb-3">
-        <label className="text-xs font-semibold text-slate-400 whitespace-nowrap">Descuento global (%)</label>
-        <input
-          type="number"
-          min={0}
-          max={100}
-          step="0.01"
-          value={globalDiscountPercent}
-          onChange={(e) => setGlobalDiscountPercent(e.target.value)}
-          onWheel={blockWheelOnNumberInput}
-          placeholder="Ej: 10"
-          className={`w-full sm:w-36 h-10 bg-slate-800/80 border border-slate-700/80 rounded-xl px-3 text-sm text-white font-mono tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none ${numberInputNoSpinClass}`}
-        />
-        <button
-          type="button"
-          onClick={applyGlobalDiscount}
-          disabled={!rows.length}
-          className="h-10 px-4 rounded-xl bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 disabled:text-slate-500 text-slate-200 text-sm font-semibold border border-slate-600 transition"
-        >
-          Aplicar a todos
-        </button>
       </div>
 
-      {/* Matriz: ocupa el espacio libre; scroll acá; encabezado de talles sticky */}
-      <div className="flex-1 min-h-0 flex flex-col rounded-xl md:rounded-2xl border border-slate-700/80 bg-slate-800/30 shadow-inner overflow-hidden">
+      {/* Matriz: fila flexible del grid — ocupa todo el alto restante */}
+      <div
+        inert={readOnly || undefined}
+        aria-disabled={readOnly || undefined}
+        className={`min-h-0 h-full flex flex-col w-full border border-slate-700/70 bg-slate-800/25 overflow-hidden ${
+          readOnly ? '[&_input]:cursor-not-allowed [&_button]:cursor-not-allowed' : ''
+        }`}
+      >
         {rows.length === 0 ? (
           <button
             type="button"
             onClick={() => setShowAddModal(true)}
-            className="w-full flex-1 min-h-[200px] flex flex-col items-center justify-center gap-4 py-12 px-4 rounded-2xl border-2 border-dashed border-slate-600/80 hover:border-blue-500/50 hover:bg-slate-800/60 transition-colors group"
+            className="w-full h-full min-h-[12rem] flex flex-col items-center justify-center gap-4 py-12 px-4 border-2 border-dashed border-slate-600/80 hover:border-blue-500/50 hover:bg-slate-800/60 transition-colors group"
           >
             <span className="w-16 h-16 rounded-2xl bg-slate-700/80 group-hover:bg-blue-500/20 flex items-center justify-center transition-colors">
               <Plus size={32} className="text-slate-400 group-hover:text-blue-400" strokeWidth={2} />
@@ -1380,7 +1382,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
             </div>
           </button>
         ) : (
-            <div className="flex-1 min-h-0 overflow-auto touch-scroll overscroll-contain scroll-area-ios">
+            <div className="flex-1 min-h-0 h-full w-full overflow-auto touch-scroll overscroll-contain scroll-area-ios">
               <table className="w-full min-w-max text-sm border-separate border-spacing-0">
                 <thead className="sticky top-0 z-30">
                   <tr className={`border-b border-slate-600/90 shadow-[0_2px_8px_rgba(15,23,42,0.85)] ${stickyHeadBg}`}>
@@ -1572,37 +1574,35 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         )}
       </div>
 
-      </div>{/* /inert subtree */}
-
-      {/* Pie fijo al fondo del panel: subtotal + confirmar siempre visible */}
+      {/* Pie compacto: subtotal + confirmar */}
       {!readOnly && (
-        <footer className="shrink-0 z-40 mt-2 pt-2 border-t border-slate-700/80 bg-slate-950 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-          <div className="rounded-xl border border-slate-700/80 bg-slate-800/95 p-3 md:p-4 shadow-lg shadow-black/20">
-            <div className="flex items-center justify-between gap-3 mb-2">
-              <span className="text-sm font-semibold text-slate-400">Subtotal</span>
-              <span className="text-xl md:text-2xl font-bold text-emerald-400 tabular-nums">${total.toLocaleString()}</span>
+        <footer className="min-w-0 border-t border-slate-700/80 bg-slate-950 pb-[max(0.25rem,env(safe-area-inset-bottom))] pt-1.5">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+            <div className="flex-1 min-w-0 flex items-baseline justify-between sm:justify-start sm:gap-3">
+              <span className="text-xs font-semibold text-slate-400">Subtotal</span>
+              <span className="text-lg md:text-xl font-bold text-emerald-400 tabular-nums">${total.toLocaleString()}</span>
             </div>
             {hasExceededStock && (
-              <p className="text-xs text-amber-300 mb-2">Hay cantidades mayores al stock: se guardan igual y quedan como pendientes.</p>
+              <p className="text-[10px] text-amber-300 sm:max-w-[14rem] sm:leading-tight order-last sm:order-none w-full sm:w-auto">
+                Cantidades &gt; stock: quedan pendientes.
+              </p>
             )}
             <button
               type="button"
               disabled={!selectedCustomerId || rows.length === 0 || totalUnits === 0 || savingOrder}
               onClick={handleSave}
-              className="w-full min-h-[48px] py-3 rounded-xl font-bold flex items-center justify-center gap-2.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white shadow-lg shadow-blue-900/30 disabled:shadow-none disabled:opacity-60 transition-all touch-manipulation"
+              className="w-full sm:w-auto sm:min-w-[200px] shrink-0 h-10 px-5 rounded-lg font-bold flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-sm shadow-md shadow-blue-900/30 disabled:opacity-60 transition touch-manipulation"
             >
-              <Save size={20} /> {savingOrder ? 'Guardando...' : 'Confirmar pedido'}
+              <Save size={18} /> {savingOrder ? 'Guardando...' : 'Confirmar pedido'}
             </button>
           </div>
         </footer>
       )}
 
       {readOnly && (
-        <div className="shrink-0 mt-2 pt-2 border-t border-slate-700/80 bg-slate-800/60 rounded-xl p-3 md:p-4">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-semibold text-slate-400">Subtotal</span>
-            <span className="text-xl md:text-2xl font-bold text-emerald-400 tabular-nums">${total.toLocaleString()}</span>
-          </div>
+        <div className="flex items-center justify-between border-t border-slate-700/80 pt-1.5 px-1">
+          <span className="text-xs font-semibold text-slate-400">Subtotal</span>
+          <span className="text-lg font-bold text-emerald-400 tabular-nums">${total.toLocaleString()}</span>
         </div>
       )}
 

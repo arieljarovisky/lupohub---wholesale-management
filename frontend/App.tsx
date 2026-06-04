@@ -962,7 +962,7 @@ const App: React.FC = () => {
       <main
         className={`flex-1 min-h-0 md:ml-64 relative scroll-area-ios mobile-main-scroll ${
           isOrderFormView
-            ? 'flex flex-col h-full min-h-0 overflow-hidden overflow-x-hidden p-3 md:p-4 pt-[max(0.75rem,env(safe-area-inset-top))]'
+            ? 'flex flex-col h-full min-h-0 overflow-hidden overflow-x-hidden p-2 md:p-3 pt-[max(0.5rem,env(safe-area-inset-top))]'
             : 'overflow-x-hidden overflow-y-auto pl-3 pr-3 pb-4 pt-[max(0.75rem,env(safe-area-inset-top))] md:p-8'
         }`}
       >
@@ -1205,7 +1205,7 @@ const App: React.FC = () => {
           )}
           {isOrderFormView ? (
             <Suspense fallback={<ViewFallback />}>
-              <div className="flex flex-col flex-1 min-h-0 h-full w-full">
+              <div className="flex flex-col flex-1 min-h-0 h-full w-full max-w-none">
               <CreateOrderTemplate
                 products={products}
                 customers={getVisibleCustomers}
