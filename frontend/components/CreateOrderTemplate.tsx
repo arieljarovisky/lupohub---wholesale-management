@@ -4,7 +4,7 @@ import { Order, OrderStatus, Product, Customer, Role } from '../types';
 import type { PriceList } from '../types';
 import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
-import { labelTalle, codigoTalleParaSku } from '../utils/tallesTango';
+import { labelTalle, codigoTalleParaSku, ORDER_FORM_SIZE_CODES, sortOrderFormSizeCodes } from '../utils/tallesTango';
 import { parseOrderMatrixExcel } from '../utils/orderImportMatrix';
 import { articleCodesMatch, articleCodeForOrderRow, resolveDisplayArticleCode, skuLookupCandidates, variantColorKey } from '../utils/articleCodeUtils';
 
@@ -64,19 +64,19 @@ function formatColorCell(colorCode: string, colorName: string): string {
 function normalizeSizeCode(value: unknown, skuRaw?: string): string {
   const directRaw = String(value ?? '').trim();
   if (directRaw) {
-    const numLead = directRaw.match(/^(\d{2,3})\b/);
+    const numLead = directRaw.match(/^(\d{1,3})\b/);
     if (numLead) return numLead[1];
     const fromName = codigoTalleParaSku(directRaw);
-    if (fromName && /^\d{2,3}$/.test(fromName)) return fromName;
+    if (fromName && /^\d{1,3}$/.test(fromName)) return fromName;
   }
   const sku = String(skuRaw ?? '').trim();
   if (!sku) return '';
   const parts = sku.split('-').filter(Boolean);
-  if (parts.length >= 3 && /^\d{2,3}$/.test(parts[1])) return parts[1];
+  if (parts.length >= 3 && /^\d{1,3}$/.test(parts[1])) return parts[1];
   if (parts.length >= 2) {
     const fromSku = String(parts[parts.length - 2]).trim();
     const norm = codigoTalleParaSku(fromSku) || fromSku;
-    if (/^\d{2,3}$/.test(norm)) return norm;
+    if (/^\d{1,3}$/.test(norm)) return norm;
   }
   return '';
 }
@@ -94,7 +94,7 @@ function variantSkuLooksCanonical(variantSku: string, parentSku: string): boolea
   const v = String(variantSku ?? '').trim();
   const parts = v.split('-').filter(Boolean);
   if (parts.length !== 3) return false;
-  if (!/^\d{2,3}$/.test(parts[1])) return false;
+  if (!/^\d{1,3}$/.test(parts[1])) return false;
   const parent = String(parentSku ?? '').trim();
   return !parent || articleCodesMatch(parts[0], parent);
 }
@@ -133,7 +133,7 @@ function assignVariantsToMaps(
   for (const v of sorted) {
     const variantSkuRef = String((v as { variant_sku?: string }).variant_sku || v.sku || '');
     const sizeCode = normalizeSizeCode(v.size_code, variantSkuRef);
-    if (!sizeCode || !/^\d{2,3}$/.test(sizeCode)) continue;
+    if (!sizeCode || !/^\d{1,3}$/.test(sizeCode)) continue;
     const hasDbSize = Boolean(String(v.size_code ?? '').trim());
     const canonical = variantSkuLooksCanonical(variantSkuRef, parentSku);
     if (!canonical && !hasDbSize) continue;
@@ -458,26 +458,28 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
 
   const sizeColumns = useMemo(() => {
     const map = new Map<string, { code: string; name: string }>();
+    for (const code of ORDER_FORM_SIZE_CODES) {
+      const fromApi = sizes.find((s) => String(s.code).trim() === code);
+      map.set(code, { code, name: fromApi?.name || labelTalle(code) || code });
+    }
     for (const s of sizes) {
       const code = String(s.code || '').trim();
-      if (!code) continue;
-      map.set(code, { code, name: s.name || s.code });
+      if (!code || !/^\d{1,3}$/.test(code)) continue;
+      if (!map.has(code)) map.set(code, { code, name: s.name || labelTalle(code) || code });
     }
     for (const r of rows) {
       for (const code of Object.keys(r.variantBySize || {})) {
         const c = String(code || '').trim();
         if (!c || map.has(c)) continue;
-        map.set(c, { code: c, name: c });
+        map.set(c, { code: c, name: labelTalle(c) || c });
       }
       for (const code of Object.keys(r.quantitiesBySize || {})) {
         const c = String(code || '').trim();
         if (!c || map.has(c)) continue;
-        map.set(c, { code: c, name: c });
+        map.set(c, { code: c, name: labelTalle(c) || c });
       }
     }
-    return Array.from(map.values()).sort((a, b) =>
-      String(a.code).localeCompare(String(b.code), undefined, { numeric: true })
-    );
+    return Array.from(map.values()).sort((a, b) => sortOrderFormSizeCodes(a.code, b.code));
   }, [sizes, rows]);
 
   const filteredCustomers = useMemo(() => {
@@ -566,7 +568,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         });
       }
       const row = rowsByKey.get(key)!;
-      if (sizeCode && /^\d{2,3}$/.test(sizeCode) && !row.variantBySize[sizeCode]) {
+      if (sizeCode && /^\d{1,3}$/.test(sizeCode) && !row.variantBySize[sizeCode]) {
         row.variantBySize[sizeCode] = variantId;
       }
       row.quantitiesBySize[sizeCode] = (row.quantitiesBySize[sizeCode] || 0) + Number(item.quantity || 0);
@@ -627,7 +629,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     api.getSizes().then(list => {
       const withCode = list.filter(s => {
         const code = String(s?.code ?? '').trim();
-        return code !== '' && /^\d{2,3}$/.test(code);
+        return code !== '' && /^\d{1,3}$/.test(code);
       });
       const sorted = [...withCode].sort((a, b) => String(a.code).localeCompare(String(b.code), undefined, { numeric: true }));
       setSizes(sorted);

@@ -31,8 +31,23 @@ const TALLE_NOMBRE_A_CODIGO: Record<string, string> = {
 export function codigoTalleParaSku(nameOrCode: string | undefined | null): string {
   if (nameOrCode == null) return '';
   const s = String(nameOrCode).trim().toUpperCase();
-  if (/^\d{2,3}$/.test(s)) return s;
+  if (/^\d{1,3}$/.test(s)) return s;
   return TALLE_NOMBRE_A_CODIGO[s] ?? s;
+}
+
+/** Orden de columnas en la matriz de pedidos (guía de talles). */
+export const ORDER_FORM_SIZE_CODES = [
+  '4', '6', '8', '10', '12', '14',
+  '130', '140', '150', '160', '170', '180', '200', '250',
+] as const;
+
+export function sortOrderFormSizeCodes(a: string, b: string): number {
+  const ia = ORDER_FORM_SIZE_CODES.indexOf(a as (typeof ORDER_FORM_SIZE_CODES)[number]);
+  const ib = ORDER_FORM_SIZE_CODES.indexOf(b as (typeof ORDER_FORM_SIZE_CODES)[number]);
+  if (ia >= 0 && ib >= 0) return ia - ib;
+  if (ia >= 0) return -1;
+  if (ib >= 0) return 1;
+  return String(a).localeCompare(String(b), undefined, { numeric: true });
 }
 
 /** Formato para mostrar: "código - talle" (ej. "130 - P"). */
