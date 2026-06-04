@@ -307,6 +307,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const showPriceListSelector = (role === Role.ADMIN || role === Role.WAREHOUSE) && priceLists.length > 0;
   /** Evita re-hidratar el pedido (y resetear la lista de precios) cada vez que se recargan productos. */
   const editHydratedOrderIdRef = useRef<string | null>(null);
+  /** Detecta cambio de lista tras abrir edición (p. ej. catálogo base → lista del cliente). */
+  const editPriceListAtHydrationRef = useRef<string | null | undefined>(undefined);
   /** Invalida respuestas async del modal de colores si el usuario cerró o abrió otro. */
   const colorPickerRequestRef = useRef(0);
   /** En edición: evita pisar priceAtMoment al abrir; permite recalcular si cambia la lista. */
@@ -512,6 +514,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     editHydratedOrderIdRef.current = hydrateKey;
 
     setSelectedCustomerId(hydrateSourceOrder.customerId);
+    applyCustomerPriceList(hydrateSourceOrder.customerId);
     setOrderDate(isDuplicating ? new Date().toISOString().slice(0, 10) : hydrateSourceOrder.date);
 
     const rowsByKey = new Map<string, TemplateRow>();
@@ -593,14 +596,33 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     });
     appliedPriceListForRowsRef.current = undefined;
     if (isDuplicating) pendingNewOrderIdRef.current = null;
-  }, [hydrateSourceOrder, products, isDuplicating]);
+  }, [hydrateSourceOrder, products, isDuplicating, applyCustomerPriceList]);
 
   useEffect(() => {
     appliedPriceListForRowsRef.current = undefined;
     priceListRecalcPendingRef.current = false;
     productsAtPriceListChangeRef.current = null;
+    editPriceListAtHydrationRef.current = undefined;
     if (!hydrateSourceOrder) pendingNewOrderIdRef.current = null;
   }, [hydrateSourceOrder?.id, isDuplicating]);
+
+  /** Si la lista del cliente llega después de la primera hidratación, volver a enlazar variantes con el catálogo correcto. */
+  useEffect(() => {
+    if (!isEditing || !initialOrder?.id) return;
+    const listId = selectedPriceListId ?? null;
+    const prev = editPriceListAtHydrationRef.current;
+    if (prev === undefined) {
+      editPriceListAtHydrationRef.current = listId;
+      return;
+    }
+    if (prev === listId) return;
+    editPriceListAtHydrationRef.current = listId;
+    if (editHydratedOrderIdRef.current === initialOrder.id) {
+      editHydratedOrderIdRef.current = null;
+      appliedPriceListForRowsRef.current = undefined;
+      priceListRecalcPendingRef.current = true;
+    }
+  }, [selectedPriceListId, isEditing, initialOrder?.id]);
 
   /** Solo al cambiar el selector (no cuando llegan productos): guardar snapshot para detectar recarga. */
   useEffect(() => {

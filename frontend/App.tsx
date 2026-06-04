@@ -192,6 +192,7 @@ const App: React.FC = () => {
       setEditingOrder(null);
       setDuplicateSourceOrder(null);
       editingOrderIdRef.current = null;
+      setCreateOrderPriceListId(null);
     }
     setCurrentView(nextView);
   }, [currentUser, defaultViewForRole, isViewAccessible]);
@@ -540,9 +541,15 @@ const App: React.FC = () => {
     setCurrentView('orders');
   }, [showToast]);
 
+  const resolveCustomerPriceListId = (customerId: string): string | null => {
+    const c = customers.find((x) => x.id === customerId);
+    return c?.priceListId ?? null;
+  };
+
   const handleEditOrder = (order: Order) => {
     setDuplicateSourceOrder(null);
     editingOrderIdRef.current = order.id;
+    setCreateOrderPriceListId(resolveCustomerPriceListId(order.customerId));
     setEditingOrder(order);
     setCurrentView('create_order');
   };
@@ -550,6 +557,7 @@ const App: React.FC = () => {
   const handleDuplicateOrder = (order: Order) => {
     setEditingOrder(null);
     editingOrderIdRef.current = null;
+    setCreateOrderPriceListId(resolveCustomerPriceListId(order.customerId));
     setDuplicateSourceOrder(order);
     setCurrentView('create_order');
   };
@@ -1240,7 +1248,13 @@ const App: React.FC = () => {
                 products={products}
                 customers={getVisibleCustomers}
                 onSave={handleCreateOrder}
-                onCancel={() => { setEditingOrder(null); setDuplicateSourceOrder(null); editingOrderIdRef.current = null; setCurrentView('orders'); }}
+                onCancel={() => {
+                  setEditingOrder(null);
+                  setDuplicateSourceOrder(null);
+                  editingOrderIdRef.current = null;
+                  setCreateOrderPriceListId(null);
+                  setCurrentView('orders');
+                }}
                 sellerId={currentUser.role === Role.CUSTOMER ? undefined : currentUser.id}
                 initialOrder={editingOrder}
                 duplicateFromOrder={duplicateSourceOrder}
