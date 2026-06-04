@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { ArrowLeft, Plus, Trash2, Search, Save, Package, ChevronDown, ChevronRight, Check, Palette, List, Upload } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Search, Save, Package, ChevronDown, ChevronRight, Check, Palette, List, Upload, Bookmark } from 'lucide-react';
 import { Order, OrderStatus, Product, Customer, Role } from '../types';
 import type { PriceList } from '../types';
 import { api } from '../services/api';
@@ -31,6 +31,8 @@ interface CreateOrderTemplateProps {
    * Tras importar pedidos desde Excel (varios clientes), opcionalmente refrescar lista y volver a pedidos.
    */
   onMatrixImportDone?: () => void | Promise<void>;
+  /** Tras guardar la lista de precios en la ficha del cliente (actualizar estado en App). */
+  onCustomerUpdated?: (customer: Customer) => void;
 }
 
 /** Una fila de la plantilla: un artículo (código) + un color, con cantidades por talle. */
@@ -259,7 +261,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   selectedPriceListId = null,
   onPriceListChange,
   readOnly = false,
-  onMatrixImportDone
+  onMatrixImportDone,
+  onCustomerUpdated,
 }) => {
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [clientFilter, setClientFilter] = useState('');
@@ -285,6 +288,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   /** Códigos de artículo colapsados (solo se muestra resumen). */
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [matrixImporting, setMatrixImporting] = useState(false);
+  const [savingCustomerPriceList, setSavingCustomerPriceList] = useState(false);
   /** false = solo la primera hoja del Excel con filas válidas (evita pedidos duplicados por muchas hojas). */
   const [matrixImportAllSheets, setMatrixImportAllSheets] = useState(false);
 
@@ -326,6 +330,51 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     const customer = customers.find((c) => c.id === customerId);
     onPriceListChange?.(customer?.priceListId ?? null);
   }, [customers, onPriceListChange]);
+
+  const selectedCustomer = useMemo(
+    () => customers.find((c) => c.id === selectedCustomerId),
+    [customers, selectedCustomerId]
+  );
+
+  const selectedPriceListLabel = useMemo(() => {
+    if (!selectedPriceListId) return 'Precio base';
+    return priceLists.find((pl) => pl.id === selectedPriceListId)?.name ?? 'Lista seleccionada';
+  }, [selectedPriceListId, priceLists]);
+
+  const customerPriceListAlreadySaved = useMemo(() => {
+    const saved = selectedCustomer?.priceListId ?? null;
+    const current = selectedPriceListId ?? null;
+    return saved === current;
+  }, [selectedCustomer?.priceListId, selectedPriceListId]);
+
+  const saveCustomerPriceListPermanent = useCallback(async () => {
+    if (!selectedCustomerId || readOnly || savingCustomerPriceList) return;
+    setSavingCustomerPriceList(true);
+    try {
+      const updated = await api.updateCustomer(selectedCustomerId, {
+        priceListId: selectedPriceListId ?? null,
+      });
+      onCustomerUpdated?.(updated);
+      const name = updated.businessName || updated.name || 'el cliente';
+      showToast(
+        'success',
+        `Lista «${selectedPriceListLabel}» guardada para ${name}. Los próximos pedidos la usarán por defecto.`
+      );
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'No se pudo guardar la lista del cliente';
+      showToast('error', msg);
+    } finally {
+      setSavingCustomerPriceList(false);
+    }
+  }, [
+    selectedCustomerId,
+    readOnly,
+    savingCustomerPriceList,
+    selectedPriceListId,
+    onCustomerUpdated,
+    selectedPriceListLabel,
+    showToast,
+  ]);
 
   const onMatrixImportExcel = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1233,16 +1282,36 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
             <label className="block text-[10px] font-semibold text-slate-500 mb-0.5 flex items-center gap-1">
               <List size={12} /> Lista
             </label>
-            <select
-              className={orderFieldClass}
-              value={selectedPriceListId ?? ''}
-              onChange={(e) => onPriceListChange?.(e.target.value || null)}
-            >
-              <option value="">Precio base</option>
-              {priceLists.map(pl => (
-                <option key={pl.id} value={pl.id}>{pl.name}</option>
-              ))}
-            </select>
+            <div className="flex gap-1.5 items-stretch min-w-0">
+              <select
+                className={`${orderFieldClass} flex-1 min-w-0`}
+                value={selectedPriceListId ?? ''}
+                onChange={(e) => onPriceListChange?.(e.target.value || null)}
+              >
+                <option value="">Precio base</option>
+                {priceLists.map(pl => (
+                  <option key={pl.id} value={pl.id}>{pl.name}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={saveCustomerPriceListPermanent}
+                disabled={!selectedCustomerId || savingCustomerPriceList || customerPriceListAlreadySaved}
+                title={
+                  !selectedCustomerId
+                    ? 'Elegí un cliente primero'
+                    : customerPriceListAlreadySaved
+                      ? 'Esta lista ya es la predeterminada del cliente'
+                      : `Guardar «${selectedPriceListLabel}» como lista del cliente`
+                }
+                className="shrink-0 h-9 px-2.5 flex items-center justify-center gap-1 rounded-lg border border-slate-600 bg-slate-700/90 hover:bg-slate-600 disabled:opacity-45 disabled:hover:bg-slate-700/90 text-slate-200 text-xs font-semibold transition touch-manipulation"
+              >
+                <Bookmark size={14} className={customerPriceListAlreadySaved ? 'text-emerald-400' : ''} />
+                <span className="hidden lg:inline max-w-[5.5rem] truncate">
+                  {savingCustomerPriceList ? '…' : customerPriceListAlreadySaved ? 'Fijada' : 'Fijar'}
+                </span>
+              </button>
+            </div>
           </div>
         )}
 

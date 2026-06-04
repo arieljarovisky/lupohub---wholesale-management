@@ -1220,6 +1220,12 @@ const App: React.FC = () => {
                 onPriceListChange={setCreateOrderPriceListId}
                 readOnly={!!editingOrder?.invoice}
                 onMatrixImportDone={handleMatrixImportDone}
+                onCustomerUpdated={(updated) => {
+                  setCustomers((prev) => prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)));
+                  if (myCustomer?.id === updated.id) {
+                    setMyCustomer((prev) => (prev ? { ...prev, ...updated } : null));
+                  }
+                }}
               />
               </div>
             </Suspense>
