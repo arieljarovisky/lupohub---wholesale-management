@@ -95,7 +95,7 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({ currentView, onChangeView,
   };
 
   return (
-    <div className="w-64 bg-gradient-to-b from-slate-950 to-slate-900 text-white flex flex-col h-screen fixed left-0 top-0 shadow-2xl z-20 border-r border-slate-800/50">
+    <div className="hidden md:flex w-64 bg-gradient-to-b from-slate-950 to-slate-900 text-white flex-col h-screen fixed left-0 top-0 shadow-2xl z-20 border-r border-slate-800/50">
       {/* Logo */}
       <div className="p-5 flex items-center gap-2 border-b border-slate-800/50">
         <div className="w-11 h-11 shrink-0 bg-gradient-to-br from-blue-500 to-blue-700 rounded-xl flex items-center justify-center shadow-lg shadow-blue-900/30">

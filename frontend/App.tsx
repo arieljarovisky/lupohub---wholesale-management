@@ -965,16 +965,14 @@ const App: React.FC = () => {
   return (
     <div className="flex w-full bg-slate-950 text-slate-200 flex-col md:flex-row min-h-[100dvh] h-[100dvh] md:h-screen overflow-hidden">
       {!sidebarCollapsed && (
-        <div className="hidden md:block shrink-0 w-64">
-          <Sidebar
-            currentView={baseView}
-            onChangeView={handleChangeView}
-            userRole={currentUser.role}
-            userEmail={currentUser.email}
-            onLogout={handleLogout}
-            onToggleCollapse={() => setSidebarCollapsed(true)}
-          />
-        </div>
+        <Sidebar
+          currentView={baseView}
+          onChangeView={handleChangeView}
+          userRole={currentUser.role}
+          userEmail={currentUser.email}
+          onLogout={handleLogout}
+          onToggleCollapse={() => setSidebarCollapsed(true)}
+        />
       )}
 
       {sidebarCollapsed && (
