@@ -76,27 +76,31 @@ const CATALOG_PRINT_CSS = `
   }
 `;
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-function buildCatalogPrintHtml(cover: CoverConfig, bodyHtml: string): string {
+function mountPrintDocument(doc: Document, cover: CoverConfig, bodyHtml: string) {
   const title = [cover.brand || 'Catálogo', cover.collection].filter(Boolean).join(' - ');
-  const styleNodes = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
-    .map((el) => el.outerHTML)
-    .join('\n');
-  return `<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="utf-8" />
-  <title>${escapeHtml(title)}</title>
-  ${styleNodes}
-  <style>${CATALOG_PRINT_CSS}</style>
-</head>
-<body>
-${bodyHtml}
-</body>
-</html>`;
+
+  doc.documentElement.lang = 'es';
+
+  const meta = doc.createElement('meta');
+  meta.setAttribute('charset', 'utf-8');
+  doc.head.appendChild(meta);
+
+  const titleEl = doc.createElement('title');
+  titleEl.textContent = title;
+  doc.head.appendChild(titleEl);
+
+  document.querySelectorAll('link[rel="stylesheet"]').forEach((node) => {
+    doc.head.appendChild(node.cloneNode(true));
+  });
+  document.querySelectorAll('style').forEach((node) => {
+    doc.head.appendChild(node.cloneNode(true));
+  });
+
+  const printStyle = doc.createElement('style');
+  printStyle.textContent = CATALOG_PRINT_CSS;
+  doc.head.appendChild(printStyle);
+
+  doc.body.innerHTML = bodyHtml;
 }
 
 function waitForImages(doc: Document, done: () => void) {
@@ -118,8 +122,8 @@ function waitForImages(doc: Document, done: () => void) {
   }
 }
 
-/** Imprime el catálogo en un iframe oculto (no requiere ventanas emergentes). */
-function printCatalogHtml(html: string): boolean {
+/** Imprime el catálogo en un iframe oculto (sin document.write ni ventanas emergentes). */
+function printCatalogHtml(cover: CoverConfig, bodyHtml: string): boolean {
   const iframe = document.createElement('iframe');
   iframe.setAttribute('aria-hidden', 'true');
   Object.assign(iframe.style, {
@@ -138,18 +142,25 @@ function printCatalogHtml(html: string): boolean {
     iframe.remove();
     return false;
   }
-  doc.open();
-  doc.write(html);
-  doc.close();
+
+  mountPrintDocument(doc, cover, bodyHtml);
+
   const cleanup = () => setTimeout(() => iframe.remove(), 2000);
   win.addEventListener('afterprint', cleanup, { once: true });
   setTimeout(cleanup, 20000);
-  waitForImages(doc, () => {
-    setTimeout(() => {
-      win.focus();
-      win.print();
-    }, 350);
-  });
+
+  const runPrint = () => {
+    waitForImages(doc, () => {
+      setTimeout(() => {
+        win.focus();
+        win.print();
+      }, 350);
+    });
+  };
+
+  // Breve espera para que carguen las hojas de estilo clonadas en el iframe.
+  setTimeout(runPrint, 450);
+
   return true;
 }
 
@@ -158,7 +169,7 @@ function openCatalogPrint(cover: CoverConfig): boolean {
   if (!root) return false;
   const clone = root.cloneNode(true) as HTMLElement;
   clone.querySelectorAll('.tn-noprint').forEach((n) => n.remove());
-  return printCatalogHtml(buildCatalogPrintHtml(cover, clone.outerHTML));
+  return printCatalogHtml(cover, clone.outerHTML);
 }
 
 interface ProductOverride {
