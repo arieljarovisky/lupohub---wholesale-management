@@ -44,7 +44,7 @@ interface ColorVariant {
 const COLOR_THUMB_SIZE = 160;
 
 const CATALOG_PRINT_CSS = `
-  @page { size: A4; margin: 0; }
+  @page { size: A4 landscape; margin: 0; }
   html, body {
     margin: 0;
     padding: 0;
@@ -59,20 +59,88 @@ const CATALOG_PRINT_CSS = `
     border-radius: 0 !important;
     box-shadow: none !important;
   }
+  .tn-catalog-body {
+    padding: 0 !important;
+  }
   .tn-cover {
     break-after: page;
     page-break-after: always;
     min-height: 100vh;
+    width: 100%;
     box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
-  .tn-section:not(:first-child) {
+  .tn-section-head {
     break-before: page;
     page-break-before: always;
+    break-after: avoid;
+    page-break-after: avoid;
+    padding: 10mm 0 !important;
+  }
+  .tn-section:first-child .tn-section-head {
+    break-before: auto;
+    page-break-before: auto;
+  }
+  .tn-products-list {
+    gap: 0 !important;
   }
   .tn-product {
     break-inside: avoid;
     page-break-inside: avoid;
+    break-after: page;
+    page-break-after: always;
     box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    height: 210mm;
+    max-height: 210mm;
+    overflow: hidden;
+    box-sizing: border-box;
+  }
+  .tn-product-layout {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: stretch !important;
+    height: 100% !important;
+    min-height: 0 !important;
+  }
+  .tn-product-layout.tn-product-flip {
+    flex-direction: row-reverse !important;
+  }
+  .tn-product-media {
+    width: 50% !important;
+    flex: 0 0 50% !important;
+    max-width: 50% !important;
+    min-height: 0 !important;
+    height: 100% !important;
+    aspect-ratio: auto !important;
+  }
+  .tn-product-media img {
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: cover !important;
+  }
+  .tn-product-info {
+    width: 50% !important;
+    flex: 0 0 50% !important;
+    max-width: 50% !important;
+    padding: 8mm 10mm !important;
+    overflow: hidden !important;
+  }
+  .tn-product-info h3 {
+    font-size: 18px !important;
+    line-height: 1.15 !important;
+  }
+  .tn-product-info p,
+  .tn-product-info li {
+    font-size: 10.5px !important;
+    line-height: 1.35 !important;
+  }
+  .tn-product-info .mt-3,
+  .tn-product-info .mt-4 {
+    margin-top: 0.35rem !important;
   }
 `;
 
@@ -1178,9 +1246,9 @@ const ProductDisplay: React.FC<{
         </div>
       )}
 
-      <div className={`flex flex-col ${flip ? 'md:flex-row-reverse' : 'md:flex-row'}`}>
+      <div className={`tn-product-layout flex flex-col ${flip ? 'md:flex-row-reverse tn-product-flip' : 'md:flex-row'}`}>
         {/* Imagen */}
-        <div className="md:w-1/2 bg-[#f4f1ec] flex items-center justify-center aspect-[4/5] md:aspect-auto md:min-h-[340px] overflow-hidden">
+        <div className="tn-product-media md:w-1/2 bg-[#f4f1ec] flex items-center justify-center aspect-[4/5] md:aspect-auto md:min-h-[340px] overflow-hidden">
           {img ? (
             <img src={img} alt={product.name} loading="lazy" className="w-full h-full object-cover" />
           ) : (
@@ -1192,7 +1260,7 @@ const ProductDisplay: React.FC<{
         </div>
 
         {/* Detalles */}
-        <div className="md:w-1/2 p-5 sm:p-7 flex flex-col justify-center">
+        <div className="tn-product-info md:w-1/2 p-5 sm:p-7 flex flex-col justify-center">
           <h3 className="text-2xl font-black leading-tight tracking-tight" style={{ fontFamily: headingFont, color: colors.heading }}>{product.name}</h3>
 
           {showPrice && product.price != null && (
@@ -1757,7 +1825,7 @@ const TiendaNubeCatalogView: React.FC = () => {
             </div>
           )}
 
-          <div className="p-4 sm:p-7 space-y-12">
+          <div className="tn-catalog-body p-4 sm:p-7 space-y-12">
             {visibleSections.map(({ section, products, included }) => {
               const baseProdIds = section.products.map((p) => p.id);
               return (
@@ -1789,7 +1857,7 @@ const TiendaNubeCatalogView: React.FC = () => {
                         </button>
                       </div>
                     ) : (
-                      <div className="text-center py-4 border-y-2" style={{ borderColor: colors.heading }}>
+                      <div className="tn-section-head text-center py-4 border-y-2" style={{ borderColor: colors.heading }}>
                         <div className="inline-flex items-center gap-3">
                           <span className="w-8 h-[2px]" style={{ backgroundColor: colors.accent }} />
                           <h2 className="text-3xl font-black uppercase tracking-[0.15em]" style={{ fontFamily: headingStack, color: colors.heading }}>
@@ -1802,7 +1870,7 @@ const TiendaNubeCatalogView: React.FC = () => {
                   </div>
 
                   {/* Productos */}
-                  <div className="space-y-6">
+                  <div className="tn-products-list space-y-6">
                     {products.map((p, i) => {
                       const dp = mergeProduct(p, config.products[p.id]);
                       return (
