@@ -72,13 +72,6 @@ const CATALOG_PRINT_CSS = `
     align-items: center;
     justify-content: center;
   }
-  .tn-section-head {
-    break-before: page;
-    page-break-before: always;
-    break-after: avoid;
-    page-break-after: avoid;
-    padding: 10mm 0 !important;
-  }
   .tn-section:first-child .tn-section-head {
     break-before: auto;
     page-break-before: auto;
@@ -110,12 +103,13 @@ const CATALOG_PRINT_CSS = `
     flex-direction: row-reverse !important;
   }
   .tn-product-media {
-    width: 50% !important;
-    flex: 0 0 50% !important;
-    max-width: 50% !important;
+    width: 58% !important;
+    flex: 0 0 58% !important;
+    max-width: 58% !important;
     min-height: 0 !important;
     height: 100% !important;
     aspect-ratio: auto !important;
+    background: #ebe6e0 !important;
   }
   .tn-product-media img {
     width: 100% !important;
@@ -123,24 +117,76 @@ const CATALOG_PRINT_CSS = `
     object-fit: cover !important;
   }
   .tn-product-info {
-    width: 50% !important;
-    flex: 0 0 50% !important;
-    max-width: 50% !important;
-    padding: 8mm 10mm !important;
+    width: 42% !important;
+    flex: 0 0 42% !important;
+    max-width: 42% !important;
+    padding: 0 !important;
     overflow: hidden !important;
+    background: #faf8f5 !important;
   }
-  .tn-product-info h3 {
-    font-size: 18px !important;
-    line-height: 1.15 !important;
+  .tn-product-info-inner {
+    padding: 14mm 12mm 10mm 14mm !important;
+    height: 100% !important;
+    box-sizing: border-box !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
   }
-  .tn-product-info p,
-  .tn-product-info li {
-    font-size: 10.5px !important;
-    line-height: 1.35 !important;
+  .tn-product-title {
+    font-size: 22px !important;
+    line-height: 1.2 !important;
+    font-weight: 500 !important;
   }
-  .tn-product-info .mt-3,
-  .tn-product-info .mt-4 {
-    margin-top: 0.35rem !important;
+  .tn-product-blurb,
+  .tn-product-features li {
+    font-size: 10px !important;
+    line-height: 1.5 !important;
+  }
+  .tn-spec-label {
+    font-size: 8px !important;
+    letter-spacing: 0.2em !important;
+  }
+  .tn-spec-value {
+    font-size: 11px !important;
+  }
+  .tn-color-thumb {
+    width: 40px !important;
+    height: 40px !important;
+  }
+  .tn-color-name {
+    font-size: 8px !important;
+  }
+  .tn-product-sku {
+    font-size: 8px !important;
+    margin-top: auto !important;
+    padding-top: 4mm !important;
+  }
+  .tn-section-head {
+    break-before: page;
+    page-break-before: always;
+    break-after: avoid;
+    page-break-after: avoid;
+    min-height: 210mm !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    background: #faf8f5 !important;
+    border: none !important;
+    padding: 0 !important;
+  }
+  .tn-section-head h2 {
+    font-size: 32px !important;
+    font-weight: 300 !important;
+    letter-spacing: 0.4em !important;
+  }
+  .tn-cover h1 {
+    font-weight: 400 !important;
+    letter-spacing: 0.08em !important;
+  }
+  .tn-catalog-footer {
+    background: #1c1917 !important;
+    color: #f5f0eb !important;
+    padding: 5mm !important;
   }
 `;
 
@@ -208,19 +254,19 @@ const defaultCover = (): CoverConfig => ({
 });
 
 const defaultColors = (): ColorsConfig => ({
-  heading: '#0b1f3a',
-  accent: '#c8102e',
-  text: '#475569',
-  coverBg: '#0b1f3a',
-  coverText: '#ffffff',
+  heading: '#1c1917',
+  accent: '#9a7b4f',
+  text: '#57534e',
+  coverBg: '#1c1917',
+  coverText: '#f5f0eb',
 });
 
 const defaultConfig = (): CatalogConfig => ({
   cover: defaultCover(),
   colors: defaultColors(),
   showPrice: false,
-  fontHeading: 'default',
-  fontBody: 'default',
+  fontHeading: 'cormorant',
+  fontBody: 'raleway',
   sections: {},
   products: {},
   sectionOrder: [],
@@ -1196,6 +1242,16 @@ const TypographyModal: React.FC<{
   );
 };
 
+/** Texto corto para catálogo editorial (evita bloques enormes de Tienda Nube). */
+function catalogBlurb(description: string, features: string[]): string | null {
+  if (features.length > 0) return null;
+  const clean = description.replace(/\s+/g, ' ').trim();
+  if (!clean) return null;
+  const sentence = clean.split(/(?<=[.!?])\s+/)[0]?.trim() || clean;
+  if (sentence.length <= 200) return sentence;
+  return `${sentence.slice(0, 197).trim()}…`;
+}
+
 /* ===================== Ficha de producto (display) ===================== */
 
 const ProductDisplay: React.FC<{
@@ -1212,12 +1268,13 @@ const ProductDisplay: React.FC<{
 }> = ({ product, flip, showPrice, editMode, headingFont, colors, onToggleInclude, onEdit, onMoveUp, onMoveDown }) => {
   const img = product.images[product.imageIndex] || product.images[0] || '';
   const dimmed = editMode && !product.included;
+  const blurb = catalogBlurb(product.description, product.features);
 
   return (
     <article
-      className={`tn-product break-inside-avoid relative rounded-xl overflow-hidden border border-slate-200 bg-white ${
-        dimmed ? 'opacity-40' : ''
-      }`}
+      className={`tn-product break-inside-avoid relative overflow-hidden bg-white ${
+        editMode ? 'rounded-xl border border-slate-200' : ''
+      } ${dimmed ? 'opacity-40' : ''}`}
     >
       {editMode && (
         <div className="tn-noprint absolute top-2 right-2 z-10 flex gap-1">
@@ -1246,96 +1303,121 @@ const ProductDisplay: React.FC<{
         </div>
       )}
 
-      <div className={`tn-product-layout flex flex-col ${flip ? 'md:flex-row-reverse tn-product-flip' : 'md:flex-row'}`}>
-        {/* Imagen */}
-        <div className="tn-product-media md:w-1/2 bg-[#f4f1ec] flex items-center justify-center aspect-[4/5] md:aspect-auto md:min-h-[340px] overflow-hidden">
+      <div className={`tn-product-layout flex flex-col min-h-[380px] md:min-h-[420px] ${flip ? 'md:flex-row-reverse tn-product-flip' : 'md:flex-row'}`}>
+        {/* Texto — columna editorial */}
+        <div className="tn-product-info md:w-[42%] bg-[#faf8f5] flex flex-col">
+          <div className="tn-product-info-inner flex flex-col justify-center h-full px-8 py-10 md:px-10 md:py-12">
+            <p className="tn-spec-label text-[9px] uppercase tracking-[0.28em] mb-3 font-medium" style={{ color: colors.accent }}>
+              Lupo
+            </p>
+            <h3
+              className="tn-product-title text-[1.65rem] md:text-[1.85rem] font-medium leading-[1.15] tracking-wide"
+              style={{ fontFamily: headingFont, color: colors.heading }}
+            >
+              {product.name}
+            </h3>
+
+            {showPrice && product.price != null && (
+              <div className="mt-3 flex items-baseline gap-2">
+                {product.promotionalPrice != null ? (
+                  <>
+                    <span className="text-lg font-medium" style={{ color: colors.accent }}>{formatPrice(product.promotionalPrice)}</span>
+                    <span className="text-sm text-stone-400 line-through">{formatPrice(product.price)}</span>
+                  </>
+                ) : (
+                  <span className="text-lg font-medium" style={{ color: colors.heading }}>{formatPrice(product.price)}</span>
+                )}
+              </div>
+            )}
+
+            {blurb && (
+              <p className="tn-product-blurb mt-4 text-[12px] leading-relaxed max-w-sm" style={{ color: colors.text }}>
+                {blurb}
+              </p>
+            )}
+
+            {product.features.length > 0 && (
+              <ul className="tn-product-features mt-4 space-y-1.5 max-w-sm">
+                {product.features.map((f, i) => (
+                  <li key={i} className="flex items-start gap-2.5 text-[11.5px] leading-snug" style={{ color: colors.text }}>
+                    <span className="mt-[7px] w-3 h-px shrink-0" style={{ backgroundColor: colors.accent }} />
+                    <span>{f}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {(product.composition || product.sizesText) && (
+              <div className="mt-6 pt-5 border-t border-stone-200/80 grid grid-cols-1 gap-4">
+                {product.composition && (
+                  <div>
+                    <p className="tn-spec-label text-[9px] uppercase tracking-[0.22em] mb-1 font-medium" style={{ color: colors.accent }}>
+                      Composición
+                    </p>
+                    <p className="tn-spec-value text-[12.5px] leading-snug text-stone-700">{product.composition}</p>
+                  </div>
+                )}
+                {product.sizesText && (
+                  <div>
+                    <p className="tn-spec-label text-[9px] uppercase tracking-[0.22em] mb-1 font-medium" style={{ color: colors.accent }}>
+                      Talles
+                    </p>
+                    <p className="tn-spec-value text-[12.5px] font-medium tracking-wide text-stone-800">{product.sizesText}</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {product.colorVariants.length > 0 && (
+              <div className="mt-5">
+                <p className="tn-spec-label text-[9px] uppercase tracking-[0.22em] mb-3 font-medium" style={{ color: colors.accent }}>
+                  Colores
+                </p>
+                <div className="flex flex-wrap gap-4">
+                  {product.colorVariants.map((cv, i) => {
+                    const hex = colorToHex(cv.name);
+                    return (
+                      <div key={`${cv.name}-${i}`} className="flex flex-col items-center gap-1.5">
+                        <div
+                          className="tn-color-thumb w-11 h-11 rounded-full overflow-hidden flex items-center justify-center"
+                          style={{ boxShadow: `0 0 0 1px ${colors.accent}33` }}
+                        >
+                          {cv.image || cv.sourceImage ? (
+                            <img src={cv.image || cv.sourceImage} alt={cv.name} className="w-full h-full object-cover" />
+                          ) : (
+                            <span
+                              className="w-full h-full rounded-full"
+                              style={{ backgroundColor: hex || '#e7e5e4' }}
+                            />
+                          )}
+                        </div>
+                        <span className="tn-color-name text-[9px] uppercase tracking-wider text-stone-500 text-center max-w-[64px] leading-tight">
+                          {cv.name}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {product.articleCode && (
+              <p className="tn-product-sku mt-auto pt-6 text-[9px] uppercase tracking-[0.25em] text-stone-400">
+                Art. {product.articleCode}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Imagen — full bleed */}
+        <div className="tn-product-media md:w-[58%] bg-[#ebe6e0] flex items-center justify-center aspect-[4/5] md:aspect-auto md:min-h-0 overflow-hidden">
           {img ? (
             <img src={img} alt={product.name} loading="lazy" className="w-full h-full object-cover" />
           ) : (
-            <div className="flex flex-col items-center text-slate-300 py-16">
-              <ImageOff size={44} />
-              <span className="text-xs mt-2">Sin imagen</span>
+            <div className="flex flex-col items-center text-stone-300 py-16">
+              <ImageOff size={40} />
+              <span className="text-[10px] mt-2 tracking-widest uppercase">Sin imagen</span>
             </div>
-          )}
-        </div>
-
-        {/* Detalles */}
-        <div className="tn-product-info md:w-1/2 p-5 sm:p-7 flex flex-col justify-center">
-          <h3 className="text-2xl font-black leading-tight tracking-tight" style={{ fontFamily: headingFont, color: colors.heading }}>{product.name}</h3>
-
-          {showPrice && product.price != null && (
-            <div className="mt-1 flex items-baseline gap-2">
-              {product.promotionalPrice != null ? (
-                <>
-                  <span className="text-xl font-black" style={{ color: colors.accent }}>{formatPrice(product.promotionalPrice)}</span>
-                  <span className="text-sm text-slate-400 line-through">{formatPrice(product.price)}</span>
-                </>
-              ) : (
-                <span className="text-xl font-black" style={{ color: colors.heading }}>{formatPrice(product.price)}</span>
-              )}
-            </div>
-          )}
-
-          {product.description && (
-            <p className="mt-3 text-[13.5px] leading-relaxed whitespace-pre-line" style={{ color: colors.text }}>{product.description}</p>
-          )}
-
-          {product.features.length > 0 && (
-            <ul className="mt-3 space-y-1">
-              {product.features.map((f, i) => (
-                <li key={i} className="flex items-center gap-2 text-[13px] font-semibold" style={{ color: colors.heading }}>
-                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: colors.accent }} />
-                  {f}
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <div className="mt-4 grid grid-cols-2 gap-4 border-t border-slate-200 pt-3">
-            {product.composition && (
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest mb-0.5" style={{ color: colors.accent }}>Composición</p>
-                <p className="text-[13px] text-slate-700 leading-snug">{product.composition}</p>
-              </div>
-            )}
-            {product.sizesText && (
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest mb-0.5" style={{ color: colors.accent }}>Talles</p>
-                <p className="text-[13px] font-semibold text-slate-800">{product.sizesText}</p>
-              </div>
-            )}
-          </div>
-
-          {product.colorVariants.length > 0 && (
-            <div className="mt-3">
-              <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: colors.accent }}>Colores</p>
-              <div className="flex flex-wrap gap-3">
-                {product.colorVariants.map((cv, i) => {
-                  const hex = colorToHex(cv.name);
-                  return (
-                    <div key={`${cv.name}-${i}`} className="flex flex-col items-center gap-1 min-w-[52px]">
-                      <div className="w-12 h-12 rounded-md overflow-hidden border border-slate-200 bg-slate-50 flex items-center justify-center shadow-sm">
-                        {cv.image || cv.sourceImage ? (
-                          <img src={cv.image || cv.sourceImage} alt={cv.name} className="w-full h-full object-cover" />
-                        ) : (
-                          <span
-                            className="w-7 h-7 rounded-full border border-slate-300"
-                            style={{ backgroundColor: hex || '#e2e8f0' }}
-                          />
-                        )}
-                      </div>
-                      <span className="text-[11px] font-medium text-slate-700 text-center leading-tight max-w-[72px]">
-                        {cv.name}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {product.articleCode && (
-            <p className="mt-4 text-[11px] font-bold tracking-widest text-slate-400">ART. {product.articleCode}</p>
           )}
         </div>
       </div>
@@ -1795,32 +1877,44 @@ const TiendaNubeCatalogView: React.FC = () => {
           {/* Portada */}
           {cover.enabled && (
             <div
-              className="tn-cover relative px-8 py-16 sm:py-24 text-center overflow-hidden"
+              className="tn-cover relative px-10 py-20 sm:py-28 text-center overflow-hidden flex items-center justify-center min-h-[70vh]"
               style={{ backgroundColor: cover.backgroundUrl ? '#000' : colors.coverBg }}
             >
               {cover.backgroundUrl ? (
                 <>
                   <img src={cover.backgroundUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
-                  <div className="absolute inset-0" style={{ backgroundColor: colors.coverBg, opacity: 0.62 }} />
+                  <div className="absolute inset-0" style={{ backgroundColor: colors.coverBg, opacity: 0.55 }} />
                 </>
               ) : (
-                <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_30%_20%,#ffffff_0,transparent_45%)]" />
+                <>
+                  <div className="absolute inset-0 opacity-[0.07] bg-[radial-gradient(ellipse_at_50%_0%,#ffffff_0,transparent_55%)]" />
+                  <div className="absolute inset-0 opacity-30 bg-[linear-gradient(180deg,transparent_0%,rgba(0,0,0,0.35)_100%)]" />
+                </>
               )}
-              <div className="relative" style={{ color: colors.coverText }}>
+              <div className="relative max-w-2xl mx-auto" style={{ color: colors.coverText }}>
                 {cover.logoUrl && (
-                  <img src={cover.logoUrl} alt="logo" className="mx-auto max-h-24 object-contain mb-5" />
+                  <img src={cover.logoUrl} alt="logo" className="mx-auto max-h-20 object-contain mb-8 opacity-95" />
                 )}
-                <p className="text-sm tracking-[0.4em] uppercase opacity-60">{cover.title}</p>
-                <h1 className="text-6xl sm:text-7xl font-black tracking-tight mt-2" style={{ fontFamily: headingStack }}>{cover.brand}</h1>
-                <div className="w-20 h-[3px] mx-auto my-6" style={{ backgroundColor: colors.accent }} />
-                <p className="text-lg tracking-[0.25em] uppercase opacity-80">{cover.collection}</p>
+                <p className="text-[11px] tracking-[0.45em] uppercase opacity-50 font-light">{cover.title}</p>
+                <h1
+                  className="text-5xl sm:text-7xl font-light tracking-[0.12em] mt-4"
+                  style={{ fontFamily: headingStack }}
+                >
+                  {cover.brand}
+                </h1>
+                <div className="w-16 h-px mx-auto my-7 opacity-80" style={{ backgroundColor: colors.accent }} />
+                <p className="text-sm sm:text-base tracking-[0.35em] uppercase opacity-75 font-light">{cover.collection}</p>
                 {cover.category && (
-                  <p className="mt-8 text-3xl font-light italic opacity-90" style={{ fontFamily: headingStack }}>{cover.category}</p>
+                  <p className="mt-10 text-2xl sm:text-3xl font-light italic opacity-85" style={{ fontFamily: headingStack }}>
+                    {cover.category}
+                  </p>
                 )}
                 {cover.subtitle && (
-                  <p className="mt-6 text-xs tracking-[0.2em] uppercase opacity-60 max-w-md mx-auto">{cover.subtitle}</p>
+                  <p className="mt-8 text-[10px] tracking-[0.28em] uppercase opacity-45 max-w-lg mx-auto leading-relaxed font-light">
+                    {cover.subtitle}
+                  </p>
                 )}
-                <p className="mt-10 text-sm tracking-[0.3em] opacity-70">{cover.website}</p>
+                <p className="mt-12 text-[10px] tracking-[0.35em] uppercase opacity-40">{cover.website}</p>
               </div>
             </div>
           )}
@@ -1857,13 +1951,18 @@ const TiendaNubeCatalogView: React.FC = () => {
                         </button>
                       </div>
                     ) : (
-                      <div className="tn-section-head text-center py-4 border-y-2" style={{ borderColor: colors.heading }}>
-                        <div className="inline-flex items-center gap-3">
-                          <span className="w-8 h-[2px]" style={{ backgroundColor: colors.accent }} />
-                          <h2 className="text-3xl font-black uppercase tracking-[0.15em]" style={{ fontFamily: headingStack, color: colors.heading }}>
+                      <div className="tn-section-head text-center py-16 md:py-24 bg-[#faf8f5] flex items-center justify-center min-h-[280px]">
+                        <div>
+                          <p className="text-[9px] uppercase tracking-[0.4em] mb-4 font-light" style={{ color: colors.accent }}>
+                            Colección
+                          </p>
+                          <h2
+                            className="text-3xl md:text-4xl font-light uppercase tracking-[0.35em]"
+                            style={{ fontFamily: headingStack, color: colors.heading }}
+                          >
                             {config.sections[section.id]?.name || section.name}
                           </h2>
-                          <span className="w-8 h-[2px]" style={{ backgroundColor: colors.accent }} />
+                          <div className="w-12 h-px mx-auto mt-6 opacity-60" style={{ backgroundColor: colors.accent }} />
                         </div>
                       </div>
                     )}
@@ -1895,9 +1994,12 @@ const TiendaNubeCatalogView: React.FC = () => {
             })}
           </div>
 
-          <div className="text-center text-[11px] py-3 px-6 tracking-widest" style={{ backgroundColor: colors.coverBg, color: colors.coverText }}>
-            <span className="opacity-70">
-              {cover.brand} · {cover.website} · Generado el {new Date(catalog.generatedAt).toLocaleDateString('es-AR')}
+          <div
+            className="tn-catalog-footer text-center text-[9px] py-4 px-6 tracking-[0.3em] uppercase font-light"
+            style={{ backgroundColor: colors.coverBg, color: colors.coverText }}
+          >
+            <span className="opacity-50">
+              {cover.brand} · {cover.website}
             </span>
           </div>
         </div>
