@@ -76,102 +76,6 @@ const CATALOG_PRINT_CSS = `
   }
 `;
 
-function mountPrintDocument(doc: Document, cover: CoverConfig, bodyHtml: string) {
-  const title = [cover.brand || 'Catálogo', cover.collection].filter(Boolean).join(' - ');
-
-  doc.documentElement.lang = 'es';
-
-  const meta = doc.createElement('meta');
-  meta.setAttribute('charset', 'utf-8');
-  doc.head.appendChild(meta);
-
-  const titleEl = doc.createElement('title');
-  titleEl.textContent = title;
-  doc.head.appendChild(titleEl);
-
-  document.querySelectorAll('link[rel="stylesheet"]').forEach((node) => {
-    doc.head.appendChild(node.cloneNode(true));
-  });
-  document.querySelectorAll('style').forEach((node) => {
-    doc.head.appendChild(node.cloneNode(true));
-  });
-
-  const printStyle = doc.createElement('style');
-  printStyle.textContent = CATALOG_PRINT_CSS;
-  doc.head.appendChild(printStyle);
-
-  doc.body.innerHTML = bodyHtml;
-}
-
-function waitForImages(doc: Document, done: () => void) {
-  const imgs = Array.from(doc.images);
-  if (imgs.length === 0) {
-    done();
-    return;
-  }
-  let left = imgs.length;
-  const tick = () => {
-    if (--left <= 0) done();
-  };
-  for (const img of imgs) {
-    if (img.complete) tick();
-    else {
-      img.onload = tick;
-      img.onerror = tick;
-    }
-  }
-}
-
-/** Imprime el catálogo en un iframe oculto (sin document.write ni ventanas emergentes). */
-function printCatalogHtml(cover: CoverConfig, bodyHtml: string): boolean {
-  const iframe = document.createElement('iframe');
-  iframe.setAttribute('aria-hidden', 'true');
-  Object.assign(iframe.style, {
-    position: 'fixed',
-    left: '0',
-    top: '0',
-    width: '0',
-    height: '0',
-    border: 'none',
-    visibility: 'hidden',
-  });
-  document.body.appendChild(iframe);
-  const win = iframe.contentWindow;
-  const doc = win?.document;
-  if (!win || !doc) {
-    iframe.remove();
-    return false;
-  }
-
-  mountPrintDocument(doc, cover, bodyHtml);
-
-  const cleanup = () => setTimeout(() => iframe.remove(), 2000);
-  win.addEventListener('afterprint', cleanup, { once: true });
-  setTimeout(cleanup, 20000);
-
-  const runPrint = () => {
-    waitForImages(doc, () => {
-      setTimeout(() => {
-        win.focus();
-        win.print();
-      }, 350);
-    });
-  };
-
-  // Breve espera para que carguen las hojas de estilo clonadas en el iframe.
-  setTimeout(runPrint, 450);
-
-  return true;
-}
-
-function openCatalogPrint(cover: CoverConfig): boolean {
-  const root = document.querySelector('.tn-catalog-print');
-  if (!root) return false;
-  const clone = root.cloneNode(true) as HTMLElement;
-  clone.querySelectorAll('.tn-noprint').forEach((n) => n.remove());
-  return printCatalogHtml(cover, clone.outerHTML);
-}
-
 interface ProductOverride {
   included?: boolean;
   name?: string;
@@ -1608,42 +1512,50 @@ const TiendaNubeCatalogView: React.FC = () => {
     [visibleSections]
   );
 
-  const cover = config.cover;
-
   const handlePrint = useCallback(() => {
     const run = () => {
-      if (!openCatalogPrint(cover)) {
-        document.body.classList.add('tn-printing');
-        window.print();
-        setTimeout(() => document.body.classList.remove('tn-printing'), 1000);
-      }
+      const prevTitle = document.title;
+      const printTitle = [config.cover.brand || 'Catálogo', config.cover.collection].filter(Boolean).join(' - ');
+      document.title = printTitle;
+
+      document.body.classList.add('tn-printing');
+      const cleanup = () => {
+        document.body.classList.remove('tn-printing');
+        document.title = prevTitle;
+      };
+      window.addEventListener('afterprint', cleanup, { once: true });
+      setTimeout(cleanup, 120000);
+
+      requestAnimationFrame(() => window.print());
     };
     if (editMode) {
       setEditMode(false);
-      setTimeout(run, 200);
+      setTimeout(run, 250);
     } else {
       run();
     }
-  }, [cover, editMode]);
+  }, [config.cover.brand, config.cover.collection, editMode]);
 
   return (
     <div className="space-y-5">
       <style>{`
         @media print {
-          html, body, main, #root, .flex, [class*="overflow"] {
+          html, body, #root, main, main > div, .flex, [class*="overflow"], [class*="h-screen"], [class*="h-\\[100dvh\\]"] {
             overflow: visible !important;
             height: auto !important;
             max-height: none !important;
             min-height: 0 !important;
+            position: static !important;
           }
           body.tn-printing * { visibility: hidden !important; }
           body.tn-printing .tn-catalog-print,
           body.tn-printing .tn-catalog-print * { visibility: visible !important; }
           body.tn-printing .tn-catalog-print {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
+            position: static !important;
+            left: auto !important;
+            top: auto !important;
             width: 100% !important;
+            overflow: visible !important;
           }
           .tn-noprint { display: none !important; }
           ${CATALOG_PRINT_CSS}
