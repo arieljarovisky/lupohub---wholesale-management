@@ -21,6 +21,8 @@ import {
   Upload,
   Palette,
   Crop,
+  Plus,
+  Image as ImageIcon,
 } from 'lucide-react';
 import {
   api,
@@ -32,6 +34,11 @@ import ImageCropModal from './ImageCropModal';
 
 /* ===================== Tipos de configuración editable ===================== */
 
+interface ColorVariant {
+  name: string;
+  image?: string;
+}
+
 interface ProductOverride {
   included?: boolean;
   name?: string;
@@ -39,7 +46,9 @@ interface ProductOverride {
   features?: string[];
   composition?: string;
   sizesText?: string;
+  /** @deprecated usar colorVariants */
   colors?: string[];
+  colorVariants?: ColorVariant[];
   articleCode?: string;
   imageIndex?: number;
   /** Si está presente, reemplaza por completo la lista de imágenes (TN + propias). */
@@ -228,13 +237,19 @@ interface DisplayProduct {
   features: string[];
   composition: string;
   sizesText: string;
-  colors: string[];
+  colorVariants: ColorVariant[];
   articleCode: string;
   images: string[];
   imageIndex: number;
   price: number | null;
   promotionalPrice: number | null;
   included: boolean;
+}
+
+function resolveColorVariants(ov: ProductOverride | undefined, productColors: string[]): ColorVariant[] {
+  if (ov?.colorVariants?.length) return ov.colorVariants;
+  if (ov?.colors?.length) return ov.colors.map((name) => ({ name }));
+  return productColors.map((name) => ({ name }));
 }
 
 function mergeProduct(p: TiendaNubeCatalogProduct, ov: ProductOverride | undefined): DisplayProduct {
@@ -246,7 +261,7 @@ function mergeProduct(p: TiendaNubeCatalogProduct, ov: ProductOverride | undefin
     features: ov?.features ?? [],
     composition: ov?.composition ?? p.composition,
     sizesText: ov?.sizesText ?? p.sizes.join('  ·  '),
-    colors: ov?.colors ?? p.colors,
+    colorVariants: resolveColorVariants(ov, p.colors),
     articleCode: ov?.articleCode ?? p.articleCode,
     images,
     imageIndex: Math.min(ov?.imageIndex ?? 0, Math.max(0, images.length - 1)),
@@ -277,13 +292,16 @@ const ProductEditorModal: React.FC<{
   const [features, setFeatures] = useState((merged.features || []).join('\n'));
   const [composition, setComposition] = useState(merged.composition);
   const [sizesText, setSizesText] = useState(merged.sizesText);
-  const [colors, setColors] = useState((merged.colors || []).join('\n'));
+  const [colorVariants, setColorVariants] = useState<ColorVariant[]>(merged.colorVariants);
   const [articleCode, setArticleCode] = useState(merged.articleCode);
   const [images, setImages] = useState<string[]>(merged.images);
   const [imageIndex, setImageIndex] = useState(merged.imageIndex);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const [croppingIndex, setCroppingIndex] = useState<number | null>(null);
+  const [croppingColorIdx, setCroppingColorIdx] = useState<number | null>(null);
+  const [colorUploadingIdx, setColorUploadingIdx] = useState<number | null>(null);
+  const [pickingColorIdx, setPickingColorIdx] = useState<number | null>(null);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files: File[] = e.target.files ? Array.from(e.target.files) : [];
@@ -342,7 +360,7 @@ const ProductEditorModal: React.FC<{
       features: features.split('\n').map((s) => s.trim()).filter(Boolean),
       composition: composition.trim(),
       sizesText: sizesText.trim(),
-      colors: colors.split('\n').map((s) => s.trim()).filter(Boolean),
+      colorVariants: colorVariants.filter((c) => c.name.trim()),
       articleCode: articleCode.trim(),
       images,
       imageIndex: Math.min(imageIndex, Math.max(0, images.length - 1)),
@@ -357,7 +375,7 @@ const ProductEditorModal: React.FC<{
     setFeatures('');
     setComposition(product.composition);
     setSizesText(product.sizes.join('  ·  '));
-    setColors(product.colors.join('\n'));
+    setColorVariants(product.colors.map((name) => ({ name })));
     setArticleCode(product.articleCode);
     setImages(product.images);
     setImageIndex(0);
@@ -370,6 +388,32 @@ const ProductEditorModal: React.FC<{
     const url = await api.uploadCatalogImage(file);
     setImages((prev) => prev.map((s, i) => (i === idx ? url : s)));
   };
+
+  const updateColorVariant = (idx: number, patch: Partial<ColorVariant>) => {
+    setColorVariants((prev) => prev.map((c, i) => (i === idx ? { ...c, ...patch } : c)));
+  };
+
+  const uploadColorImage = async (idx: number, file: File) => {
+    setUploadError('');
+    setColorUploadingIdx(idx);
+    try {
+      const url = await api.uploadCatalogImage(file);
+      updateColorVariant(idx, { image: url });
+    } catch (err: any) {
+      setUploadError(err?.message || 'No se pudo subir la foto del color');
+    } finally {
+      setColorUploadingIdx(null);
+    }
+  };
+
+  const applyCroppedColorImage = async (idx: number, blob: Blob) => {
+    const file = new File([blob], `color-crop-${Date.now()}.jpg`, { type: 'image/jpeg' });
+    const url = await api.uploadCatalogImage(file);
+    updateColorVariant(idx, { image: url });
+  };
+
+  const addColorVariant = () => setColorVariants((prev) => [...prev, { name: '' }]);
+  const removeColorVariant = (idx: number) => setColorVariants((prev) => prev.filter((_, i) => i !== idx));
 
   const inputCls =
     'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm outline-none focus:ring-2 focus:ring-emerald-500';
@@ -433,14 +477,113 @@ const ProductEditorModal: React.FC<{
                 <input className={inputCls} placeholder="P · M · G · GG" value={sizesText} onChange={(e) => setSizesText(e.target.value)} />
               </div>
               <div>
-                <label className={labelCls}>Colores (uno por línea)</label>
-                <textarea
-                  className={inputCls}
-                  rows={3}
-                  placeholder={'614 · Nude\n999 · Negro'}
-                  value={colors}
-                  onChange={(e) => setColors(e.target.value)}
-                />
+                <div className="flex items-center justify-between mb-1">
+                  <label className={labelCls + ' mb-0'}>Colores con foto</label>
+                  <button
+                    type="button"
+                    onClick={addColorVariant}
+                    className="text-xs font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
+                  >
+                    <Plus size={14} /> Agregar
+                  </button>
+                </div>
+                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                  {colorVariants.length === 0 && (
+                    <p className="text-xs text-slate-500">Sin colores. Agregá uno o restaurá desde Tienda Nube.</p>
+                  )}
+                  {colorVariants.map((cv, idx) => (
+                    <div key={idx} className="flex items-center gap-2 bg-slate-900/60 border border-slate-700 rounded-lg p-2">
+                      <div className="w-12 h-12 rounded-md overflow-hidden border border-slate-600 shrink-0 bg-slate-800 flex items-center justify-center">
+                        {cv.image ? (
+                          <img src={cv.image} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <span
+                            className="w-6 h-6 rounded-full border border-slate-500"
+                            style={{ backgroundColor: colorToHex(cv.name) || '#64748b' }}
+                          />
+                        )}
+                      </div>
+                      <input
+                        className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-white text-xs outline-none focus:ring-2 focus:ring-emerald-500"
+                        value={cv.name}
+                        placeholder="999 · Negro"
+                        onChange={(e) => updateColorVariant(idx, { name: e.target.value })}
+                      />
+                      <div className="flex flex-col gap-0.5 shrink-0">
+                        <label className="cursor-pointer text-[10px] font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1">
+                          {colorUploadingIdx === idx ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+                          Subir
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            disabled={colorUploadingIdx !== null}
+                            onChange={(e) => {
+                              const f = e.target.files?.[0];
+                              if (f) void uploadColorImage(idx, f);
+                              e.target.value = '';
+                            }}
+                          />
+                        </label>
+                        {cv.image && (
+                          <button
+                            type="button"
+                            onClick={() => setCroppingColorIdx(idx)}
+                            className="text-[10px] font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 text-left"
+                          >
+                            <Crop size={11} /> Recortar
+                          </button>
+                        )}
+                        {images.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setPickingColorIdx(pickingColorIdx === idx ? null : idx)}
+                            className="text-[10px] font-bold text-sky-400 hover:text-sky-300 flex items-center gap-1 text-left"
+                          >
+                            <ImageIcon size={11} /> Elegir
+                          </button>
+                        )}
+                        {cv.image && (
+                          <button
+                            type="button"
+                            onClick={() => updateColorVariant(idx, { image: undefined })}
+                            className="text-[10px] text-red-400 hover:text-red-300 text-left"
+                          >
+                            Quitar foto
+                          </button>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeColorVariant(idx)}
+                        className="w-6 h-6 shrink-0 rounded text-slate-500 hover:text-red-400 flex items-center justify-center"
+                        title="Quitar color"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                {pickingColorIdx !== null && images.length > 0 && (
+                  <div className="mt-2 p-2 bg-slate-900 border border-slate-700 rounded-lg">
+                    <p className="text-[10px] text-slate-400 mb-1.5">Elegí una foto del producto para este color:</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {images.map((src, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => {
+                            updateColorVariant(pickingColorIdx, { image: src });
+                            setPickingColorIdx(null);
+                          }}
+                          className="w-14 h-14 rounded-md overflow-hidden border-2 border-slate-600 hover:border-emerald-500"
+                        >
+                          <img src={src} alt="" className="w-full h-full object-cover" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -528,6 +671,15 @@ const ProductEditorModal: React.FC<{
           defaultAspect="4:5"
           onClose={() => setCroppingIndex(null)}
           onApply={(blob) => applyCroppedImage(croppingIndex, blob)}
+        />
+      )}
+      {croppingColorIdx !== null && colorVariants[croppingColorIdx]?.image && (
+        <ImageCropModal
+          src={colorVariants[croppingColorIdx].image!}
+          title={`Recortar foto — ${colorVariants[croppingColorIdx].name || 'color'}`}
+          defaultAspect="1:1"
+          onClose={() => setCroppingColorIdx(null)}
+          onApply={(blob) => applyCroppedColorImage(croppingColorIdx, blob)}
         />
       )}
     </div>
@@ -988,17 +1140,28 @@ const ProductDisplay: React.FC<{
             )}
           </div>
 
-          {product.colors.length > 0 && (
+          {product.colorVariants.length > 0 && (
             <div className="mt-3">
-              <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: colors.accent }}>Colores</p>
-              <div className="flex flex-wrap gap-2">
-                {product.colors.map((c) => {
-                  const hex = colorToHex(c);
+              <p className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: colors.accent }}>Colores</p>
+              <div className="flex flex-wrap gap-3">
+                {product.colorVariants.map((cv, i) => {
+                  const hex = colorToHex(cv.name);
                   return (
-                    <span key={c} className="inline-flex items-center gap-1.5 text-[12px] font-medium text-slate-700">
-                      <span className="w-4 h-4 rounded-full border border-slate-300 shrink-0" style={{ backgroundColor: hex || '#e2e8f0' }} />
-                      {c}
-                    </span>
+                    <div key={`${cv.name}-${i}`} className="flex flex-col items-center gap-1 min-w-[52px]">
+                      <div className="w-12 h-12 rounded-md overflow-hidden border border-slate-200 bg-slate-50 flex items-center justify-center shadow-sm">
+                        {cv.image ? (
+                          <img src={cv.image} alt={cv.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <span
+                            className="w-7 h-7 rounded-full border border-slate-300"
+                            style={{ backgroundColor: hex || '#e2e8f0' }}
+                          />
+                        )}
+                      </div>
+                      <span className="text-[11px] font-medium text-slate-700 text-center leading-tight max-w-[72px]">
+                        {cv.name}
+                      </span>
+                    </div>
                   );
                 })}
               </div>
@@ -1195,7 +1358,9 @@ const TiendaNubeCatalogView: React.FC = () => {
               (config.products[p.id]?.name ?? p.name).toLowerCase().includes(q) ||
               p.description.toLowerCase().includes(q) ||
               p.sizes.some((x) => x.toLowerCase().includes(q)) ||
-              p.colors.some((x) => x.toLowerCase().includes(q))
+              resolveColorVariants(config.products[p.id], p.colors).some((x) =>
+                x.name.toLowerCase().includes(q)
+              )
           );
         }
         return { section: s, products };
