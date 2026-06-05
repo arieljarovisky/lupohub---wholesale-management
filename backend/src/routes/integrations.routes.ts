@@ -66,6 +66,11 @@ import {
   listTiendaNubeCategoryMatches,
   downloadTiendaNubeCategoryImagesZip,
 } from '../controllers/tiendanubeCategoryImages.controller';
+import { getTiendaNubeCatalog } from '../controllers/tiendanubeCatalog.controller';
+import {
+  getTiendaNubeCatalogConfig,
+  saveTiendaNubeCatalogConfig,
+} from '../controllers/tiendanubeCatalogConfig.controller';
 import { authMiddleware } from '../middleware/auth';
 import {
   getLupoWebhookConfigEndpoint,
@@ -137,6 +142,9 @@ router.get('/tiendanube/stock/totals', getTiendaNubeStockTotals);
 router.get('/tiendanube/sales-report-export', authMiddleware, exportTiendaNubeSalesReportXlsx);
 router.get('/tiendanube/category-images/preview', authMiddleware, listTiendaNubeCategoryMatches);
 router.get('/tiendanube/category-images/download', authMiddleware, downloadTiendaNubeCategoryImagesZip);
+router.get('/tiendanube/catalog', authMiddleware, getTiendaNubeCatalog);
+router.get('/tiendanube/catalog/config', authMiddleware, getTiendaNubeCatalogConfig);
+router.put('/tiendanube/catalog/config', authMiddleware, saveTiendaNubeCatalogConfig);
 router.get('/tiendanube/products/:productId/variants', getTiendaNubeProductVariants);
 router.post('/tiendanube/products', createTiendaNubeProduct);
 router.post('/tiendanube/products/:productId/duplicate', duplicateTiendaNubeProduct);
