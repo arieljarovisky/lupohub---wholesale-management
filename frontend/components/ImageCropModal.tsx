@@ -65,6 +65,10 @@ interface ImageCropModalProps {
   src: string;
   title?: string;
   defaultAspect?: AspectPreset;
+  /** Oculta selector de proporción y fija el recorte (ej. miniaturas de color). */
+  lockAspect?: boolean;
+  /** Si se define, exporta un cuadrado de ese tamaño en px (ej. 160). */
+  outputSize?: number;
   onApply: (blob: Blob) => void | Promise<void>;
   onClose: () => void;
 }
@@ -73,6 +77,8 @@ const ImageCropModal: React.FC<ImageCropModalProps> = ({
   src,
   title = 'Recortar imagen',
   defaultAspect = '4:5',
+  lockAspect = false,
+  outputSize,
   onApply,
   onClose,
 }) => {
@@ -158,12 +164,14 @@ const ImageCropModal: React.FC<ImageCropModalProps> = ({
     const sw = clamp(box.w / base, 1, img.naturalWidth - sx);
     const sh = clamp(box.h / base, 1, img.naturalHeight - sy);
 
+    const outW = outputSize ? outputSize : Math.round(sw);
+    const outH = outputSize ? outputSize : Math.round(sh);
     const canvas = document.createElement('canvas');
-    canvas.width = Math.round(sw);
-    canvas.height = Math.round(sh);
+    canvas.width = outW;
+    canvas.height = outH;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
 
     setApplying(true);
     try {
@@ -210,7 +218,11 @@ const ImageCropModal: React.FC<ImageCropModalProps> = ({
             <p className="text-red-400 text-sm text-center py-8 px-2">{error}</p>
           ) : (
             <>
-              <p className="text-xs text-slate-400 text-center">Arrastrá la imagen para encuadrar. Usá zoom si necesitás.</p>
+              <p className="text-xs text-slate-400 text-center">
+                {lockAspect
+                  ? 'Arrastrá la foto del producto para encuadrar la miniatura del color.'
+                  : 'Arrastrá la imagen para encuadrar. Usá zoom si necesitás.'}
+              </p>
               <div
                 ref={containerRef}
                 className="relative mx-auto bg-slate-950 rounded-xl overflow-hidden select-none touch-none cursor-grab active:cursor-grabbing"
@@ -248,19 +260,26 @@ const ImageCropModal: React.FC<ImageCropModalProps> = ({
                 />
               </div>
 
-              <div className="flex flex-wrap gap-1.5 justify-center">
-                {(['free', '4:5', '1:1', '3:4', '16:9'] as AspectPreset[]).map((a) => (
-                  <button
-                    key={a}
-                    onClick={() => setAspect(a)}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
-                      aspect === a ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                    }`}
-                  >
-                    {a === 'free' ? 'Libre' : a}
-                  </button>
-                ))}
-              </div>
+              {!lockAspect && (
+                <div className="flex flex-wrap gap-1.5 justify-center">
+                  {(['free', '4:5', '1:1', '3:4', '16:9'] as AspectPreset[]).map((a) => (
+                    <button
+                      key={a}
+                      onClick={() => setAspect(a)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
+                        aspect === a ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                      }`}
+                    >
+                      {a === 'free' ? 'Libre' : a}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {lockAspect && outputSize && (
+                <p className="text-[10px] text-slate-500 text-center">
+                  Formato fijo: cuadrado {outputSize}×{outputSize} px
+                </p>
+              )}
 
               <div className="flex items-center gap-3 px-1">
                 <ZoomOut size={16} className="text-slate-500 shrink-0" />

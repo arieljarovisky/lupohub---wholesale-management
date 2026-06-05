@@ -3594,6 +3594,11 @@ export const api = {
   }
 };
 
+export interface TiendaNubeCatalogColorVariant {
+  name: string;
+  sourceImage: string | null;
+}
+
 export interface TiendaNubeCatalogProduct {
   id: number;
   name: string;
@@ -3601,6 +3606,7 @@ export interface TiendaNubeCatalogProduct {
   images: string[];
   sizes: string[];
   colors: string[];
+  colorVariants: TiendaNubeCatalogColorVariant[];
   price: number | null;
   promotionalPrice: number | null;
   permalink: string | null;

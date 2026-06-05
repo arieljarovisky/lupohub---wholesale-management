@@ -8,6 +8,12 @@ import {
 const TN_USER_AGENT = process.env.TIENDA_NUBE_USER_AGENT || 'LupoHub (support@lupo.ar)';
 const TN_BASE = 'https://api.tiendanube.com/v1';
 
+/** Variante de color con la foto asignada en Tienda Nube (por image_id de la variante). */
+export type CatalogColorVariant = {
+  name: string;
+  sourceImage: string | null;
+};
+
 /** Producto completo de catálogo, ya normalizado para el frontend. */
 export type CatalogProduct = {
   id: number;
@@ -16,6 +22,8 @@ export type CatalogProduct = {
   images: string[];
   sizes: string[];
   colors: string[];
+  /** Colores con la imagen que TN ya asignó a cada variante. */
+  colorVariants: CatalogColorVariant[];
   price: number | null;
   promotionalPrice: number | null;
   permalink: string | null;
@@ -122,9 +130,16 @@ function mapProduct(p: any): CatalogProduct {
   const name = lang(p?.name);
   const description = stripHtml(lang(p?.description));
 
-  const images = (Array.isArray(p?.images) ? [...p.images] : [])
+  const rawImages = Array.isArray(p?.images) ? [...p.images] : [];
+  const imageById = new Map<number, string>();
+  const images = rawImages
     .sort((a: any, b: any) => (a?.position ?? 0) - (b?.position ?? 0))
-    .map((img: any) => String(img?.src || img?.url || '').trim())
+    .map((img: any) => {
+      const id = Number(img?.id);
+      const src = String(img?.src || img?.url || '').trim();
+      if (Number.isFinite(id) && id > 0 && src.startsWith('http')) imageById.set(id, src);
+      return src;
+    })
     .filter((src: string) => src.startsWith('http'));
 
   const attrs = Array.isArray(p?.attributes) ? p.attributes : [];
@@ -138,6 +153,7 @@ function mapProduct(p: any): CatalogProduct {
 
   const sizesSet = new Set<string>();
   const colorsSet = new Set<string>();
+  const colorImageByName = new Map<string, string>();
   let totalStock = 0;
   let price: number | null = null;
   let promotionalPrice: number | null = null;
@@ -152,7 +168,14 @@ function mapProduct(p: any): CatalogProduct {
     }
     if (colorIdx >= 0 && colorIdx < values.length) {
       const c = lang(values[colorIdx]).trim();
-      if (c) colorsSet.add(c);
+      if (c) {
+        colorsSet.add(c);
+        const imageId = Number(v?.image_id);
+        if (!colorImageByName.has(c) && Number.isFinite(imageId) && imageId > 0) {
+          const src = imageById.get(imageId);
+          if (src) colorImageByName.set(c, src);
+        }
+      }
     }
     totalStock += Number(v?.stock) || 0;
     if (!firstSku && v?.sku) firstSku = String(v.sku).trim();
@@ -165,6 +188,10 @@ function mapProduct(p: any): CatalogProduct {
   });
 
   const permalink = p?.canonical_url || p?.url || null;
+  const colorVariants: CatalogColorVariant[] = Array.from(colorsSet).map((name) => ({
+    name,
+    sourceImage: colorImageByName.get(name) ?? null,
+  }));
 
   return {
     id: Number(p?.id),
@@ -173,6 +200,7 @@ function mapProduct(p: any): CatalogProduct {
     images,
     sizes: Array.from(sizesSet),
     colors: Array.from(colorsSet),
+    colorVariants,
     price,
     promotionalPrice,
     permalink: permalink ? String(permalink) : null,
