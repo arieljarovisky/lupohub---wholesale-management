@@ -3583,6 +3583,14 @@ export const api = {
       'PUT',
       { config }
     );
+  },
+  /** Sube una imagen propia para el catálogo y devuelve su URL absoluta. */
+  uploadCatalogImage: async (file: File): Promise<string> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await requestFormData<{ file: string; path: string }>('/catalog-images', formData);
+    const base = getBaseUrl().replace(/\/$/, '');
+    return res.path.startsWith('http') ? res.path : `${base}${res.path}`;
   }
 };
 

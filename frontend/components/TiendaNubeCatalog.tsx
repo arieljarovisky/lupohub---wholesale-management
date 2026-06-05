@@ -18,6 +18,8 @@ import {
   Check,
   BookOpen,
   Type,
+  Upload,
+  Palette,
 } from 'lucide-react';
 import {
   api,
@@ -38,6 +40,8 @@ interface ProductOverride {
   colors?: string[];
   articleCode?: string;
   imageIndex?: number;
+  /** Si está presente, reemplaza por completo la lista de imágenes (TN + propias). */
+  images?: string[];
 }
 
 interface SectionOverride {
@@ -53,10 +57,21 @@ interface CoverConfig {
   subtitle: string;
   website: string;
   category: string;
+  logoUrl?: string;
+  backgroundUrl?: string;
+}
+
+interface ColorsConfig {
+  heading: string;
+  accent: string;
+  text: string;
+  coverBg: string;
+  coverText: string;
 }
 
 interface CatalogConfig {
   cover: CoverConfig;
+  colors: ColorsConfig;
   showPrice: boolean;
   fontHeading: string;
   fontBody: string;
@@ -76,8 +91,17 @@ const defaultCover = (): CoverConfig => ({
   category: '',
 });
 
+const defaultColors = (): ColorsConfig => ({
+  heading: '#0b1f3a',
+  accent: '#c8102e',
+  text: '#475569',
+  coverBg: '#0b1f3a',
+  coverText: '#ffffff',
+});
+
 const defaultConfig = (): CatalogConfig => ({
   cover: defaultCover(),
+  colors: defaultColors(),
   showPrice: false,
   fontHeading: 'default',
   fontBody: 'default',
@@ -86,6 +110,8 @@ const defaultConfig = (): CatalogConfig => ({
   sectionOrder: [],
   productOrder: {},
 });
+
+const CATALOG_CACHE_KEY = 'lupo_tn_catalog_cache';
 
 /* ===================== Tipografías disponibles ===================== */
 
@@ -210,6 +236,7 @@ interface DisplayProduct {
 }
 
 function mergeProduct(p: TiendaNubeCatalogProduct, ov: ProductOverride | undefined): DisplayProduct {
+  const images = ov?.images && ov.images.length ? ov.images : p.images;
   return {
     id: p.id,
     name: ov?.name ?? p.name,
@@ -219,8 +246,8 @@ function mergeProduct(p: TiendaNubeCatalogProduct, ov: ProductOverride | undefin
     sizesText: ov?.sizesText ?? p.sizes.join('  ·  '),
     colors: ov?.colors ?? p.colors,
     articleCode: ov?.articleCode ?? p.articleCode,
-    images: p.images,
-    imageIndex: Math.min(ov?.imageIndex ?? 0, Math.max(0, p.images.length - 1)),
+    images,
+    imageIndex: Math.min(ov?.imageIndex ?? 0, Math.max(0, images.length - 1)),
     price: p.price,
     promotionalPrice: p.promotionalPrice,
     included: ov?.included !== false,
@@ -250,7 +277,58 @@ const ProductEditorModal: React.FC<{
   const [sizesText, setSizesText] = useState(merged.sizesText);
   const [colors, setColors] = useState((merged.colors || []).join('\n'));
   const [articleCode, setArticleCode] = useState(merged.articleCode);
+  const [images, setImages] = useState<string[]>(merged.images);
   const [imageIndex, setImageIndex] = useState(merged.imageIndex);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files: File[] = e.target.files ? Array.from(e.target.files) : [];
+    if (files.length === 0) return;
+    setUploadError('');
+    setUploading(true);
+    try {
+      const urls: string[] = [];
+      for (const f of files) {
+        const url = await api.uploadCatalogImage(f);
+        urls.push(url);
+      }
+      setImages((prev) => {
+        const nextList = [...prev, ...urls];
+        // si no había imágenes, la primera subida pasa a ser principal
+        if (prev.length === 0) setImageIndex(0);
+        return nextList;
+      });
+    } catch (err: any) {
+      setUploadError(err?.message || 'No se pudo subir la imagen');
+    } finally {
+      setUploading(false);
+      e.target.value = '';
+    }
+  };
+
+  const removeImage = (idx: number) => {
+    setImages((prev) => {
+      const nextList = prev.filter((_, i) => i !== idx);
+      setImageIndex((cur) => {
+        if (idx < cur) return cur - 1;
+        if (idx === cur) return 0;
+        return cur;
+      });
+      return nextList;
+    });
+  };
+
+  const moveImage = (idx: number, dir: -1 | 1) => {
+    setImages((prev) => {
+      const j = idx + dir;
+      if (j < 0 || j >= prev.length) return prev;
+      const next = [...prev];
+      [next[idx], next[j]] = [next[j], next[idx]];
+      setImageIndex((cur) => (cur === idx ? j : cur === j ? idx : cur));
+      return next;
+    });
+  };
 
   const save = () => {
     onSave({
@@ -263,7 +341,8 @@ const ProductEditorModal: React.FC<{
       sizesText: sizesText.trim(),
       colors: colors.split('\n').map((s) => s.trim()).filter(Boolean),
       articleCode: articleCode.trim(),
-      imageIndex,
+      images,
+      imageIndex: Math.min(imageIndex, Math.max(0, images.length - 1)),
     });
     onClose();
   };
@@ -277,8 +356,11 @@ const ProductEditorModal: React.FC<{
     setSizesText(product.sizes.join('  ·  '));
     setColors(product.colors.join('\n'));
     setArticleCode(product.articleCode);
+    setImages(product.images);
     setImageIndex(0);
   };
+
+  const isUploaded = (src: string) => /\/catalog-images\//.test(src);
 
   const inputCls =
     'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm outline-none focus:ring-2 focus:ring-emerald-500';
@@ -354,29 +436,58 @@ const ProductEditorModal: React.FC<{
             </div>
           </div>
 
-          {product.images.length > 0 && (
-            <div>
-              <label className={labelCls}>Imagen principal</label>
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className={labelCls + ' mb-0'}>Imágenes (la principal va con check)</label>
+              <label className="cursor-pointer text-xs font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1.5">
+                {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                Subir desde mi compu
+                <input type="file" accept="image/*" multiple className="hidden" onChange={handleUpload} disabled={uploading} />
+              </label>
+            </div>
+            {uploadError && <p className="text-red-400 text-xs mb-2">{uploadError}</p>}
+            {images.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-slate-600 p-4 text-center text-slate-500 text-xs">
+                Sin imágenes. Subí una desde tu computadora.
+              </div>
+            ) : (
               <div className="flex flex-wrap gap-2">
-                {product.images.map((src, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setImageIndex(i)}
-                    className={`relative w-16 h-20 rounded-lg overflow-hidden border-2 ${
+                {images.map((src, i) => (
+                  <div
+                    key={`${src}-${i}`}
+                    className={`relative w-20 h-24 rounded-lg overflow-hidden border-2 group ${
                       i === imageIndex ? 'border-emerald-500' : 'border-slate-700'
                     }`}
                   >
-                    <img src={src} alt="" className="w-full h-full object-cover" />
+                    <button onClick={() => setImageIndex(i)} className="w-full h-full" title="Marcar como principal">
+                      <img src={src} alt="" className="w-full h-full object-cover" />
+                    </button>
                     {i === imageIndex && (
-                      <span className="absolute top-0.5 right-0.5 bg-emerald-500 rounded-full p-0.5">
+                      <span className="absolute top-0.5 left-0.5 bg-emerald-500 rounded-full p-0.5">
                         <Check size={10} className="text-white" />
                       </span>
                     )}
-                  </button>
+                    {isUploaded(src) && (
+                      <span className="absolute bottom-0.5 left-0.5 bg-indigo-600 text-white text-[8px] px-1 rounded">propia</span>
+                    )}
+                    <div className="absolute top-0.5 right-0.5 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition">
+                      <button onClick={() => removeImage(i)} className="w-5 h-5 rounded bg-red-600/90 text-white flex items-center justify-center" title="Quitar">
+                        <X size={11} />
+                      </button>
+                    </div>
+                    <div className="absolute bottom-0.5 right-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100 transition">
+                      <button onClick={() => moveImage(i, -1)} className="w-5 h-5 rounded bg-black/60 text-white flex items-center justify-center" title="Mover izquierda">
+                        <ChevronUp size={11} className="-rotate-90" />
+                      </button>
+                      <button onClick={() => moveImage(i, 1)} className="w-5 h-5 rounded bg-black/60 text-white flex items-center justify-center" title="Mover derecha">
+                        <ChevronDown size={11} className="-rotate-90" />
+                      </button>
+                    </div>
+                  </div>
                 ))}
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         <div className="sticky bottom-0 bg-slate-800 border-t border-slate-700 px-5 py-3 flex flex-wrap gap-2 justify-between">
@@ -405,10 +516,28 @@ const CoverEditorModal: React.FC<{
   onClose: () => void;
 }> = ({ cover, onSave, onClose }) => {
   const [c, setC] = useState<CoverConfig>(cover);
+  const [uploading, setUploading] = useState<'logo' | 'bg' | null>(null);
+  const [uploadError, setUploadError] = useState('');
   const inputCls =
     'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm outline-none focus:ring-2 focus:ring-emerald-500';
   const labelCls = 'text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1 block';
   const set = (k: keyof CoverConfig, v: any) => setC((prev) => ({ ...prev, [k]: v }));
+
+  const uploadImage = async (e: React.ChangeEvent<HTMLInputElement>, target: 'logo' | 'bg') => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadError('');
+    setUploading(target);
+    try {
+      const url = await api.uploadCatalogImage(file);
+      set(target === 'logo' ? 'logoUrl' : 'backgroundUrl', url);
+    } catch (err: any) {
+      setUploadError(err?.message || 'No se pudo subir la imagen');
+    } finally {
+      setUploading(null);
+      e.target.value = '';
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3" onClick={onClose}>
@@ -454,6 +583,135 @@ const CoverEditorModal: React.FC<{
               <input className={inputCls} value={c.category} onChange={(e) => set('category', e.target.value)} placeholder="Lencería" />
             </div>
           </div>
+
+          {uploadError && <p className="text-red-400 text-xs">{uploadError}</p>}
+          <div className="grid grid-cols-2 gap-3">
+            {/* Logo */}
+            <div>
+              <label className={labelCls}>Logo</label>
+              <div className="flex items-center gap-2">
+                <div className="w-16 h-16 rounded-lg bg-slate-900 border border-slate-700 flex items-center justify-center overflow-hidden shrink-0">
+                  {c.logoUrl ? <img src={c.logoUrl} alt="logo" className="w-full h-full object-contain" /> : <ImageOff size={20} className="text-slate-600" />}
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="cursor-pointer text-xs font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1.5">
+                    {uploading === 'logo' ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                    Subir logo
+                    <input type="file" accept="image/*" className="hidden" onChange={(e) => uploadImage(e, 'logo')} disabled={uploading !== null} />
+                  </label>
+                  {c.logoUrl && (
+                    <button onClick={() => set('logoUrl', undefined)} className="text-xs text-red-400 hover:text-red-300 text-left">Quitar</button>
+                  )}
+                </div>
+              </div>
+            </div>
+            {/* Fondo */}
+            <div>
+              <label className={labelCls}>Imagen de fondo</label>
+              <div className="flex items-center gap-2">
+                <div className="w-16 h-16 rounded-lg bg-slate-900 border border-slate-700 flex items-center justify-center overflow-hidden shrink-0">
+                  {c.backgroundUrl ? <img src={c.backgroundUrl} alt="fondo" className="w-full h-full object-cover" /> : <ImageOff size={20} className="text-slate-600" />}
+                </div>
+                <div className="flex flex-col gap-1">
+                  <label className="cursor-pointer text-xs font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1.5">
+                    {uploading === 'bg' ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                    Subir fondo
+                    <input type="file" accept="image/*" className="hidden" onChange={(e) => uploadImage(e, 'bg')} disabled={uploading !== null} />
+                  </label>
+                  {c.backgroundUrl && (
+                    <button onClick={() => set('backgroundUrl', undefined)} className="text-xs text-red-400 hover:text-red-300 text-left">Quitar</button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="border-t border-slate-700 px-5 py-3 flex gap-2 justify-end">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-slate-300 hover:bg-slate-700 text-sm font-semibold">
+            Cancelar
+          </button>
+          <button
+            onClick={() => { onSave(c); onClose(); }}
+            className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold flex items-center gap-2"
+          >
+            <Check size={16} /> Aplicar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ===================== Editor de colores (modal) ===================== */
+
+const ColorsModal: React.FC<{
+  colors: ColorsConfig;
+  onSave: (c: ColorsConfig) => void;
+  onClose: () => void;
+}> = ({ colors, onSave, onClose }) => {
+  const [c, setC] = useState<ColorsConfig>(colors);
+  const set = (k: keyof ColorsConfig, v: string) => setC((prev) => ({ ...prev, [k]: v }));
+
+  const row = (k: keyof ColorsConfig, label: string) => (
+    <div className="flex items-center justify-between gap-3 py-1.5">
+      <span className="text-sm text-slate-200">{label}</span>
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          value={c[k]}
+          onChange={(e) => set(k, e.target.value)}
+          className="w-24 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-white text-xs font-mono outline-none focus:ring-2 focus:ring-emerald-500"
+        />
+        <input
+          type="color"
+          value={c[k]}
+          onChange={(e) => set(k, e.target.value)}
+          className="w-9 h-9 rounded-lg border border-slate-700 bg-transparent cursor-pointer p-0"
+        />
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3" onClick={onClose}>
+      <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-md shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="border-b border-slate-700 px-5 py-4 flex items-center justify-between">
+          <h3 className="font-bold text-white flex items-center gap-2">
+            <Palette size={18} className="text-emerald-400" /> Colores
+          </h3>
+          <button onClick={onClose} className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-white rounded-lg">
+            <X size={20} />
+          </button>
+        </div>
+        <div className="p-5">
+          <div className="divide-y divide-slate-700/60">
+            {row('heading', 'Títulos (nombres, secciones)')}
+            {row('accent', 'Acento (líneas, etiquetas)')}
+            {row('text', 'Texto de descripción')}
+            {row('coverBg', 'Fondo de portada / pie')}
+            {row('coverText', 'Texto de portada / pie')}
+          </div>
+
+          {/* Vista previa */}
+          <div className="mt-4 rounded-xl overflow-hidden border border-slate-200">
+            <div className="px-4 py-5 text-center" style={{ backgroundColor: c.coverBg, color: c.coverText }}>
+              <p className="text-2xl font-black">LUPO</p>
+              <div className="w-12 h-[3px] mx-auto my-2" style={{ backgroundColor: c.accent }} />
+              <p className="text-[10px] tracking-widest uppercase opacity-80">Colección 2026</p>
+            </div>
+            <div className="bg-white p-4">
+              <p className="text-lg font-black" style={{ color: c.heading }}>Bombacha Seamless</p>
+              <p className="text-xs mt-1" style={{ color: c.text }}>Descripción del producto de ejemplo.</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest mt-2" style={{ color: c.accent }}>Talles</p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => setC(defaultColors())}
+            className="mt-3 text-xs text-slate-400 hover:text-slate-200 font-semibold"
+          >
+            Restaurar colores Lupo
+          </button>
         </div>
         <div className="border-t border-slate-700 px-5 py-3 flex gap-2 justify-end">
           <button onClick={onClose} className="px-4 py-2 rounded-lg text-slate-300 hover:bg-slate-700 text-sm font-semibold">
@@ -564,11 +822,12 @@ const ProductDisplay: React.FC<{
   showPrice: boolean;
   editMode: boolean;
   headingFont?: string;
+  colors: ColorsConfig;
   onToggleInclude: () => void;
   onEdit: () => void;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
-}> = ({ product, flip, showPrice, editMode, headingFont, onToggleInclude, onEdit, onMoveUp, onMoveDown }) => {
+}> = ({ product, flip, showPrice, editMode, headingFont, colors, onToggleInclude, onEdit, onMoveUp, onMoveDown }) => {
   const img = product.images[product.imageIndex] || product.images[0] || '';
   const dimmed = editMode && !product.included;
 
@@ -620,30 +879,30 @@ const ProductDisplay: React.FC<{
 
         {/* Detalles */}
         <div className="md:w-1/2 p-5 sm:p-7 flex flex-col justify-center">
-          <h3 className="text-2xl font-black text-[#0b1f3a] leading-tight tracking-tight" style={{ fontFamily: headingFont }}>{product.name}</h3>
+          <h3 className="text-2xl font-black leading-tight tracking-tight" style={{ fontFamily: headingFont, color: colors.heading }}>{product.name}</h3>
 
           {showPrice && product.price != null && (
             <div className="mt-1 flex items-baseline gap-2">
               {product.promotionalPrice != null ? (
                 <>
-                  <span className="text-xl font-black text-[#c8102e]">{formatPrice(product.promotionalPrice)}</span>
+                  <span className="text-xl font-black" style={{ color: colors.accent }}>{formatPrice(product.promotionalPrice)}</span>
                   <span className="text-sm text-slate-400 line-through">{formatPrice(product.price)}</span>
                 </>
               ) : (
-                <span className="text-xl font-black text-[#0b1f3a]">{formatPrice(product.price)}</span>
+                <span className="text-xl font-black" style={{ color: colors.heading }}>{formatPrice(product.price)}</span>
               )}
             </div>
           )}
 
           {product.description && (
-            <p className="mt-3 text-[13.5px] text-slate-600 leading-relaxed whitespace-pre-line">{product.description}</p>
+            <p className="mt-3 text-[13.5px] leading-relaxed whitespace-pre-line" style={{ color: colors.text }}>{product.description}</p>
           )}
 
           {product.features.length > 0 && (
             <ul className="mt-3 space-y-1">
               {product.features.map((f, i) => (
-                <li key={i} className="flex items-center gap-2 text-[13px] font-semibold text-[#0b1f3a]">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#c8102e] shrink-0" />
+                <li key={i} className="flex items-center gap-2 text-[13px] font-semibold" style={{ color: colors.heading }}>
+                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: colors.accent }} />
                   {f}
                 </li>
               ))}
@@ -653,13 +912,13 @@ const ProductDisplay: React.FC<{
           <div className="mt-4 grid grid-cols-2 gap-4 border-t border-slate-200 pt-3">
             {product.composition && (
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-[#c8102e] mb-0.5">Composición</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest mb-0.5" style={{ color: colors.accent }}>Composición</p>
                 <p className="text-[13px] text-slate-700 leading-snug">{product.composition}</p>
               </div>
             )}
             {product.sizesText && (
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-[#c8102e] mb-0.5">Talles</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest mb-0.5" style={{ color: colors.accent }}>Talles</p>
                 <p className="text-[13px] font-semibold text-slate-800">{product.sizesText}</p>
               </div>
             )}
@@ -667,7 +926,7 @@ const ProductDisplay: React.FC<{
 
           {product.colors.length > 0 && (
             <div className="mt-3">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-[#c8102e] mb-1">Colores</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: colors.accent }}>Colores</p>
               <div className="flex flex-wrap gap-2">
                 {product.colors.map((c) => {
                   const hex = colorToHex(c);
@@ -706,10 +965,12 @@ const TiendaNubeCatalogView: React.FC = () => {
   const [editingProduct, setEditingProduct] = useState<{ section: TiendaNubeCatalogSection; product: TiendaNubeCatalogProduct } | null>(null);
   const [editingCover, setEditingCover] = useState(false);
   const [editingTypography, setEditingTypography] = useState(false);
+  const [editingColors, setEditingColors] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
 
   const headingStack = useMemo(() => findFont(config.fontHeading).stack || undefined, [config.fontHeading]);
   const bodyStack = useMemo(() => findFont(config.fontBody).stack || undefined, [config.fontBody]);
+  const colors = config.colors || defaultColors();
 
   useEffect(() => {
     ensureGoogleFont(findFont(config.fontHeading));
@@ -727,12 +988,14 @@ const TiendaNubeCatalogView: React.FC = () => {
         api.getTiendaNubeCatalogConfig().catch(() => ({ config: null, updatedAt: null })),
       ]);
       setCatalog(data);
+      try { localStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify(data)); } catch { /* quota */ }
       const base = defaultConfig();
       const loaded: CatalogConfig = cfgRes?.config
         ? {
             ...base,
             ...cfgRes.config,
             cover: { ...base.cover, ...(cfgRes.config.cover || {}) },
+            colors: { ...base.colors, ...(cfgRes.config.colors || {}) },
             sections: cfgRes.config.sections || {},
             products: cfgRes.config.products || {},
             sectionOrder: cfgRes.config.sectionOrder || [],
@@ -750,8 +1013,17 @@ const TiendaNubeCatalogView: React.FC = () => {
     }
   }, []);
 
-  // Cargar config guardada al montar (aunque no se haya generado el catálogo todavía)
+  // Al montar: recuperar el catálogo cacheado (para que no se borre al cambiar de sección / actualizar)
+  // y la configuración guardada.
   useEffect(() => {
+    try {
+      const cached = localStorage.getItem(CATALOG_CACHE_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed?.sections) setCatalog(parsed);
+      }
+    } catch { /* ignore */ }
+
     api
       .getTiendaNubeCatalogConfig()
       .then((res) => {
@@ -761,6 +1033,7 @@ const TiendaNubeCatalogView: React.FC = () => {
             ...base,
             ...res.config,
             cover: { ...base.cover, ...(res.config.cover || {}) },
+            colors: { ...base.colors, ...(res.config.colors || {}) },
             sections: res.config.sections || {},
             products: res.config.products || {},
             sectionOrder: res.config.sectionOrder || [],
@@ -990,6 +1263,12 @@ const TiendaNubeCatalogView: React.FC = () => {
                   >
                     <Type size={18} /> Fuente
                   </button>
+                  <button
+                    onClick={() => setEditingColors(true)}
+                    className="min-h-[44px] px-3 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 border bg-slate-700 border-slate-600 text-slate-200 hover:bg-slate-600"
+                  >
+                    <Palette size={18} /> Colores
+                  </button>
                 </>
               )}
             </div>
@@ -1059,20 +1338,33 @@ const TiendaNubeCatalogView: React.FC = () => {
         <div className="tn-catalog-print bg-white rounded-2xl overflow-hidden shadow-sm" style={{ fontFamily: bodyStack }}>
           {/* Portada */}
           {cover.enabled && (
-            <div className="tn-cover relative bg-[#0b1f3a] text-white px-8 py-16 sm:py-24 text-center overflow-hidden">
-              <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_30%_20%,#ffffff_0,transparent_45%)]" />
-              <div className="relative">
-                <p className="text-sm tracking-[0.4em] uppercase text-white/60">{cover.title}</p>
+            <div
+              className="tn-cover relative px-8 py-16 sm:py-24 text-center overflow-hidden"
+              style={{ backgroundColor: cover.backgroundUrl ? '#000' : colors.coverBg }}
+            >
+              {cover.backgroundUrl ? (
+                <>
+                  <img src={cover.backgroundUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                  <div className="absolute inset-0" style={{ backgroundColor: colors.coverBg, opacity: 0.62 }} />
+                </>
+              ) : (
+                <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_30%_20%,#ffffff_0,transparent_45%)]" />
+              )}
+              <div className="relative" style={{ color: colors.coverText }}>
+                {cover.logoUrl && (
+                  <img src={cover.logoUrl} alt="logo" className="mx-auto max-h-24 object-contain mb-5" />
+                )}
+                <p className="text-sm tracking-[0.4em] uppercase opacity-60">{cover.title}</p>
                 <h1 className="text-6xl sm:text-7xl font-black tracking-tight mt-2" style={{ fontFamily: headingStack }}>{cover.brand}</h1>
-                <div className="w-20 h-[3px] bg-[#c8102e] mx-auto my-6" />
-                <p className="text-lg tracking-[0.25em] uppercase text-white/80">{cover.collection}</p>
+                <div className="w-20 h-[3px] mx-auto my-6" style={{ backgroundColor: colors.accent }} />
+                <p className="text-lg tracking-[0.25em] uppercase opacity-80">{cover.collection}</p>
                 {cover.category && (
-                  <p className="mt-8 text-3xl font-light italic text-white/90" style={{ fontFamily: headingStack }}>{cover.category}</p>
+                  <p className="mt-8 text-3xl font-light italic opacity-90" style={{ fontFamily: headingStack }}>{cover.category}</p>
                 )}
                 {cover.subtitle && (
-                  <p className="mt-6 text-xs tracking-[0.2em] uppercase text-white/60 max-w-md mx-auto">{cover.subtitle}</p>
+                  <p className="mt-6 text-xs tracking-[0.2em] uppercase opacity-60 max-w-md mx-auto">{cover.subtitle}</p>
                 )}
-                <p className="mt-10 text-sm tracking-[0.3em] text-white/70">{cover.website}</p>
+                <p className="mt-10 text-sm tracking-[0.3em] opacity-70">{cover.website}</p>
               </div>
             </div>
           )}
@@ -1109,13 +1401,13 @@ const TiendaNubeCatalogView: React.FC = () => {
                         </button>
                       </div>
                     ) : (
-                      <div className="text-center py-4 border-y-2 border-[#0b1f3a]">
+                      <div className="text-center py-4 border-y-2" style={{ borderColor: colors.heading }}>
                         <div className="inline-flex items-center gap-3">
-                          <span className="w-8 h-[2px] bg-[#c8102e]" />
-                          <h2 className="text-3xl font-black uppercase tracking-[0.15em] text-[#0b1f3a]" style={{ fontFamily: headingStack }}>
+                          <span className="w-8 h-[2px]" style={{ backgroundColor: colors.accent }} />
+                          <h2 className="text-3xl font-black uppercase tracking-[0.15em]" style={{ fontFamily: headingStack, color: colors.heading }}>
                             {config.sections[section.id]?.name || section.name}
                           </h2>
-                          <span className="w-8 h-[2px] bg-[#c8102e]" />
+                          <span className="w-8 h-[2px]" style={{ backgroundColor: colors.accent }} />
                         </div>
                       </div>
                     )}
@@ -1133,6 +1425,7 @@ const TiendaNubeCatalogView: React.FC = () => {
                           showPrice={config.showPrice}
                           editMode={editMode}
                           headingFont={headingStack}
+                          colors={colors}
                           onToggleInclude={() => toggleProduct(p.id)}
                           onEdit={() => setEditingProduct({ section, product: p })}
                           onMoveUp={editMode ? () => moveProduct(section.id, baseProdIds, p.id, -1) : undefined}
@@ -1146,8 +1439,10 @@ const TiendaNubeCatalogView: React.FC = () => {
             })}
           </div>
 
-          <div className="bg-[#0b1f3a] text-white/70 text-center text-[11px] py-3 px-6 tracking-widest">
-            {cover.brand} · {cover.website} · Generado el {new Date(catalog.generatedAt).toLocaleDateString('es-AR')}
+          <div className="text-center text-[11px] py-3 px-6 tracking-widest" style={{ backgroundColor: colors.coverBg, color: colors.coverText }}>
+            <span className="opacity-70">
+              {cover.brand} · {cover.website} · Generado el {new Date(catalog.generatedAt).toLocaleDateString('es-AR')}
+            </span>
           </div>
         </div>
       )}
@@ -1181,6 +1476,13 @@ const TiendaNubeCatalogView: React.FC = () => {
           fontBody={config.fontBody}
           onSave={(heading, body) => setConfig((prev) => ({ ...prev, fontHeading: heading, fontBody: body }))}
           onClose={() => setEditingTypography(false)}
+        />
+      )}
+      {editingColors && (
+        <ColorsModal
+          colors={colors}
+          onSave={(c) => setConfig((prev) => ({ ...prev, colors: c }))}
+          onClose={() => setEditingColors(false)}
         />
       )}
     </div>
