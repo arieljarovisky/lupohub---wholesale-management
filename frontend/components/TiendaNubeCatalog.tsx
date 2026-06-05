@@ -20,6 +20,7 @@ import {
   Type,
   Upload,
   Palette,
+  Crop,
 } from 'lucide-react';
 import {
   api,
@@ -27,6 +28,7 @@ import {
   TiendaNubeCatalogProduct,
   TiendaNubeCatalogSection,
 } from '../services/api';
+import ImageCropModal from './ImageCropModal';
 
 /* ===================== Tipos de configuración editable ===================== */
 
@@ -281,6 +283,7 @@ const ProductEditorModal: React.FC<{
   const [imageIndex, setImageIndex] = useState(merged.imageIndex);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
+  const [croppingIndex, setCroppingIndex] = useState<number | null>(null);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files: File[] = e.target.files ? Array.from(e.target.files) : [];
@@ -361,6 +364,12 @@ const ProductEditorModal: React.FC<{
   };
 
   const isUploaded = (src: string) => /\/catalog-images\//.test(src);
+
+  const applyCroppedImage = async (idx: number, blob: Blob) => {
+    const file = new File([blob], `crop-${Date.now()}.jpg`, { type: 'image/jpeg' });
+    const url = await api.uploadCatalogImage(file);
+    setImages((prev) => prev.map((s, i) => (i === idx ? url : s)));
+  };
 
   const inputCls =
     'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm outline-none focus:ring-2 focus:ring-emerald-500';
@@ -471,6 +480,13 @@ const ProductEditorModal: React.FC<{
                       <span className="absolute bottom-0.5 left-0.5 bg-indigo-600 text-white text-[8px] px-1 rounded">propia</span>
                     )}
                     <div className="absolute top-0.5 right-0.5 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition">
+                      <button
+                        onClick={() => setCroppingIndex(i)}
+                        className="w-5 h-5 rounded bg-emerald-600/95 text-white flex items-center justify-center"
+                        title="Recortar"
+                      >
+                        <Crop size={11} />
+                      </button>
                       <button onClick={() => removeImage(i)} className="w-5 h-5 rounded bg-red-600/90 text-white flex items-center justify-center" title="Quitar">
                         <X size={11} />
                       </button>
@@ -504,6 +520,16 @@ const ProductEditorModal: React.FC<{
           </div>
         </div>
       </div>
+
+      {croppingIndex !== null && images[croppingIndex] && (
+        <ImageCropModal
+          src={images[croppingIndex]}
+          title="Recortar imagen del producto"
+          defaultAspect="4:5"
+          onClose={() => setCroppingIndex(null)}
+          onApply={(blob) => applyCroppedImage(croppingIndex, blob)}
+        />
+      )}
     </div>
   );
 };
@@ -518,6 +544,7 @@ const CoverEditorModal: React.FC<{
   const [c, setC] = useState<CoverConfig>(cover);
   const [uploading, setUploading] = useState<'logo' | 'bg' | null>(null);
   const [uploadError, setUploadError] = useState('');
+  const [cropping, setCropping] = useState<'logo' | 'bg' | null>(null);
   const inputCls =
     'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm outline-none focus:ring-2 focus:ring-emerald-500';
   const labelCls = 'text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1 block';
@@ -600,7 +627,12 @@ const CoverEditorModal: React.FC<{
                     <input type="file" accept="image/*" className="hidden" onChange={(e) => uploadImage(e, 'logo')} disabled={uploading !== null} />
                   </label>
                   {c.logoUrl && (
-                    <button onClick={() => set('logoUrl', undefined)} className="text-xs text-red-400 hover:text-red-300 text-left">Quitar</button>
+                    <>
+                      <button onClick={() => setCropping('logo')} className="text-xs text-emerald-400 hover:text-emerald-300 text-left flex items-center gap-1">
+                        <Crop size={12} /> Recortar
+                      </button>
+                      <button onClick={() => set('logoUrl', undefined)} className="text-xs text-red-400 hover:text-red-300 text-left">Quitar</button>
+                    </>
                   )}
                 </div>
               </div>
@@ -619,7 +651,12 @@ const CoverEditorModal: React.FC<{
                     <input type="file" accept="image/*" className="hidden" onChange={(e) => uploadImage(e, 'bg')} disabled={uploading !== null} />
                   </label>
                   {c.backgroundUrl && (
-                    <button onClick={() => set('backgroundUrl', undefined)} className="text-xs text-red-400 hover:text-red-300 text-left">Quitar</button>
+                    <>
+                      <button onClick={() => setCropping('bg')} className="text-xs text-emerald-400 hover:text-emerald-300 text-left flex items-center gap-1">
+                        <Crop size={12} /> Recortar
+                      </button>
+                      <button onClick={() => set('backgroundUrl', undefined)} className="text-xs text-red-400 hover:text-red-300 text-left">Quitar</button>
+                    </>
                   )}
                 </div>
               </div>
@@ -638,6 +675,33 @@ const CoverEditorModal: React.FC<{
           </button>
         </div>
       </div>
+
+      {cropping === 'logo' && c.logoUrl && (
+        <ImageCropModal
+          src={c.logoUrl}
+          title="Recortar logo"
+          defaultAspect="1:1"
+          onClose={() => setCropping(null)}
+          onApply={async (blob) => {
+            const file = new File([blob], `logo-crop-${Date.now()}.jpg`, { type: 'image/jpeg' });
+            const url = await api.uploadCatalogImage(file);
+            set('logoUrl', url);
+          }}
+        />
+      )}
+      {cropping === 'bg' && c.backgroundUrl && (
+        <ImageCropModal
+          src={c.backgroundUrl}
+          title="Recortar fondo de portada"
+          defaultAspect="16:9"
+          onClose={() => setCropping(null)}
+          onApply={async (blob) => {
+            const file = new File([blob], `bg-crop-${Date.now()}.jpg`, { type: 'image/jpeg' });
+            const url = await api.uploadCatalogImage(file);
+            set('backgroundUrl', url);
+          }}
+        />
+      )}
     </div>
   );
 };
