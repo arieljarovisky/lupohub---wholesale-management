@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   Loader2,
   RefreshCw,
@@ -6,30 +6,140 @@ import {
   Search,
   AlertCircle,
   ImageOff,
-  ChevronLeft,
-  ChevronRight,
-  Tag,
   Layers,
   DollarSign,
+  Pencil,
+  Eye,
+  EyeOff,
+  ChevronUp,
+  ChevronDown,
+  Save,
+  X,
+  Check,
+  BookOpen,
+  Type,
 } from 'lucide-react';
-import { api, TiendaNubeCatalog as TnCatalog, TiendaNubeCatalogProduct } from '../services/api';
+import {
+  api,
+  TiendaNubeCatalog as TnCatalog,
+  TiendaNubeCatalogProduct,
+  TiendaNubeCatalogSection,
+} from '../services/api';
 
-/** Mapa de nombres de color (es) a un hex aproximado para el swatch. */
+/* ===================== Tipos de configuración editable ===================== */
+
+interface ProductOverride {
+  included?: boolean;
+  name?: string;
+  description?: string;
+  features?: string[];
+  composition?: string;
+  sizesText?: string;
+  colors?: string[];
+  articleCode?: string;
+  imageIndex?: number;
+}
+
+interface SectionOverride {
+  included?: boolean;
+  name?: string;
+}
+
+interface CoverConfig {
+  enabled: boolean;
+  brand: string;
+  title: string;
+  collection: string;
+  subtitle: string;
+  website: string;
+  category: string;
+}
+
+interface CatalogConfig {
+  cover: CoverConfig;
+  showPrice: boolean;
+  fontHeading: string;
+  fontBody: string;
+  sections: Record<string, SectionOverride>;
+  products: Record<string, ProductOverride>;
+  sectionOrder: number[];
+  productOrder: Record<string, number[]>;
+}
+
+const defaultCover = (): CoverConfig => ({
+  enabled: true,
+  brand: 'LUPO',
+  title: 'Catálogo',
+  collection: 'COLECCIÓN 2026',
+  subtitle: 'SUAVIDAD Y AJUSTE PERFECTO TODO EL DÍA',
+  website: 'WWW.MULTILUPO.COM.AR',
+  category: '',
+});
+
+const defaultConfig = (): CatalogConfig => ({
+  cover: defaultCover(),
+  showPrice: false,
+  fontHeading: 'default',
+  fontBody: 'default',
+  sections: {},
+  products: {},
+  sectionOrder: [],
+  productOrder: {},
+});
+
+/* ===================== Tipografías disponibles ===================== */
+
+interface FontOption {
+  id: string;
+  label: string;
+  stack: string;
+  google?: string;
+}
+
+const FONT_OPTIONS: FontOption[] = [
+  { id: 'default', label: 'Predeterminada (sistema)', stack: '' },
+  { id: 'montserrat', label: 'Montserrat', stack: "'Montserrat', sans-serif", google: 'Montserrat:wght@400;600;700;900' },
+  { id: 'poppins', label: 'Poppins', stack: "'Poppins', sans-serif", google: 'Poppins:wght@400;600;700;800' },
+  { id: 'lato', label: 'Lato', stack: "'Lato', sans-serif", google: 'Lato:wght@400;700;900' },
+  { id: 'raleway', label: 'Raleway', stack: "'Raleway', sans-serif", google: 'Raleway:wght@400;600;700;800' },
+  { id: 'oswald', label: 'Oswald (condensada)', stack: "'Oswald', sans-serif", google: 'Oswald:wght@400;500;700' },
+  { id: 'bebas', label: 'Bebas Neue (titulares)', stack: "'Bebas Neue', sans-serif", google: 'Bebas+Neue' },
+  { id: 'playfair', label: 'Playfair Display (serif)', stack: "'Playfair Display', serif", google: 'Playfair+Display:wght@400;700;900' },
+  { id: 'cormorant', label: 'Cormorant Garamond (serif)', stack: "'Cormorant Garamond', serif", google: 'Cormorant+Garamond:wght@400;600;700' },
+  { id: 'georgia', label: 'Georgia (serif clásica)', stack: "Georgia, 'Times New Roman', serif" },
+  { id: 'helvetica', label: 'Helvetica / Arial', stack: 'Helvetica, Arial, sans-serif' },
+  { id: 'times', label: 'Times New Roman', stack: "'Times New Roman', Times, serif" },
+];
+
+function findFont(id: string): FontOption {
+  return FONT_OPTIONS.find((f) => f.id === id) || FONT_OPTIONS[0];
+}
+
+/** Carga la hoja de Google Fonts una sola vez por fuente. */
+function ensureGoogleFont(opt: FontOption) {
+  if (!opt?.google || typeof document === 'undefined') return;
+  const id = `tn-font-${opt.id}`;
+  if (document.getElementById(id)) return;
+  const link = document.createElement('link');
+  link.id = id;
+  link.rel = 'stylesheet';
+  link.href = `https://fonts.googleapis.com/css2?family=${opt.google}&display=swap`;
+  document.head.appendChild(link);
+}
+
+/* ===================== Helpers de color y precio ===================== */
+
 const COLOR_HEX: Record<string, string> = {
   negro: '#111827',
   blanco: '#ffffff',
   gris: '#9ca3af',
-  'gris melange': '#b8bcc4',
   plomo: '#6b7280',
   rojo: '#dc2626',
   bordo: '#7f1d1d',
-  bordeaux: '#7f1d1d',
   azul: '#1d4ed8',
-  'azul marino': '#1e3a5f',
   marino: '#1e3a5f',
   celeste: '#38bdf8',
   verde: '#16a34a',
-  'verde militar': '#4d5320',
   amarillo: '#facc15',
   naranja: '#f97316',
   rosa: '#f472b6',
@@ -38,22 +148,36 @@ const COLOR_HEX: Record<string, string> = {
   lila: '#c4b5fd',
   beige: '#e7d8c0',
   marron: '#92400e',
-  'marrón': '#92400e',
   camel: '#c19a6b',
   nude: '#e8c9b5',
+  natural: '#efe2d2',
   crudo: '#f3ead6',
-  natural: '#f3ead6',
+  capuccino: '#b08968',
+  capiccino: '#b08968',
+  cappuccino: '#b08968',
+  chocolate: '#5b3a29',
   dorado: '#d4af37',
   plateado: '#c0c0c0',
   turquesa: '#14b8a6',
   coral: '#fb7185',
 };
 
-function colorToHex(name: string): string | null {
-  const key = name.trim().toLowerCase();
-  if (COLOR_HEX[key]) return COLOR_HEX[key];
+/** Quita el código numérico ("999-Negro" -> "negro") para mapear a un hex. */
+function colorNamePart(label: string): string {
+  return label
+    .replace(/\d{2,4}/g, '')
+    .replace(/[·\-_/]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function colorToHex(label: string): string | null {
+  const name = colorNamePart(label);
+  if (!name) return null;
+  if (COLOR_HEX[name]) return COLOR_HEX[name];
   for (const k of Object.keys(COLOR_HEX)) {
-    if (key.includes(k)) return COLOR_HEX[k];
+    if (name.includes(k)) return COLOR_HEX[k];
   }
   return null;
 }
@@ -67,147 +191,557 @@ function formatPrice(n: number | null): string {
   }
 }
 
-const ProductCard: React.FC<{ product: TiendaNubeCatalogProduct; showPrice: boolean }> = ({
-  product,
-  showPrice,
-}) => {
-  const [imgIdx, setImgIdx] = useState(0);
-  const images = product.images.length > 0 ? product.images : [];
-  const current = images[Math.min(imgIdx, images.length - 1)];
+/* ===================== Modelo de producto para mostrar ===================== */
 
-  const next = useCallback(() => setImgIdx((i) => (images.length ? (i + 1) % images.length : 0)), [images.length]);
-  const prev = useCallback(
-    () => setImgIdx((i) => (images.length ? (i - 1 + images.length) % images.length : 0)),
-    [images.length]
-  );
+interface DisplayProduct {
+  id: number;
+  name: string;
+  description: string;
+  features: string[];
+  composition: string;
+  sizesText: string;
+  colors: string[];
+  articleCode: string;
+  images: string[];
+  imageIndex: number;
+  price: number | null;
+  promotionalPrice: number | null;
+  included: boolean;
+}
+
+function mergeProduct(p: TiendaNubeCatalogProduct, ov: ProductOverride | undefined): DisplayProduct {
+  return {
+    id: p.id,
+    name: ov?.name ?? p.name,
+    description: ov?.description ?? p.description,
+    features: ov?.features ?? [],
+    composition: ov?.composition ?? p.composition,
+    sizesText: ov?.sizesText ?? p.sizes.join('  ·  '),
+    colors: ov?.colors ?? p.colors,
+    articleCode: ov?.articleCode ?? p.articleCode,
+    images: p.images,
+    imageIndex: Math.min(ov?.imageIndex ?? 0, Math.max(0, p.images.length - 1)),
+    price: p.price,
+    promotionalPrice: p.promotionalPrice,
+    included: ov?.included !== false,
+  };
+}
+
+/** Ordena ids según un orden guardado, agregando al final los que falten. */
+function orderedIds(saved: number[] | undefined, base: number[]): number[] {
+  const result = (saved || []).filter((id) => base.includes(id));
+  for (const id of base) if (!result.includes(id)) result.push(id);
+  return result;
+}
+
+/* ===================== Editor de producto (modal) ===================== */
+
+const ProductEditorModal: React.FC<{
+  product: TiendaNubeCatalogProduct;
+  override: ProductOverride | undefined;
+  onSave: (ov: ProductOverride) => void;
+  onClose: () => void;
+}> = ({ product, override, onSave, onClose }) => {
+  const merged = mergeProduct(product, override);
+  const [name, setName] = useState(merged.name);
+  const [description, setDescription] = useState(merged.description);
+  const [features, setFeatures] = useState((merged.features || []).join('\n'));
+  const [composition, setComposition] = useState(merged.composition);
+  const [sizesText, setSizesText] = useState(merged.sizesText);
+  const [colors, setColors] = useState((merged.colors || []).join('\n'));
+  const [articleCode, setArticleCode] = useState(merged.articleCode);
+  const [imageIndex, setImageIndex] = useState(merged.imageIndex);
+
+  const save = () => {
+    onSave({
+      ...override,
+      included: override?.included,
+      name: name.trim(),
+      description,
+      features: features.split('\n').map((s) => s.trim()).filter(Boolean),
+      composition: composition.trim(),
+      sizesText: sizesText.trim(),
+      colors: colors.split('\n').map((s) => s.trim()).filter(Boolean),
+      articleCode: articleCode.trim(),
+      imageIndex,
+    });
+    onClose();
+  };
+
+  const resetField = () => {
+    // Restaura a los valores originales de Tienda Nube
+    setName(product.name);
+    setDescription(product.description);
+    setFeatures('');
+    setComposition(product.composition);
+    setSizesText(product.sizes.join('  ·  '));
+    setColors(product.colors.join('\n'));
+    setArticleCode(product.articleCode);
+    setImageIndex(0);
+  };
+
+  const inputCls =
+    'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm outline-none focus:ring-2 focus:ring-emerald-500';
+  const labelCls = 'text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1 block';
 
   return (
-    <div className="tn-card break-inside-avoid rounded-2xl border border-slate-200 bg-white overflow-hidden flex flex-col shadow-sm">
-      <div className="relative bg-slate-50 aspect-[3/4] flex items-center justify-center overflow-hidden">
-        {current ? (
-          <img
-            src={current}
-            alt={product.name}
-            loading="lazy"
-            className="w-full h-full object-cover"
-          />
-        ) : (
-          <div className="flex flex-col items-center text-slate-300">
-            <ImageOff size={40} />
-            <span className="text-xs mt-1">Sin imagen</span>
-          </div>
-        )}
-        {images.length > 1 && (
-          <>
-            <button
-              onClick={prev}
-              className="tn-noprint absolute left-1.5 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/45 hover:bg-black/65 text-white flex items-center justify-center"
-              aria-label="Imagen anterior"
-            >
-              <ChevronLeft size={18} />
-            </button>
-            <button
-              onClick={next}
-              className="tn-noprint absolute right-1.5 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/45 hover:bg-black/65 text-white flex items-center justify-center"
-              aria-label="Imagen siguiente"
-            >
-              <ChevronRight size={18} />
-            </button>
-            <div className="tn-noprint absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1">
-              {images.map((_, i) => (
-                <span
-                  key={i}
-                  className={`w-1.5 h-1.5 rounded-full ${i === imgIdx ? 'bg-white' : 'bg-white/50'}`}
-                />
-              ))}
-            </div>
-          </>
-        )}
-      </div>
+    <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3" onClick={onClose}>
+      <div
+        className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-3xl max-h-[92vh] overflow-y-auto shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="sticky top-0 bg-slate-800 border-b border-slate-700 px-5 py-4 flex items-center justify-between z-10">
+          <h3 className="font-bold text-white flex items-center gap-2">
+            <Pencil size={18} className="text-emerald-400" /> Editar producto
+          </h3>
+          <button onClick={onClose} className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-white rounded-lg">
+            <X size={20} />
+          </button>
+        </div>
 
-      <div className="p-4 flex flex-col gap-3 flex-1">
-        <div>
-          <h4 className="font-bold text-slate-900 leading-snug text-[15px]">{product.name}</h4>
-          {showPrice && product.price != null && (
-            <div className="mt-1 flex items-baseline gap-2">
-              {product.promotionalPrice != null ? (
-                <>
-                  <span className="text-lg font-black text-[#c8102e]">
-                    {formatPrice(product.promotionalPrice)}
-                  </span>
-                  <span className="text-sm text-slate-400 line-through">{formatPrice(product.price)}</span>
-                </>
-              ) : (
-                <span className="text-lg font-black text-slate-900">{formatPrice(product.price)}</span>
-              )}
+        <div className="p-5 space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className={labelCls}>Nombre</label>
+              <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
+            </div>
+            <div>
+              <label className={labelCls}>Código de artículo</label>
+              <input className={inputCls} value={articleCode} onChange={(e) => setArticleCode(e.target.value)} />
+            </div>
+          </div>
+
+          <div>
+            <label className={labelCls}>Descripción</label>
+            <textarea className={inputCls} rows={4} value={description} onChange={(e) => setDescription(e.target.value)} />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className={labelCls}>Características (una por línea)</label>
+              <textarea
+                className={inputCls}
+                rows={5}
+                placeholder={'Tecnología Seamless\nMicrofibra premium\nAjuste anatómico'}
+                value={features}
+                onChange={(e) => setFeatures(e.target.value)}
+              />
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className={labelCls}>Composición</label>
+                <input
+                  className={inputCls}
+                  placeholder="Poliamida 93% Elastano 7%"
+                  value={composition}
+                  onChange={(e) => setComposition(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Talles</label>
+                <input className={inputCls} placeholder="P · M · G · GG" value={sizesText} onChange={(e) => setSizesText(e.target.value)} />
+              </div>
+              <div>
+                <label className={labelCls}>Colores (uno por línea)</label>
+                <textarea
+                  className={inputCls}
+                  rows={3}
+                  placeholder={'614 · Nude\n999 · Negro'}
+                  value={colors}
+                  onChange={(e) => setColors(e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+
+          {product.images.length > 0 && (
+            <div>
+              <label className={labelCls}>Imagen principal</label>
+              <div className="flex flex-wrap gap-2">
+                {product.images.map((src, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setImageIndex(i)}
+                    className={`relative w-16 h-20 rounded-lg overflow-hidden border-2 ${
+                      i === imageIndex ? 'border-emerald-500' : 'border-slate-700'
+                    }`}
+                  >
+                    <img src={src} alt="" className="w-full h-full object-cover" />
+                    {i === imageIndex && (
+                      <span className="absolute top-0.5 right-0.5 bg-emerald-500 rounded-full p-0.5">
+                        <Check size={10} className="text-white" />
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </div>
 
-        {product.description && (
-          <p className="text-[13px] text-slate-600 leading-relaxed line-clamp-4 whitespace-pre-line">
-            {product.description}
-          </p>
-        )}
-
-        {product.sizes.length > 0 && (
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Talles</p>
-            <div className="flex flex-wrap gap-1.5">
-              {product.sizes.map((s) => (
-                <span
-                  key={s}
-                  className="px-2 py-0.5 rounded-md border border-slate-300 bg-slate-50 text-slate-700 text-xs font-semibold"
-                >
-                  {s}
-                </span>
-              ))}
-            </div>
+        <div className="sticky bottom-0 bg-slate-800 border-t border-slate-700 px-5 py-3 flex flex-wrap gap-2 justify-between">
+          <button onClick={resetField} className="px-3 py-2 rounded-lg text-slate-300 hover:bg-slate-700 text-sm font-semibold">
+            Restaurar de Tienda Nube
+          </button>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-4 py-2 rounded-lg text-slate-300 hover:bg-slate-700 text-sm font-semibold">
+              Cancelar
+            </button>
+            <button onClick={save} className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold flex items-center gap-2">
+              <Check size={16} /> Aplicar
+            </button>
           </div>
-        )}
-
-        {product.colors.length > 0 && (
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">Colores</p>
-            <div className="flex flex-wrap gap-1.5">
-              {product.colors.map((c) => {
-                const hex = colorToHex(c);
-                return (
-                  <span
-                    key={c}
-                    className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-slate-300 bg-white text-slate-700 text-xs font-medium"
-                  >
-                    <span
-                      className="w-3 h-3 rounded-full border border-slate-300 shrink-0"
-                      style={{ backgroundColor: hex || '#e2e8f0' }}
-                    />
-                    {c}
-                  </span>
-                );
-              })}
-            </div>
-          </div>
-        )}
+        </div>
       </div>
     </div>
   );
 };
 
+/* ===================== Editor de portada (modal) ===================== */
+
+const CoverEditorModal: React.FC<{
+  cover: CoverConfig;
+  onSave: (c: CoverConfig) => void;
+  onClose: () => void;
+}> = ({ cover, onSave, onClose }) => {
+  const [c, setC] = useState<CoverConfig>(cover);
+  const inputCls =
+    'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm outline-none focus:ring-2 focus:ring-emerald-500';
+  const labelCls = 'text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1 block';
+  const set = (k: keyof CoverConfig, v: any) => setC((prev) => ({ ...prev, [k]: v }));
+
+  return (
+    <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3" onClick={onClose}>
+      <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="border-b border-slate-700 px-5 py-4 flex items-center justify-between">
+          <h3 className="font-bold text-white flex items-center gap-2">
+            <BookOpen size={18} className="text-emerald-400" /> Editar portada
+          </h3>
+          <button onClick={onClose} className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-white rounded-lg">
+            <X size={20} />
+          </button>
+        </div>
+        <div className="p-5 space-y-3">
+          <label className="flex items-center gap-2 text-sm text-slate-200 font-semibold">
+            <input type="checkbox" checked={c.enabled} onChange={(e) => set('enabled', e.target.checked)} className="w-4 h-4 accent-emerald-500" />
+            Mostrar portada
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>Marca</label>
+              <input className={inputCls} value={c.brand} onChange={(e) => set('brand', e.target.value)} />
+            </div>
+            <div>
+              <label className={labelCls}>Título</label>
+              <input className={inputCls} value={c.title} onChange={(e) => set('title', e.target.value)} />
+            </div>
+          </div>
+          <div>
+            <label className={labelCls}>Colección</label>
+            <input className={inputCls} value={c.collection} onChange={(e) => set('collection', e.target.value)} />
+          </div>
+          <div>
+            <label className={labelCls}>Subtítulo</label>
+            <input className={inputCls} value={c.subtitle} onChange={(e) => set('subtitle', e.target.value)} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>Sitio web</label>
+              <input className={inputCls} value={c.website} onChange={(e) => set('website', e.target.value)} />
+            </div>
+            <div>
+              <label className={labelCls}>Categoría / línea</label>
+              <input className={inputCls} value={c.category} onChange={(e) => set('category', e.target.value)} placeholder="Lencería" />
+            </div>
+          </div>
+        </div>
+        <div className="border-t border-slate-700 px-5 py-3 flex gap-2 justify-end">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-slate-300 hover:bg-slate-700 text-sm font-semibold">
+            Cancelar
+          </button>
+          <button
+            onClick={() => { onSave(c); onClose(); }}
+            className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold flex items-center gap-2"
+          >
+            <Check size={16} /> Aplicar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ===================== Editor de tipografía (modal) ===================== */
+
+const TypographyModal: React.FC<{
+  fontHeading: string;
+  fontBody: string;
+  onSave: (heading: string, body: string) => void;
+  onClose: () => void;
+}> = ({ fontHeading, fontBody, onSave, onClose }) => {
+  const [heading, setHeading] = useState(fontHeading);
+  const [body, setBody] = useState(fontBody);
+
+  useEffect(() => {
+    ensureGoogleFont(findFont(heading));
+  }, [heading]);
+  useEffect(() => {
+    ensureGoogleFont(findFont(body));
+  }, [body]);
+
+  const headingStack = findFont(heading).stack || undefined;
+  const bodyStack = findFont(body).stack || undefined;
+  const selectCls =
+    'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm outline-none focus:ring-2 focus:ring-emerald-500';
+  const labelCls = 'text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1 block';
+
+  return (
+    <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3" onClick={onClose}>
+      <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="border-b border-slate-700 px-5 py-4 flex items-center justify-between">
+          <h3 className="font-bold text-white flex items-center gap-2">
+            <Type size={18} className="text-emerald-400" /> Tipografía
+          </h3>
+          <button onClick={onClose} className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-white rounded-lg">
+            <X size={20} />
+          </button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className={labelCls}>Fuente de títulos</label>
+              <select className={selectCls} value={heading} onChange={(e) => setHeading(e.target.value)}>
+                {FONT_OPTIONS.map((f) => (
+                  <option key={f.id} value={f.id}>{f.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Fuente de texto</label>
+              <select className={selectCls} value={body} onChange={(e) => setBody(e.target.value)}>
+                {FONT_OPTIONS.map((f) => (
+                  <option key={f.id} value={f.id}>{f.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Vista previa */}
+          <div className="rounded-xl bg-white p-5 border border-slate-200">
+            <p className="text-[10px] uppercase tracking-widest text-[#c8102e] font-bold mb-1">Vista previa</p>
+            <h4 className="text-2xl font-black text-[#0b1f3a] leading-tight" style={{ fontFamily: headingStack }}>
+              Bombacha Básica Seamless
+            </h4>
+            <p className="text-sm text-slate-600 mt-2 leading-relaxed" style={{ fontFamily: bodyStack }}>
+              Bombacha seamless de tacto suave y ajuste anatómico diseñada para acompañarte todos los días con máxima comodidad.
+            </p>
+            <p className="text-xs font-bold tracking-widest text-slate-400 mt-3" style={{ fontFamily: bodyStack }}>
+              ART. 40306-001
+            </p>
+          </div>
+        </div>
+        <div className="border-t border-slate-700 px-5 py-3 flex gap-2 justify-end">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-slate-300 hover:bg-slate-700 text-sm font-semibold">
+            Cancelar
+          </button>
+          <button
+            onClick={() => { onSave(heading, body); onClose(); }}
+            className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold flex items-center gap-2"
+          >
+            <Check size={16} /> Aplicar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ===================== Ficha de producto (display) ===================== */
+
+const ProductDisplay: React.FC<{
+  product: DisplayProduct;
+  flip: boolean;
+  showPrice: boolean;
+  editMode: boolean;
+  headingFont?: string;
+  onToggleInclude: () => void;
+  onEdit: () => void;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
+}> = ({ product, flip, showPrice, editMode, headingFont, onToggleInclude, onEdit, onMoveUp, onMoveDown }) => {
+  const img = product.images[product.imageIndex] || product.images[0] || '';
+  const dimmed = editMode && !product.included;
+
+  return (
+    <article
+      className={`tn-product break-inside-avoid relative rounded-xl overflow-hidden border border-slate-200 bg-white ${
+        dimmed ? 'opacity-40' : ''
+      }`}
+    >
+      {editMode && (
+        <div className="tn-noprint absolute top-2 right-2 z-10 flex gap-1">
+          {onMoveUp && (
+            <button onClick={onMoveUp} className="w-8 h-8 rounded-lg bg-white/90 border border-slate-300 text-slate-600 hover:bg-white flex items-center justify-center shadow" title="Subir">
+              <ChevronUp size={16} />
+            </button>
+          )}
+          {onMoveDown && (
+            <button onClick={onMoveDown} className="w-8 h-8 rounded-lg bg-white/90 border border-slate-300 text-slate-600 hover:bg-white flex items-center justify-center shadow" title="Bajar">
+              <ChevronDown size={16} />
+            </button>
+          )}
+          <button onClick={onEdit} className="w-8 h-8 rounded-lg bg-white/90 border border-slate-300 text-slate-700 hover:bg-white flex items-center justify-center shadow" title="Editar">
+            <Pencil size={15} />
+          </button>
+          <button
+            onClick={onToggleInclude}
+            className={`w-8 h-8 rounded-lg border flex items-center justify-center shadow ${
+              product.included ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-white/90 border-slate-300 text-slate-500'
+            }`}
+            title={product.included ? 'Quitar del catálogo' : 'Incluir en el catálogo'}
+          >
+            {product.included ? <Eye size={15} /> : <EyeOff size={15} />}
+          </button>
+        </div>
+      )}
+
+      <div className={`flex flex-col ${flip ? 'md:flex-row-reverse' : 'md:flex-row'}`}>
+        {/* Imagen */}
+        <div className="md:w-1/2 bg-[#f4f1ec] flex items-center justify-center aspect-[4/5] md:aspect-auto md:min-h-[340px] overflow-hidden">
+          {img ? (
+            <img src={img} alt={product.name} loading="lazy" className="w-full h-full object-cover" />
+          ) : (
+            <div className="flex flex-col items-center text-slate-300 py-16">
+              <ImageOff size={44} />
+              <span className="text-xs mt-2">Sin imagen</span>
+            </div>
+          )}
+        </div>
+
+        {/* Detalles */}
+        <div className="md:w-1/2 p-5 sm:p-7 flex flex-col justify-center">
+          <h3 className="text-2xl font-black text-[#0b1f3a] leading-tight tracking-tight" style={{ fontFamily: headingFont }}>{product.name}</h3>
+
+          {showPrice && product.price != null && (
+            <div className="mt-1 flex items-baseline gap-2">
+              {product.promotionalPrice != null ? (
+                <>
+                  <span className="text-xl font-black text-[#c8102e]">{formatPrice(product.promotionalPrice)}</span>
+                  <span className="text-sm text-slate-400 line-through">{formatPrice(product.price)}</span>
+                </>
+              ) : (
+                <span className="text-xl font-black text-[#0b1f3a]">{formatPrice(product.price)}</span>
+              )}
+            </div>
+          )}
+
+          {product.description && (
+            <p className="mt-3 text-[13.5px] text-slate-600 leading-relaxed whitespace-pre-line">{product.description}</p>
+          )}
+
+          {product.features.length > 0 && (
+            <ul className="mt-3 space-y-1">
+              {product.features.map((f, i) => (
+                <li key={i} className="flex items-center gap-2 text-[13px] font-semibold text-[#0b1f3a]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#c8102e] shrink-0" />
+                  {f}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="mt-4 grid grid-cols-2 gap-4 border-t border-slate-200 pt-3">
+            {product.composition && (
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-[#c8102e] mb-0.5">Composición</p>
+                <p className="text-[13px] text-slate-700 leading-snug">{product.composition}</p>
+              </div>
+            )}
+            {product.sizesText && (
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-[#c8102e] mb-0.5">Talles</p>
+                <p className="text-[13px] font-semibold text-slate-800">{product.sizesText}</p>
+              </div>
+            )}
+          </div>
+
+          {product.colors.length > 0 && (
+            <div className="mt-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-[#c8102e] mb-1">Colores</p>
+              <div className="flex flex-wrap gap-2">
+                {product.colors.map((c) => {
+                  const hex = colorToHex(c);
+                  return (
+                    <span key={c} className="inline-flex items-center gap-1.5 text-[12px] font-medium text-slate-700">
+                      <span className="w-4 h-4 rounded-full border border-slate-300 shrink-0" style={{ backgroundColor: hex || '#e2e8f0' }} />
+                      {c}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {product.articleCode && (
+            <p className="mt-4 text-[11px] font-bold tracking-widest text-slate-400">ART. {product.articleCode}</p>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+};
+
+/* ===================== Componente principal ===================== */
+
 const TiendaNubeCatalogView: React.FC = () => {
   const [catalog, setCatalog] = useState<TnCatalog | null>(null);
+  const [config, setConfig] = useState<CatalogConfig>(defaultConfig());
+  const [savedSnapshot, setSavedSnapshot] = useState<string>('');
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [activeSection, setActiveSection] = useState<number | 'all'>('all');
-  const [showPrice, setShowPrice] = useState(false);
-  const printRef = useRef<HTMLDivElement | null>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<{ section: TiendaNubeCatalogSection; product: TiendaNubeCatalogProduct } | null>(null);
+  const [editingCover, setEditingCover] = useState(false);
+  const [editingTypography, setEditingTypography] = useState(false);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+
+  const headingStack = useMemo(() => findFont(config.fontHeading).stack || undefined, [config.fontHeading]);
+  const bodyStack = useMemo(() => findFont(config.fontBody).stack || undefined, [config.fontBody]);
+
+  useEffect(() => {
+    ensureGoogleFont(findFont(config.fontHeading));
+    ensureGoogleFont(findFont(config.fontBody));
+  }, [config.fontHeading, config.fontBody]);
+
+  const dirty = useMemo(() => JSON.stringify(config) !== savedSnapshot, [config, savedSnapshot]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const data = await api.getTiendaNubeCatalog();
+      const [data, cfgRes] = await Promise.all([
+        api.getTiendaNubeCatalog(),
+        api.getTiendaNubeCatalogConfig().catch(() => ({ config: null, updatedAt: null })),
+      ]);
       setCatalog(data);
+      const base = defaultConfig();
+      const loaded: CatalogConfig = cfgRes?.config
+        ? {
+            ...base,
+            ...cfgRes.config,
+            cover: { ...base.cover, ...(cfgRes.config.cover || {}) },
+            sections: cfgRes.config.sections || {},
+            products: cfgRes.config.products || {},
+            sectionOrder: cfgRes.config.sectionOrder || [],
+            productOrder: cfgRes.config.productOrder || {},
+          }
+        : base;
+      setConfig(loaded);
+      setSavedSnapshot(JSON.stringify(loaded));
+      setSavedAt(cfgRes?.updatedAt || null);
       setActiveSection('all');
     } catch (e: any) {
       setError(e?.message || 'No se pudo generar el catálogo desde Tienda Nube');
@@ -216,50 +750,160 @@ const TiendaNubeCatalogView: React.FC = () => {
     }
   }, []);
 
-  const filteredSections = useMemo(() => {
+  // Cargar config guardada al montar (aunque no se haya generado el catálogo todavía)
+  useEffect(() => {
+    api
+      .getTiendaNubeCatalogConfig()
+      .then((res) => {
+        if (res?.config) {
+          const base = defaultConfig();
+          const loaded: CatalogConfig = {
+            ...base,
+            ...res.config,
+            cover: { ...base.cover, ...(res.config.cover || {}) },
+            sections: res.config.sections || {},
+            products: res.config.products || {},
+            sectionOrder: res.config.sectionOrder || [],
+            productOrder: res.config.productOrder || {},
+          };
+          setConfig(loaded);
+          setSavedSnapshot(JSON.stringify(loaded));
+          setSavedAt(res.updatedAt || null);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const save = useCallback(async () => {
+    setSaving(true);
+    try {
+      await api.saveTiendaNubeCatalogConfig(config);
+      setSavedSnapshot(JSON.stringify(config));
+      setSavedAt(new Date().toISOString());
+    } catch (e: any) {
+      setError(e?.message || 'No se pudo guardar la configuración');
+    } finally {
+      setSaving(false);
+    }
+  }, [config]);
+
+  /* ---------- Mutadores de config ---------- */
+
+  const setProductOverride = (id: number, patch: Partial<ProductOverride>) => {
+    setConfig((prev) => ({
+      ...prev,
+      products: { ...prev.products, [id]: { ...prev.products[id], ...patch } },
+    }));
+  };
+
+  const toggleProduct = (id: number) => {
+    setConfig((prev) => {
+      const cur = prev.products[id]?.included !== false;
+      return { ...prev, products: { ...prev.products, [id]: { ...prev.products[id], included: !cur } } };
+    });
+  };
+
+  const toggleSection = (id: number) => {
+    setConfig((prev) => {
+      const cur = prev.sections[id]?.included !== false;
+      return { ...prev, sections: { ...prev.sections, [id]: { ...prev.sections[id], included: !cur } } };
+    });
+  };
+
+  const renameSection = (id: number, name: string) => {
+    setConfig((prev) => ({ ...prev, sections: { ...prev.sections, [id]: { ...prev.sections[id], name } } }));
+  };
+
+  const moveSection = (id: number, dir: -1 | 1) => {
+    if (!catalog) return;
+    const base = catalog.sections.map((s) => s.id);
+    const order = orderedIds(config.sectionOrder, base);
+    const idx = order.indexOf(id);
+    const j = idx + dir;
+    if (idx < 0 || j < 0 || j >= order.length) return;
+    [order[idx], order[j]] = [order[j], order[idx]];
+    setConfig((prev) => ({ ...prev, sectionOrder: order }));
+  };
+
+  const moveProduct = (sectionId: number, baseIds: number[], id: number, dir: -1 | 1) => {
+    const order = orderedIds(config.productOrder[sectionId], baseIds);
+    const idx = order.indexOf(id);
+    const j = idx + dir;
+    if (idx < 0 || j < 0 || j >= order.length) return;
+    [order[idx], order[j]] = [order[j], order[idx]];
+    setConfig((prev) => ({ ...prev, productOrder: { ...prev.productOrder, [sectionId]: order } }));
+  };
+
+  /* ---------- Modelo ordenado / filtrado para render ---------- */
+
+  const orderedSections = useMemo(() => {
     if (!catalog) return [];
+    const base = catalog.sections.map((s) => s.id);
+    const order = orderedIds(config.sectionOrder, base);
+    const byId = new Map(catalog.sections.map((s) => [s.id, s]));
     const q = search.trim().toLowerCase();
-    return catalog.sections
+
+    return order
+      .map((id) => byId.get(id))
+      .filter((s): s is TiendaNubeCatalogSection => !!s)
       .filter((s) => activeSection === 'all' || s.id === activeSection)
       .map((s) => {
-        if (!q) return s;
-        const products = s.products.filter(
-          (p) =>
-            p.name.toLowerCase().includes(q) ||
-            p.description.toLowerCase().includes(q) ||
-            p.sizes.some((x) => x.toLowerCase().includes(q)) ||
-            p.colors.some((x) => x.toLowerCase().includes(q))
-        );
-        return { ...s, products, productCount: products.length };
+        const baseProdIds = s.products.map((p) => p.id);
+        const prodOrder = orderedIds(config.productOrder[s.id], baseProdIds);
+        const byPid = new Map(s.products.map((p) => [p.id, p]));
+        let products = prodOrder.map((pid) => byPid.get(pid)).filter((p): p is TiendaNubeCatalogProduct => !!p);
+        if (q) {
+          products = products.filter(
+            (p) =>
+              (config.products[p.id]?.name ?? p.name).toLowerCase().includes(q) ||
+              p.description.toLowerCase().includes(q) ||
+              p.sizes.some((x) => x.toLowerCase().includes(q)) ||
+              p.colors.some((x) => x.toLowerCase().includes(q))
+          );
+        }
+        return { section: s, products };
       })
-      .filter((s) => s.products.length > 0);
-  }, [catalog, search, activeSection]);
+      .filter((x) => x.products.length > 0);
+  }, [catalog, config, search, activeSection]);
+
+  // Para preview/print, ocultar secciones/productos excluidos
+  const visibleSections = useMemo(() => {
+    return orderedSections
+      .map(({ section, products }) => {
+        const incl = config.sections[section.id]?.included !== false;
+        if (!editMode && !incl) return null;
+        const prods = editMode ? products : products.filter((p) => config.products[p.id]?.included !== false);
+        if (!editMode && prods.length === 0) return null;
+        return { section, products: prods, included: incl };
+      })
+      .filter((x): x is { section: TiendaNubeCatalogSection; products: TiendaNubeCatalogProduct[]; included: boolean } => !!x);
+  }, [orderedSections, config, editMode]);
 
   const totalShown = useMemo(
-    () => filteredSections.reduce((acc, s) => acc + s.products.length, 0),
-    [filteredSections]
+    () => visibleSections.reduce((acc, s) => acc + s.products.length, 0),
+    [visibleSections]
   );
 
-  const handlePrint = () => {
-    window.print();
-  };
+  const handlePrint = () => window.print();
+
+  const cover = config.cover;
 
   return (
     <div className="space-y-5">
-      {/* Print styles: al imprimir, solo se ve el catálogo */}
       <style>{`
         @media print {
           body * { visibility: hidden !important; }
           .tn-catalog-print, .tn-catalog-print * { visibility: visible !important; }
           .tn-catalog-print { position: absolute; left: 0; top: 0; width: 100%; }
           .tn-noprint { display: none !important; }
-          .tn-card { box-shadow: none !important; border-color: #e5e7eb !important; }
-          .tn-print-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; gap: 12px !important; }
-          @page { margin: 12mm; }
+          .tn-product { box-shadow: none !important; border-color: #e5e7eb !important; break-inside: avoid; }
+          .tn-section:not(:first-child) { break-before: page; }
+          .tn-cover { break-after: page; }
+          @page { margin: 0; size: A4; }
         }
       `}</style>
 
-      {/* Controles */}
+      {/* Barra de herramientas */}
       <div className="tn-noprint bg-slate-800/80 border border-slate-700 rounded-2xl p-4 sm:p-5">
         <div className="flex flex-col lg:flex-row lg:items-center gap-3">
           <div>
@@ -268,7 +912,8 @@ const TiendaNubeCatalogView: React.FC = () => {
               Catálogo Tienda Nube
             </h3>
             <p className="text-slate-400 text-xs mt-0.5">
-              Se genera en vivo desde tu tienda, agrupado por cada sección.
+              Diseño editorial estilo lookbook. Editá qué entra y los textos de cada producto.
+              {savedAt && <span className="ml-1 text-slate-500">· Guardado {new Date(savedAt).toLocaleString('es-AR')}</span>}
             </p>
           </div>
           <div className="flex flex-wrap gap-2 lg:ml-auto">
@@ -280,46 +925,79 @@ const TiendaNubeCatalogView: React.FC = () => {
               {loading ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} />}
               {catalog ? 'Actualizar' : 'Generar catálogo'}
             </button>
-            <button
-              onClick={() => setShowPrice((v) => !v)}
-              className={`min-h-[44px] px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 border ${
-                showPrice
-                  ? 'bg-amber-600 border-amber-500 text-white'
-                  : 'bg-slate-700 border-slate-600 text-slate-200 hover:bg-slate-600'
-              }`}
-            >
-              <DollarSign size={18} />
-              {showPrice ? 'Precios visibles' : 'Mostrar precios'}
-            </button>
-            <button
-              onClick={handlePrint}
-              disabled={!catalog || totalShown === 0}
-              className="min-h-[44px] px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white font-bold text-sm flex items-center gap-2 border border-slate-600"
-            >
-              <Printer size={18} /> Imprimir / PDF
-            </button>
+            {catalog && (
+              <>
+                <button
+                  onClick={() => setEditMode((v) => !v)}
+                  className={`min-h-[44px] px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 border ${
+                    editMode ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-200 hover:bg-slate-600'
+                  }`}
+                >
+                  <Pencil size={18} /> {editMode ? 'Editando' : 'Editar'}
+                </button>
+                <button
+                  onClick={save}
+                  disabled={!dirty || saving}
+                  className="min-h-[44px] px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-bold text-sm flex items-center gap-2"
+                >
+                  {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                  {dirty ? 'Guardar' : 'Guardado'}
+                </button>
+                <button
+                  onClick={handlePrint}
+                  disabled={totalShown === 0}
+                  className="min-h-[44px] px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white font-bold text-sm flex items-center gap-2 border border-slate-600"
+                >
+                  <Printer size={18} /> PDF
+                </button>
+              </>
+            )}
           </div>
         </div>
 
         {catalog && (
           <div className="mt-4 flex flex-col gap-3">
-            <div className="relative">
-              <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar por nombre, talle o color..."
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-white placeholder-slate-500 outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
-              />
+            <div className="flex flex-wrap gap-2 items-center">
+              <div className="relative flex-1 min-w-[200px]">
+                <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Buscar por nombre, talle o color..."
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-white placeholder-slate-500 outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
+                />
+              </div>
+              <button
+                onClick={() => setConfig((p) => ({ ...p, showPrice: !p.showPrice }))}
+                className={`min-h-[44px] px-3 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 border ${
+                  config.showPrice ? 'bg-amber-600 border-amber-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-200 hover:bg-slate-600'
+                }`}
+              >
+                <DollarSign size={18} /> {config.showPrice ? 'Con precios' : 'Sin precios'}
+              </button>
+              {editMode && (
+                <>
+                  <button
+                    onClick={() => setEditingCover(true)}
+                    className="min-h-[44px] px-3 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 border bg-slate-700 border-slate-600 text-slate-200 hover:bg-slate-600"
+                  >
+                    <BookOpen size={18} /> Portada
+                  </button>
+                  <button
+                    onClick={() => setEditingTypography(true)}
+                    className="min-h-[44px] px-3 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 border bg-slate-700 border-slate-600 text-slate-200 hover:bg-slate-600"
+                  >
+                    <Type size={18} /> Fuente
+                  </button>
+                </>
+              )}
             </div>
             <div className="flex flex-wrap gap-1.5">
               <button
                 onClick={() => setActiveSection('all')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
-                  activeSection === 'all'
-                    ? 'bg-emerald-600 text-white'
-                    : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                  activeSection === 'all' ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
                 }`}
               >
                 Todas ({catalog.productCount})
@@ -329,15 +1007,19 @@ const TiendaNubeCatalogView: React.FC = () => {
                   key={s.id}
                   onClick={() => setActiveSection(s.id)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
-                    activeSection === s.id
-                      ? 'bg-emerald-600 text-white'
-                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                    activeSection === s.id ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
                   }`}
                 >
-                  {s.name} ({s.productCount})
+                  {config.sections[s.id]?.name || s.name} ({s.productCount})
                 </button>
               ))}
             </div>
+            {editMode && (
+              <p className="text-xs text-indigo-300 bg-indigo-950/40 border border-indigo-800/50 rounded-lg px-3 py-2">
+                Modo edición: usá el ojo para incluir/quitar, el lápiz para editar textos e imagen, y las flechas para reordenar.
+                Acordate de <strong>Guardar</strong> al terminar.
+              </p>
+            )}
           </div>
         )}
       </div>
@@ -346,11 +1028,9 @@ const TiendaNubeCatalogView: React.FC = () => {
         <div className="tn-noprint bg-red-900/20 border border-red-800 rounded-2xl p-4 flex items-start gap-3">
           <AlertCircle className="text-red-400 shrink-0 mt-0.5" size={20} />
           <div className="min-w-0">
-            <p className="text-red-300 font-medium text-sm">No se pudo generar el catálogo</p>
+            <p className="text-red-300 font-medium text-sm">Ocurrió un problema</p>
             <p className="text-slate-400 text-sm mt-0.5">{error}</p>
-            <p className="text-slate-500 text-xs mt-1">
-              Verificá que Tienda Nube esté conectada en Configuración.
-            </p>
+            <p className="text-slate-500 text-xs mt-1">Verificá que Tienda Nube esté conectada en Configuración.</p>
           </div>
         </div>
       )}
@@ -368,57 +1048,106 @@ const TiendaNubeCatalogView: React.FC = () => {
           <Layers size={48} className="mx-auto text-slate-600 mb-3" />
           <p className="text-slate-400 font-medium">Generá el catálogo desde tu Tienda Nube</p>
           <p className="text-slate-600 text-sm mt-1 max-w-md mx-auto">
-            Toca «Generar catálogo» para traer todos los productos con sus imágenes, talles, colores y
-            descripciones, separados por cada sección de la tienda.
+            Toca «Generar catálogo» para traer todos los productos con imágenes, talles, colores y descripciones,
+            separados por cada sección, con un diseño editorial listo para imprimir.
           </p>
         </div>
       )}
 
       {/* Catálogo (área imprimible) */}
       {catalog && totalShown > 0 && (
-        <div ref={printRef} className="tn-catalog-print bg-white rounded-2xl overflow-hidden">
-          {/* Encabezado branded Lupo */}
-          <div className="bg-[#0b1f3a] text-white px-6 sm:px-8 py-6 flex items-center justify-between">
-            <div>
-              <p className="text-3xl font-black tracking-tight leading-none">LUPO</p>
-              <p className="text-xs tracking-[0.3em] text-white/70 mt-1 uppercase">Catálogo Mayorista</p>
+        <div className="tn-catalog-print bg-white rounded-2xl overflow-hidden shadow-sm" style={{ fontFamily: bodyStack }}>
+          {/* Portada */}
+          {cover.enabled && (
+            <div className="tn-cover relative bg-[#0b1f3a] text-white px-8 py-16 sm:py-24 text-center overflow-hidden">
+              <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_30%_20%,#ffffff_0,transparent_45%)]" />
+              <div className="relative">
+                <p className="text-sm tracking-[0.4em] uppercase text-white/60">{cover.title}</p>
+                <h1 className="text-6xl sm:text-7xl font-black tracking-tight mt-2" style={{ fontFamily: headingStack }}>{cover.brand}</h1>
+                <div className="w-20 h-[3px] bg-[#c8102e] mx-auto my-6" />
+                <p className="text-lg tracking-[0.25em] uppercase text-white/80">{cover.collection}</p>
+                {cover.category && (
+                  <p className="mt-8 text-3xl font-light italic text-white/90" style={{ fontFamily: headingStack }}>{cover.category}</p>
+                )}
+                {cover.subtitle && (
+                  <p className="mt-6 text-xs tracking-[0.2em] uppercase text-white/60 max-w-md mx-auto">{cover.subtitle}</p>
+                )}
+                <p className="mt-10 text-sm tracking-[0.3em] text-white/70">{cover.website}</p>
+              </div>
             </div>
-            <div className="text-right text-white/80">
-              <p className="text-sm font-semibold">multilupo.com.ar</p>
-              <p className="text-[11px] mt-0.5">
-                {new Date(catalog.generatedAt).toLocaleDateString('es-AR', {
-                  day: '2-digit',
-                  month: 'long',
-                  year: 'numeric',
-                })}
-              </p>
-            </div>
+          )}
+
+          <div className="p-4 sm:p-7 space-y-12">
+            {visibleSections.map(({ section, products, included }) => {
+              const baseProdIds = section.products.map((p) => p.id);
+              return (
+                <section key={section.id} className={`tn-section ${editMode && !included ? 'opacity-50' : ''}`}>
+                  {/* Divisor de sección */}
+                  <div className="relative mb-6">
+                    {editMode ? (
+                      <div className="tn-noprint flex flex-wrap items-center gap-2 bg-slate-100 rounded-xl p-2">
+                        <button
+                          onClick={() => toggleSection(section.id)}
+                          className={`w-9 h-9 rounded-lg flex items-center justify-center ${
+                            included ? 'bg-emerald-600 text-white' : 'bg-slate-300 text-slate-600'
+                          }`}
+                          title={included ? 'Quitar sección' : 'Incluir sección'}
+                        >
+                          {included ? <Eye size={16} /> : <EyeOff size={16} />}
+                        </button>
+                        <input
+                          value={config.sections[section.id]?.name ?? section.name}
+                          onChange={(e) => renameSection(section.id, e.target.value)}
+                          className="flex-1 min-w-[160px] bg-white border border-slate-300 rounded-lg px-3 py-2 text-[#0b1f3a] font-bold uppercase tracking-wide text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+                        />
+                        <span className="text-xs text-slate-400 font-semibold">{products.length} prod.</span>
+                        <button onClick={() => moveSection(section.id, -1)} className="w-9 h-9 rounded-lg bg-white border border-slate-300 text-slate-600 hover:bg-slate-50 flex items-center justify-center" title="Subir sección">
+                          <ChevronUp size={16} />
+                        </button>
+                        <button onClick={() => moveSection(section.id, 1)} className="w-9 h-9 rounded-lg bg-white border border-slate-300 text-slate-600 hover:bg-slate-50 flex items-center justify-center" title="Bajar sección">
+                          <ChevronDown size={16} />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="text-center py-4 border-y-2 border-[#0b1f3a]">
+                        <div className="inline-flex items-center gap-3">
+                          <span className="w-8 h-[2px] bg-[#c8102e]" />
+                          <h2 className="text-3xl font-black uppercase tracking-[0.15em] text-[#0b1f3a]" style={{ fontFamily: headingStack }}>
+                            {config.sections[section.id]?.name || section.name}
+                          </h2>
+                          <span className="w-8 h-[2px] bg-[#c8102e]" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Productos */}
+                  <div className="space-y-6">
+                    {products.map((p, i) => {
+                      const dp = mergeProduct(p, config.products[p.id]);
+                      return (
+                        <ProductDisplay
+                          key={`${section.id}-${p.id}`}
+                          product={dp}
+                          flip={i % 2 === 1}
+                          showPrice={config.showPrice}
+                          editMode={editMode}
+                          headingFont={headingStack}
+                          onToggleInclude={() => toggleProduct(p.id)}
+                          onEdit={() => setEditingProduct({ section, product: p })}
+                          onMoveUp={editMode ? () => moveProduct(section.id, baseProdIds, p.id, -1) : undefined}
+                          onMoveDown={editMode ? () => moveProduct(section.id, baseProdIds, p.id, 1) : undefined}
+                        />
+                      );
+                    })}
+                  </div>
+                </section>
+              );
+            })}
           </div>
 
-          <div className="p-5 sm:p-7 space-y-9">
-            {filteredSections.map((section) => (
-              <section key={section.id} className="break-inside-avoid">
-                <div className="flex items-center gap-3 mb-4 pb-2 border-b-2 border-[#c8102e]">
-                  <Tag size={18} className="text-[#c8102e]" />
-                  <h3 className="text-xl font-black text-[#0b1f3a] uppercase tracking-wide">
-                    {section.name}
-                  </h3>
-                  <span className="ml-auto text-xs font-semibold text-slate-400">
-                    {section.products.length} productos
-                  </span>
-                </div>
-                <div className="tn-print-grid grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {section.products.map((p) => (
-                    <ProductCard key={`${section.id}-${p.id}`} product={p} showPrice={showPrice} />
-                  ))}
-                </div>
-              </section>
-            ))}
-          </div>
-
-          <div className="bg-[#0b1f3a] text-white/70 text-center text-[11px] py-3 px-6">
-            LUPO · multilupo.com.ar · Catálogo generado el{' '}
-            {new Date(catalog.generatedAt).toLocaleString('es-AR')}
+          <div className="bg-[#0b1f3a] text-white/70 text-center text-[11px] py-3 px-6 tracking-widest">
+            {cover.brand} · {cover.website} · Generado el {new Date(catalog.generatedAt).toLocaleDateString('es-AR')}
           </div>
         </div>
       )}
@@ -426,8 +1155,33 @@ const TiendaNubeCatalogView: React.FC = () => {
       {catalog && totalShown === 0 && (
         <div className="tn-noprint bg-slate-800/50 border border-slate-700 rounded-2xl p-10 text-center">
           <Search size={40} className="mx-auto text-slate-600 mb-3" />
-          <p className="text-slate-400 font-medium">No hay productos que coincidan con la búsqueda</p>
+          <p className="text-slate-400 font-medium">No hay productos para mostrar con los filtros actuales</p>
         </div>
+      )}
+
+      {/* Modales */}
+      {editingProduct && (
+        <ProductEditorModal
+          product={editingProduct.product}
+          override={config.products[editingProduct.product.id]}
+          onSave={(ov) => setProductOverride(editingProduct.product.id, ov)}
+          onClose={() => setEditingProduct(null)}
+        />
+      )}
+      {editingCover && (
+        <CoverEditorModal
+          cover={cover}
+          onSave={(c) => setConfig((prev) => ({ ...prev, cover: c }))}
+          onClose={() => setEditingCover(false)}
+        />
+      )}
+      {editingTypography && (
+        <TypographyModal
+          fontHeading={config.fontHeading}
+          fontBody={config.fontBody}
+          onSave={(heading, body) => setConfig((prev) => ({ ...prev, fontHeading: heading, fontBody: body }))}
+          onClose={() => setEditingTypography(false)}
+        />
       )}
     </div>
   );

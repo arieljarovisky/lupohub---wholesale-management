@@ -3570,6 +3570,19 @@ export const api = {
       undefined,
       300000
     );
+  },
+  getTiendaNubeCatalogConfig: async (): Promise<{ config: any | null; updatedAt: string | null }> => {
+    return request<{ config: any | null; updatedAt: string | null }>(
+      '/integrations/tiendanube/catalog/config',
+      'GET'
+    );
+  },
+  saveTiendaNubeCatalogConfig: async (config: any): Promise<{ ok: boolean }> => {
+    return request<{ ok: boolean }>(
+      '/integrations/tiendanube/catalog/config',
+      'PUT',
+      { config }
+    );
   }
 };
 
@@ -3585,6 +3598,8 @@ export interface TiendaNubeCatalogProduct {
   permalink: string | null;
   totalStock: number;
   categoryIds: number[];
+  articleCode: string;
+  composition: string;
 }
 
 export interface TiendaNubeCatalogSection {

@@ -21,6 +21,10 @@ export type CatalogProduct = {
   permalink: string | null;
   totalStock: number;
   categoryIds: number[];
+  /** Código de artículo (derivado del SKU de la primera variante, ej. 40306-001). */
+  articleCode: string;
+  /** Composición de tela detectada en la descripción (ej. "Poliamida 93% Elastano 7%"). */
+  composition: string;
 };
 
 /** Una sección del catálogo = una categoría de Tienda Nube con sus productos. */
@@ -72,6 +76,35 @@ function stripHtml(html: string): string {
 const isSizeAttr = (name: string) => /talle|talla|size|tamano|tamaño/i.test(name);
 const isColorAttr = (name: string) => /color|colour|cor/i.test(name);
 
+/** Deriva el código de artículo (ej. 40306-001) desde el SKU de la variante. */
+function deriveArticleCode(sku: string): string {
+  const s = (sku || '').trim();
+  if (!s) return '';
+  const m = s.match(/^(\d{3,6}-\d{2,3})/);
+  if (m) return m[1];
+  // fallback: primeros dos segmentos
+  const parts = s.split('-');
+  if (parts.length >= 2) return `${parts[0]}-${parts[1]}`;
+  return s;
+}
+
+/** Intenta extraer la composición de tela desde la descripción (líneas con telas y %). */
+function extractComposition(description: string): string {
+  if (!description) return '';
+  const fabricRe = /(poliamida|algod[oó]n|elastano|poli[eé]ster|lycra|microfibra|nylon|spandex|viscosa|modal)/i;
+  const lines = description.split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  for (const line of lines) {
+    if (fabricRe.test(line) && /\d{1,3}\s*%/.test(line) && line.length <= 90) {
+      return line.replace(/\s+/g, ' ').trim();
+    }
+  }
+  // buscar dentro de una sola línea larga
+  const inline = description.match(
+    /((?:poliamida|algod[oó]n|elastano|poli[eé]ster|lycra|microfibra|nylon|spandex|viscosa|modal)[^.]*?\d{1,3}\s*%[^.]*)/i
+  );
+  return inline ? inline[1].replace(/\s+/g, ' ').trim().slice(0, 90) : '';
+}
+
 /** Categorías a las que pertenece un producto (la API puede devolver ids o objetos). */
 function productCategoryIds(p: any): number[] {
   const raw = Array.isArray(p?.categories) ? p.categories : [];
@@ -108,6 +141,7 @@ function mapProduct(p: any): CatalogProduct {
   let totalStock = 0;
   let price: number | null = null;
   let promotionalPrice: number | null = null;
+  let firstSku = '';
 
   const variants = Array.isArray(p?.variants) ? p.variants : [];
   variants.forEach((v: any, vi: number) => {
@@ -121,6 +155,7 @@ function mapProduct(p: any): CatalogProduct {
       if (c) colorsSet.add(c);
     }
     totalStock += Number(v?.stock) || 0;
+    if (!firstSku && v?.sku) firstSku = String(v.sku).trim();
     if (vi === 0) {
       const pr = v?.price != null ? Number(v.price) : NaN;
       price = Number.isFinite(pr) ? pr : null;
@@ -143,6 +178,8 @@ function mapProduct(p: any): CatalogProduct {
     permalink: permalink ? String(permalink) : null,
     totalStock,
     categoryIds: productCategoryIds(p),
+    articleCode: deriveArticleCode(firstSku),
+    composition: extractComposition(description),
   };
 }
 
