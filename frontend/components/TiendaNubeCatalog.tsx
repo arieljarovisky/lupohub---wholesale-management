@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   Loader2,
   RefreshCw,
@@ -80,24 +80,12 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-/** Abre el catálogo en una ventana limpia para imprimir/guardar PDF multipágina. */
-function openCatalogPrintWindow(cover: CoverConfig): boolean {
-  const root = document.querySelector('.tn-catalog-print');
-  if (!root) return false;
-
-  const clone = root.cloneNode(true) as HTMLElement;
-  clone.querySelectorAll('.tn-noprint').forEach((n) => n.remove());
-
+function buildCatalogPrintHtml(cover: CoverConfig, bodyHtml: string): string {
   const title = [cover.brand || 'Catálogo', cover.collection].filter(Boolean).join(' - ');
-  const w = window.open('', '_blank');
-  if (!w) return false;
-
   const styleNodes = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
     .map((el) => el.outerHTML)
     .join('\n');
-
-  w.document.open();
-  w.document.write(`<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="utf-8" />
@@ -106,25 +94,71 @@ function openCatalogPrintWindow(cover: CoverConfig): boolean {
   <style>${CATALOG_PRINT_CSS}</style>
 </head>
 <body>
-${clone.outerHTML}
-<script>
-  (function () {
-    function go() { setTimeout(function () { window.focus(); window.print(); }, 400); }
-    var imgs = document.images;
-    if (!imgs.length) { go(); return; }
-    var left = imgs.length;
-    function tick() { if (--left <= 0) go(); }
-    for (var i = 0; i < imgs.length; i++) {
-      var img = imgs[i];
-      if (img.complete) tick();
-      else { img.onload = tick; img.onerror = tick; }
-    }
-  })();
-<\/script>
+${bodyHtml}
 </body>
-</html>`);
-  w.document.close();
+</html>`;
+}
+
+function waitForImages(doc: Document, done: () => void) {
+  const imgs = Array.from(doc.images);
+  if (imgs.length === 0) {
+    done();
+    return;
+  }
+  let left = imgs.length;
+  const tick = () => {
+    if (--left <= 0) done();
+  };
+  for (const img of imgs) {
+    if (img.complete) tick();
+    else {
+      img.onload = tick;
+      img.onerror = tick;
+    }
+  }
+}
+
+/** Imprime el catálogo en un iframe oculto (no requiere ventanas emergentes). */
+function printCatalogHtml(html: string): boolean {
+  const iframe = document.createElement('iframe');
+  iframe.setAttribute('aria-hidden', 'true');
+  Object.assign(iframe.style, {
+    position: 'fixed',
+    left: '0',
+    top: '0',
+    width: '0',
+    height: '0',
+    border: 'none',
+    visibility: 'hidden',
+  });
+  document.body.appendChild(iframe);
+  const win = iframe.contentWindow;
+  const doc = win?.document;
+  if (!win || !doc) {
+    iframe.remove();
+    return false;
+  }
+  doc.open();
+  doc.write(html);
+  doc.close();
+  const cleanup = () => setTimeout(() => iframe.remove(), 2000);
+  win.addEventListener('afterprint', cleanup, { once: true });
+  setTimeout(cleanup, 20000);
+  waitForImages(doc, () => {
+    setTimeout(() => {
+      win.focus();
+      win.print();
+    }, 350);
+  });
   return true;
+}
+
+function openCatalogPrint(cover: CoverConfig): boolean {
+  const root = document.querySelector('.tn-catalog-print');
+  if (!root) return false;
+  const clone = root.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll('.tn-noprint').forEach((n) => n.remove());
+  return printCatalogHtml(buildCatalogPrintHtml(cover, clone.outerHTML));
 }
 
 interface ProductOverride {
@@ -211,6 +245,65 @@ const defaultConfig = (): CatalogConfig => ({
 });
 
 const CATALOG_CACHE_KEY = 'lupo_tn_catalog_cache';
+const CONFIG_CACHE_KEY = 'lupo_tn_catalog_config_cache';
+
+function mergeProductOverrides(
+  server: Record<string, ProductOverride>,
+  local: Record<string, ProductOverride>
+): Record<string, ProductOverride> {
+  const ids = new Set([...Object.keys(server), ...Object.keys(local)]);
+  const out: Record<string, ProductOverride> = {};
+  for (const id of ids) {
+    const s = server[id] || {};
+    const l = local[id] || {};
+    out[id] = {
+      ...s,
+      ...l,
+      colorVariants: l.colorVariants?.length ? l.colorVariants : s.colorVariants,
+      images: l.images?.length ? l.images : s.images,
+    };
+  }
+  return out;
+}
+
+function mergeCatalogConfig(server: CatalogConfig, local: Partial<CatalogConfig> | null): CatalogConfig {
+  if (!local) return server;
+  return {
+    ...server,
+    ...local,
+    cover: { ...server.cover, ...(local.cover || {}) },
+    colors: { ...server.colors, ...(local.colors || {}) },
+    sections: { ...server.sections, ...(local.sections || {}) },
+    products: mergeProductOverrides(server.products, local.products || {}),
+    sectionOrder: local.sectionOrder?.length ? local.sectionOrder : server.sectionOrder,
+    productOrder: { ...server.productOrder, ...(local.productOrder || {}) },
+  };
+}
+
+function readCachedConfig(): Partial<CatalogConfig> | null {
+  try {
+    const raw = localStorage.getItem(CONFIG_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function buildConfigFromResponse(cfg: Partial<CatalogConfig> | null, base: CatalogConfig): CatalogConfig {
+  if (!cfg) return base;
+  return {
+    ...base,
+    ...cfg,
+    cover: { ...base.cover, ...(cfg.cover || {}) },
+    colors: { ...base.colors, ...(cfg.colors || {}) },
+    sections: cfg.sections || {},
+    products: cfg.products || {},
+    sectionOrder: cfg.sectionOrder || [],
+    productOrder: cfg.productOrder || {},
+  };
+}
 
 /* ===================== Tipografías disponibles ===================== */
 
@@ -346,19 +439,25 @@ function tnColorVariants(p: TiendaNubeCatalogProduct): ColorVariant[] {
 
 function resolveColorVariants(ov: ProductOverride | undefined, p: TiendaNubeCatalogProduct): ColorVariant[] {
   const fromTn = tnColorVariants(p);
-  if (ov?.colorVariants?.length) {
-    return ov.colorVariants.map((cv) => {
-      const tn = fromTn.find((t) => t.name === cv.name);
+  const tnByName = new Map(fromTn.map((c) => [c.name, c]));
+  const saved = ov?.colorVariants || [];
+  const savedByName = new Map(saved.map((c) => [c.name, c]));
+
+  if (saved.length > 0 || ov?.colors?.length) {
+    const names = fromTn.length
+      ? fromTn.map((c) => c.name)
+      : ov?.colors?.length
+        ? ov.colors
+        : saved.map((c) => c.name);
+    const uniqueNames = [...new Set(names.filter(Boolean))];
+    return uniqueNames.map((name) => {
+      const tn = tnByName.get(name);
+      const sv = savedByName.get(name);
       return {
-        ...cv,
-        sourceImage: cv.sourceImage ?? tn?.sourceImage,
+        name,
+        sourceImage: sv?.sourceImage ?? tn?.sourceImage,
+        image: sv?.image,
       };
-    });
-  }
-  if (ov?.colors?.length) {
-    return ov.colors.map((name) => {
-      const tn = fromTn.find((t) => t.name === name);
-      return { name, sourceImage: tn?.sourceImage };
     });
   }
   return fromTn;
@@ -1278,6 +1377,27 @@ const TiendaNubeCatalogView: React.FC = () => {
   const [editingTypography, setEditingTypography] = useState(false);
   const [editingColors, setEditingColors] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  const savedSnapshotRef = useRef('');
+  const configRef = useRef(config);
+
+  useEffect(() => {
+    configRef.current = config;
+  }, [config]);
+
+  useEffect(() => {
+    savedSnapshotRef.current = savedSnapshot;
+  }, [savedSnapshot]);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      try {
+        localStorage.setItem(CONFIG_CACHE_KEY, JSON.stringify(config));
+      } catch {
+        /* quota */
+      }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [config]);
 
   const headingStack = useMemo(() => findFont(config.fontHeading).stack || undefined, [config.fontHeading]);
   const bodyStack = useMemo(() => findFont(config.fontBody).stack || undefined, [config.fontBody]);
@@ -1299,23 +1419,22 @@ const TiendaNubeCatalogView: React.FC = () => {
         api.getTiendaNubeCatalogConfig().catch(() => ({ config: null, updatedAt: null })),
       ]);
       setCatalog(data);
-      try { localStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify(data)); } catch { /* quota */ }
+      try {
+        localStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify(data));
+      } catch {
+        /* quota */
+      }
       const base = defaultConfig();
-      const loaded: CatalogConfig = cfgRes?.config
-        ? {
-            ...base,
-            ...cfgRes.config,
-            cover: { ...base.cover, ...(cfgRes.config.cover || {}) },
-            colors: { ...base.colors, ...(cfgRes.config.colors || {}) },
-            sections: cfgRes.config.sections || {},
-            products: cfgRes.config.products || {},
-            sectionOrder: cfgRes.config.sectionOrder || [],
-            productOrder: cfgRes.config.productOrder || {},
-          }
-        : base;
-      setConfig(loaded);
-      setSavedSnapshot(JSON.stringify(loaded));
-      setSavedAt(cfgRes?.updatedAt || null);
+      const serverCfg = buildConfigFromResponse(cfgRes?.config, base);
+      const merged = mergeCatalogConfig(serverCfg, readCachedConfig());
+      const isDirty = JSON.stringify(configRef.current) !== savedSnapshotRef.current;
+      if (!isDirty) {
+        setConfig(merged);
+        const snap = JSON.stringify(merged);
+        setSavedSnapshot(snap);
+        savedSnapshotRef.current = snap;
+        setSavedAt(cfgRes?.updatedAt || null);
+      }
       setActiveSection('all');
     } catch (e: any) {
       setError(e?.message || 'No se pudo generar el catálogo desde Tienda Nube');
@@ -1338,32 +1457,40 @@ const TiendaNubeCatalogView: React.FC = () => {
     api
       .getTiendaNubeCatalogConfig()
       .then((res) => {
-        if (res?.config) {
-          const base = defaultConfig();
-          const loaded: CatalogConfig = {
-            ...base,
-            ...res.config,
-            cover: { ...base.cover, ...(res.config.cover || {}) },
-            colors: { ...base.colors, ...(res.config.colors || {}) },
-            sections: res.config.sections || {},
-            products: res.config.products || {},
-            sectionOrder: res.config.sectionOrder || [],
-            productOrder: res.config.productOrder || {},
-          };
-          setConfig(loaded);
-          setSavedSnapshot(JSON.stringify(loaded));
-          setSavedAt(res.updatedAt || null);
-        }
+        const base = defaultConfig();
+        const serverCfg = buildConfigFromResponse(res?.config, base);
+        const merged = mergeCatalogConfig(serverCfg, readCachedConfig());
+        setConfig(merged);
+        const snap = JSON.stringify(merged);
+        setSavedSnapshot(snap);
+        savedSnapshotRef.current = snap;
+        setSavedAt(res?.updatedAt || null);
       })
-      .catch(() => {});
+      .catch(() => {
+        const cached = readCachedConfig();
+        if (cached) {
+          const merged = mergeCatalogConfig(defaultConfig(), cached);
+          setConfig(merged);
+          const snap = JSON.stringify(merged);
+          setSavedSnapshot(snap);
+          savedSnapshotRef.current = snap;
+        }
+      });
   }, []);
 
   const save = useCallback(async () => {
     setSaving(true);
     try {
       await api.saveTiendaNubeCatalogConfig(config);
-      setSavedSnapshot(JSON.stringify(config));
+      const snap = JSON.stringify(config);
+      setSavedSnapshot(snap);
+      savedSnapshotRef.current = snap;
       setSavedAt(new Date().toISOString());
+      try {
+        localStorage.setItem(CONFIG_CACHE_KEY, JSON.stringify(config));
+      } catch {
+        /* quota */
+      }
     } catch (e: any) {
       setError(e?.message || 'No se pudo guardar la configuración');
     } finally {
@@ -1474,8 +1601,10 @@ const TiendaNubeCatalogView: React.FC = () => {
 
   const handlePrint = useCallback(() => {
     const run = () => {
-      if (!openCatalogPrintWindow(cover)) {
-        window.alert('No se pudo abrir la ventana de impresión. Permití ventanas emergentes e intentá de nuevo.');
+      if (!openCatalogPrint(cover)) {
+        document.body.classList.add('tn-printing');
+        window.print();
+        setTimeout(() => document.body.classList.remove('tn-printing'), 1000);
       }
     };
     if (editMode) {
@@ -1495,6 +1624,15 @@ const TiendaNubeCatalogView: React.FC = () => {
             height: auto !important;
             max-height: none !important;
             min-height: 0 !important;
+          }
+          body.tn-printing * { visibility: hidden !important; }
+          body.tn-printing .tn-catalog-print,
+          body.tn-printing .tn-catalog-print * { visibility: visible !important; }
+          body.tn-printing .tn-catalog-print {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
           }
           .tn-noprint { display: none !important; }
           ${CATALOG_PRINT_CSS}
