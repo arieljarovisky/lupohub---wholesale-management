@@ -1512,6 +1512,8 @@ const TiendaNubeCatalogView: React.FC = () => {
     [visibleSections]
   );
 
+  const cover = config.cover;
+
   const handlePrint = useCallback(() => {
     const run = () => {
       const prevTitle = document.title;
