@@ -43,6 +43,90 @@ interface ColorVariant {
 
 const COLOR_THUMB_SIZE = 160;
 
+const CATALOG_PRINT_CSS = `
+  @page { size: A4; margin: 0; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #fff;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .tn-catalog-print {
+    position: static !important;
+    width: 100% !important;
+    overflow: visible !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+  .tn-cover {
+    break-after: page;
+    page-break-after: always;
+    min-height: 100vh;
+    box-sizing: border-box;
+  }
+  .tn-section:not(:first-child) {
+    break-before: page;
+    page-break-before: always;
+  }
+  .tn-product {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    box-shadow: none !important;
+  }
+`;
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/** Abre el catálogo en una ventana limpia para imprimir/guardar PDF multipágina. */
+function openCatalogPrintWindow(cover: CoverConfig): boolean {
+  const root = document.querySelector('.tn-catalog-print');
+  if (!root) return false;
+
+  const clone = root.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll('.tn-noprint').forEach((n) => n.remove());
+
+  const title = [cover.brand || 'Catálogo', cover.collection].filter(Boolean).join(' - ');
+  const w = window.open('', '_blank');
+  if (!w) return false;
+
+  const styleNodes = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
+    .map((el) => el.outerHTML)
+    .join('\n');
+
+  w.document.open();
+  w.document.write(`<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(title)}</title>
+  ${styleNodes}
+  <style>${CATALOG_PRINT_CSS}</style>
+</head>
+<body>
+${clone.outerHTML}
+<script>
+  (function () {
+    function go() { setTimeout(function () { window.focus(); window.print(); }, 400); }
+    var imgs = document.images;
+    if (!imgs.length) { go(); return; }
+    var left = imgs.length;
+    function tick() { if (--left <= 0) go(); }
+    for (var i = 0; i < imgs.length; i++) {
+      var img = imgs[i];
+      if (img.complete) tick();
+      else { img.onload = tick; img.onerror = tick; }
+    }
+  })();
+<\/script>
+</body>
+</html>`);
+  w.document.close();
+  return true;
+}
+
 interface ProductOverride {
   included?: boolean;
   name?: string;
@@ -1386,22 +1470,34 @@ const TiendaNubeCatalogView: React.FC = () => {
     [visibleSections]
   );
 
-  const handlePrint = () => window.print();
-
   const cover = config.cover;
+
+  const handlePrint = useCallback(() => {
+    const run = () => {
+      if (!openCatalogPrintWindow(cover)) {
+        window.alert('No se pudo abrir la ventana de impresión. Permití ventanas emergentes e intentá de nuevo.');
+      }
+    };
+    if (editMode) {
+      setEditMode(false);
+      setTimeout(run, 200);
+    } else {
+      run();
+    }
+  }, [cover, editMode]);
 
   return (
     <div className="space-y-5">
       <style>{`
         @media print {
-          body * { visibility: hidden !important; }
-          .tn-catalog-print, .tn-catalog-print * { visibility: visible !important; }
-          .tn-catalog-print { position: absolute; left: 0; top: 0; width: 100%; }
+          html, body, main, #root, .flex, [class*="overflow"] {
+            overflow: visible !important;
+            height: auto !important;
+            max-height: none !important;
+            min-height: 0 !important;
+          }
           .tn-noprint { display: none !important; }
-          .tn-product { box-shadow: none !important; border-color: #e5e7eb !important; break-inside: avoid; }
-          .tn-section:not(:first-child) { break-before: page; }
-          .tn-cover { break-after: page; }
-          @page { margin: 0; size: A4; }
+          ${CATALOG_PRINT_CSS}
         }
       `}</style>
 
