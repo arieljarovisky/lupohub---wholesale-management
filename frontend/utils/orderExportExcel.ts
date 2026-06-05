@@ -11,7 +11,8 @@ const ALL_BORDERS = { top: BORDER, left: BORDER, bottom: BORDER, right: BORDER }
 const HEADER_FILL = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFD9D9D9' } };
 /** Separador decimal coma (planilla cliente AR). */
 const MONEY_FMT = '#.##0,00';
-const QTY_FMT = '#.##0';
+/** Cantidades: enteros sin decimales (evita 2,0 en Numbers/Excel AR). */
+const QTY_FMT = '0';
 
 function stripLeadingZeros(s: string): string {
   const t = String(s || '').trim();
@@ -164,7 +165,7 @@ export async function addOrderExportWorksheet(
 
   let subtotal = 0;
   for (const item of items) {
-    const qty = lineQuantity(item, order);
+    const qty = Math.max(0, Math.round(lineQuantity(item, order)));
     if (qty <= 0) continue;
     const price = Math.round((Number(item.priceAtMoment) || 0) * 100) / 100;
     const lineTotal = Math.round(qty * price * 100) / 100;
