@@ -160,44 +160,71 @@ const CATALOG_PRINT_CSS = `
     padding: 0 !important;
     overflow: hidden !important;
     background: #faf8f5 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
   }
   .tn-product-info-inner {
-    padding: 16mm 14mm 12mm 16mm !important;
-    height: 100% !important;
-    min-height: 210mm !important;
+    padding: 12mm 12mm 12mm 14mm !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
     box-sizing: border-box !important;
     display: flex !important;
     flex-direction: column !important;
-    justify-content: space-between !important;
+    justify-content: flex-start !important;
+    gap: 4mm !important;
+  }
+  .tn-product-copy {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 2.5mm !important;
+  }
+  .tn-product-specs {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 3mm 8mm !important;
+    padding-top: 3mm !important;
+    border-top: 1px solid rgba(120, 113, 108, 0.25) !important;
+  }
+  .tn-product-colors {
+    padding-top: 1mm !important;
   }
   .tn-product-title {
-    font-size: 26px !important;
-    line-height: 1.15 !important;
+    font-size: 24px !important;
+    line-height: 1.12 !important;
     font-weight: 500 !important;
+    margin: 0 !important;
   }
   .tn-product-blurb,
   .tn-product-features li {
-    font-size: 11px !important;
-    line-height: 1.45 !important;
+    font-size: 10.5px !important;
+    line-height: 1.4 !important;
+  }
+  .tn-product-features {
+    margin: 0 !important;
+    gap: 1.5mm !important;
   }
   .tn-spec-label {
-    font-size: 9px !important;
-    letter-spacing: 0.22em !important;
+    font-size: 8px !important;
+    letter-spacing: 0.2em !important;
+    margin-bottom: 1mm !important;
   }
   .tn-spec-value {
-    font-size: 12px !important;
+    font-size: 11px !important;
   }
   .tn-color-thumb {
-    width: 44px !important;
-    height: 44px !important;
+    width: 40px !important;
+    height: 40px !important;
   }
-  .tn-color-name {
-    font-size: 8px !important;
+  .tn-product-colors .flex-wrap {
+    gap: 3mm !important;
   }
   .tn-product-sku {
     font-size: 8px !important;
-    margin-top: auto !important;
-    padding-top: 4mm !important;
+    margin-top: 0 !important;
+    padding-top: 3mm !important;
+    border-top: 1px solid rgba(120, 113, 108, 0.2) !important;
   }
   .tn-section-head {
     break-before: page;
@@ -1356,56 +1383,62 @@ const ProductDisplay: React.FC<{
 
       <div className={`tn-product-layout flex flex-col min-h-[380px] md:min-h-[420px] ${flip ? 'md:flex-row-reverse tn-product-flip' : 'md:flex-row'}`}>
         {/* Texto — columna editorial */}
-        <div className="tn-product-info md:w-[42%] bg-[#faf8f5] flex flex-col">
-          <div className="tn-product-info-inner flex flex-col justify-center h-full px-8 py-10 md:px-10 md:py-12">
-            <p className="tn-spec-label text-[9px] uppercase tracking-[0.28em] mb-3 font-medium" style={{ color: colors.accent }}>
-              Lupo
-            </p>
-            <h3
-              className="tn-product-title text-[1.65rem] md:text-[1.85rem] font-medium leading-[1.15] tracking-wide"
-              style={{ fontFamily: headingFont, color: colors.heading }}
-            >
-              {product.name}
-            </h3>
-
-            {showPrice && product.price != null && (
-              <div className="mt-3 flex items-baseline gap-2">
-                {product.promotionalPrice != null ? (
-                  <>
-                    <span className="text-lg font-medium" style={{ color: colors.accent }}>{formatPrice(product.promotionalPrice)}</span>
-                    <span className="text-sm text-stone-400 line-through">{formatPrice(product.price)}</span>
-                  </>
-                ) : (
-                  <span className="text-lg font-medium" style={{ color: colors.heading }}>{formatPrice(product.price)}</span>
-                )}
-              </div>
-            )}
-
-            {blurb && (
-              <p className="tn-product-blurb mt-4 text-[12px] leading-relaxed max-w-sm" style={{ color: colors.text }}>
-                {blurb}
+        <div className="tn-product-info md:w-[42%] bg-[#faf8f5] flex flex-col justify-center">
+          <div className="tn-product-info-inner flex flex-col gap-4 w-full px-7 py-8 md:px-9 md:py-9">
+            <div className="tn-product-copy space-y-3">
+              <p className="tn-spec-label text-[9px] uppercase tracking-[0.28em] font-medium" style={{ color: colors.accent }}>
+                Lupo
               </p>
-            )}
+              <h3
+                className="tn-product-title text-[1.5rem] md:text-[1.7rem] font-medium leading-[1.12] tracking-wide"
+                style={{ fontFamily: headingFont, color: colors.heading }}
+              >
+                {product.name}
+              </h3>
 
-            {product.features.length > 0 && (
-              <ul className="tn-product-features mt-4 space-y-1.5 max-w-sm">
-                {product.features.map((f, i) => (
-                  <li key={i} className="flex items-start gap-2.5 text-[11.5px] leading-snug" style={{ color: colors.text }}>
-                    <span className="mt-[7px] w-3 h-px shrink-0" style={{ backgroundColor: colors.accent }} />
-                    <span>{f}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
+              {showPrice && product.price != null && (
+                <div className="flex items-baseline gap-2">
+                  {product.promotionalPrice != null ? (
+                    <>
+                      <span className="text-base font-medium" style={{ color: colors.accent }}>{formatPrice(product.promotionalPrice)}</span>
+                      <span className="text-sm text-stone-400 line-through">{formatPrice(product.price)}</span>
+                    </>
+                  ) : (
+                    <span className="text-base font-medium" style={{ color: colors.heading }}>{formatPrice(product.price)}</span>
+                  )}
+                </div>
+              )}
+
+              {blurb && (
+                <p className="tn-product-blurb text-[11.5px] leading-relaxed" style={{ color: colors.text }}>
+                  {blurb}
+                </p>
+              )}
+
+              {product.features.length > 0 && (
+                <ul className="tn-product-features space-y-1">
+                  {product.features.slice(0, 5).map((f, i) => (
+                    <li key={i} className="flex items-start gap-2 text-[11px] leading-snug" style={{ color: colors.text }}>
+                      <span className="mt-[6px] w-3 h-px shrink-0" style={{ backgroundColor: colors.accent }} />
+                      <span>{f}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
 
             {(product.composition || product.sizesText) && (
-              <div className="mt-6 pt-5 border-t border-stone-200/80 grid grid-cols-1 gap-4">
+              <div
+                className={`tn-product-specs grid gap-x-6 gap-y-3 pt-4 border-t border-stone-200/80 ${
+                  product.composition && product.sizesText ? 'grid-cols-2' : 'grid-cols-1'
+                }`}
+              >
                 {product.composition && (
                   <div>
                     <p className="tn-spec-label text-[9px] uppercase tracking-[0.22em] mb-1 font-medium" style={{ color: colors.accent }}>
                       Composición
                     </p>
-                    <p className="tn-spec-value text-[12.5px] leading-snug text-stone-700">{product.composition}</p>
+                    <p className="tn-spec-value text-[12px] leading-snug text-stone-700">{product.composition}</p>
                   </div>
                 )}
                 {product.sizesText && (
@@ -1413,24 +1446,24 @@ const ProductDisplay: React.FC<{
                     <p className="tn-spec-label text-[9px] uppercase tracking-[0.22em] mb-1 font-medium" style={{ color: colors.accent }}>
                       Talles
                     </p>
-                    <p className="tn-spec-value text-[12.5px] font-medium tracking-wide text-stone-800">{product.sizesText}</p>
+                    <p className="tn-spec-value text-[12px] font-medium tracking-wide text-stone-800">{product.sizesText}</p>
                   </div>
                 )}
               </div>
             )}
 
             {product.colorVariants.length > 0 && (
-              <div className="mt-5">
-                <p className="tn-spec-label text-[9px] uppercase tracking-[0.22em] mb-3 font-medium" style={{ color: colors.accent }}>
+              <div className="tn-product-colors">
+                <p className="tn-spec-label text-[9px] uppercase tracking-[0.22em] mb-2 font-medium" style={{ color: colors.accent }}>
                   Colores
                 </p>
-                <div className="flex flex-wrap gap-4">
+                <div className="flex flex-wrap gap-3">
                   {product.colorVariants.map((cv, i) => {
                     const hex = colorToHex(cv.name);
                     return (
-                      <div key={`${cv.name}-${i}`} className="flex flex-col items-center gap-1.5">
+                      <div key={`${cv.name}-${i}`} className="flex flex-col items-center gap-1">
                         <div
-                          className="tn-color-thumb w-11 h-11 rounded-full overflow-hidden flex items-center justify-center"
+                          className="tn-color-thumb w-10 h-10 rounded-full overflow-hidden flex items-center justify-center"
                           style={{ boxShadow: `0 0 0 1px ${colors.accent}33` }}
                         >
                           {cv.image || cv.sourceImage ? (
@@ -1442,7 +1475,7 @@ const ProductDisplay: React.FC<{
                             />
                           )}
                         </div>
-                        <span className="tn-color-name text-[9px] uppercase tracking-wider text-stone-500 text-center max-w-[64px] leading-tight">
+                        <span className="tn-color-name text-[8px] uppercase tracking-wider text-stone-500 text-center max-w-[56px] leading-tight">
                           {cv.name}
                         </span>
                       </div>
@@ -1453,7 +1486,7 @@ const ProductDisplay: React.FC<{
             )}
 
             {product.articleCode && (
-              <p className="tn-product-sku mt-auto pt-6 text-[9px] uppercase tracking-[0.25em] text-stone-400">
+              <p className="tn-product-sku pt-3 text-[9px] uppercase tracking-[0.22em] text-stone-400 border-t border-stone-200/70">
                 Art. {catalogArticleCode(product.articleCode)}
               </p>
             )}
