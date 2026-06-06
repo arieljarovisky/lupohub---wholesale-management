@@ -97,15 +97,25 @@ const CATALOG_PRINT_CSS = `
   .tn-cover {
     break-after: page;
     page-break-after: always;
-    width: 297mm;
-    height: 210mm;
-    min-height: 210mm;
-    max-height: 210mm;
+    width: 297mm !important;
+    height: 210mm !important;
+    min-height: 210mm !important;
+    max-height: 210mm !important;
+    aspect-ratio: auto !important;
     box-sizing: border-box;
     display: flex;
     align-items: center;
     justify-content: center;
     margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .tn-cover h1 {
+    font-family: 'Montserrat', sans-serif !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.1em !important;
   }
   .tn-section:first-child .tn-section-head {
     break-before: auto;
@@ -288,10 +298,6 @@ const CATALOG_PRINT_CSS = `
     font-size: 32px !important;
     font-weight: 300 !important;
     letter-spacing: 0.4em !important;
-  }
-  .tn-cover h1 {
-    font-weight: 400 !important;
-    letter-spacing: 0.08em !important;
   }
   .tn-catalog-footer {
     background: #1c1917 !important;
@@ -2030,8 +2036,11 @@ const TiendaNubeCatalogView: React.FC = () => {
           {/* Portada */}
           {cover.enabled && (
             <div
-              className="tn-cover relative px-10 py-20 sm:py-28 text-center overflow-hidden flex items-center justify-center min-h-[70vh]"
-              style={{ backgroundColor: cover.backgroundUrl ? '#000' : colors.coverBg }}
+              className="tn-cover relative w-full aspect-[297/210] min-h-[320px] text-center overflow-hidden flex items-center justify-center px-8 py-10 sm:px-14"
+              style={{
+                backgroundColor: cover.backgroundUrl ? '#000' : colors.coverBg,
+                fontFamily: "'Montserrat', sans-serif",
+              }}
             >
               {cover.backgroundUrl ? (
                 <>
@@ -2040,34 +2049,35 @@ const TiendaNubeCatalogView: React.FC = () => {
                 </>
               ) : (
                 <>
-                  <div className="absolute inset-0 opacity-[0.07] bg-[radial-gradient(ellipse_at_50%_0%,#ffffff_0,transparent_55%)]" />
-                  <div className="absolute inset-0 opacity-30 bg-[linear-gradient(180deg,transparent_0%,rgba(0,0,0,0.35)_100%)]" />
+                  <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_42%,rgba(255,255,255,0.12)_0%,transparent_58%)]" />
+                  <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.04)_0%,transparent_45%,rgba(0,0,0,0.25)_100%)]" />
                 </>
               )}
-              <div className="relative max-w-2xl mx-auto" style={{ color: colors.coverText }}>
+              <div className="relative z-[1] max-w-xl mx-auto flex flex-col items-center" style={{ color: colors.coverText }}>
                 {cover.logoUrl && (
-                  <img src={cover.logoUrl} alt="logo" className="mx-auto max-h-20 object-contain mb-8 opacity-95" />
+                  <img src={cover.logoUrl} alt="logo" className="mx-auto max-h-16 sm:max-h-20 object-contain mb-6 opacity-95" />
                 )}
-                <p className="text-[11px] tracking-[0.45em] uppercase opacity-50 font-light">{cover.title}</p>
-                <h1
-                  className="text-5xl sm:text-7xl font-light tracking-[0.12em] mt-4"
-                  style={{ fontFamily: headingStack }}
-                >
+                <p className="text-[10px] sm:text-[11px] tracking-[0.45em] uppercase text-white/50 font-light">
+                  {cover.title}
+                </p>
+                <h1 className="text-4xl sm:text-6xl md:text-7xl font-bold tracking-[0.1em] mt-3 sm:mt-4 text-white uppercase">
                   {cover.brand}
                 </h1>
-                <div className="w-16 h-px mx-auto my-7 opacity-80" style={{ backgroundColor: colors.accent }} />
-                <p className="text-sm sm:text-base tracking-[0.35em] uppercase opacity-75 font-light">{cover.collection}</p>
+                <div className="w-14 sm:w-16 h-px mx-auto my-5 sm:my-7 opacity-90" style={{ backgroundColor: colors.accent }} />
+                <p className="text-xs sm:text-sm tracking-[0.35em] uppercase text-white/80 font-light">
+                  {cover.collection}
+                </p>
                 {cover.category && (
-                  <p className="mt-10 text-2xl sm:text-3xl font-light italic opacity-85" style={{ fontFamily: headingStack }}>
-                    {cover.category}
-                  </p>
+                  <p className="mt-8 text-xl sm:text-2xl font-light italic text-white/85">{cover.category}</p>
                 )}
                 {cover.subtitle && (
-                  <p className="mt-8 text-[10px] tracking-[0.28em] uppercase opacity-45 max-w-lg mx-auto leading-relaxed font-light">
+                  <p className="mt-6 sm:mt-8 text-[9px] sm:text-[10px] tracking-[0.28em] uppercase text-white/45 max-w-md mx-auto leading-relaxed font-light">
                     {cover.subtitle}
                   </p>
                 )}
-                <p className="mt-12 text-[10px] tracking-[0.35em] uppercase opacity-40">{cover.website}</p>
+                <p className="mt-8 sm:mt-10 text-[9px] sm:text-[10px] tracking-[0.35em] uppercase text-white/40 font-light">
+                  {cover.website}
+                </p>
               </div>
             </div>
           )}
