@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BookOpen, Upload, Link as LinkIcon, Trash2, ExternalLink, Loader2, FileText, X, AlertCircle, FolderOpen, Layers } from 'lucide-react';
+import { BookOpen, Upload, Link as LinkIcon, Trash2, ExternalLink, Loader2, FileText, X, AlertCircle } from 'lucide-react';
 import { Role } from '../types';
 import { api } from '../services/api';
 import TiendaNubeCatalogView from './TiendaNubeCatalog';
@@ -29,7 +29,6 @@ const Catalogs: React.FC<CatalogsProps> = ({ role }) => {
   const [fileInput, setFileInput] = useState<HTMLInputElement | null>(null);
   const [openLoadingId, setOpenLoadingId] = useState<string | null>(null);
   const [error, setError] = useState('');
-  const [tab, setTab] = useState<'files' | 'tn'>('files');
 
   const isAdmin = role === Role.ADMIN;
 
@@ -129,36 +128,16 @@ const Catalogs: React.FC<CatalogsProps> = ({ role }) => {
     }
   };
 
+  if (isAdmin) {
+    return (
+      <div className="space-y-5 sm:space-y-6 max-w-full px-0 sm:px-0">
+        <TiendaNubeCatalogView />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-5 sm:space-y-6 max-w-full px-0 sm:px-0">
-      {isAdmin && (
-        <div className="flex gap-1 border-b border-slate-800">
-          <button
-            onClick={() => setTab('files')}
-            className={`flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 -mb-px transition-colors ${
-              tab === 'files'
-                ? 'border-emerald-500 text-emerald-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <FolderOpen size={18} /> Archivos
-          </button>
-          <button
-            onClick={() => setTab('tn')}
-            className={`flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 -mb-px transition-colors ${
-              tab === 'tn'
-                ? 'border-emerald-500 text-emerald-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Layers size={18} /> Catálogo Tienda Nube
-          </button>
-        </div>
-      )}
-
-      {isAdmin && tab === 'tn' ? (
-        <TiendaNubeCatalogView />
-      ) : (
       <>
       <div className="flex flex-col gap-4">
         <div>
@@ -302,7 +281,6 @@ const Catalogs: React.FC<CatalogsProps> = ({ role }) => {
         </div>
       )}
       </>
-      )}
     </div>
   );
 };

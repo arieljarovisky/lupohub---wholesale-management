@@ -86,6 +86,11 @@ const CATALOG_PRINT_CSS = `
   .tn-catalog-body {
     padding: 0 !important;
     margin: 0 !important;
+    gap: 0 !important;
+  }
+  .tn-catalog-body > .tn-section:first-child .tn-section-head {
+    break-before: auto !important;
+    page-break-before: auto !important;
   }
   .tn-section {
     margin: 0 !important;
@@ -94,14 +99,24 @@ const CATALOG_PRINT_CSS = `
   .tn-section > div {
     margin: 0 !important;
   }
-  .tn-cover {
+  .tn-cover-page {
+    width: 297mm !important;
+    height: 210mm !important;
+    max-height: 210mm !important;
+    overflow: hidden !important;
+    margin: 0 !important;
+    padding: 0 !important;
     break-after: page;
     page-break-after: always;
+  }
+  .tn-cover {
+    break-inside: avoid;
+    page-break-inside: avoid;
     width: 297mm !important;
     height: 210mm !important;
     min-height: 210mm !important;
     max-height: 210mm !important;
-    aspect-ratio: auto !important;
+    aspect-ratio: unset !important;
     box-sizing: border-box;
     display: flex;
     align-items: center;
@@ -369,13 +384,22 @@ const defaultCover = (): CoverConfig => ({
   category: '',
 });
 
-const defaultColors = (): ColorsConfig => ({
-  heading: '#1c1917',
-  accent: '#9a7b4f',
-  text: '#57534e',
-  coverBg: '#1c1917',
-  coverText: '#f5f0eb',
-});
+/** Paleta de marca Lupo: negro, blanco, azul. */
+const BRAND_BLACK = '#000000';
+const BRAND_WHITE = '#ffffff';
+const BRAND_BLUE = '#6b99de';
+
+function colorsFromBrandPalette(black = BRAND_BLACK, white = BRAND_WHITE, blue = BRAND_BLUE): ColorsConfig {
+  return {
+    heading: black,
+    accent: blue,
+    text: black,
+    coverBg: black,
+    coverText: white,
+  };
+}
+
+const defaultColors = (): ColorsConfig => colorsFromBrandPalette();
 
 const defaultConfig = (): CatalogConfig => ({
   cover: defaultCover(),
@@ -1194,25 +1218,38 @@ const ColorsModal: React.FC<{
   onClose: () => void;
 }> = ({ colors, onSave, onClose }) => {
   const [c, setC] = useState<ColorsConfig>(colors);
-  const set = (k: keyof ColorsConfig, v: string) => setC((prev) => ({ ...prev, [k]: v }));
+  const [black, setBlack] = useState(colors.heading || BRAND_BLACK);
+  const [white, setWhite] = useState(colors.coverText || BRAND_WHITE);
+  const [blue, setBlue] = useState(colors.accent || BRAND_BLUE);
 
-  const row = (k: keyof ColorsConfig, label: string) => (
-    <div className="flex items-center justify-between gap-3 py-1.5">
-      <span className="text-sm text-slate-200">{label}</span>
-      <div className="flex items-center gap-2">
-        <input
-          type="text"
-          value={c[k]}
-          onChange={(e) => set(k, e.target.value)}
-          className="w-24 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-white text-xs font-mono outline-none focus:ring-2 focus:ring-emerald-500"
+  const applyPalette = (nextBlack: string, nextWhite: string, nextBlue: string) => {
+    setBlack(nextBlack);
+    setWhite(nextWhite);
+    setBlue(nextBlue);
+    setC(colorsFromBrandPalette(nextBlack, nextWhite, nextBlue));
+  };
+
+  const swatch = (label: string, value: string, onChange: (hex: string) => void) => (
+    <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
+      <label className="relative cursor-pointer group">
+        <span
+          className="block w-14 h-14 rounded-full border border-slate-300/80 shadow-sm"
+          style={{ backgroundColor: value }}
         />
         <input
           type="color"
-          value={c[k]}
-          onChange={(e) => set(k, e.target.value)}
-          className="w-9 h-9 rounded-lg border border-slate-700 bg-transparent cursor-pointer p-0"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+          aria-label={label}
         />
-      </div>
+      </label>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full max-w-[88px] bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-white text-[10px] font-mono text-center outline-none focus:ring-2 focus:ring-emerald-500"
+      />
     </div>
   );
 
@@ -1228,12 +1265,13 @@ const ColorsModal: React.FC<{
           </button>
         </div>
         <div className="p-5">
-          <div className="divide-y divide-slate-700/60">
-            {row('heading', 'Títulos (nombres, secciones)')}
-            {row('accent', 'Acento (líneas, etiquetas)')}
-            {row('text', 'Texto de descripción')}
-            {row('coverBg', 'Fondo de portada / pie')}
-            {row('coverText', 'Texto de portada / pie')}
+          <p className="text-sm font-semibold text-slate-200 mb-3">Paleta de colores</p>
+          <div className="rounded-xl border border-slate-600/80 bg-slate-900/40 px-4 py-5">
+            <div className="flex items-start justify-center gap-4 sm:gap-6">
+              {swatch('Negro', black, (v) => applyPalette(v, white, blue))}
+              {swatch('Blanco', white, (v) => applyPalette(black, v, blue))}
+              {swatch('Azul', blue, (v) => applyPalette(black, white, v))}
+            </div>
           </div>
 
           {/* Vista previa */}
@@ -1245,13 +1283,13 @@ const ColorsModal: React.FC<{
             </div>
             <div className="bg-white p-4">
               <p className="text-lg font-black" style={{ color: c.heading }}>Bombacha Seamless</p>
-              <p className="text-xs mt-1" style={{ color: c.text }}>Descripción del producto de ejemplo.</p>
+              <p className="text-xs mt-1 opacity-80" style={{ color: c.text }}>Descripción del producto de ejemplo.</p>
               <p className="text-[10px] font-bold uppercase tracking-widest mt-2" style={{ color: c.accent }}>Talles</p>
             </div>
           </div>
 
           <button
-            onClick={() => setC(defaultColors())}
+            onClick={() => applyPalette(BRAND_BLACK, BRAND_WHITE, BRAND_BLUE)}
             className="mt-3 text-xs text-slate-400 hover:text-slate-200 font-semibold"
           >
             Restaurar colores Lupo
@@ -1861,6 +1899,17 @@ const TiendaNubeCatalogView: React.FC = () => {
   return (
     <div className="space-y-5">
       <style>{`
+        .tn-cover-page {
+          width: 100%;
+          max-width: 100%;
+          overflow: hidden;
+        }
+        .tn-cover {
+          box-sizing: border-box;
+          width: 100%;
+          aspect-ratio: 297 / 210;
+          max-height: calc(100vw * 210 / 297);
+        }
         @media print {
           html, body, #root, main, main > div, .flex, [class*="overflow"], [class*="h-screen"], [class*="h-\\[100dvh\\]"] {
             overflow: visible !important;
@@ -2035,60 +2084,62 @@ const TiendaNubeCatalogView: React.FC = () => {
         <div className="tn-catalog-print bg-white rounded-2xl overflow-hidden shadow-sm" style={{ fontFamily: bodyStack }}>
           {/* Portada */}
           {cover.enabled && (
-            <div
-              className="tn-cover relative w-full aspect-[297/210] min-h-[320px] text-center overflow-hidden flex items-center justify-center px-8 py-10 sm:px-14"
-              style={{
-                backgroundColor: cover.backgroundUrl ? '#000' : colors.coverBg,
-                fontFamily: "'Montserrat', sans-serif",
-              }}
-            >
-              {cover.backgroundUrl ? (
-                <>
-                  <img src={cover.backgroundUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
-                  <div className="absolute inset-0" style={{ backgroundColor: colors.coverBg, opacity: 0.55 }} />
-                </>
-              ) : (
-                <>
-                  <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_42%,rgba(255,255,255,0.12)_0%,transparent_58%)]" />
-                  <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.04)_0%,transparent_45%,rgba(0,0,0,0.25)_100%)]" />
-                </>
-              )}
-              <div className="relative z-[1] max-w-xl mx-auto flex flex-col items-center" style={{ color: colors.coverText }}>
-                {cover.logoUrl && (
-                  <img src={cover.logoUrl} alt="logo" className="mx-auto max-h-16 sm:max-h-20 object-contain mb-6 opacity-95" />
+            <div className="tn-cover-page">
+              <div
+                className="tn-cover relative text-center overflow-hidden flex items-center justify-center px-8 sm:px-14"
+                style={{
+                  backgroundColor: cover.backgroundUrl ? '#000' : colors.coverBg,
+                  fontFamily: "'Montserrat', sans-serif",
+                }}
+              >
+                {cover.backgroundUrl ? (
+                  <>
+                    <img src={cover.backgroundUrl} alt="" className="absolute inset-0 w-full h-full object-cover" />
+                    <div className="absolute inset-0" style={{ backgroundColor: colors.coverBg, opacity: 0.55 }} />
+                  </>
+                ) : (
+                  <>
+                    <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_50%_42%,rgba(255,255,255,0.12)_0%,transparent_58%)]" />
+                    <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.04)_0%,transparent_45%,rgba(0,0,0,0.25)_100%)]" />
+                  </>
                 )}
-                <p className="text-[10px] sm:text-[11px] tracking-[0.45em] uppercase text-white/50 font-light">
-                  {cover.title}
-                </p>
-                <h1 className="text-4xl sm:text-6xl md:text-7xl font-bold tracking-[0.1em] mt-3 sm:mt-4 text-white uppercase">
-                  {cover.brand}
-                </h1>
-                <div className="w-14 sm:w-16 h-px mx-auto my-5 sm:my-7 opacity-90" style={{ backgroundColor: colors.accent }} />
-                <p className="text-xs sm:text-sm tracking-[0.35em] uppercase text-white/80 font-light">
-                  {cover.collection}
-                </p>
-                {cover.category && (
-                  <p className="mt-8 text-xl sm:text-2xl font-light italic text-white/85">{cover.category}</p>
-                )}
-                {cover.subtitle && (
-                  <p className="mt-6 sm:mt-8 text-[9px] sm:text-[10px] tracking-[0.28em] uppercase text-white/45 max-w-md mx-auto leading-relaxed font-light">
-                    {cover.subtitle}
+                <div className="relative z-[1] max-w-xl mx-auto flex flex-col items-center py-6" style={{ color: colors.coverText }}>
+                  {cover.logoUrl && (
+                    <img src={cover.logoUrl} alt="logo" className="mx-auto max-h-16 sm:max-h-20 object-contain mb-6 opacity-95" />
+                  )}
+                  <p className="text-[10px] sm:text-[11px] tracking-[0.45em] uppercase text-white/50 font-light">
+                    {cover.title}
                   </p>
-                )}
-                <p className="mt-8 sm:mt-10 text-[9px] sm:text-[10px] tracking-[0.35em] uppercase text-white/40 font-light">
-                  {cover.website}
-                </p>
+                  <h1 className="text-4xl sm:text-6xl md:text-7xl font-bold tracking-[0.1em] mt-3 sm:mt-4 text-white uppercase">
+                    {cover.brand}
+                  </h1>
+                  <div className="w-14 sm:w-16 h-px mx-auto my-5 sm:my-7 opacity-90" style={{ backgroundColor: colors.accent }} />
+                  <p className="text-xs sm:text-sm tracking-[0.35em] uppercase text-white/80 font-light">
+                    {cover.collection}
+                  </p>
+                  {cover.category && (
+                    <p className="mt-8 text-xl sm:text-2xl font-light italic text-white/85">{cover.category}</p>
+                  )}
+                  {cover.subtitle && (
+                    <p className="mt-6 sm:mt-8 text-[9px] sm:text-[10px] tracking-[0.28em] uppercase text-white/45 max-w-md mx-auto leading-relaxed font-light">
+                      {cover.subtitle}
+                    </p>
+                  )}
+                  <p className="mt-8 sm:mt-10 text-[9px] sm:text-[10px] tracking-[0.35em] uppercase text-white/40 font-light">
+                    {cover.website}
+                  </p>
+                </div>
               </div>
             </div>
           )}
 
-          <div className="tn-catalog-body p-4 sm:p-7 space-y-12">
+          <div className="tn-catalog-body">
             {visibleSections.map(({ section, products, included }) => {
               const baseProdIds = section.products.map((p) => p.id);
               return (
                 <section key={section.id} className={`tn-section ${editMode && !included ? 'opacity-50' : ''}`}>
                   {/* Divisor de sección */}
-                  <div className="relative mb-6">
+                  <div className="relative mb-0">
                     {editMode ? (
                       <div className="tn-noprint flex flex-wrap items-center gap-2 bg-slate-100 rounded-xl p-2">
                         <button
@@ -2114,7 +2165,7 @@ const TiendaNubeCatalogView: React.FC = () => {
                         </button>
                       </div>
                     ) : (
-                      <div className="tn-section-head text-center py-16 md:py-24 bg-[#faf8f5] flex items-center justify-center min-h-[280px]">
+                      <div className="tn-section-head text-center py-14 md:py-20 bg-[#faf8f5] flex items-center justify-center">
                         <div>
                           <p className="text-[9px] uppercase tracking-[0.4em] mb-4 font-light" style={{ color: colors.accent }}>
                             Colección
@@ -2132,7 +2183,7 @@ const TiendaNubeCatalogView: React.FC = () => {
                   </div>
 
                   {/* Productos */}
-                  <div className="tn-products-list space-y-6">
+                  <div className="tn-products-list space-y-6 md:space-y-8">
                     {products.map((p, i) => {
                       const dp = mergeProduct(p, config.products[p.id]);
                       return (
