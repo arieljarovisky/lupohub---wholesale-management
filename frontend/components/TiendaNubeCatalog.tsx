@@ -21,7 +21,9 @@ import {
   Upload,
   Palette,
   Crop,
-  Plus,
+  Ruler,
+  Tag,
+  Layers,
 } from 'lucide-react';
 import {
   api,
@@ -192,37 +194,59 @@ const CATALOG_PRINT_CSS = `
   .tn-brand {
     font-size: 7px !important;
     letter-spacing: 0.38em !important;
-    margin-bottom: 3.5mm !important;
+    font-weight: 300 !important;
+    margin-bottom: 4mm !important;
   }
   .tn-section-rule {
-    margin: 4mm 0 !important;
+    width: 88% !important;
+    margin: 5mm auto !important;
   }
   .tn-product-title {
-    font-size: 22px !important;
-    line-height: 1.18 !important;
-    font-weight: 400 !important;
-    margin: 0 0 3.5mm 0 !important;
+    font-size: 24px !important;
+    line-height: 1.15 !important;
+    font-weight: 700 !important;
+    margin: 0 0 4mm 0 !important;
   }
   .tn-product-copy {
     display: flex !important;
     flex-direction: column !important;
     gap: 2.5mm !important;
-    max-width: 92% !important;
+    max-width: 94% !important;
   }
   .tn-product-blurb,
   .tn-product-feature {
     font-size: 10px !important;
-    line-height: 1.65 !important;
+    line-height: 1.7 !important;
+    font-weight: 400 !important;
     color: #78716c !important;
+  }
+  .tn-section-icon {
+    width: 9mm !important;
+    height: 9mm !important;
+    border-radius: 50% !important;
+    border: 0.2mm solid rgba(168, 162, 158, 0.65) !important;
+    background: #f9f8f6 !important;
+    flex-shrink: 0 !important;
+  }
+  .tn-section-icon svg {
+    width: 3.5mm !important;
+    height: 3.5mm !important;
+  }
+  .tn-product-section {
+    display: flex !important;
+    gap: 3mm !important;
+    align-items: flex-start !important;
   }
   .tn-spec-label {
     font-size: 8px !important;
     letter-spacing: 0.22em !important;
+    font-weight: 300 !important;
     color: #a8a29e !important;
-    margin-bottom: 1.5mm !important;
+    margin-bottom: 1mm !important;
   }
   .tn-spec-value {
     font-size: 11px !important;
+    font-weight: 500 !important;
     color: #44403c !important;
   }
   .tn-color-thumb {
@@ -233,11 +257,13 @@ const CATALOG_PRINT_CSS = `
   .tn-color-name {
     font-size: 7px !important;
     letter-spacing: 0.14em !important;
+    font-weight: 300 !important;
   }
   .tn-product-sku {
-    font-size: 8px !important;
-    letter-spacing: 0.24em !important;
-    color: #a8a29e !important;
+    font-size: 10px !important;
+    letter-spacing: 0.2em !important;
+    font-weight: 300 !important;
+    color: #78716c !important;
     margin: 0 !important;
     padding: 0 !important;
   }
@@ -349,8 +375,8 @@ const defaultConfig = (): CatalogConfig => ({
   cover: defaultCover(),
   colors: defaultColors(),
   showPrice: false,
-  fontHeading: 'cormorant',
-  fontBody: 'raleway',
+  fontHeading: 'montserrat',
+  fontBody: 'montserrat',
   sections: {},
   products: {},
   sectionOrder: [],
@@ -429,7 +455,7 @@ interface FontOption {
 
 const FONT_OPTIONS: FontOption[] = [
   { id: 'default', label: 'Predeterminada (sistema)', stack: '' },
-  { id: 'montserrat', label: 'Montserrat', stack: "'Montserrat', sans-serif", google: 'Montserrat:wght@400;600;700;900' },
+  { id: 'montserrat', label: 'Montserrat', stack: "'Montserrat', sans-serif", google: 'Montserrat:wght@300;400;500;600;700' },
   { id: 'poppins', label: 'Poppins', stack: "'Poppins', sans-serif", google: 'Poppins:wght@400;600;700;800' },
   { id: 'lato', label: 'Lato', stack: "'Lato', sans-serif", google: 'Lato:wght@400;700;900' },
   { id: 'raleway', label: 'Raleway', stack: "'Raleway', sans-serif", google: 'Raleway:wght@400;600;700;800' },
@@ -1335,14 +1361,15 @@ function catalogArticleCode(raw: string): string {
   return articleCodeForPrintGroup(code) || code;
 }
 
-/** Texto corto para catálogo editorial (evita bloques enormes de Tienda Nube). */
+/** Texto descriptivo para ficha (1–2 oraciones, estilo catálogo impreso). */
 function catalogBlurb(description: string, features: string[]): string | null {
   if (features.length > 0) return null;
   const clean = description.replace(/\s+/g, ' ').trim();
   if (!clean) return null;
-  const sentence = clean.split(/(?<=[.!?])\s+/)[0]?.trim() || clean;
-  if (sentence.length <= 200) return sentence;
-  return `${sentence.slice(0, 197).trim()}…`;
+  const sentences = clean.split(/(?<=[.!?])\s+/).filter(Boolean);
+  const text = (sentences.slice(0, 2).join(' ') || clean).trim();
+  if (text.length <= 320) return text;
+  return `${text.slice(0, 317).trim()}…`;
 }
 
 /** Talles en una sola línea con puntos medios (XG · XXG · XXXG). */
@@ -1356,13 +1383,40 @@ function formatCatalogSizes(text: string): string {
 
 /* ===================== Ficha de producto (display) ===================== */
 
-/** Separador fino entre bloques de ficha (estilo catálogo Lupo). */
-const CatalogSectionRule: React.FC = () => <div className="tn-section-rule h-px w-full bg-stone-300/80 my-4 shrink-0" />;
+/** Separador fino entre bloques (no ocupa todo el ancho). */
+const CatalogSectionRule: React.FC = () => (
+  <div className="flex justify-center w-full my-5 shrink-0">
+    <div className="tn-section-rule h-px bg-stone-300/75 w-[88%]" />
+  </div>
+);
 
 const CatalogSpecLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <p className="tn-spec-label text-[9px] uppercase tracking-[0.22em] text-stone-400 font-normal mb-2">
+  <p className="tn-spec-label text-[9px] uppercase tracking-[0.22em] text-stone-400 font-light mb-1.5">
     {children}
   </p>
+);
+
+const CatalogSectionIcon: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div className="tn-section-icon w-10 h-10 rounded-full border border-stone-300/80 bg-[#f9f8f6] flex items-center justify-center text-stone-500 shrink-0">
+    {children}
+  </div>
+);
+
+const CatalogDetailSection: React.FC<{
+  icon: React.ReactNode;
+  label?: string;
+  children: React.ReactNode;
+}> = ({ icon, label, children }) => (
+  <div className="tn-detail-block w-full">
+    <CatalogSectionRule />
+    <div className="tn-product-section flex gap-3.5 items-start w-full">
+      <CatalogSectionIcon>{icon}</CatalogSectionIcon>
+      <div className="tn-section-body flex-1 min-w-0 pt-0.5">
+        {label ? <CatalogSpecLabel>{label}</CatalogSpecLabel> : null}
+        {children}
+      </div>
+    </div>
+  </div>
 );
 
 const ProductDisplay: React.FC<{
@@ -1381,6 +1435,8 @@ const ProductDisplay: React.FC<{
   const img = product.images[product.imageIndex] || product.images[0] || '';
   const dimmed = editMode && !product.included;
   const blurb = catalogBlurb(product.description, product.features);
+  const fontStack = "'Montserrat', sans-serif";
+  const iconProps = { size: 15, strokeWidth: 1.5 as const };
 
   return (
     <article
@@ -1416,47 +1472,46 @@ const ProductDisplay: React.FC<{
       )}
 
       <div className={`tn-product-layout flex flex-col min-h-[380px] md:min-h-[440px] md:items-stretch ${flip ? 'md:flex-row-reverse tn-product-flip' : 'md:flex-row'}`}>
-        {/* Texto — flujo vertical de arriba a abajo (catálogo impreso) */}
+        {/* Texto — diseño catálogo Lupo (Montserrat) */}
         <div className="tn-product-info md:w-[40%] bg-[#f9f8f6] flex flex-col h-full">
           <div
             className="tn-product-info-inner flex flex-col h-full w-full items-start px-9 py-10 md:px-11 md:py-12 text-stone-600"
-            style={{ fontFamily: bodyFont }}
+            style={{ fontFamily: fontStack }}
           >
-            {/* Intro: marca, título, descripción */}
             <div className="tn-product-intro w-full">
-              <p className="tn-brand text-[8px] uppercase tracking-[0.38em] text-stone-400 font-normal mb-4">
+              <p className="tn-brand text-[8px] uppercase tracking-[0.38em] text-stone-400 font-light mb-5">
                 Lupo
               </p>
 
               <h3
-                className="tn-product-title text-[1.45rem] md:text-[1.65rem] font-normal leading-[1.18] text-stone-900 mb-4"
-                style={{ fontFamily: headingFont, color: colors.heading }}
+                className="tn-product-title text-[1.55rem] md:text-[1.75rem] font-bold leading-[1.15] text-stone-900 mb-5"
+                style={{ fontFamily: fontStack, color: colors.heading }}
               >
                 {product.name}
               </h3>
 
               {showPrice && product.price != null && (
-                <p className="text-[12px] text-stone-700 mb-3">
+                <p className="text-[12px] text-stone-700 mb-4 font-medium">
                   {product.promotionalPrice != null ? (
                     <>
-                      <span className="font-medium">{formatPrice(product.promotionalPrice)}</span>
-                      <span className="text-stone-400 line-through ml-2">{formatPrice(product.price)}</span>
+                      <span>{formatPrice(product.promotionalPrice)}</span>
+                      <span className="text-stone-400 line-through ml-2 font-normal">{formatPrice(product.price)}</span>
                     </>
                   ) : (
-                    <span className="font-medium">{formatPrice(product.price)}</span>
+                    formatPrice(product.price)
                   )}
                 </p>
               )}
 
               {(blurb || product.features.length > 0) && (
-                <div className="tn-product-copy space-y-3 max-w-[92%]">
+                <div className="tn-product-copy space-y-3 max-w-[94%]">
                   {blurb && (
-                    <p className="tn-product-blurb text-[11px] leading-[1.65] text-stone-500">
+                    <p className="tn-product-blurb text-[11px] leading-[1.7] text-stone-500 font-normal">
                       {blurb}
                     </p>
                   )}
-                  {product.features.slice(0, 4).map((f, i) => (
-                    <p key={i} className="tn-product-feature text-[11px] leading-[1.65] text-stone-500">
+                  {product.features.slice(0, 3).map((f, i) => (
+                    <p key={i} className="tn-product-feature text-[11px] leading-[1.7] text-stone-500 font-normal">
                       {f}
                     </p>
                   ))}
@@ -1464,68 +1519,54 @@ const ProductDisplay: React.FC<{
               )}
             </div>
 
-            {/* Detalle: talles → composición → colores → artículo */}
             <div className="tn-product-details w-full flex flex-col">
               {product.sizesText && (
-                <>
-                  <CatalogSectionRule />
-                  <section className="tn-product-section">
-                    <CatalogSpecLabel>Talles</CatalogSpecLabel>
-                    <p className="tn-spec-value text-[12px] font-normal tracking-wide text-stone-800">
-                      {formatCatalogSizes(product.sizesText)}
-                    </p>
-                  </section>
-                </>
+                <CatalogDetailSection icon={<Ruler {...iconProps} />} label="Talles">
+                  <p className="tn-spec-value text-[12px] font-medium tracking-wide text-stone-800">
+                    {formatCatalogSizes(product.sizesText)}
+                  </p>
+                </CatalogDetailSection>
               )}
 
               {product.composition && (
-                <>
-                  <CatalogSectionRule />
-                  <section className="tn-product-section">
-                    <CatalogSpecLabel>Composición</CatalogSpecLabel>
-                    <p className="tn-spec-value text-[11.5px] leading-[1.55] text-stone-700 whitespace-pre-line">
-                      {product.composition.replace(/\s*-\s*/g, '\n').replace(/,\s*/g, '\n')}
-                    </p>
-                  </section>
-                </>
+                <CatalogDetailSection icon={<Layers {...iconProps} />} label="Composición">
+                  <p className="tn-spec-value text-[11px] leading-[1.6] text-stone-700 font-normal whitespace-pre-line">
+                    {product.composition.replace(/\s*-\s*/g, '\n').replace(/,\s*/g, '\n')}
+                  </p>
+                </CatalogDetailSection>
               )}
 
               {product.colorVariants.length > 0 && (
-                <>
-                  <CatalogSectionRule />
-                  <section className="tn-product-section">
-                    <CatalogSpecLabel>Colores</CatalogSpecLabel>
-                    <div className="flex flex-wrap justify-start gap-x-5 gap-y-3">
-                      {product.colorVariants.map((cv, i) => {
-                        const hex = colorToHex(cv.name);
-                        const colorLabel = cv.name.replace(/^\d+\s*[·\-]?\s*/, '').trim() || cv.name;
-                        return (
-                          <div key={`${cv.name}-${i}`} className="flex flex-col items-start gap-1.5">
-                            <div className="tn-color-thumb w-11 h-11 rounded-sm overflow-hidden bg-white border border-stone-200/90">
-                              {cv.image || cv.sourceImage ? (
-                                <img src={cv.image || cv.sourceImage} alt={cv.name} className="w-full h-full object-cover" />
-                              ) : (
-                                <span className="block w-full h-full" style={{ backgroundColor: hex || '#e7e5e4' }} />
-                              )}
-                            </div>
-                            <span className="tn-color-name text-[8px] uppercase tracking-[0.14em] text-stone-500 leading-tight">
-                              {colorLabel}
-                            </span>
+                <CatalogDetailSection icon={<Palette {...iconProps} />} label="Colores">
+                  <div className="flex flex-wrap justify-start gap-x-5 gap-y-3">
+                    {product.colorVariants.map((cv, i) => {
+                      const hex = colorToHex(cv.name);
+                      const colorLabel = cv.name.replace(/^\d+\s*[·\-]?\s*/, '').trim() || cv.name;
+                      return (
+                        <div key={`${cv.name}-${i}`} className="flex flex-col items-start gap-1.5">
+                          <div className="tn-color-thumb w-11 h-11 rounded-sm overflow-hidden bg-white border border-stone-200/90">
+                            {cv.image || cv.sourceImage ? (
+                              <img src={cv.image || cv.sourceImage} alt={cv.name} className="w-full h-full object-cover" />
+                            ) : (
+                              <span className="block w-full h-full" style={{ backgroundColor: hex || '#e7e5e4' }} />
+                            )}
                           </div>
-                        );
-                      })}
-                    </div>
-                  </section>
-                </>
+                          <span className="tn-color-name text-[8px] uppercase tracking-[0.14em] text-stone-500 font-light leading-tight">
+                            {colorLabel}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </CatalogDetailSection>
               )}
 
               {product.articleCode && (
-                <>
-                  <CatalogSectionRule />
-                  <p className="tn-product-sku text-[9px] uppercase tracking-[0.24em] text-stone-400 font-normal">
+                <CatalogDetailSection icon={<Tag {...iconProps} />}>
+                  <p className="tn-product-sku text-[11px] uppercase tracking-[0.2em] text-stone-500 font-light pt-1.5">
                     Art. {catalogArticleCode(product.articleCode)}
                   </p>
-                </>
+                </CatalogDetailSection>
               )}
             </div>
           </div>
@@ -1591,6 +1632,7 @@ const TiendaNubeCatalogView: React.FC = () => {
   const colors = config.colors || defaultColors();
 
   useEffect(() => {
+    ensureGoogleFont(findFont('montserrat'));
     ensureGoogleFont(findFont(config.fontHeading));
     ensureGoogleFont(findFont(config.fontBody));
   }, [config.fontHeading, config.fontBody]);
