@@ -610,26 +610,25 @@ function tnColorVariants(p: TiendaNubeCatalogProduct): ColorVariant[] {
 function resolveColorVariants(ov: ProductOverride | undefined, p: TiendaNubeCatalogProduct): ColorVariant[] {
   const fromTn = tnColorVariants(p);
   const tnByName = new Map(fromTn.map((c) => [c.name, c]));
-  const saved = ov?.colorVariants || [];
-  const savedByName = new Map(saved.map((c) => [c.name, c]));
 
-  if (saved.length > 0 || ov?.colors?.length) {
-    const names = fromTn.length
-      ? fromTn.map((c) => c.name)
-      : ov?.colors?.length
-        ? ov.colors
-        : saved.map((c) => c.name);
-    const uniqueNames = [...new Set(names.filter(Boolean))];
-    return uniqueNames.map((name) => {
-      const tn = tnByName.get(name);
-      const sv = savedByName.get(name);
-      return {
-        name,
-        sourceImage: sv?.sourceImage ?? tn?.sourceImage,
-        image: sv?.image,
-      };
-    });
+  const enrich = (sv: ColorVariant): ColorVariant => {
+    const tn = tnByName.get(sv.name);
+    return {
+      name: sv.name,
+      sourceImage: sv.sourceImage ?? tn?.sourceImage,
+      image: sv.image,
+    };
+  };
+
+  // Lista guardada en el editor manda (incluye colores quitados por el usuario).
+  if (ov?.colorVariants !== undefined) {
+    return ov.colorVariants.filter((c) => c.name.trim()).map(enrich);
   }
+
+  if (ov?.colors?.length) {
+    return ov.colors.filter(Boolean).map((name) => enrich({ name }));
+  }
+
   return fromTn;
 }
 
