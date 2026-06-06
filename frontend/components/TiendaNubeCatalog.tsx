@@ -30,6 +30,7 @@ import {
   TiendaNubeCatalogSection,
 } from '../services/api';
 import ImageCropModal from './ImageCropModal';
+import { articleCodeForPrintGroup } from '../utils/wholesaleInvoiceHtml';
 
 /* ===================== Tipos de configuración editable ===================== */
 
@@ -46,31 +47,63 @@ const COLOR_THUMB_SIZE = 160;
 const CATALOG_PRINT_CSS = `
   @page { size: A4 landscape; margin: 0; }
   html, body {
-    margin: 0;
-    padding: 0;
+    margin: 0 !important;
+    padding: 0 !important;
     background: #fff;
+    width: 100% !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
-  .tn-catalog-print {
-    position: static !important;
+  body.tn-printing aside,
+  body.tn-printing header,
+  body.tn-printing nav,
+  body.tn-printing .tn-noprint {
+    display: none !important;
+  }
+  body.tn-printing main,
+  body.tn-printing main > div,
+  body.tn-printing #root,
+  body.tn-printing #root > div {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: none !important;
     width: 100% !important;
+    overflow: visible !important;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+  .tn-catalog-print {
+    position: relative !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
     overflow: visible !important;
     border-radius: 0 !important;
     box-shadow: none !important;
   }
   .tn-catalog-body {
     padding: 0 !important;
+    margin: 0 !important;
+  }
+  .tn-section {
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  .tn-section > div {
+    margin: 0 !important;
   }
   .tn-cover {
     break-after: page;
     page-break-after: always;
-    min-height: 100vh;
-    width: 100%;
+    width: 297mm;
+    height: 210mm;
+    min-height: 210mm;
+    max-height: 210mm;
     box-sizing: border-box;
     display: flex;
     align-items: center;
     justify-content: center;
+    margin: 0 !important;
   }
   .tn-section:first-child .tn-section-head {
     break-before: auto;
@@ -87,8 +120,12 @@ const CATALOG_PRINT_CSS = `
     box-shadow: none !important;
     border: none !important;
     border-radius: 0 !important;
-    height: 210mm;
-    max-height: 210mm;
+    width: 297mm !important;
+    height: 210mm !important;
+    min-height: 210mm !important;
+    max-height: 210mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
     overflow: hidden;
     box-sizing: border-box;
   }
@@ -125,33 +162,34 @@ const CATALOG_PRINT_CSS = `
     background: #faf8f5 !important;
   }
   .tn-product-info-inner {
-    padding: 14mm 12mm 10mm 14mm !important;
+    padding: 16mm 14mm 12mm 16mm !important;
     height: 100% !important;
+    min-height: 210mm !important;
     box-sizing: border-box !important;
     display: flex !important;
     flex-direction: column !important;
-    justify-content: center !important;
+    justify-content: space-between !important;
   }
   .tn-product-title {
-    font-size: 22px !important;
-    line-height: 1.2 !important;
+    font-size: 26px !important;
+    line-height: 1.15 !important;
     font-weight: 500 !important;
   }
   .tn-product-blurb,
   .tn-product-features li {
-    font-size: 10px !important;
-    line-height: 1.5 !important;
+    font-size: 11px !important;
+    line-height: 1.45 !important;
   }
   .tn-spec-label {
-    font-size: 8px !important;
-    letter-spacing: 0.2em !important;
+    font-size: 9px !important;
+    letter-spacing: 0.22em !important;
   }
   .tn-spec-value {
-    font-size: 11px !important;
+    font-size: 12px !important;
   }
   .tn-color-thumb {
-    width: 40px !important;
-    height: 40px !important;
+    width: 44px !important;
+    height: 44px !important;
   }
   .tn-color-name {
     font-size: 8px !important;
@@ -166,13 +204,17 @@ const CATALOG_PRINT_CSS = `
     page-break-before: always;
     break-after: avoid;
     page-break-after: avoid;
+    width: 297mm !important;
+    height: 210mm !important;
     min-height: 210mm !important;
+    max-height: 210mm !important;
     display: flex !important;
     align-items: center !important;
     justify-content: center !important;
     background: #faf8f5 !important;
     border: none !important;
     padding: 0 !important;
+    margin: 0 !important;
   }
   .tn-section-head h2 {
     font-size: 32px !important;
@@ -1242,6 +1284,15 @@ const TypographyModal: React.FC<{
   );
 };
 
+/** Prefijo de artículo para catálogo (ej. 78416140280 → 78416, 40306-001 → 40306-001). */
+function catalogArticleCode(raw: string): string {
+  const code = String(raw || '').trim();
+  if (!code) return '';
+  const dashed = code.match(/^(\d{3,6}-\d{2,3})/);
+  if (dashed) return dashed[1];
+  return articleCodeForPrintGroup(code) || code;
+}
+
 /** Texto corto para catálogo editorial (evita bloques enormes de Tienda Nube). */
 function catalogBlurb(description: string, features: string[]): string | null {
   if (features.length > 0) return null;
@@ -1403,7 +1454,7 @@ const ProductDisplay: React.FC<{
 
             {product.articleCode && (
               <p className="tn-product-sku mt-auto pt-6 text-[9px] uppercase tracking-[0.25em] text-stone-400">
-                Art. {product.articleCode}
+                Art. {catalogArticleCode(product.articleCode)}
               </p>
             )}
           </div>
@@ -1697,17 +1748,6 @@ const TiendaNubeCatalogView: React.FC = () => {
             height: auto !important;
             max-height: none !important;
             min-height: 0 !important;
-            position: static !important;
-          }
-          body.tn-printing * { visibility: hidden !important; }
-          body.tn-printing .tn-catalog-print,
-          body.tn-printing .tn-catalog-print * { visibility: visible !important; }
-          body.tn-printing .tn-catalog-print {
-            position: static !important;
-            left: auto !important;
-            top: auto !important;
-            width: 100% !important;
-            overflow: visible !important;
           }
           .tn-noprint { display: none !important; }
           ${CATALOG_PRINT_CSS}
