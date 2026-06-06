@@ -21,9 +21,9 @@ import {
   Upload,
   Palette,
   Crop,
+  Plus,
   Ruler,
   Tag,
-  Layers,
 } from 'lucide-react';
 import {
   api,
