@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, Loader2, X, ZoomIn, ZoomOut } from 'lucide-react';
+import { loadCatalogImageElement } from '../utils/catalogColorCrop';
 
 type AspectPreset = 'free' | '4:5' | '1:1' | '3:4' | '16:9';
 
@@ -12,49 +13,7 @@ const ASPECT_VALUES: Record<AspectPreset, number | null> = {
 };
 
 async function loadImageElement(src: string): Promise<HTMLImageElement> {
-  // Misma API: sin problema de CORS
-  if (src.includes('/catalog-images/')) {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error('No se pudo cargar la imagen'));
-      img.src = src;
-    });
-  }
-
-  // Externas (Tienda Nube): intentar fetch como blob
-  try {
-    const res = await fetch(src, { mode: 'cors' });
-    if (!res.ok) throw new Error('fetch failed');
-    const blob = await res.blob();
-    const objectUrl = URL.createObjectURL(blob);
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => {
-        URL.revokeObjectURL(objectUrl);
-        resolve(img);
-      };
-      img.onerror = () => {
-        URL.revokeObjectURL(objectUrl);
-        reject(new Error('No se pudo decodificar la imagen'));
-      };
-      img.src = objectUrl;
-    });
-  } catch {
-    // Fallback: crossOrigin anonymous
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => resolve(img);
-      img.onerror = () =>
-        reject(
-          new Error(
-            'No se puede recortar esta imagen por restricciones del servidor. Subila primero desde tu compu y recortala.'
-          )
-        );
-      img.src = src;
-    });
-  }
+  return loadCatalogImageElement(src);
 }
 
 function clamp(n: number, min: number, max: number) {

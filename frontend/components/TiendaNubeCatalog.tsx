@@ -33,6 +33,7 @@ import {
 } from '../services/api';
 import ImageCropModal from './ImageCropModal';
 import { articleCodeForPrintGroup } from '../utils/wholesaleInvoiceHtml';
+import { autoCropColorThumb, CATALOG_COLOR_THUMB_SIZE } from '../utils/catalogColorCrop';
 
 /* ===================== Tipos de configuración editable ===================== */
 
@@ -44,7 +45,7 @@ interface ColorVariant {
   image?: string;
 }
 
-const COLOR_THUMB_SIZE = 160;
+const COLOR_THUMB_SIZE = CATALOG_COLOR_THUMB_SIZE;
 
 const CATALOG_PRINT_CSS = `
   @page { size: A4 landscape; margin: 0; }
@@ -869,7 +870,7 @@ const ProductEditorModal: React.FC<{
                   </button>
                 </div>
                 <p className="text-[10px] text-slate-500 mb-2">
-                  Las fotos vienen asignadas por color en Tienda Nube. Solo recortá la miniatura cuadrada.
+                  Las miniaturas se recortan solas al producto. Podés ajustar con Recortar si hace falta.
                 </p>
                 <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
                   {colorVariants.length === 0 && (
@@ -1649,8 +1650,11 @@ const TiendaNubeCatalogView: React.FC = () => {
   const [editingTypography, setEditingTypography] = useState(false);
   const [editingColors, setEditingColors] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [autoCroppingColors, setAutoCroppingColors] = useState(false);
+  const [configHydrated, setConfigHydrated] = useState(false);
   const savedSnapshotRef = useRef('');
   const configRef = useRef(config);
+  const autoCropDoneRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     configRef.current = config;
@@ -1708,6 +1712,7 @@ const TiendaNubeCatalogView: React.FC = () => {
         savedSnapshotRef.current = snap;
         setSavedAt(cfgRes?.updatedAt || null);
       }
+      setConfigHydrated(true);
       setActiveSection('all');
     } catch (e: any) {
       setError(e?.message || 'No se pudo generar el catálogo desde Tienda Nube');
@@ -1738,6 +1743,7 @@ const TiendaNubeCatalogView: React.FC = () => {
         setSavedSnapshot(snap);
         savedSnapshotRef.current = snap;
         setSavedAt(res?.updatedAt || null);
+        setConfigHydrated(true);
       })
       .catch(() => {
         const cached = readCachedConfig();
@@ -1748,8 +1754,78 @@ const TiendaNubeCatalogView: React.FC = () => {
           setSavedSnapshot(snap);
           savedSnapshotRef.current = snap;
         }
+        setConfigHydrated(true);
       });
   }, []);
+
+  // Recorte automático de miniaturas de color (sin imagen guardada aún).
+  useEffect(() => {
+    if (!catalog?.sections?.length || !configHydrated) return;
+
+    let cancelled = false;
+
+    const run = async () => {
+      type PendingItem = {
+        productId: number;
+        product: TiendaNubeCatalogProduct;
+        cv: ColorVariant;
+      };
+      const pending: PendingItem[] = [];
+
+      for (const section of catalog.sections) {
+        for (const p of section.products) {
+          const ov = configRef.current.products[p.id];
+          const variants = resolveColorVariants(ov, p);
+          for (const cv of variants) {
+            if (!cv.sourceImage || cv.image) continue;
+            const key = `${p.id}:${cv.name}:${cv.sourceImage}`;
+            if (autoCropDoneRef.current.has(key)) continue;
+            pending.push({ productId: p.id, product: p, cv });
+          }
+        }
+      }
+
+      if (pending.length === 0 || cancelled) return;
+
+      setAutoCroppingColors(true);
+      for (const item of pending) {
+        if (cancelled) break;
+        const key = `${item.productId}:${item.cv.name}:${item.cv.sourceImage}`;
+        autoCropDoneRef.current.add(key);
+        try {
+          const blob = await autoCropColorThumb(item.cv.sourceImage!);
+          const file = new File([blob], `color-auto-${item.productId}-${Date.now()}.jpg`, {
+            type: 'image/jpeg',
+          });
+          const url = await api.uploadCatalogImage(file);
+          if (cancelled) break;
+
+          setConfig((prev) => {
+            const ov = prev.products[item.productId] || {};
+            const variants = resolveColorVariants(ov, item.product);
+            const updated = variants.map((cv) =>
+              cv.name === item.cv.name && cv.sourceImage === item.cv.sourceImage ? { ...cv, image: url } : cv
+            );
+            return {
+              ...prev,
+              products: {
+                ...prev.products,
+                [item.productId]: { ...ov, colorVariants: updated },
+              },
+            };
+          });
+        } catch {
+          autoCropDoneRef.current.delete(key);
+        }
+      }
+      if (!cancelled) setAutoCroppingColors(false);
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [catalog, configHydrated]);
 
   const save = useCallback(async () => {
     setSaving(true);
@@ -1932,6 +2008,9 @@ const TiendaNubeCatalogView: React.FC = () => {
             </h3>
             <p className="text-slate-400 text-xs mt-0.5">
               Diseño editorial estilo lookbook. Editá qué entra y los textos de cada producto.
+              {autoCroppingColors && (
+                <span className="ml-1 text-emerald-400">· Recortando miniaturas de colores…</span>
+              )}
               {savedAt && <span className="ml-1 text-slate-500">· Guardado {new Date(savedAt).toLocaleString('es-AR')}</span>}
             </p>
           </div>
