@@ -17,7 +17,9 @@ export const getTiendaNubeCatalog = async (req: Request, res: Response) => {
           .filter((n) => Number.isFinite(n))
       : undefined;
 
-    const catalog = await buildTiendaNubeCatalog({ categoryIds });
+    const priceListId = String(req.query.priceListId || req.query.price_list_id || '').trim() || undefined;
+
+    const catalog = await buildTiendaNubeCatalog({ categoryIds, priceListId });
     res.json(catalog);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BookOpen, Upload, Link as LinkIcon, Trash2, ExternalLink, Loader2, FileText, X, AlertCircle } from 'lucide-react';
-import { Role } from '../types';
+import { Role, PriceList } from '../types';
 import { api } from '../services/api';
 import TiendaNubeCatalogView from './TiendaNubeCatalog';
 
@@ -16,9 +16,10 @@ interface CatalogItem {
 
 interface CatalogsProps {
   role: Role;
+  priceLists?: PriceList[];
 }
 
-const Catalogs: React.FC<CatalogsProps> = ({ role }) => {
+const Catalogs: React.FC<CatalogsProps> = ({ role, priceLists = [] }) => {
   const [list, setList] = useState<CatalogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -31,6 +32,8 @@ const Catalogs: React.FC<CatalogsProps> = ({ role }) => {
   const [error, setError] = useState('');
 
   const isAdmin = role === Role.ADMIN;
+  const isSeller = role === Role.SELLER;
+  const showTnCatalog = isAdmin || isSeller;
 
   const load = async () => {
     setLoading(true);
@@ -128,10 +131,10 @@ const Catalogs: React.FC<CatalogsProps> = ({ role }) => {
     }
   };
 
-  if (isAdmin) {
+  if (showTnCatalog) {
     return (
       <div className="space-y-5 sm:space-y-6 max-w-full px-0 sm:px-0">
-        <TiendaNubeCatalogView />
+        <TiendaNubeCatalogView role={role} priceLists={priceLists} />
       </div>
     );
   }

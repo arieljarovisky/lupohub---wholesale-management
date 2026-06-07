@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { query, get } from '../database/db';
 import {
   getTiendaNubeIntegration,
   fetchAllTnCategories,
@@ -49,6 +50,9 @@ export type TiendaNubeCatalog = {
   generatedAt: string;
   productCount: number;
   sections: CatalogSection[];
+  /** Presente si se aplicó una lista de precios mayorista. */
+  priceListId?: string;
+  priceListName?: string;
 };
 
 /** Devuelve el texto de un campo multi-idioma de TN (es > pt > en > primero disponible). */
@@ -251,6 +255,78 @@ async function fetchAllProducts(
   return all;
 }
 
+function normalizeSkuKey(sku: string): string {
+  return String(sku || '')
+    .trim()
+    .replace(/[-/\s]/g, '')
+    .toUpperCase();
+}
+
+/** Aplica precios de una lista mayorista al catálogo (match por tienda_nube_id o código de artículo). */
+async function applyPriceListToCatalog(catalog: TiendaNubeCatalog, priceListId: string): Promise<TiendaNubeCatalog> {
+  const listRow = await get(`SELECT id, name FROM price_lists WHERE id = ? LIMIT 1`, [priceListId]);
+  if (!listRow?.id) return catalog;
+
+  const rows = (await query(
+    `SELECT p.tienda_nube_id AS tnId, p.sku, pli.price
+     FROM price_list_items pli
+     INNER JOIN products p ON p.id = pli.product_id
+     WHERE pli.price_list_id = ?`,
+    [priceListId]
+  )) as Array<{ tnId?: string | null; sku?: string | null; price?: number | null }>;
+
+  const byTnId = new Map<string, number>();
+  const bySku = new Map<string, number>();
+  const bySkuNorm = new Map<string, number>();
+
+  for (const row of rows || []) {
+    const price = Number(row.price);
+    if (!Number.isFinite(price) || price <= 0) continue;
+    const tnId = row.tnId != null ? String(row.tnId).trim() : '';
+    if (tnId) byTnId.set(tnId, price);
+    const sku = row.sku != null ? String(row.sku).trim() : '';
+    if (sku) {
+      bySku.set(sku, price);
+      bySkuNorm.set(normalizeSkuKey(sku), price);
+    }
+  }
+
+  const resolvePrice = (tnProductId: number, articleCode: string): number | null => {
+    const tnKey = String(tnProductId);
+    if (byTnId.has(tnKey)) return byTnId.get(tnKey)!;
+
+    const code = (articleCode || '').trim();
+    if (code) {
+      if (bySku.has(code)) return bySku.get(code)!;
+      const codeNorm = normalizeSkuKey(code);
+      if (bySkuNorm.has(codeNorm)) return bySkuNorm.get(codeNorm)!;
+      for (const [sku, price] of bySku.entries()) {
+        if (sku.startsWith(`${code}-`) || sku.startsWith(code)) return price;
+      }
+      for (const [norm, price] of bySkuNorm.entries()) {
+        if (norm.startsWith(codeNorm)) return price;
+      }
+    }
+    return null;
+  };
+
+  for (const section of catalog.sections) {
+    for (const product of section.products) {
+      const listPrice = resolvePrice(product.id, product.articleCode);
+      if (listPrice != null) {
+        product.price = listPrice;
+        product.promotionalPrice = null;
+      }
+    }
+  }
+
+  return {
+    ...catalog,
+    priceListId: String(listRow.id),
+    priceListName: String(listRow.name || ''),
+  };
+}
+
 function categoryLabel(c: TnCategory): string {
   return lang(c.name) || `Categoría ${c.id}`;
 }
@@ -260,7 +336,7 @@ function categoryLabel(c: TnCategory): string {
  * Un producto puede aparecer en varias secciones si pertenece a varias categorías.
  */
 export async function buildTiendaNubeCatalog(
-  opts?: { categoryIds?: number[]; onLog?: (msg: string) => void }
+  opts?: { categoryIds?: number[]; priceListId?: string; onLog?: (msg: string) => void }
 ): Promise<TiendaNubeCatalog> {
   const log = opts?.onLog;
   const { accessToken, storeId } = await getTiendaNubeIntegration();
@@ -317,10 +393,17 @@ export async function buildTiendaNubeCatalog(
     });
   }
 
-  return {
+  let catalog: TiendaNubeCatalog = {
     storeId,
     generatedAt: new Date().toISOString(),
     productCount: products.length,
     sections,
   };
+
+  const priceListId = opts?.priceListId?.trim();
+  if (priceListId) {
+    catalog = await applyPriceListToCatalog(catalog, priceListId);
+  }
+
+  return catalog;
 }

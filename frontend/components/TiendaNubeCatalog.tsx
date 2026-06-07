@@ -34,6 +34,7 @@ import {
 import ImageCropModal from './ImageCropModal';
 import { articleCodeForPrintGroup } from '../utils/wholesaleInvoiceHtml';
 import { autoCropColorThumb, CATALOG_COLOR_THUMB_SIZE } from '../utils/catalogColorCrop';
+import { Role, PriceList } from '../types';
 
 /* ===================== Tipos de configuración editable ===================== */
 
@@ -416,6 +417,7 @@ const defaultConfig = (): CatalogConfig => ({
 
 const CATALOG_CACHE_KEY = 'lupo_tn_catalog_cache';
 const CONFIG_CACHE_KEY = 'lupo_tn_catalog_config_cache';
+const SELLER_PRICE_LIST_KEY = 'lupo_tn_catalog_seller_price_list';
 
 function mergeProductOverrides(
   server: Record<string, ProductOverride>,
@@ -1634,7 +1636,13 @@ const ProductDisplay: React.FC<{
 
 /* ===================== Componente principal ===================== */
 
-const TiendaNubeCatalogView: React.FC = () => {
+const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[] }> = ({
+  role,
+  priceLists = [],
+}) => {
+  const isAdmin = role === Role.ADMIN;
+  const isSeller = role === Role.SELLER;
+
   const [catalog, setCatalog] = useState<TnCatalog | null>(null);
   const [config, setConfig] = useState<CatalogConfig>(defaultConfig());
   const [savedSnapshot, setSavedSnapshot] = useState<string>('');
@@ -1651,6 +1659,13 @@ const TiendaNubeCatalogView: React.FC = () => {
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [autoCroppingColors, setAutoCroppingColors] = useState(false);
   const [configHydrated, setConfigHydrated] = useState(false);
+  const [selectedPriceListId, setSelectedPriceListId] = useState<string>(() => {
+    try {
+      return sessionStorage.getItem(SELLER_PRICE_LIST_KEY) || '';
+    } catch {
+      return '';
+    }
+  });
   const savedSnapshotRef = useRef('');
   const configRef = useRef(config);
   const autoCropDoneRef = useRef<Set<string>>(new Set());
@@ -1664,6 +1679,7 @@ const TiendaNubeCatalogView: React.FC = () => {
   }, [savedSnapshot]);
 
   useEffect(() => {
+    if (!isAdmin) return;
     const t = setTimeout(() => {
       try {
         localStorage.setItem(CONFIG_CACHE_KEY, JSON.stringify(config));
@@ -1672,7 +1688,13 @@ const TiendaNubeCatalogView: React.FC = () => {
       }
     }, 250);
     return () => clearTimeout(t);
-  }, [config]);
+  }, [config, isAdmin]);
+
+  const effectiveShowPrice = isSeller ? !!selectedPriceListId : config.showPrice;
+  const selectedPriceListName = useMemo(
+    () => priceLists.find((pl) => pl.id === selectedPriceListId)?.name || catalog?.priceListName || '',
+    [priceLists, selectedPriceListId, catalog?.priceListName]
+  );
 
   const headingStack = useMemo(() => findFont(config.fontHeading).stack || undefined, [config.fontHeading]);
   const bodyStack = useMemo(() => findFont(config.fontBody).stack || undefined, [config.fontBody]);
@@ -1686,24 +1708,35 @@ const TiendaNubeCatalogView: React.FC = () => {
 
   const dirty = useMemo(() => JSON.stringify(config) !== savedSnapshot, [config, savedSnapshot]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (overridePriceListId?: string) => {
+    const priceListId = isSeller ? (overridePriceListId ?? selectedPriceListId) : '';
+    if (isSeller && !priceListId) {
+      setError('Elegí una lista de precios antes de generar el catálogo.');
+      return;
+    }
     setLoading(true);
     setError('');
     try {
       const [data, cfgRes] = await Promise.all([
-        api.getTiendaNubeCatalog(),
+        api.getTiendaNubeCatalog(
+          isSeller && priceListId ? { priceListId } : undefined
+        ),
         api.getTiendaNubeCatalogConfig().catch(() => ({ config: null, updatedAt: null })),
       ]);
       setCatalog(data);
-      try {
-        localStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify(data));
-      } catch {
-        /* quota */
+      if (isAdmin) {
+        try {
+          localStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify(data));
+        } catch {
+          /* quota */
+        }
       }
       const base = defaultConfig();
       const serverCfg = buildConfigFromResponse(cfgRes?.config, base);
-      const merged = mergeCatalogConfig(serverCfg, readCachedConfig());
-      const isDirty = JSON.stringify(configRef.current) !== savedSnapshotRef.current;
+      const merged = isAdmin
+        ? mergeCatalogConfig(serverCfg, readCachedConfig())
+        : serverCfg;
+      const isDirty = isAdmin && JSON.stringify(configRef.current) !== savedSnapshotRef.current;
       if (!isDirty) {
         setConfig(merged);
         const snap = JSON.stringify(merged);
@@ -1718,25 +1751,27 @@ const TiendaNubeCatalogView: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isAdmin, isSeller, selectedPriceListId]);
 
   // Al montar: recuperar el catálogo cacheado (para que no se borre al cambiar de sección / actualizar)
   // y la configuración guardada.
   useEffect(() => {
-    try {
-      const cached = localStorage.getItem(CATALOG_CACHE_KEY);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (parsed?.sections) setCatalog(parsed);
-      }
-    } catch { /* ignore */ }
+    if (isAdmin) {
+      try {
+        const cached = localStorage.getItem(CATALOG_CACHE_KEY);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed?.sections) setCatalog(parsed);
+        }
+      } catch { /* ignore */ }
+    }
 
     api
       .getTiendaNubeCatalogConfig()
       .then((res) => {
         const base = defaultConfig();
         const serverCfg = buildConfigFromResponse(res?.config, base);
-        const merged = mergeCatalogConfig(serverCfg, readCachedConfig());
+        const merged = isAdmin ? mergeCatalogConfig(serverCfg, readCachedConfig()) : serverCfg;
         setConfig(merged);
         const snap = JSON.stringify(merged);
         setSavedSnapshot(snap);
@@ -1745,21 +1780,23 @@ const TiendaNubeCatalogView: React.FC = () => {
         setConfigHydrated(true);
       })
       .catch(() => {
-        const cached = readCachedConfig();
-        if (cached) {
-          const merged = mergeCatalogConfig(defaultConfig(), cached);
-          setConfig(merged);
-          const snap = JSON.stringify(merged);
-          setSavedSnapshot(snap);
-          savedSnapshotRef.current = snap;
+        if (isAdmin) {
+          const cached = readCachedConfig();
+          if (cached) {
+            const merged = mergeCatalogConfig(defaultConfig(), cached);
+            setConfig(merged);
+            const snap = JSON.stringify(merged);
+            setSavedSnapshot(snap);
+            savedSnapshotRef.current = snap;
+          }
         }
         setConfigHydrated(true);
       });
-  }, []);
+  }, [isAdmin]);
 
   // Recorte automático de miniaturas de color (sin imagen guardada aún).
   useEffect(() => {
-    if (!catalog?.sections?.length || !configHydrated) return;
+    if (!isAdmin || !catalog?.sections?.length || !configHydrated) return;
 
     let cancelled = false;
 
@@ -1824,9 +1861,23 @@ const TiendaNubeCatalogView: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [catalog, configHydrated]);
+  }, [catalog, configHydrated, isAdmin]);
+
+  const handlePriceListChange = (id: string) => {
+    setSelectedPriceListId(id);
+    try {
+      sessionStorage.setItem(SELLER_PRICE_LIST_KEY, id);
+    } catch {
+      /* ignore */
+    }
+    setError('');
+    if (id && catalog) {
+      void load(id);
+    }
+  };
 
   const save = useCallback(async () => {
+    if (!isAdmin) return;
     setSaving(true);
     try {
       await api.saveTiendaNubeCatalogConfig(config);
@@ -1844,7 +1895,7 @@ const TiendaNubeCatalogView: React.FC = () => {
     } finally {
       setSaving(false);
     }
-  }, [config]);
+  }, [config, isAdmin]);
 
   /* ---------- Mutadores de config ---------- */
 
@@ -1933,7 +1984,7 @@ const TiendaNubeCatalogView: React.FC = () => {
       .map(({ section, products }) => {
         const incl = config.sections[section.id]?.included !== false;
         if (!editMode && !incl) return null;
-        const prods = editMode ? products : products.filter((p) => config.products[p.id]?.included !== false);
+        const prods = isAdmin && editMode ? products : products.filter((p) => config.products[p.id]?.included !== false);
         if (!editMode && prods.length === 0) return null;
         return { section, products: prods, included: incl };
       })
@@ -2006,17 +2057,38 @@ const TiendaNubeCatalogView: React.FC = () => {
               Catálogo Tienda Nube
             </h3>
             <p className="text-slate-400 text-xs mt-0.5">
-              Diseño editorial estilo lookbook. Editá qué entra y los textos de cada producto.
+              {isSeller
+                ? 'Generá el catálogo con la lista de precios que elijas. El diseño lo define el administrador.'
+                : 'Diseño editorial estilo lookbook. Editá qué entra y los textos de cada producto.'}
               {autoCroppingColors && (
                 <span className="ml-1 text-emerald-400">· Recortando miniaturas de colores…</span>
               )}
-              {savedAt && <span className="ml-1 text-slate-500">· Guardado {new Date(savedAt).toLocaleString('es-AR')}</span>}
+              {isAdmin && savedAt && (
+                <span className="ml-1 text-slate-500">· Guardado {new Date(savedAt).toLocaleString('es-AR')}</span>
+              )}
+              {isSeller && selectedPriceListName && catalog && (
+                <span className="ml-1 text-emerald-400">· Lista: {selectedPriceListName}</span>
+              )}
             </p>
           </div>
           <div className="flex flex-wrap gap-2 lg:ml-auto">
+            {isSeller && (
+              <select
+                value={selectedPriceListId}
+                onChange={(e) => handlePriceListChange(e.target.value)}
+                className="min-h-[44px] min-w-[200px] bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm outline-none focus:ring-2 focus:ring-emerald-500"
+              >
+                <option value="">Lista de precios…</option>
+                {priceLists.map((pl) => (
+                  <option key={pl.id} value={pl.id}>
+                    {pl.name}
+                  </option>
+                ))}
+              </select>
+            )}
             <button
-              onClick={load}
-              disabled={loading}
+              onClick={() => void load()}
+              disabled={loading || (isSeller && (!selectedPriceListId || priceLists.length === 0))}
               className="min-h-[44px] px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-sm flex items-center gap-2"
             >
               {loading ? <Loader2 size={18} className="animate-spin" /> : <RefreshCw size={18} />}
@@ -2024,22 +2096,26 @@ const TiendaNubeCatalogView: React.FC = () => {
             </button>
             {catalog && (
               <>
-                <button
-                  onClick={() => setEditMode((v) => !v)}
-                  className={`min-h-[44px] px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 border ${
-                    editMode ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-200 hover:bg-slate-600'
-                  }`}
-                >
-                  <Pencil size={18} /> {editMode ? 'Editando' : 'Editar'}
-                </button>
-                <button
-                  onClick={save}
-                  disabled={!dirty || saving}
-                  className="min-h-[44px] px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-bold text-sm flex items-center gap-2"
-                >
-                  {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-                  {dirty ? 'Guardar' : 'Guardado'}
-                </button>
+                {isAdmin && (
+                  <>
+                    <button
+                      onClick={() => setEditMode((v) => !v)}
+                      className={`min-h-[44px] px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 border ${
+                        editMode ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-200 hover:bg-slate-600'
+                      }`}
+                    >
+                      <Pencil size={18} /> {editMode ? 'Editando' : 'Editar'}
+                    </button>
+                    <button
+                      onClick={save}
+                      disabled={!dirty || saving}
+                      className="min-h-[44px] px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-bold text-sm flex items-center gap-2"
+                    >
+                      {saving ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                      {dirty ? 'Guardar' : 'Guardado'}
+                    </button>
+                  </>
+                )}
                 <button
                   onClick={handlePrint}
                   disabled={totalShown === 0}
@@ -2052,8 +2128,20 @@ const TiendaNubeCatalogView: React.FC = () => {
           </div>
         </div>
 
-        {catalog && (
+        {(catalog || isSeller) && (
           <div className="mt-4 flex flex-col gap-3">
+            {isSeller && priceLists.length === 0 && (
+              <p className="text-xs text-amber-300 bg-amber-950/40 border border-amber-800/50 rounded-lg px-3 py-2">
+                No hay listas de precios disponibles. Pedile al administrador que las configure.
+              </p>
+            )}
+            {isSeller && priceLists.length > 0 && !selectedPriceListId && (
+              <p className="text-xs text-amber-300 bg-amber-950/40 border border-amber-800/50 rounded-lg px-3 py-2">
+                Seleccioná una lista de precios para generar el catálogo con tus precios mayoristas.
+              </p>
+            )}
+            {catalog && (
+            <>
             <div className="flex flex-wrap gap-2 items-center">
               <div className="relative flex-1 min-w-[200px]">
                 <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
@@ -2065,6 +2153,7 @@ const TiendaNubeCatalogView: React.FC = () => {
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-white placeholder-slate-500 outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
                 />
               </div>
+              {isAdmin && (
               <button
                 onClick={() => setConfig((p) => ({ ...p, showPrice: !p.showPrice }))}
                 className={`min-h-[44px] px-3 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 border ${
@@ -2073,7 +2162,8 @@ const TiendaNubeCatalogView: React.FC = () => {
               >
                 <DollarSign size={18} /> {config.showPrice ? 'Con precios' : 'Sin precios'}
               </button>
-              {editMode && (
+              )}
+              {isAdmin && editMode && (
                 <>
                   <button
                     onClick={() => setEditingCover(true)}
@@ -2117,11 +2207,13 @@ const TiendaNubeCatalogView: React.FC = () => {
                 </button>
               ))}
             </div>
-            {editMode && (
+            {isAdmin && editMode && (
               <p className="text-xs text-indigo-300 bg-indigo-950/40 border border-indigo-800/50 rounded-lg px-3 py-2">
                 Modo edición: usá el ojo para incluir/quitar, el lápiz para editar textos e imagen, y las flechas para reordenar.
                 Acordate de <strong>Guardar</strong> al terminar.
               </p>
+            )}
+            </>
             )}
           </div>
         )}
@@ -2149,10 +2241,13 @@ const TiendaNubeCatalogView: React.FC = () => {
       {!loading && !catalog && !error && (
         <div className="tn-noprint bg-slate-800/50 border border-slate-700 border-dashed rounded-2xl p-10 text-center">
           <Layers size={48} className="mx-auto text-slate-600 mb-3" />
-          <p className="text-slate-400 font-medium">Generá el catálogo desde tu Tienda Nube</p>
+          <p className="text-slate-400 font-medium">
+            {isSeller ? 'Generá tu catálogo con lista de precios' : 'Generá el catálogo desde tu Tienda Nube'}
+          </p>
           <p className="text-slate-600 text-sm mt-1 max-w-md mx-auto">
-            Toca «Generar catálogo» para traer todos los productos con imágenes, talles, colores y descripciones,
-            separados por cada sección, con un diseño editorial listo para imprimir.
+            {isSeller
+              ? 'Elegí la lista de precios y tocá «Generar catálogo» para obtener el PDF con tus precios mayoristas.'
+              : 'Tocá «Generar catálogo» para traer todos los productos con imágenes, talles, colores y descripciones, separados por cada sección, con un diseño editorial listo para imprimir.'}
           </p>
         </div>
       )}
@@ -2269,8 +2364,8 @@ const TiendaNubeCatalogView: React.FC = () => {
                           key={`${section.id}-${p.id}`}
                           product={dp}
                           flip={i % 2 === 1}
-                          showPrice={config.showPrice}
-                          editMode={editMode}
+                          showPrice={effectiveShowPrice}
+                          editMode={isAdmin && editMode}
                           headingFont={headingStack}
                           bodyFont={bodyStack}
                           colors={colors}
@@ -2306,7 +2401,7 @@ const TiendaNubeCatalogView: React.FC = () => {
       )}
 
       {/* Modales */}
-      {editingProduct && (
+      {isAdmin && editingProduct && (
         <ProductEditorModal
           product={editingProduct.product}
           override={config.products[editingProduct.product.id]}
@@ -2314,14 +2409,14 @@ const TiendaNubeCatalogView: React.FC = () => {
           onClose={() => setEditingProduct(null)}
         />
       )}
-      {editingCover && (
+      {isAdmin && editingCover && (
         <CoverEditorModal
           cover={cover}
           onSave={(c) => setConfig((prev) => ({ ...prev, cover: c }))}
           onClose={() => setEditingCover(false)}
         />
       )}
-      {editingTypography && (
+      {isAdmin && editingTypography && (
         <TypographyModal
           fontHeading={config.fontHeading}
           fontBody={config.fontBody}
@@ -2329,7 +2424,7 @@ const TiendaNubeCatalogView: React.FC = () => {
           onClose={() => setEditingTypography(false)}
         />
       )}
-      {editingColors && (
+      {isAdmin && editingColors && (
         <ColorsModal
           colors={colors}
           onSave={(c) => setConfig((prev) => ({ ...prev, colors: c }))}

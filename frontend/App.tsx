@@ -361,6 +361,14 @@ const App: React.FC = () => {
             setPriceLists([]);
           }
           setUsers([]);
+        } else if (currentUser?.role === Role.SELLER) {
+          try {
+            const fetchedPriceLists = await api.getPriceLists();
+            setPriceLists(fetchedPriceLists);
+          } catch {
+            setPriceLists([]);
+          }
+          setUsers([]);
         } else {
           setUsers([]);
         }
@@ -1326,7 +1334,7 @@ const App: React.FC = () => {
           )}
           {baseView === 'catalogs' && (
             <Suspense fallback={<ViewFallback />}>
-              <Catalogs role={currentUser.role} />
+              <Catalogs role={currentUser.role} priceLists={priceLists} />
             </Suspense>
           )}
           {baseView === 'stock_history' && (

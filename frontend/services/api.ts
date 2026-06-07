@@ -3561,8 +3561,11 @@ export const api = {
   },
 
   // --- CATÁLOGO TIENDA NUBE (generado en vivo desde la tienda) ---
-  getTiendaNubeCatalog: async (categoryIds?: number[]): Promise<TiendaNubeCatalog> => {
-    const qs = categoryIds && categoryIds.length > 0 ? `?categoryIds=${categoryIds.join(',')}` : '';
+  getTiendaNubeCatalog: async (options?: { categoryIds?: number[]; priceListId?: string }): Promise<TiendaNubeCatalog> => {
+    const params = new URLSearchParams();
+    if (options?.categoryIds?.length) params.set('categoryIds', options.categoryIds.join(','));
+    if (options?.priceListId) params.set('priceListId', options.priceListId);
+    const qs = params.toString() ? `?${params.toString()}` : '';
     return request<TiendaNubeCatalog>(
       `/integrations/tiendanube/catalog${qs}`,
       'GET',
@@ -3629,4 +3632,6 @@ export interface TiendaNubeCatalog {
   generatedAt: string;
   productCount: number;
   sections: TiendaNubeCatalogSection[];
+  priceListId?: string;
+  priceListName?: string;
 }

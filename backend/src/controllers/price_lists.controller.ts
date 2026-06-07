@@ -36,11 +36,12 @@ async function copyPriceListItems(
   return count;
 }
 
-/** Listar listas de precios. Solo ADMIN. */
+/** Listar listas de precios. ADMIN, WAREHOUSE y SELLER (solo lectura para catálogo/pedidos). */
 export const listPriceLists = async (req: Request, res: Response) => {
   try {
-    if ((req as any).user?.role !== 'ADMIN') {
-      return res.status(403).json({ message: 'Solo administradores pueden listar listas de precios' });
+    const role = (req as any).user?.role;
+    if (!['ADMIN', 'WAREHOUSE', 'SELLER'].includes(role)) {
+      return res.status(403).json({ message: 'Sin permiso para listar listas de precios' });
     }
     const rows = await query(
       `SELECT id, name, description, created_at AS createdAt, updated_at AS updatedAt FROM price_lists ORDER BY name`
