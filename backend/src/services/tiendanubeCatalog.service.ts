@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { query, get } from '../database/db';
+import { runPool } from '../utils/channelMarginFetch';
 import {
   getTiendaNubeIntegration,
   fetchAllTnCategories,
@@ -191,6 +192,15 @@ function mapProduct(p: any): CatalogProduct {
     }
   });
 
+  // Si TN no asignó image_id por color, repartir fotos del producto en orden.
+  if (images.length > 0) {
+    Array.from(colorsSet).forEach((name, idx) => {
+      if (!colorImageByName.has(name)) {
+        colorImageByName.set(name, images[Math.min(idx, images.length - 1)]);
+      }
+    });
+  }
+
   const permalink = p?.canonical_url || p?.url || null;
   const colorVariants: CatalogColorVariant[] = Array.from(colorsSet).map((name) => ({
     name,
@@ -253,6 +263,44 @@ async function fetchAllProducts(
     await sleepTn();
   }
   return all;
+}
+
+function productNeedsImageEnrichment(p: CatalogProduct): boolean {
+  if (p.images.length === 0) return true;
+  return p.colorVariants.some((cv) => cv.name.trim() && !cv.sourceImage);
+}
+
+/** Algunos productos vienen sin imágenes en el listado; el GET individual las trae completas. */
+async function enrichProductsMissingImages(
+  storeId: string,
+  accessToken: string,
+  products: CatalogProduct[],
+  onLog?: (msg: string) => void
+): Promise<void> {
+  const pending = products.filter(productNeedsImageEnrichment);
+  if (pending.length === 0) return;
+
+  onLog?.(`Completando imágenes de ${pending.length} producto(s)…`);
+  const headers = {
+    Authentication: `bearer ${accessToken}`,
+    'User-Agent': TN_USER_AGENT,
+  };
+
+  await runPool(pending, 4, async (product) => {
+    try {
+      const res = await axios.get(`${TN_BASE}/${storeId}/products/${product.id}`, {
+        headers,
+        validateStatus: () => true,
+      });
+      if (res.status !== 200 || !res.data) return;
+      const patched = mapProduct(res.data);
+      product.images = patched.images;
+      product.colorVariants = patched.colorVariants;
+    } catch {
+      /* ignore */
+    }
+    await sleepTn();
+  });
 }
 
 function normalizeSkuKey(sku: string): string {
@@ -349,6 +397,7 @@ export async function buildTiendaNubeCatalog(
   log?.(`Productos: ${rawProducts.length}`);
 
   const products = rawProducts.map(mapProduct).filter((p) => Number.isFinite(p.id));
+  await enrichProductsMissingImages(storeId, accessToken, products, log);
 
   const wanted = opts?.categoryIds && opts.categoryIds.length > 0 ? new Set(opts.categoryIds) : null;
 

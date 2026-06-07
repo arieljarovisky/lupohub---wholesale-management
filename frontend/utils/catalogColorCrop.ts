@@ -1,5 +1,7 @@
 /** Recorte automático de miniaturas de color para catálogo (cuadrado 160px). */
 
+import { resolveCatalogImageSrc } from './catalogImageUrl';
+
 export const CATALOG_COLOR_THUMB_SIZE = 160;
 
 function clamp(n: number, min: number, max: number) {
@@ -7,17 +9,19 @@ function clamp(n: number, min: number, max: number) {
 }
 
 export async function loadCatalogImageElement(src: string): Promise<HTMLImageElement> {
-  if (src.includes('/catalog-images/')) {
+  const resolved = resolveCatalogImageSrc(src);
+
+  if (resolved.includes('/catalog-images/')) {
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => resolve(img);
       img.onerror = () => reject(new Error('No se pudo cargar la imagen'));
-      img.src = src;
+      img.src = resolved;
     });
   }
 
   try {
-    const res = await fetch(src, { mode: 'cors' });
+    const res = await fetch(resolved, { mode: 'cors' });
     if (!res.ok) throw new Error('fetch failed');
     const blob = await res.blob();
     const objectUrl = URL.createObjectURL(blob);
@@ -39,7 +43,7 @@ export async function loadCatalogImageElement(src: string): Promise<HTMLImageEle
       img.crossOrigin = 'anonymous';
       img.onload = () => resolve(img);
       img.onerror = () => reject(new Error('No se pudo cargar la imagen externa'));
-      img.src = src;
+      img.src = resolved;
     });
   }
 }

@@ -33,6 +33,11 @@ import {
 } from '../services/api';
 import ImageCropModal from './ImageCropModal';
 import { articleCodeForPrintGroup } from '../utils/wholesaleInvoiceHtml';
+import {
+  colorVariantDisplaySrc,
+  pickCatalogProductImages,
+  resolveCatalogImageSrc,
+} from '../utils/catalogImageUrl';
 import { autoCropColorThumb, CATALOG_COLOR_THUMB_SIZE } from '../utils/catalogColorCrop';
 import { Role, PriceList } from '../types';
 
@@ -617,8 +622,8 @@ function resolveColorVariants(ov: ProductOverride | undefined, p: TiendaNubeCata
     const tn = tnByName.get(sv.name);
     return {
       name: sv.name,
-      sourceImage: sv.sourceImage ?? tn?.sourceImage,
-      image: sv.image,
+      sourceImage: resolveCatalogImageSrc(sv.sourceImage ?? tn?.sourceImage) || undefined,
+      image: sv.image ? resolveCatalogImageSrc(sv.image) : undefined,
     };
   };
 
@@ -635,7 +640,8 @@ function resolveColorVariants(ov: ProductOverride | undefined, p: TiendaNubeCata
 }
 
 function mergeProduct(p: TiendaNubeCatalogProduct, ov: ProductOverride | undefined): DisplayProduct {
-  const images = ov?.images && ov.images.length ? ov.images : p.images;
+  const images = pickCatalogProductImages(p.images, ov?.images);
+  const imageIndex = Math.min(ov?.imageIndex ?? 0, Math.max(0, images.length - 1));
   return {
     id: p.id,
     name: ov?.name ?? p.name,
@@ -646,7 +652,7 @@ function mergeProduct(p: TiendaNubeCatalogProduct, ov: ProductOverride | undefin
     colorVariants: resolveColorVariants(ov, p),
     articleCode: ov?.articleCode ?? p.articleCode,
     images,
-    imageIndex: Math.min(ov?.imageIndex ?? 0, Math.max(0, images.length - 1)),
+    imageIndex,
     price: p.price,
     promotionalPrice: p.promotionalPrice,
     included: ov?.included !== false,
@@ -1478,7 +1484,7 @@ const ProductDisplay: React.FC<{
   onMoveUp?: () => void;
   onMoveDown?: () => void;
 }> = ({ product, flip, showPrice, editMode, headingFont, bodyFont, colors, onToggleInclude, onEdit, onMoveUp, onMoveDown }) => {
-  const img = product.images[product.imageIndex] || product.images[0] || '';
+  const img = resolveCatalogImageSrc(product.images[product.imageIndex] || product.images[0] || '');
   const dimmed = editMode && !product.included;
   const blurb = catalogBlurb(product.description, product.features);
   const fontStack = "'Montserrat', sans-serif";
@@ -1588,11 +1594,12 @@ const ProductDisplay: React.FC<{
                     {product.colorVariants.map((cv, i) => {
                       const hex = colorToHex(cv.name);
                       const colorLabel = cv.name.replace(/^\d+\s*[·\-]?\s*/, '').trim() || cv.name;
+                      const thumbSrc = colorVariantDisplaySrc(cv);
                       return (
                         <div key={`${cv.name}-${i}`} className="flex flex-col items-start gap-1.5">
                           <div className="tn-color-thumb w-11 h-11 rounded-sm overflow-hidden bg-white border border-stone-200/90">
-                            {cv.image || cv.sourceImage ? (
-                              <img src={cv.image || cv.sourceImage} alt={cv.name} className="w-full h-full object-cover" />
+                            {thumbSrc ? (
+                              <img src={thumbSrc} alt={colorLabel} className="w-full h-full object-cover" />
                             ) : (
                               <span className="block w-full h-full" style={{ backgroundColor: hex || '#e7e5e4' }} />
                             )}
