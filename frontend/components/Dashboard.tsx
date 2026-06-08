@@ -3,6 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { DollarSign, Package, AlertTriangle, Cloud, Zap, ShoppingCart, RefreshCw, Loader2, Award, AlertCircle, Calendar, ClipboardList, Clock, ChevronDown, ChevronRight, User, MapPin } from 'lucide-react';
 import { Product, Order, OrderStatus, Role } from '../types';
 import { api } from '../services/api';
+import { formatOrderDate } from '../utils/formatDate';
 
 interface CustomerForDashboard {
   id: string;
@@ -339,7 +340,7 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
                   <li key={o.id} className="flex flex-wrap items-center justify-between gap-2 py-3 border-b border-slate-700/50 last:border-0">
                     <div className="min-w-0">
                       <p className="text-white font-medium text-sm">Pedido #{String(o.id).slice(-8)}</p>
-                      <p className="text-slate-500 text-xs">{o.date}</p>
+                      <p className="text-slate-500 text-xs">{formatOrderDate(o.date)}</p>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <span className={`px-2 py-0.5 rounded-lg text-xs font-bold border ${getStatusColor(o.status)}`}>
@@ -395,10 +396,9 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
       o.status === 'paid' && o.shipping?.status && ['ready_to_ship', 'pending', 'handling'].includes(o.shipping.status)
     );
 
-    const formatOrderDate = (dateStr: string) => {
+    const formatChannelOrderDate = (dateStr: string) => {
       if (!dateStr) return '-';
-      const d = new Date(dateStr);
-      return d.toLocaleDateString('es-AR', { day: '2-digit', month: 'short' });
+      return formatOrderDate(dateStr);
     };
 
     return (
@@ -447,7 +447,7 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
                   {ordersToPick.slice(0, 8).map(o => (
                     <li key={o.id} className="flex items-center justify-between py-2 border-b border-slate-700/50 last:border-0">
                       <span className="text-white text-sm">Pedido #{o.id.slice(0, 8)}</span>
-                      <span className="text-slate-500 text-xs">{o.date}</span>
+                      <span className="text-slate-500 text-xs">{formatOrderDate(o.date)}</span>
                     </li>
                   ))}
                   {ordersToPick.length > 8 && <li className="text-slate-500 text-xs pt-2">+ {ordersToPick.length - 8} más</li>}
@@ -514,7 +514,7 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
                       >
                         <span className="text-white text-sm font-medium">#{o.number ?? o.id}</span>
                         <span className="flex items-center gap-2">
-                          <span className="text-slate-500 text-xs">{formatOrderDate(o.createdAt)}</span>
+                          <span className="text-slate-500 text-xs">{formatChannelOrderDate(o.createdAt)}</span>
                           {isExpanded ? <ChevronDown size={16} className="text-slate-400" /> : <ChevronRight size={16} className="text-slate-400" />}
                         </span>
                       </button>
@@ -598,7 +598,7 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
                             )}
                           </span>
                           <span className="flex items-center gap-2">
-                            <span className="text-slate-500 text-xs">{formatOrderDate(o.dateCreated)}</span>
+                            <span className="text-slate-500 text-xs">{formatChannelOrderDate(o.dateCreated)}</span>
                             {isExpanded ? <ChevronDown size={16} className="text-slate-400" /> : <ChevronRight size={16} className="text-slate-400" />}
                           </span>
                         </button>
@@ -748,7 +748,7 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
                     <li key={o.id} className="flex flex-wrap items-center justify-between gap-2 py-3 border-b border-slate-700/50 last:border-0">
                       <div className="min-w-0">
                         <p className="text-white font-medium text-sm">Pedido #{String(o.id).slice(-8)}</p>
-                        <p className="text-slate-500 text-xs">{o.date} · {o.customerBusinessName || 'Cliente'}</p>
+                        <p className="text-slate-500 text-xs">{formatOrderDate(o.date)} · {o.customerBusinessName || 'Cliente'}</p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <span className={`px-2 py-0.5 rounded-lg text-xs font-bold border ${getStatusColor(o.status)}`}>

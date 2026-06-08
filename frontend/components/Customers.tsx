@@ -9,6 +9,7 @@ import { useNotification } from '../context/NotificationContext';
 import { getWholesaleStockImpactMeta } from '../utils/orderStockImpact';
 import { orderPedidoImporteDisplay } from '../utils/wholesaleInvoiceHtml';
 import { formatMoneyAr } from '../utils/moneyFormat';
+import { formatOrderDate } from '../utils/formatDate';
 import { canonicalizeCityInput, cityDisplayLabel, isCabaCity, normalizeCityKey } from '../utils/cityNormalize';
 import { CityInput } from './CityInput';
 import { isVoidedReinvoiceLedgerEntry, ledgerTipoDisplay, normalizeLedgerDocType } from '../utils/ledgerDocType';
@@ -2463,7 +2464,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                              )}
                           </div>
                           <div className="flex items-center gap-3 mt-1 text-xs text-slate-500">
-                             <span className="flex items-center gap-1"><Calendar size={12}/> {order.date}</span>
+                             <span className="flex items-center gap-1"><Calendar size={12}/> {formatOrderDate(order.date)}</span>
                              <span className="w-1 h-1 bg-slate-700 rounded-full"></span>
                              <span>{order.items.reduce((a,b) => a + b.quantity, 0)} items</span>
                              {getPendingUnitsForOrder(order) > 0 && (
