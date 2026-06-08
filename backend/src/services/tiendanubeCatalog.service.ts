@@ -118,6 +118,13 @@ function extractComposition(description: string): string {
   return inline ? inline[1].replace(/\s+/g, ' ').trim().slice(0, 90) : '';
 }
 
+/** Excluye tablas de talles / guías que a veces están en la galería del producto. */
+function isLikelyNonProductImage(img: { alt?: unknown } | null | undefined): boolean {
+  const alt = lang(img?.alt).toLowerCase();
+  if (!alt) return false;
+  return /talle|tabla|medida|gu[ií]a|size\s*chart|cuadro|escala|size\s*guide/i.test(alt);
+}
+
 /** Categorías a las que pertenece un producto (la API puede devolver ids o objetos). */
 function productCategoryIds(p: any): number[] {
   const raw = Array.isArray(p?.categories) ? p.categories : [];
@@ -137,15 +144,27 @@ function mapProduct(p: any): CatalogProduct {
 
   const rawImages = Array.isArray(p?.images) ? [...p.images] : [];
   const imageById = new Map<number, string>();
-  const images = rawImages
-    .sort((a: any, b: any) => (a?.position ?? 0) - (b?.position ?? 0))
-    .map((img: any) => {
-      const id = Number(img?.id);
-      const src = String(img?.src || img?.url || '').trim();
-      if (Number.isFinite(id) && id > 0 && src.startsWith('http')) imageById.set(id, src);
-      return src;
-    })
+  const imageMetaById = new Map<number, any>();
+  const sortedRawImages = [...rawImages].sort((a: any, b: any) => (a?.position ?? 0) - (b?.position ?? 0));
+
+  for (const img of sortedRawImages) {
+    const id = Number(img?.id);
+    const src = String(img?.src || img?.url || '').trim();
+    if (Number.isFinite(id) && id > 0 && src.startsWith('http')) {
+      imageById.set(id, src);
+      imageMetaById.set(id, img);
+    }
+  }
+
+  const images = sortedRawImages
+    .map((img: any) => String(img?.src || img?.url || '').trim())
     .filter((src: string) => src.startsWith('http'));
+
+  const productPhotoImages = sortedRawImages
+    .filter((img: any) => !isLikelyNonProductImage(img))
+    .map((img: any) => String(img?.src || img?.url || '').trim())
+    .filter((src: string) => src.startsWith('http'));
+  const photoPool = productPhotoImages.length > 0 ? productPhotoImages : images;
 
   const attrs = Array.isArray(p?.attributes) ? p.attributes : [];
   let sizeIdx = -1;
@@ -159,6 +178,7 @@ function mapProduct(p: any): CatalogProduct {
   const sizesSet = new Set<string>();
   const colorsSet = new Set<string>();
   const colorImageByName = new Map<string, string>();
+  const colorImageCandidates = new Map<string, string[]>();
   let totalStock = 0;
   let price: number | null = null;
   let promotionalPrice: number | null = null;
@@ -176,9 +196,14 @@ function mapProduct(p: any): CatalogProduct {
       if (c) {
         colorsSet.add(c);
         const imageId = Number(v?.image_id);
-        if (!colorImageByName.has(c) && Number.isFinite(imageId) && imageId > 0) {
+        if (Number.isFinite(imageId) && imageId > 0) {
           const src = imageById.get(imageId);
-          if (src) colorImageByName.set(c, src);
+          const meta = imageMetaById.get(imageId);
+          if (src && !isLikelyNonProductImage(meta)) {
+            const list = colorImageCandidates.get(c) || [];
+            if (!list.includes(src)) list.push(src);
+            colorImageCandidates.set(c, list);
+          }
         }
       }
     }
@@ -192,12 +217,29 @@ function mapProduct(p: any): CatalogProduct {
     }
   });
 
-  // Si TN no asignó image_id por color, repartir fotos del producto en orden.
-  if (images.length > 0) {
-    Array.from(colorsSet).forEach((name, idx) => {
-      if (!colorImageByName.has(name)) {
-        colorImageByName.set(name, images[Math.min(idx, images.length - 1)]);
+  for (const [color, srcs] of colorImageCandidates) {
+    if (srcs.length > 0) colorImageByName.set(color, srcs[0]);
+  }
+
+  // Si TN no asignó image_id por color, repartir solo fotos de producto (sin tablas de talles).
+  if (photoPool.length > 0) {
+    const used = new Set(colorImageByName.values());
+    let poolIdx = 0;
+    Array.from(colorsSet).forEach((name) => {
+      if (colorImageByName.has(name)) return;
+      let picked = '';
+      for (let i = 0; i < photoPool.length; i++) {
+        const candidate = photoPool[(poolIdx + i) % photoPool.length];
+        if (!used.has(candidate)) {
+          picked = candidate;
+          poolIdx = (poolIdx + i + 1) % photoPool.length;
+          break;
+        }
       }
+      if (!picked) picked = photoPool[Math.min(poolIdx, photoPool.length - 1)];
+      colorImageByName.set(name, picked);
+      used.add(picked);
+      poolIdx = (poolIdx + 1) % photoPool.length;
     });
   }
 

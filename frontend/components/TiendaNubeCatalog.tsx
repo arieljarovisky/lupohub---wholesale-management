@@ -38,7 +38,12 @@ import {
   pickCatalogProductImages,
   resolveCatalogImageSrc,
 } from '../utils/catalogImageUrl';
-import { autoCropColorThumb, CATALOG_COLOR_THUMB_SIZE } from '../utils/catalogColorCrop';
+import {
+  autoCropColorThumb,
+  CATALOG_COLOR_CROP_ALGO,
+  CATALOG_COLOR_THUMB_SIZE,
+  pickBestColorSourceImage,
+} from '../utils/catalogColorCrop';
 import { Role, PriceList } from '../types';
 
 /* ===================== Tipos de configuración editable ===================== */
@@ -1860,6 +1865,21 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
   const savedSnapshotRef = useRef('');
   const configRef = useRef(config);
   const autoCropDoneRef = useRef<Set<string>>(new Set());
+  const cropDoneHydratedRef = useRef(false);
+  if (!cropDoneHydratedRef.current) {
+    cropDoneHydratedRef.current = true;
+    try {
+      const raw = sessionStorage.getItem(`tn_catalog_color_crop_done_${CATALOG_COLOR_CROP_ALGO}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          autoCropDoneRef.current = new Set(parsed.filter((k) => typeof k === 'string'));
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
 
   useEffect(() => {
     configRef.current = config;
@@ -2011,7 +2031,7 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
       });
   }, [isAdmin]);
 
-  // Recorte automático de miniaturas de color (sin imagen guardada aún).
+  // Recorte automático de miniaturas de color (elige foto correcta y encuadra la prenda).
   useEffect(() => {
     if (!isAdmin || !catalog?.sections?.length || !configHydrated) return;
 
@@ -2029,9 +2049,10 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
         for (const p of section.products) {
           const ov = configRef.current.products[p.id];
           const variants = resolveColorVariants(ov, p);
+          const imageCandidates = pickCatalogProductImages(p.images, ov?.images);
           for (const cv of variants) {
-            if (!cv.sourceImage || cv.image) continue;
-            const key = `${p.id}:${cv.name}:${cv.sourceImage}`;
+            if (!cv.sourceImage && imageCandidates.length === 0) continue;
+            const key = `${CATALOG_COLOR_CROP_ALGO}:${p.id}:${cv.name}:${cv.sourceImage || ''}`;
             if (autoCropDoneRef.current.has(key)) continue;
             pending.push({ productId: p.id, product: p, cv });
           }
@@ -2043,10 +2064,22 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
       setAutoCroppingColors(true);
       for (const item of pending) {
         if (cancelled) break;
-        const key = `${item.productId}:${item.cv.name}:${item.cv.sourceImage}`;
-        autoCropDoneRef.current.add(key);
+        const ov = configRef.current.products[item.productId];
+        const imageCandidates = pickCatalogProductImages(item.product.images, ov?.images);
+        let sourceImage = item.cv.sourceImage || '';
         try {
-          const blob = await autoCropColorThumb(item.cv.sourceImage!);
+          sourceImage = await pickBestColorSourceImage(imageCandidates, sourceImage);
+        } catch {
+          /* keep original */
+        }
+        if (!sourceImage) continue;
+
+        const key = `${CATALOG_COLOR_CROP_ALGO}:${item.productId}:${item.cv.name}:${sourceImage}`;
+        if (autoCropDoneRef.current.has(key)) continue;
+        autoCropDoneRef.current.add(key);
+
+        try {
+          const blob = await autoCropColorThumb(sourceImage);
           const file = new File([blob], `color-auto-${item.productId}-${Date.now()}.jpg`, {
             type: 'image/jpeg',
           });
@@ -2054,19 +2087,29 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
           if (cancelled) break;
 
           setConfig((prev) => {
-            const ov = prev.products[item.productId] || {};
-            const variants = resolveColorVariants(ov, item.product);
+            const productOv = prev.products[item.productId] || {};
+            const variants = resolveColorVariants(productOv, item.product);
             const updated = variants.map((cv) =>
-              cv.name === item.cv.name && cv.sourceImage === item.cv.sourceImage ? { ...cv, image: url } : cv
+              cv.name === item.cv.name
+                ? { ...cv, sourceImage, image: url }
+                : cv
             );
             return {
               ...prev,
               products: {
                 ...prev.products,
-                [item.productId]: { ...ov, colorVariants: updated },
+                [item.productId]: { ...productOv, colorVariants: updated },
               },
             };
           });
+          try {
+            sessionStorage.setItem(
+              `tn_catalog_color_crop_done_${CATALOG_COLOR_CROP_ALGO}`,
+              JSON.stringify([...autoCropDoneRef.current])
+            );
+          } catch {
+            /* quota */
+          }
         } catch {
           autoCropDoneRef.current.delete(key);
         }
