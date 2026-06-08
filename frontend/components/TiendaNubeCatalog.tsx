@@ -328,6 +328,12 @@ const CATALOG_PRINT_CSS = `
   }
 `;
 
+/** Personalización de texto por vendedor (no modifica la config global del admin). */
+interface SellerProductOverride {
+  name?: string;
+  description?: string;
+}
+
 interface ProductOverride {
   included?: boolean;
   name?: string;
@@ -423,6 +429,79 @@ const defaultConfig = (): CatalogConfig => ({
 const CATALOG_CACHE_KEY = 'lupo_tn_catalog_cache';
 const CONFIG_CACHE_KEY = 'lupo_tn_catalog_config_cache';
 const SELLER_PRICE_LIST_KEY = 'lupo_tn_catalog_seller_price_list';
+const SELLER_HIDDEN_PREFIX = 'lupo_tn_catalog_seller_hidden';
+const SELLER_OVERRIDES_PREFIX = 'lupo_tn_catalog_seller_overrides';
+
+function sellerHiddenStorageKey(userId: string, priceListId: string): string {
+  return `${SELLER_HIDDEN_PREFIX}_${userId}_${priceListId}`;
+}
+
+function sellerOverridesStorageKey(userId: string, priceListId: string): string {
+  return `${SELLER_OVERRIDES_PREFIX}_${userId}_${priceListId}`;
+}
+
+function readSellerHiddenIds(userId: string, priceListId: string): number[] {
+  if (!userId || !priceListId) return [];
+  try {
+    const raw = localStorage.getItem(sellerHiddenStorageKey(userId, priceListId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((id): id is number => typeof id === 'number' && Number.isFinite(id));
+  } catch {
+    return [];
+  }
+}
+
+function writeSellerHiddenIds(userId: string, priceListId: string, ids: number[]) {
+  if (!userId || !priceListId) return;
+  try {
+    localStorage.setItem(sellerHiddenStorageKey(userId, priceListId), JSON.stringify(ids));
+  } catch {
+    /* quota */
+  }
+}
+
+function readSellerOverrides(userId: string, priceListId: string): Record<number, SellerProductOverride> {
+  if (!userId || !priceListId) return {};
+  try {
+    const raw = localStorage.getItem(sellerOverridesStorageKey(userId, priceListId));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return {};
+    const out: Record<number, SellerProductOverride> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      const id = Number(key);
+      if (!Number.isFinite(id) || !value || typeof value !== 'object') continue;
+      const ov = value as SellerProductOverride;
+      const entry: SellerProductOverride = {};
+      if (typeof ov.name === 'string' && ov.name.trim()) entry.name = ov.name.trim();
+      if (typeof ov.description === 'string') entry.description = ov.description;
+      if (entry.name || entry.description !== undefined) out[id] = entry;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function writeSellerOverrides(userId: string, priceListId: string, overrides: Record<number, SellerProductOverride>) {
+  if (!userId || !priceListId) return;
+  try {
+    const serializable: Record<string, SellerProductOverride> = {};
+    for (const [id, ov] of Object.entries(overrides)) {
+      if (!ov || (ov.name === undefined && ov.description === undefined)) continue;
+      serializable[id] = ov;
+    }
+    localStorage.setItem(sellerOverridesStorageKey(userId, priceListId), JSON.stringify(serializable));
+  } catch {
+    /* quota */
+  }
+}
+
+function isAdminProductIncluded(productId: number, products: Record<string, ProductOverride>): boolean {
+  return products[productId]?.included !== false;
+}
 
 function mergeProductOverrides(
   server: Record<string, ProductOverride>,
@@ -656,6 +735,18 @@ function mergeProduct(p: TiendaNubeCatalogProduct, ov: ProductOverride | undefin
     price: p.price,
     promotionalPrice: p.promotionalPrice,
     included: ov?.included !== false,
+  };
+}
+
+function applySellerProductOverride(
+  display: DisplayProduct,
+  sellerOv: SellerProductOverride | undefined
+): DisplayProduct {
+  if (!sellerOv) return display;
+  return {
+    ...display,
+    name: sellerOv.name?.trim() || display.name,
+    description: sellerOv.description !== undefined ? sellerOv.description : display.description,
   };
 }
 
@@ -1042,6 +1133,87 @@ const ProductEditorModal: React.FC<{
           onApply={(blob) => applyCroppedColorImage(croppingColorIdx, blob)}
         />
       )}
+    </div>
+  );
+};
+
+/* ===================== Editor de producto para vendedor (solo textos) ===================== */
+
+const SellerProductEditorModal: React.FC<{
+  product: TiendaNubeCatalogProduct;
+  adminOverride: ProductOverride | undefined;
+  sellerOverride: SellerProductOverride | undefined;
+  onSave: (ov: SellerProductOverride) => void;
+  onClose: () => void;
+}> = ({ product, adminOverride, sellerOverride, onSave, onClose }) => {
+  const base = mergeProduct(product, adminOverride);
+  const [name, setName] = useState(sellerOverride?.name ?? base.name);
+  const [description, setDescription] = useState(sellerOverride?.description ?? base.description);
+
+  const inputCls =
+    'w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm outline-none focus:ring-2 focus:ring-emerald-500';
+  const labelCls = 'text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1 block';
+
+  const save = () => {
+    const patch: SellerProductOverride = {};
+    const trimmedName = name.trim();
+    if (trimmedName && trimmedName !== base.name) patch.name = trimmedName;
+    if (description !== base.description) patch.description = description;
+    onSave(patch);
+    onClose();
+  };
+
+  const resetField = () => {
+    setName(base.name);
+    setDescription(base.description);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm flex items-center justify-center p-3" onClick={onClose}>
+      <div
+        className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-xl shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="border-b border-slate-700 px-5 py-4 flex items-center justify-between">
+          <h3 className="font-bold text-white flex items-center gap-2">
+            <Pencil size={18} className="text-emerald-400" /> Editar título y descripción
+          </h3>
+          <button onClick={onClose} className="w-9 h-9 flex items-center justify-center text-slate-400 hover:text-white rounded-lg">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          <p className="text-xs text-slate-400">
+            Los cambios solo aplican a tu catálogo. El diseño y textos base los define el administrador.
+          </p>
+          <div>
+            <label className={labelCls}>Título del producto</label>
+            <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div>
+            <label className={labelCls}>Descripción</label>
+            <textarea className={inputCls} rows={5} value={description} onChange={(e) => setDescription(e.target.value)} />
+          </div>
+        </div>
+
+        <div className="border-t border-slate-700 px-5 py-4 flex flex-wrap gap-2 justify-end">
+          <button
+            type="button"
+            onClick={resetField}
+            className="px-4 py-2 rounded-xl text-sm font-semibold text-slate-300 hover:text-white border border-slate-600"
+          >
+            Restaurar original
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            className="px-4 py-2 rounded-xl text-sm font-bold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-2"
+          >
+            <Check size={16} /> Aplicar
+          </button>
+        </div>
+      </div>
     </div>
   );
 };
@@ -1476,6 +1648,7 @@ const ProductDisplay: React.FC<{
   flip: boolean;
   showPrice: boolean;
   editMode: boolean;
+  pickMode?: boolean;
   headingFont?: string;
   bodyFont?: string;
   colors: ColorsConfig;
@@ -1483,9 +1656,10 @@ const ProductDisplay: React.FC<{
   onEdit: () => void;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
-}> = ({ product, flip, showPrice, editMode, headingFont, bodyFont, colors, onToggleInclude, onEdit, onMoveUp, onMoveDown }) => {
+}> = ({ product, flip, showPrice, editMode, pickMode = false, headingFont, bodyFont, colors, onToggleInclude, onEdit, onMoveUp, onMoveDown }) => {
   const img = resolveCatalogImageSrc(product.images[product.imageIndex] || product.images[0] || '');
-  const dimmed = editMode && !product.included;
+  const selectionMode = editMode || pickMode;
+  const dimmed = selectionMode && !product.included;
   const blurb = catalogBlurb(product.description, product.features);
   const fontStack = "'Montserrat', sans-serif";
   const iconProps = { size: 15, strokeWidth: 1.5 as const };
@@ -1493,30 +1667,36 @@ const ProductDisplay: React.FC<{
   return (
     <article
       className={`tn-product break-inside-avoid relative overflow-hidden bg-white ${
-        editMode ? 'rounded-xl border border-slate-200' : ''
+        selectionMode ? 'rounded-xl border border-slate-200' : ''
       } ${dimmed ? 'opacity-40' : ''}`}
     >
-      {editMode && (
+      {selectionMode && (
         <div className="tn-noprint absolute top-2 right-2 z-10 flex gap-1">
-          {onMoveUp && (
+          {editMode && onMoveUp && (
             <button onClick={onMoveUp} className="w-8 h-8 rounded-lg bg-white/90 border border-slate-300 text-slate-600 hover:bg-white flex items-center justify-center shadow" title="Subir">
               <ChevronUp size={16} />
             </button>
           )}
-          {onMoveDown && (
+          {editMode && onMoveDown && (
             <button onClick={onMoveDown} className="w-8 h-8 rounded-lg bg-white/90 border border-slate-300 text-slate-600 hover:bg-white flex items-center justify-center shadow" title="Bajar">
               <ChevronDown size={16} />
             </button>
           )}
-          <button onClick={onEdit} className="w-8 h-8 rounded-lg bg-white/90 border border-slate-300 text-slate-700 hover:bg-white flex items-center justify-center shadow" title="Editar">
-            <Pencil size={15} />
-          </button>
+          {(editMode || pickMode) && (
+            <button
+              onClick={onEdit}
+              className="w-8 h-8 rounded-lg bg-white/90 border border-slate-300 text-slate-700 hover:bg-white flex items-center justify-center shadow"
+              title={pickMode ? 'Editar título y descripción' : 'Editar'}
+            >
+              <Pencil size={15} />
+            </button>
+          )}
           <button
             onClick={onToggleInclude}
             className={`w-8 h-8 rounded-lg border flex items-center justify-center shadow ${
               product.included ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-white/90 border-slate-300 text-slate-500'
             }`}
-            title={product.included ? 'Quitar del catálogo' : 'Incluir en el catálogo'}
+            title={product.included ? 'Ocultar del catálogo' : 'Mostrar en el catálogo'}
           >
             {product.included ? <Eye size={15} /> : <EyeOff size={15} />}
           </button>
@@ -1643,9 +1823,10 @@ const ProductDisplay: React.FC<{
 
 /* ===================== Componente principal ===================== */
 
-const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[] }> = ({
+const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; userId?: string }> = ({
   role,
   priceLists = [],
+  userId = '',
 }) => {
   const isAdmin = role === Role.ADMIN;
   const isSeller = role === Role.SELLER;
@@ -1659,6 +1840,9 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[] }> 
   const [search, setSearch] = useState('');
   const [activeSection, setActiveSection] = useState<number | 'all'>('all');
   const [editMode, setEditMode] = useState(false);
+  const [pickMode, setPickMode] = useState(false);
+  const [sellerHiddenIds, setSellerHiddenIds] = useState<number[]>([]);
+  const [sellerOverrides, setSellerOverrides] = useState<Record<number, SellerProductOverride>>({});
   const [editingProduct, setEditingProduct] = useState<{ section: TiendaNubeCatalogSection; product: TiendaNubeCatalogProduct } | null>(null);
   const [editingCover, setEditingCover] = useState(false);
   const [editingTypography, setEditingTypography] = useState(false);
@@ -1696,6 +1880,32 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[] }> 
     }, 250);
     return () => clearTimeout(t);
   }, [config, isAdmin]);
+
+  useEffect(() => {
+    if (!isSeller || !userId || !selectedPriceListId) {
+      setSellerHiddenIds([]);
+      setSellerOverrides({});
+      return;
+    }
+    setSellerHiddenIds(readSellerHiddenIds(userId, selectedPriceListId));
+    setSellerOverrides(readSellerOverrides(userId, selectedPriceListId));
+  }, [isSeller, userId, selectedPriceListId]);
+
+  useEffect(() => {
+    if (!isSeller || !userId || !selectedPriceListId) return;
+    const t = setTimeout(() => {
+      writeSellerHiddenIds(userId, selectedPriceListId, sellerHiddenIds);
+    }, 250);
+    return () => clearTimeout(t);
+  }, [isSeller, userId, selectedPriceListId, sellerHiddenIds]);
+
+  useEffect(() => {
+    if (!isSeller || !userId || !selectedPriceListId) return;
+    const t = setTimeout(() => {
+      writeSellerOverrides(userId, selectedPriceListId, sellerOverrides);
+    }, 250);
+    return () => clearTimeout(t);
+  }, [isSeller, userId, selectedPriceListId, sellerOverrides]);
 
   const effectiveShowPrice = isSeller ? !!selectedPriceListId : config.showPrice;
   const selectedPriceListName = useMemo(
@@ -1920,6 +2130,25 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[] }> 
     });
   };
 
+  const toggleSellerProduct = (id: number) => {
+    setSellerHiddenIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const setSellerProductOverride = (id: number, patch: SellerProductOverride) => {
+    setSellerOverrides((prev) => {
+      const next = { ...prev };
+      const entry: SellerProductOverride = {};
+      if (patch.name) entry.name = patch.name;
+      if (patch.description !== undefined) entry.description = patch.description;
+      if (!entry.name && entry.description === undefined) {
+        delete next[id];
+      } else {
+        next[id] = entry;
+      }
+      return next;
+    });
+  };
+
   const toggleSection = (id: number) => {
     setConfig((prev) => {
       const cur = prev.sections[id]?.included !== false;
@@ -1970,37 +2199,53 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[] }> 
         const byPid = new Map(s.products.map((p) => [p.id, p]));
         let products = prodOrder.map((pid) => byPid.get(pid)).filter((p): p is TiendaNubeCatalogProduct => !!p);
         if (q) {
-          products = products.filter(
-            (p) =>
-              (config.products[p.id]?.name ?? p.name).toLowerCase().includes(q) ||
-              p.description.toLowerCase().includes(q) ||
+          products = products.filter((p) => {
+            const display = applySellerProductOverride(
+              mergeProduct(p, config.products[p.id]),
+              sellerOverrides[p.id]
+            );
+            return (
+              display.name.toLowerCase().includes(q) ||
+              display.description.toLowerCase().includes(q) ||
               p.sizes.some((x) => x.toLowerCase().includes(q)) ||
               resolveColorVariants(config.products[p.id], p).some((x) =>
                 x.name.toLowerCase().includes(q)
               )
-          );
+            );
+          });
         }
         return { section: s, products };
       })
       .filter((x) => x.products.length > 0);
-  }, [catalog, config, search, activeSection]);
+  }, [catalog, config, search, activeSection, sellerOverrides]);
+
+  const selectionMode = (isAdmin && editMode) || (isSeller && pickMode);
 
   // Para preview/print, ocultar secciones/productos excluidos
   const visibleSections = useMemo(() => {
+    const sellerHidden = new Set(sellerHiddenIds);
     return orderedSections
       .map(({ section, products }) => {
         const incl = config.sections[section.id]?.included !== false;
-        if (!editMode && !incl) return null;
-        const prods = isAdmin && editMode ? products : products.filter((p) => config.products[p.id]?.included !== false);
-        if (!editMode && prods.length === 0) return null;
+        if (!selectionMode && !incl) return null;
+        let prods = products.filter((p) => isAdminProductIncluded(p.id, config.products));
+        if (!selectionMode) {
+          prods = prods.filter((p) => !sellerHidden.has(p.id));
+        }
+        if (!selectionMode && prods.length === 0) return null;
         return { section, products: prods, included: incl };
       })
       .filter((x): x is { section: TiendaNubeCatalogSection; products: TiendaNubeCatalogProduct[]; included: boolean } => !!x);
-  }, [orderedSections, config, editMode]);
+  }, [orderedSections, config, selectionMode, sellerHiddenIds]);
 
   const totalShown = useMemo(
     () => visibleSections.reduce((acc, s) => acc + s.products.length, 0),
     [visibleSections]
+  );
+
+  const sellerCustomizationCount = useMemo(
+    () => sellerHiddenIds.length + Object.keys(sellerOverrides).length,
+    [sellerHiddenIds, sellerOverrides]
   );
 
   const cover = config.cover;
@@ -2021,13 +2266,14 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[] }> 
 
       requestAnimationFrame(() => window.print());
     };
-    if (editMode) {
+    if (editMode || pickMode) {
       setEditMode(false);
+      setPickMode(false);
       setTimeout(run, 250);
     } else {
       run();
     }
-  }, [config.cover.brand, config.cover.collection, editMode]);
+  }, [config.cover.brand, config.cover.collection, editMode, pickMode]);
 
   return (
     <div className="space-y-5">
@@ -2106,7 +2352,10 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[] }> 
                 {isAdmin && (
                   <>
                     <button
-                      onClick={() => setEditMode((v) => !v)}
+                      onClick={() => {
+                        setEditMode((v) => !v);
+                        setPickMode(false);
+                      }}
                       className={`min-h-[44px] px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 border ${
                         editMode ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-200 hover:bg-slate-600'
                       }`}
@@ -2122,6 +2371,26 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[] }> 
                       {dirty ? 'Guardar' : 'Guardado'}
                     </button>
                   </>
+                )}
+                {isSeller && (
+                  <button
+                    onClick={() => {
+                      setPickMode((v) => !v);
+                      setEditMode(false);
+                      if (pickMode) setEditingProduct(null);
+                    }}
+                    className={`min-h-[44px] px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 border ${
+                      pickMode ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-200 hover:bg-slate-600'
+                    }`}
+                  >
+                    <Pencil size={18} />
+                    {pickMode ? 'Personalizando' : 'Personalizar catálogo'}
+                    {!pickMode && sellerCustomizationCount > 0 && (
+                      <span className="ml-0.5 text-[10px] bg-slate-900/50 px-1.5 py-0.5 rounded-md">
+                        {sellerCustomizationCount}
+                      </span>
+                    )}
+                  </button>
                 )}
                 <button
                   onClick={handlePrint}
@@ -2218,6 +2487,28 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[] }> 
               <p className="text-xs text-indigo-300 bg-indigo-950/40 border border-indigo-800/50 rounded-lg px-3 py-2">
                 Modo edición: usá el ojo para incluir/quitar, el lápiz para editar textos e imagen, y las flechas para reordenar.
                 Acordate de <strong>Guardar</strong> al terminar.
+              </p>
+            )}
+            {isSeller && pickMode && (
+              <p className="text-xs text-indigo-300 bg-indigo-950/40 border border-indigo-800/50 rounded-lg px-3 py-2">
+                Usá el <strong>lápiz</strong> para editar título y descripción, y el <strong>ojo</strong> para ocultar o mostrar artículos.
+                Los cambios se guardan solos y solo aplican a tu catálogo.
+              </p>
+            )}
+            {isSeller && !pickMode && sellerCustomizationCount > 0 && (
+              <p className="text-xs text-slate-400 bg-slate-900/40 border border-slate-700/50 rounded-lg px-3 py-2">
+                Tenés personalizaciones en este catálogo
+                {sellerHiddenIds.length > 0 && (
+                  <>
+                    {' '}· <strong className="text-slate-300">{sellerHiddenIds.length}</strong> oculto{sellerHiddenIds.length === 1 ? '' : 's'}
+                  </>
+                )}
+                {Object.keys(sellerOverrides).length > 0 && (
+                  <>
+                    {' '}· <strong className="text-slate-300">{Object.keys(sellerOverrides).length}</strong> con textos editados
+                  </>
+                )}
+                .
               </p>
             )}
             </>
@@ -2317,10 +2608,10 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[] }> 
             {visibleSections.map(({ section, products, included }) => {
               const baseProdIds = section.products.map((p) => p.id);
               return (
-                <section key={section.id} className={`tn-section ${editMode && !included ? 'opacity-50' : ''}`}>
+                <section key={section.id} className={`tn-section ${selectionMode && !included ? 'opacity-50' : ''}`}>
                   {/* Divisor de sección */}
                   <div className="relative mb-0">
-                    {editMode ? (
+                    {isAdmin && editMode ? (
                       <div className="tn-noprint flex flex-wrap items-center gap-2 bg-slate-100 rounded-xl p-2">
                         <button
                           onClick={() => toggleSection(section.id)}
@@ -2365,18 +2656,24 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[] }> 
                   {/* Productos */}
                   <div className="tn-products-list space-y-6 md:space-y-8">
                     {products.map((p, i) => {
-                      const dp = mergeProduct(p, config.products[p.id]);
+                      const dp = applySellerProductOverride(
+                        mergeProduct(p, config.products[p.id]),
+                        isSeller ? sellerOverrides[p.id] : undefined
+                      );
+                      const sellerIncluded = !sellerHiddenIds.includes(p.id);
+                      const displayProduct = isSeller ? { ...dp, included: sellerIncluded } : dp;
                       return (
                         <ProductDisplay
                           key={`${section.id}-${p.id}`}
-                          product={dp}
+                          product={displayProduct}
                           flip={i % 2 === 1}
                           showPrice={effectiveShowPrice}
                           editMode={isAdmin && editMode}
+                          pickMode={isSeller && pickMode}
                           headingFont={headingStack}
                           bodyFont={bodyStack}
                           colors={colors}
-                          onToggleInclude={() => toggleProduct(p.id)}
+                          onToggleInclude={() => (isSeller ? toggleSellerProduct(p.id) : toggleProduct(p.id))}
                           onEdit={() => setEditingProduct({ section, product: p })}
                           onMoveUp={editMode ? () => moveProduct(section.id, baseProdIds, p.id, -1) : undefined}
                           onMoveDown={editMode ? () => moveProduct(section.id, baseProdIds, p.id, 1) : undefined}
@@ -2413,6 +2710,15 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[] }> 
           product={editingProduct.product}
           override={config.products[editingProduct.product.id]}
           onSave={(ov) => setProductOverride(editingProduct.product.id, ov)}
+          onClose={() => setEditingProduct(null)}
+        />
+      )}
+      {isSeller && editingProduct && (
+        <SellerProductEditorModal
+          product={editingProduct.product}
+          adminOverride={config.products[editingProduct.product.id]}
+          sellerOverride={sellerOverrides[editingProduct.product.id]}
+          onSave={(ov) => setSellerProductOverride(editingProduct.product.id, ov)}
           onClose={() => setEditingProduct(null)}
         />
       )}

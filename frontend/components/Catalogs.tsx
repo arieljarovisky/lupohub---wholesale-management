@@ -17,9 +17,10 @@ interface CatalogItem {
 interface CatalogsProps {
   role: Role;
   priceLists?: PriceList[];
+  userId?: string;
 }
 
-const Catalogs: React.FC<CatalogsProps> = ({ role, priceLists = [] }) => {
+const Catalogs: React.FC<CatalogsProps> = ({ role, priceLists = [], userId = '' }) => {
   const [list, setList] = useState<CatalogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -134,7 +135,7 @@ const Catalogs: React.FC<CatalogsProps> = ({ role, priceLists = [] }) => {
   if (showTnCatalog) {
     return (
       <div className="space-y-5 sm:space-y-6 max-w-full px-0 sm:px-0">
-        <TiendaNubeCatalogView role={role} priceLists={priceLists} />
+        <TiendaNubeCatalogView role={role} priceLists={priceLists} userId={userId} />
       </div>
     );
   }

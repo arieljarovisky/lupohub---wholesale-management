@@ -1334,7 +1334,7 @@ const App: React.FC = () => {
           )}
           {baseView === 'catalogs' && (
             <Suspense fallback={<ViewFallback />}>
-              <Catalogs role={currentUser.role} priceLists={priceLists} />
+              <Catalogs role={currentUser.role} priceLists={priceLists} userId={currentUser.id} />
             </Suspense>
           )}
           {baseView === 'stock_history' && (
