@@ -135,6 +135,43 @@ async function resolveMlOrderItemSku(
   return '';
 }
 
+/** Referencia por línea de orden ML (evita omitir ítems restantes si falló el procesamiento parcial). */
+function mlOrderLineReference(
+  orderId: string,
+  mlItemId: string | number | undefined,
+  mlVariationId: string | number | undefined,
+  itemIndex: number
+): string {
+  const item = mlItemId != null && String(mlItemId).trim() !== '' ? String(mlItemId).trim() : 'item';
+  const variation =
+    mlVariationId != null && String(mlVariationId).trim() !== '' ? String(mlVariationId).trim() : '0';
+  return `Orden ML: ${orderId} · ${item}:${variation}:${itemIndex}`;
+}
+
+/** True si la línea ya generó movimiento (formato nuevo por línea o legacy por variante). */
+async function isMlOrderLineAlreadyProcessed(
+  orderId: string,
+  lineRef: string,
+  variantId?: string
+): Promise<boolean> {
+  const byLine = await get(
+    `SELECT id FROM stock_movements WHERE movement_type = 'VENTA_MERCADO_LIBRE' AND reference = ? LIMIT 1`,
+    [lineRef]
+  );
+  if (byLine) return true;
+
+  if (variantId) {
+    const legacyRef = `Orden ML: ${orderId}`;
+    const byLegacyVariant = await get(
+      `SELECT id FROM stock_movements WHERE movement_type = 'VENTA_MERCADO_LIBRE' AND reference = ? AND variant_id = ? LIMIT 1`,
+      [legacyRef, variantId]
+    );
+    if (byLegacyVariant) return true;
+  }
+
+  return false;
+}
+
 /** Si llega un ID de catálogo (ej. URL /p/MLAU...), intentar resolver a item IDs reales. */
 export async function resolveMercadoLibreCatalogProductItems(
   productId: string,
@@ -2363,17 +2400,17 @@ export const testMercadoLibreOrder = async (req: Request, res: Response) => {
       });
     }
 
-    const ref = `Orden ML: ${orderId}`;
+    const refPrefix = `Orden ML: ${orderId}%`;
     const before = await get(
-      `SELECT COUNT(*) AS n FROM stock_movements WHERE movement_type = 'VENTA_MERCADO_LIBRE' AND reference = ?`,
-      [ref]
+      `SELECT COUNT(*) AS n FROM stock_movements WHERE movement_type = 'VENTA_MERCADO_LIBRE' AND reference LIKE ?`,
+      [refPrefix]
     );
 
     await processMercadoLibreOrder(orderId);
 
     const after = await get(
-      `SELECT COUNT(*) AS n FROM stock_movements WHERE movement_type = 'VENTA_MERCADO_LIBRE' AND reference = ?`,
-      [ref]
+      `SELECT COUNT(*) AS n FROM stock_movements WHERE movement_type = 'VENTA_MERCADO_LIBRE' AND reference LIKE ?`,
+      [refPrefix]
     );
 
     const beforeN = Number((before as any)?.n ?? 0);
@@ -2382,7 +2419,7 @@ export const testMercadoLibreOrder = async (req: Request, res: Response) => {
 
     return res.json({
       orderId,
-      movementReference: ref,
+      movementReferencePattern: refPrefix,
       movementsBefore: beforeN,
       movementsAfter: afterN,
       createdMovements: created,
@@ -2498,16 +2535,6 @@ const processMercadoLibreOrder = async (orderId: string) => {
       throw e;
     }
 
-    // Idempotencia: evitar descontar dos veces por reintentos/notificaciones repetidas.
-    const alreadyProcessed = await get(
-      `SELECT id FROM stock_movements WHERE movement_type = 'VENTA_MERCADO_LIBRE' AND reference = ? LIMIT 1`,
-      [`Orden ML: ${orderId}`]
-    );
-    if (alreadyProcessed) {
-      console.log(`[ML Order] Orden ${orderId} ya procesada, omitiendo`);
-      return;
-    }
-
     const mlToken = await getValidMLToken();
     if (!mlToken) return;
 
@@ -2532,10 +2559,11 @@ const processMercadoLibreOrder = async (orderId: string) => {
 
     const { updateVariantStock } = await import('./stock.controller');
 
-    for (const item of order.order_items || []) {
+    for (const [itemIndex, item] of (order.order_items || []).entries()) {
       const mlItemId = item.item?.id;
       const mlVariationId = item.item?.variation_id;
       const quantity = item.quantity;
+      const lineRef = mlOrderLineReference(orderId, mlItemId, mlVariationId, itemIndex);
       let itemSku = (item.item?.sku || item.sku || '').toString().trim();
       if (!itemSku) {
         itemSku = await resolveMlOrderItemSku(mlToken.access_token, mlItemId, mlVariationId);
@@ -2548,11 +2576,15 @@ const processMercadoLibreOrder = async (orderId: string) => {
         const extVar = (mlVariationId && String(mlVariationId).trim()) || '';
         const bundle = await findBundleByListing('mercadolibre', mlItemId, extVar);
         if (bundle?.items?.length) {
+          if (await isMlOrderLineAlreadyProcessed(orderId, lineRef)) {
+            console.log(`[ML Order] Línea ${itemIndex + 1} de orden ${orderId} ya procesada (pack), omitiendo`);
+            continue;
+          }
           const { ok, lines } = await deductStockForBundleListing(
             bundle,
             quantity,
             'VENTA_MERCADO_LIBRE',
-            `Orden ML: ${orderId}`
+            lineRef
           );
           console.log(
             `[ML Order] Pack multicolor "${bundle.label || bundle.externalProductId}": ${lines.join('; ')}`
@@ -2573,8 +2605,20 @@ const processMercadoLibreOrder = async (orderId: string) => {
           variant = { id: fromPub.id, current_stock: Number(row?.current_stock ?? 0), ml_pack: Math.max(1, Number(fromPub.ml_pack) || 1) };
         }
       }
-      // Fallback legacy: variantes vinculadas por columna pv.mercado_libre_item_id
-      if (!variant?.id && mlItemId) {
+      // Priorizar variation_id antes que item_id suelto (publicación con variaciones).
+      if (!variant?.id && mlVariationId) {
+        variant = await get(
+          `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
+           FROM product_variants pv
+           JOIN product_colors pc ON pc.id = pv.product_color_id
+           JOIN products p ON p.id = pc.product_id
+           LEFT JOIN stocks s ON s.variant_id = pv.id
+           WHERE pv.mercado_libre_variant_id = ?`,
+          [mlVariationId]
+        );
+      }
+      // Fallback legacy: publicación propia por variante (sin variation_id en ML).
+      if (!variant?.id && mlItemId && !mlVariationId) {
         variant = await get(
           `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
            FROM product_variants pv
@@ -2634,17 +2678,6 @@ const processMercadoLibreOrder = async (orderId: string) => {
           }
         }
       }
-      if (!variant?.id && mlVariationId) {
-        variant = await get(
-          `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
-           FROM product_variants pv
-           JOIN product_colors pc ON pc.id = pv.product_color_id
-           JOIN products p ON p.id = pc.product_id
-           LEFT JOIN stocks s ON s.variant_id = pv.id
-           WHERE pv.mercado_libre_variant_id = ?`,
-          [mlVariationId]
-        );
-      }
       if (!variant?.id && itemSku) {
         variant = await get(
           `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
@@ -2690,6 +2723,10 @@ const processMercadoLibreOrder = async (orderId: string) => {
       }
 
       if (variant?.id) {
+        if (await isMlOrderLineAlreadyProcessed(orderId, lineRef, variant.id)) {
+          console.log(`[ML Order] Línea ${itemIndex + 1} de orden ${orderId} ya procesada, omitiendo variante ${variant.id}`);
+          continue;
+        }
         const mlPack = Math.max(1, Number(variant.ml_pack) || 1);
         const unitsToDeduct = quantity * mlPack;
         const currentStock = Number(variant.current_stock) || 0;
@@ -2698,7 +2735,7 @@ const processMercadoLibreOrder = async (orderId: string) => {
           variant.id,
           newStock,
           'VENTA_MERCADO_LIBRE',
-          `Orden ML: ${orderId}`,
+          lineRef,
           true
         );
         console.log(`[ML Order] Descontado ${unitsToDeduct} un. (${quantity} × pack x${mlPack}) variante ${variant.id}, stock: ${currentStock} -> ${newStock}; actualizado ML y TN`);
