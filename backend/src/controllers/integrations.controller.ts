@@ -2043,7 +2043,7 @@ const processTiendaNubeOrder = async (orderId: string) => {
       return;
     }
 
-    const { updateVariantStock } = await import('./stock.controller');
+    const { deductVariantStockForChannelSale } = await import('./stock.controller');
 
     let discountedCount = 0;
     for (const item of order.products || []) {
@@ -2065,16 +2065,22 @@ const processTiendaNubeOrder = async (orderId: string) => {
           tnVariantId || ''
         );
         if (bundle?.items?.length) {
-          const { ok, lines } = await deductStockForBundleListing(
+          const { ok, blocked, lines } = await deductStockForBundleListing(
             bundle,
             quantity,
             'VENTA_TIENDA_NUBE',
             `Orden TN: ${orderId}`
           );
-          if (ok) discountedCount++;
-          console.log(
-            `[TN Order] Pack multicolor "${bundle.label || bundle.externalProductId}": ${lines.join('; ')}`
-          );
+          if (blocked) {
+            console.warn(
+              `[TN Order] Pack multicolor BLOQUEADO (stock insuficiente) "${bundle.label || bundle.externalProductId}": ${lines.join('; ')}`
+            );
+          } else if (ok) {
+            discountedCount++;
+            console.log(
+              `[TN Order] Pack multicolor "${bundle.label || bundle.externalProductId}": ${lines.join('; ')}`
+            );
+          }
           continue;
         }
       }
@@ -2148,18 +2154,22 @@ const processTiendaNubeOrder = async (orderId: string) => {
       if (variant?.id) {
         const tnPack = Math.max(1, Number(variant.tn_pack) || 1);
         const unitsToDeduct = quantity * tnPack;
-        const currentStock = Number(variant.current_stock) || 0;
-        const newStock = Math.max(0, currentStock - unitsToDeduct);
-        const ok = await updateVariantStock(
+        const result = await deductVariantStockForChannelSale(
           variant.id,
-          newStock,
+          unitsToDeduct,
           'VENTA_TIENDA_NUBE',
           `Orden TN: ${orderId}`,
           true
         );
-        if (ok) {
+        if (result.blocked) {
+          console.warn(
+            `[TN Order] BLOQUEADO: stock insuficiente variante ${variant.id} (tiene ${result.previousStock}, pide ${result.unitsToDeduct}) orden ${orderId}`
+          );
+        } else if (result.ok) {
           discountedCount++;
-          console.log(`[TN Order] Descontado ${unitsToDeduct} un. (${quantity} × pack x${tnPack}) variante ${variant.id}, stock: ${currentStock} -> ${newStock}; actualizado ML y TN`);
+          console.log(
+            `[TN Order] Descontado ${result.unitsToDeduct} un. (${quantity} × pack x${tnPack}) variante ${variant.id}, stock: ${result.previousStock} -> ${result.newStock}; actualizado ML y TN`
+          );
         } else {
           console.error(`[TN Order] No se pudo actualizar stock para variante ${variant.id}`);
         }
@@ -2557,7 +2567,7 @@ const processMercadoLibreOrder = async (orderId: string) => {
     // Enviar mensaje de agradecimiento al comprador
     await sendThankYouMessage(orderId, order, mlToken.access_token);
 
-    const { updateVariantStock } = await import('./stock.controller');
+    const { deductVariantStockForChannelSale } = await import('./stock.controller');
 
     for (const [itemIndex, item] of (order.order_items || []).entries()) {
       const mlItemId = item.item?.id;
@@ -2580,15 +2590,21 @@ const processMercadoLibreOrder = async (orderId: string) => {
             console.log(`[ML Order] Línea ${itemIndex + 1} de orden ${orderId} ya procesada (pack), omitiendo`);
             continue;
           }
-          const { ok, lines } = await deductStockForBundleListing(
+          const { ok, blocked, lines } = await deductStockForBundleListing(
             bundle,
             quantity,
             'VENTA_MERCADO_LIBRE',
             lineRef
           );
-          console.log(
-            `[ML Order] Pack multicolor "${bundle.label || bundle.externalProductId}": ${lines.join('; ')}`
-          );
+          if (blocked) {
+            console.warn(
+              `[ML Order] Pack multicolor BLOQUEADO (stock insuficiente) "${bundle.label || bundle.externalProductId}": ${lines.join('; ')}`
+            );
+          } else if (ok) {
+            console.log(
+              `[ML Order] Pack multicolor "${bundle.label || bundle.externalProductId}": ${lines.join('; ')}`
+            );
+          }
           continue;
         }
       }
@@ -2729,16 +2745,24 @@ const processMercadoLibreOrder = async (orderId: string) => {
         }
         const mlPack = Math.max(1, Number(variant.ml_pack) || 1);
         const unitsToDeduct = quantity * mlPack;
-        const currentStock = Number(variant.current_stock) || 0;
-        const newStock = Math.max(0, currentStock - unitsToDeduct);
-        await updateVariantStock(
+        const result = await deductVariantStockForChannelSale(
           variant.id,
-          newStock,
+          unitsToDeduct,
           'VENTA_MERCADO_LIBRE',
           lineRef,
           true
         );
-        console.log(`[ML Order] Descontado ${unitsToDeduct} un. (${quantity} × pack x${mlPack}) variante ${variant.id}, stock: ${currentStock} -> ${newStock}; actualizado ML y TN`);
+        if (result.blocked) {
+          console.warn(
+            `[ML Order] BLOQUEADO: stock insuficiente variante ${variant.id} (tiene ${result.previousStock}, pide ${result.unitsToDeduct}) orden ${orderId}`
+          );
+        } else if (result.ok) {
+          console.log(
+            `[ML Order] Descontado ${result.unitsToDeduct} un. (${quantity} × pack x${mlPack}) variante ${variant.id}, stock: ${result.previousStock} -> ${result.newStock}; actualizado ML y TN`
+          );
+        } else {
+          console.error(`[ML Order] No se pudo actualizar stock para variante ${variant.id} orden ${orderId}`);
+        }
       } else if (mlVariationId || itemSku) {
         console.log(`[ML Order] Variante no encontrada para ML item_id=${mlItemId} variation_id=${mlVariationId} sku=${itemSku}`);
       }

@@ -256,6 +256,39 @@ export const updateVariantStock = async (
   }
 };
 
+export type ChannelSaleDeductResult = {
+  ok: boolean;
+  blocked?: boolean;
+  previousStock?: number;
+  newStock?: number;
+  unitsToDeduct?: number;
+};
+
+/** Descuenta stock por venta ML/TN solo si hay unidades suficientes; si no, bloquea sin registrar movimiento. */
+export const deductVariantStockForChannelSale = async (
+  variantId: string,
+  unitsToDeduct: number,
+  movementType: 'VENTA_MERCADO_LIBRE' | 'VENTA_TIENDA_NUBE',
+  reference?: string,
+  syncExternal: boolean = true
+): Promise<ChannelSaleDeductResult> => {
+  const units = Math.max(0, Math.floor(Number(unitsToDeduct) || 0));
+  if (units <= 0) {
+    return { ok: true, previousStock: 0, newStock: 0, unitsToDeduct: 0 };
+  }
+
+  const currentStockRow = await get(`SELECT COALESCE(stock, 0) AS stock FROM stocks WHERE variant_id = ?`, [variantId]);
+  const previousStock = Number(currentStockRow?.stock) || 0;
+
+  if (previousStock < units) {
+    return { ok: false, blocked: true, previousStock, unitsToDeduct: units };
+  }
+
+  const newStock = previousStock - units;
+  const ok = await updateVariantStock(variantId, newStock, movementType, reference, syncExternal);
+  return { ok, previousStock, newStock, unitsToDeduct: units };
+};
+
 // Unidades a descontar por ítem: si sell_as_pack=1, quantity está en packs → multiplicar por mayorista_pack_size
 function unitsToDeductForOrderItem(quantity: number, sellAsPack: boolean | number, mayoristaPackSize: number | null | undefined): number {
   const packSize = Math.max(1, Number(mayoristaPackSize) || 1);

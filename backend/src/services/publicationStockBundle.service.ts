@@ -270,23 +270,47 @@ export async function deductStockForBundleListing(
   quantitySold: number,
   movementType: import('../controllers/stock.controller').StockMovementType,
   reference: string
-): Promise<{ ok: boolean; lines: string[] }> {
+): Promise<{ ok: boolean; blocked?: boolean; lines: string[] }> {
   const qty = Math.max(0, Math.floor(Number(quantitySold) || 0));
   if (qty <= 0 || !bundle.items.length) return { ok: true, lines: [] };
 
-  const { updateVariantStock } = await import('../controllers/stock.controller');
+  const { deductVariantStockForChannelSale } = await import('../controllers/stock.controller');
   const lines: string[] = [];
-  let allOk = true;
 
   for (const it of bundle.items) {
     const units = qty * Math.max(1, it.unitsPerSale);
     const row = await get(`SELECT COALESCE(stock, 0) AS stock FROM stocks WHERE variant_id = ?`, [it.variantId]);
     const current = Number(row?.stock) || 0;
-    const newStock = Math.max(0, current - units);
-    const ok = await updateVariantStock(it.variantId, newStock, movementType, reference, true);
-    if (!ok) allOk = false;
+    if (current < units) {
+      return {
+        ok: false,
+        blocked: true,
+        lines: [
+          `BLOQUEADO: ${it.sku || it.variantId} stock ${current} < ${units} requeridos (${qty} pack × ${it.unitsPerSale} ${it.colorName || ''})`
+        ]
+      };
+    }
+  }
+
+  let allOk = true;
+  for (const it of bundle.items) {
+    const units = qty * Math.max(1, it.unitsPerSale);
+    const row = await get(`SELECT COALESCE(stock, 0) AS stock FROM stocks WHERE variant_id = ?`, [it.variantId]);
+    const current = Number(row?.stock) || 0;
+    const channelType =
+      movementType === 'VENTA_MERCADO_LIBRE' || movementType === 'VENTA_TIENDA_NUBE'
+        ? movementType
+        : 'VENTA_MERCADO_LIBRE';
+    const result = await deductVariantStockForChannelSale(it.variantId, units, channelType, reference, true);
+    if (result.blocked || !result.ok) {
+      allOk = false;
+      lines.push(
+        `BLOQUEADO: ${it.sku || it.variantId}: stock insuficiente (${current} < ${units})`
+      );
+      continue;
+    }
     lines.push(
-      `${it.sku || it.variantId}: -${units} (${qty} pack × ${it.unitsPerSale} ${it.colorName || ''}) ${current}→${newStock}`
+      `${it.sku || it.variantId}: -${units} (${qty} pack × ${it.unitsPerSale} ${it.colorName || ''}) ${result.previousStock}→${result.newStock}`
     );
   }
 
