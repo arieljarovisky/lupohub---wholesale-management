@@ -2476,6 +2476,30 @@ export const api = {
     }, 'getChannelMargins');
   },
 
+  exportChannelMarginsExcel: async (params?: {
+    search?: string;
+    channel?: 'all' | 'ml' | 'tn';
+    tnFeePreset?: string;
+  }): Promise<void> => {
+    const q = new URLSearchParams();
+    if (params?.search) q.set('search', params.search);
+    if (params?.channel) q.set('channel', params.channel);
+    if (params?.tnFeePreset) q.set('tnFeePreset', params.tnFeePreset);
+    const qs = q.toString();
+    const blob = await getBlob(
+      `/integrations/channel-margins/export${qs ? `?${qs}` : ''}`,
+      300000
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `margenes_precios_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
   bulkUpdateChannelPrices: async (body: {
     updates: Array<{ variantId: string; priceLocal?: number; priceML?: number; priceTN?: number }>;
     applyLocal?: boolean;

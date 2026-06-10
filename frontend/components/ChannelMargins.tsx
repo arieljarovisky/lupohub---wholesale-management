@@ -10,6 +10,7 @@ import {
   TrendingDown,
   Info,
   Pencil,
+  Download,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
@@ -44,6 +45,7 @@ const ChannelMargins: React.FC = () => {
   const [data, setData] = useState<Awaited<ReturnType<typeof api.getChannelMargins>> | null>(null);
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [pricesModalOpen, setPricesModalOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setSearchDebounced(search.trim()), 350);
@@ -132,6 +134,22 @@ const ChannelMargins: React.FC = () => {
     setSelectedProductIds(allSelected ? [] : ids);
   };
 
+  const handleExportExcel = async () => {
+    setExporting(true);
+    try {
+      await api.exportChannelMarginsExcel({
+        search: searchDebounced || undefined,
+        channel,
+        tnFeePreset,
+      });
+      showToast('success', 'Excel descargado');
+    } catch (e: unknown) {
+      showToast('error', e instanceof Error ? e.message : 'No se pudo exportar el Excel');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const config = data?.config;
 
   return (
@@ -148,6 +166,15 @@ const ChannelMargins: React.FC = () => {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void handleExportExcel()}
+            disabled={exporting || loading}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-sm font-bold disabled:opacity-50"
+          >
+            {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+            {exporting ? 'Exportando…' : 'Descargar Excel'}
+          </button>
           <button
             type="button"
             onClick={() => load()}

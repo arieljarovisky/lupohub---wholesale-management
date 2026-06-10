@@ -60,7 +60,7 @@ import {
 import { exportMercadolibrePublicationsXlsx } from '../controllers/mercadolibrePublicationsExport.controller';
 import { exportMercadoLibreToTiendaNube } from '../controllers/mlToTiendaNubeExport.controller';
 import { getVariantChannelPrices, bulkUpdateChannelPrices } from '../controllers/channelPrices.controller';
-import { getChannelMargins } from '../controllers/channelMargins.controller';
+import { getChannelMargins, exportChannelMarginsXlsx } from '../controllers/channelMargins.controller';
 import { exportTiendaNubeSalesReportXlsx } from '../controllers/tiendanubeSalesReport.controller';
 import {
   listTiendaNubeCategoryMatches,
@@ -111,6 +111,7 @@ router.post('/variant-external-stocks', getVariantExternalStocks);
 router.post('/variant-channel-prices', authMiddleware, getVariantChannelPrices);
 router.post('/variant-channel-prices/bulk', authMiddleware, bulkUpdateChannelPrices);
 router.get('/channel-margins', authMiddleware, getChannelMargins);
+router.get('/channel-margins/export', authMiddleware, exportChannelMarginsXlsx);
 router.get('/mercadolibre/auto-message', getMLAutoMessageConfig);
 router.post('/mercadolibre/auto-message', saveMLAutoMessageConfig);
 router.get('/mercadolibre/questions-ai', authMiddleware, getMLQuestionsAiConfig);
