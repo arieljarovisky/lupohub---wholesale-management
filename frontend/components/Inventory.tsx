@@ -1975,9 +1975,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       setBulkLinkVariants(variants);
       const assignments: Record<string, { ml: string; tn: string }> = {};
       variants.forEach((v: any) => {
-        const mlVal = (v.externalIds?.mercadoLibreItemId != null && String(v.externalIds.mercadoLibreItemId).trim() !== '')
-          ? String(v.externalIds.mercadoLibreItemId).trim()
-          : (v.externalIds?.mercadoLibreVariant != null ? String(v.externalIds.mercadoLibreVariant) : '');
+        const mlVal =
+          v.externalIds?.mercadoLibreVariant != null && String(v.externalIds.mercadoLibreVariant).trim() !== ''
+            ? String(v.externalIds.mercadoLibreVariant).trim()
+            : (v.externalIds?.mercadoLibreItemId != null && String(v.externalIds.mercadoLibreItemId).trim() !== ''
+              ? String(v.externalIds.mercadoLibreItemId).trim()
+              : '');
         assignments[v.variantId] = {
           ml: mlVal,
           tn: v.externalIds?.tiendaNubeVariant ? String(v.externalIds.tiendaNubeVariant) : ''
@@ -2209,11 +2212,19 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     setShowAddPublicationForm(false);
     setLinkTnId(product.externalIds?.tiendaNube || '');
     setLinkTnVariantId(product.externalIds?.tiendaNubeVariant || '');
-    setLinkMlId((product.externalIds as any)?.mercadoLibreItemId || product.externalIds?.mercadoLibre || '');
+    const mlVarFromVariant = (product.externalIds as any)?.mercadoLibreVariant?.toString()?.trim() || '';
+    const mlItemFromVariant = (product.externalIds as any)?.mercadoLibreItemId?.toString()?.trim() || '';
+    const mlParentFromProduct = product.externalIds?.mercadoLibre?.toString()?.trim() || '';
+    if (mlVarFromVariant) {
+      setLinkMlVariantId(mlVarFromVariant);
+      setLinkMlId(mlParentFromProduct || mlItemFromVariant);
+    } else {
+      setLinkMlVariantId('');
+      setLinkMlId(mlItemFromVariant || mlParentFromProduct);
+    }
     setLinkPackMl(1);
     setLinkPackTn(1);
     setLinkExternalSku((product.sku ?? '').toString());
-    setLinkMlVariantId((product.externalIds as any)?.mercadoLibreVariant?.toString() ?? '');
     setLinkSaveStockFromML(null);
     setLinkProduct(null);
     setLinkMlVariations(null);
@@ -2248,12 +2259,17 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         return /^\d+$/.test(n) ? n : '';
       })();
       const mlResolved = linkMlId.trim() ? normalizeMercadoLibreItemId(linkMlId) || linkMlId.trim() : '';
-      const isMlItemId = /^ML[A-Z]{1,5}\d+$/i.test(mlResolved);
+      const mlVariationId = linkMlVariantId.trim();
+      const isMlCatalogItem = /^ML[A-Z]{1,5}\d+$/i.test(mlResolved);
+      // Publicación propia solo si es MLA sin variación elegida (ítem unitario). Catálogo con talle/color → variación.
+      const isOwnMlPublication = isMlCatalogItem && !mlVariationId;
       const linkRes = await api.updateVariantExternalIds(linkingVariant.id, {
         tiendaNubeVariantId: linkTnVariantId || undefined,
         tiendaNubeProductId: tnResolved || undefined,
-        mercadoLibreVariantId: isMlItemId ? undefined : (linkMlVariantId || mlResolved || undefined),
-        mercadoLibreItemId: isMlItemId ? mlResolved : undefined,
+        mercadoLibreVariantId: isOwnMlPublication
+          ? undefined
+          : (mlVariationId || (!isMlCatalogItem ? mlResolved : undefined) || undefined),
+        mercadoLibreItemId: isOwnMlPublication ? mlResolved : undefined,
         externalSku: linkExternalSku.trim() || undefined
       } as { tiendaNubeVariantId?: string; tiendaNubeProductId?: string; mercadoLibreVariantId?: string; mercadoLibreItemId?: string; externalSku?: string });
       const newStockFromML = typeof (linkRes as any).stockFromML === 'number' ? (linkRes as any).stockFromML : undefined;
@@ -2294,10 +2310,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         await api.updateProductExternalIds(parentProductId, {
           tiendaNubeId: tnResolved
         });
-        if (mlResolved && !isMlItemId) {
-             await api.updateProductExternalIds(parentProductId, {
-                mercadoLibreId: mlResolved
-             });
+        if (isMlCatalogItem && mlVariationId) {
+          await api.updateProductExternalIds(parentProductId, {
+            mercadoLibreId: mlResolved,
+          });
         }
       }
       if (linkProduct) {
@@ -2324,9 +2340,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               ...p.externalIds,
               tiendaNube: tnResolved || linkTnId,
               tiendaNubeVariant: linkTnVariantId,
-              mercadoLibre: mlResolved || linkMlId,
-              mercadoLibreVariant: linkMlVariantId || undefined,
-              mercadoLibreItemId: mlResolved || undefined
+              mercadoLibre: isMlCatalogItem && mlVariationId ? mlResolved : (mlResolved || linkMlId),
+              mercadoLibreVariant: mlVariationId || undefined,
+              mercadoLibreItemId: isOwnMlPublication ? mlResolved : undefined
             },
             integrations: {
                 ...p.integrations,
@@ -2334,8 +2350,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                   tiendaNubeVariant: linkTnVariantId
                 }),
                 mercadoLibre: isVariantLinkedToMercadoLibre({
-                  mercadoLibreVariant: linkMlVariantId,
-                  mercadoLibreItemId: mlResolved
+                  mercadoLibreVariant: mlVariationId,
+                  mercadoLibreItemId: isOwnMlPublication ? mlResolved : undefined
                 })
             }
           } : p)
@@ -4572,7 +4588,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                     <h4 className="text-xs font-black text-amber-300 uppercase tracking-wider flex items-center gap-2">
                        <Zap size={14} className="text-amber-400" /> Mercado Libre
                     </h4>
-                    <p className="text-[10px] text-amber-200/90 bg-amber-900/30 border border-amber-700/50 rounded-lg px-2.5 py-2">Si esta variante tiene su propia publicación en ML (una por talle/color), poné solo el ID de esa publicación abajo y guardá. El stock se sincronizará con esa publicación.</p>
+                    <p className="text-[10px] text-amber-200/90 bg-amber-900/30 border border-amber-700/50 rounded-lg px-2.5 py-2">Catálogo con talles/colores: pegá el MLA del producto, tocá «Cargar variantes» y elegí la variación. Publicación propia (una sola unidad): solo el MLA, sin variación.</p>
                     <div className="grid grid-cols-1 gap-3">
                        <div>
                           <label className="text-[11px] text-slate-500 block mb-1">ID o link de la publicación ML</label>
