@@ -19,9 +19,14 @@ export interface StoredInventoryState {
   page: number;
   subView: 'mine' | 'ml' | 'tn';
   hideZeroStock?: boolean;
+  showHiddenVariants?: boolean;
   filterSize?: string;
   filterCategory?: string;
   filterColor?: string;
+}
+
+export function isVariantInventoryHidden(product: { inventoryHidden?: boolean }): boolean {
+  return product.inventoryHidden === true;
 }
 
 export function getStoredInventoryState(): StoredInventoryState {
@@ -32,11 +37,13 @@ export function getStoredInventoryState(): StoredInventoryState {
     const page = typeof parsed.page === 'number' && parsed.page >= 1 ? parsed.page : 1;
     const subView = parsed.subView === 'ml' || parsed.subView === 'tn' ? parsed.subView : 'mine';
     const hideZeroStock = parsed.hideZeroStock === true;
+    const showHiddenVariants = parsed.showHiddenVariants === true;
     return {
       search: typeof parsed.search === 'string' ? parsed.search : '',
       page,
       subView,
       hideZeroStock,
+      showHiddenVariants,
       filterSize: typeof parsed.filterSize === 'string' ? parsed.filterSize : undefined,
       filterCategory: typeof parsed.filterCategory === 'string' ? parsed.filterCategory : undefined,
       filterColor: typeof parsed.filterColor === 'string' ? parsed.filterColor : undefined,
@@ -51,10 +58,16 @@ export function setStoredInventoryState(
   page: number,
   subView: 'mine' | 'ml' | 'tn',
   hideZeroStock?: boolean,
-  filters?: { filterSize?: string; filterCategory?: string; filterColor?: string }
+  filters?: { filterSize?: string; filterCategory?: string; filterColor?: string; showHiddenVariants?: boolean }
 ): void {
   try {
-    const obj: Record<string, unknown> = { search, page, subView, hideZeroStock: hideZeroStock === true };
+    const obj: Record<string, unknown> = {
+      search,
+      page,
+      subView,
+      hideZeroStock: hideZeroStock === true,
+      showHiddenVariants: filters?.showHiddenVariants === true,
+    };
     if (filters) {
       obj.filterSize = filters.filterSize ?? 'ALL';
       obj.filterCategory = filters.filterCategory ?? 'ALL';

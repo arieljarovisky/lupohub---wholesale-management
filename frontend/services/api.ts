@@ -771,6 +771,7 @@ export const api = {
       colorName: string;
       sizeCode: string;
       stock: number;
+      inventoryHidden?: boolean;
       externalIds?: any;
     }>
   > => {
@@ -788,6 +789,7 @@ export const api = {
         colorName: v.color_name,
         sizeCode: v.size_code,
         stock: Number(v.stock ?? 0),
+        inventoryHidden: v.inventory_hidden === true || Number(v.inventory_hidden) === 1,
         externalIds: {
           tiendaNube: parentExternalIds.tiendaNube,
           mercadoLibre: parentExternalIds.mercadoLibre,
@@ -809,7 +811,10 @@ export const api = {
     }
   },
 
-  updateVariant: async (variantId: string, data: { sku?: string; externalSku?: string }): Promise<{ id: string; sku: string | null; external_sku: string | null }> => {
+  updateVariant: async (
+    variantId: string,
+    data: { sku?: string; externalSku?: string; inventoryHidden?: boolean }
+  ): Promise<{ id: string; sku: string | null; external_sku: string | null; inventory_hidden?: boolean }> => {
     return handleRequest(async () => {
       return await request<any>(`/products/variants/${encodeURIComponent(variantId)}`, 'PUT', data);
     }, data, 'updateVariant');
@@ -3624,6 +3629,7 @@ export const api = {
 export interface TiendaNubeCatalogColorVariant {
   name: string;
   sourceImage: string | null;
+  stock?: number;
 }
 
 export interface TiendaNubeCatalogProduct {

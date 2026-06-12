@@ -56,6 +56,10 @@ interface ColorVariant {
   sourceImage?: string;
   /** Miniatura recortada (cuadrado 160px), guardada tras aplicar recorte. */
   image?: string;
+  /** Si es false, no se muestra en el catálogo (ej. color descontinuado). */
+  included?: boolean;
+  /** Stock total del color en Tienda Nube (todas las variantes/talles). */
+  stock?: number;
 }
 
 const COLOR_THUMB_SIZE = CATALOG_COLOR_THUMB_SIZE;
@@ -695,9 +699,14 @@ function tnColorVariants(p: TiendaNubeCatalogProduct): ColorVariant[] {
     return p.colorVariants.map((cv) => ({
       name: cv.name,
       sourceImage: cv.sourceImage || undefined,
+      stock: cv.stock,
     }));
   }
   return p.colors.map((name) => ({ name }));
+}
+
+function catalogVisibleColorVariants(variants: ColorVariant[]): ColorVariant[] {
+  return variants.filter((cv) => cv.included !== false);
 }
 
 function resolveColorVariants(ov: ProductOverride | undefined, p: TiendaNubeCatalogProduct): ColorVariant[] {
@@ -715,6 +724,8 @@ function resolveColorVariants(ov: ProductOverride | undefined, p: TiendaNubeCata
       name: sv.name,
       sourceImage: resolveCatalogImageSrc(sv.sourceImage ?? tn?.sourceImage) || tnSource,
       image,
+      included: sv.included,
+      stock: sv.stock ?? tn?.stock,
     };
   };
 
@@ -980,16 +991,35 @@ const ProductEditorModal: React.FC<{
                   </button>
                 </div>
                 <p className="text-[10px] text-slate-500 mb-2">
-                  Las miniaturas se recortan solas al producto. Podés ajustar con Recortar si hace falta.
+                  Las miniaturas se recortan solas al producto. Usá el ojo para ocultar colores descontinuados.
                 </p>
+                {colorVariants.some((cv) => (cv.stock ?? 0) <= 0) && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setColorVariants((prev) =>
+                        prev.map((cv) => ((cv.stock ?? 0) <= 0 ? { ...cv, included: false } : cv))
+                      )
+                    }
+                    className="mb-2 text-[10px] font-bold text-amber-400 hover:text-amber-300"
+                  >
+                    Ocultar colores sin stock
+                  </button>
+                )}
                 <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
                   {colorVariants.length === 0 && (
                     <p className="text-xs text-slate-500">Sin colores. Agregá uno o restaurá desde Tienda Nube.</p>
                   )}
                   {colorVariants.map((cv, idx) => {
                     const preview = cv.image || cv.sourceImage;
+                    const colorVisible = cv.included !== false;
                     return (
-                      <div key={idx} className="flex items-center gap-2 bg-slate-900/60 border border-slate-700 rounded-lg p-2">
+                      <div
+                        key={idx}
+                        className={`flex items-center gap-2 bg-slate-900/60 border border-slate-700 rounded-lg p-2 ${
+                          colorVisible ? '' : 'opacity-45'
+                        }`}
+                      >
                         <div className="w-12 h-12 rounded-md overflow-hidden border border-slate-600 shrink-0 bg-slate-800 flex items-center justify-center">
                           {preview ? (
                             <img src={preview} alt="" className="w-full h-full object-cover" />
@@ -1010,7 +1040,22 @@ const ProductEditorModal: React.FC<{
                           {!cv.sourceImage && (
                             <p className="text-[9px] text-amber-400/90 mt-0.5">Sin foto en TN para este color</p>
                           )}
+                          {(cv.stock ?? 0) <= 0 && (
+                            <p className="text-[9px] text-amber-400/90 mt-0.5">Sin stock en Tienda Nube</p>
+                          )}
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => updateColorVariant(idx, { included: colorVisible ? false : true })}
+                          className={`w-7 h-7 shrink-0 rounded-lg border flex items-center justify-center ${
+                            colorVisible
+                              ? 'bg-emerald-600/90 border-emerald-500 text-white'
+                              : 'bg-slate-800 border-slate-600 text-slate-400'
+                          }`}
+                          title={colorVisible ? 'Ocultar del catálogo' : 'Mostrar en el catálogo'}
+                        >
+                          {colorVisible ? <Eye size={13} /> : <EyeOff size={13} />}
+                        </button>
                         <div className="flex flex-col gap-0.5 shrink-0">
                           <button
                             type="button"
@@ -1704,6 +1749,7 @@ const ProductDisplay: React.FC<{
   const selectionMode = editMode || pickMode;
   const dimmed = selectionMode && !product.included;
   const blurb = catalogBlurb(product.description, product.features);
+  const visibleColors = catalogVisibleColorVariants(product.colorVariants);
   const fontStack = "'Montserrat', sans-serif";
   const iconProps = { size: 15, strokeWidth: 1.5 as const };
 
@@ -1811,10 +1857,10 @@ const ProductDisplay: React.FC<{
                 </CatalogDetailSection>
               )}
 
-              {product.colorVariants.length > 0 && (
+              {visibleColors.length > 0 && (
                 <CatalogDetailSection icon={<Palette {...iconProps} />} label="Colores">
                   <div className="flex flex-wrap justify-start gap-x-5 gap-y-3">
-                    {product.colorVariants.map((cv, i) => {
+                    {visibleColors.map((cv, i) => {
                       const hex = colorToHex(cv.name);
                       const colorLabel = cv.name.replace(/^\d+\s*[·\-]?\s*/, '').trim() || cv.name;
                       return (
@@ -2568,8 +2614,8 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
             </div>
             {isAdmin && editMode && (
               <p className="text-xs text-indigo-300 bg-indigo-950/40 border border-indigo-800/50 rounded-lg px-3 py-2">
-                Modo edición: usá el ojo para incluir/quitar, el lápiz para editar textos e imagen, y las flechas para reordenar.
-                Acordate de <strong>Guardar</strong> al terminar.
+                Modo edición: usá el ojo para incluir/quitar productos, el lápiz para editar textos, colores e imágenes, y las flechas para reordenar.
+                En cada color podés ocultar variantes descontinuadas. Acordate de <strong>Guardar</strong> al terminar.
               </p>
             )}
             {isSeller && pickMode && (

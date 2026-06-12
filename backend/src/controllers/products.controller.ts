@@ -374,7 +374,8 @@ export const getProductBySku = async (req: any, res: Response) => {
       `SELECT p.id AS product_id, p.sku, pv.sku AS variant_sku, pv.external_sku,
               c.code AS color_code, c.name AS color_name,
               s.size_code, COALESCE(st.stock,0) AS stock, pv.id AS variant_id,
-              pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id
+              pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
+              COALESCE(pv.inventory_hidden, 0) AS inventory_hidden
        FROM products p
        JOIN product_colors pc ON pc.product_id=p.id
        JOIN colors c ON c.id=pc.color_id
@@ -388,6 +389,7 @@ export const getProductBySku = async (req: any, res: Response) => {
     
     const variants = variantsRows.map((v: any) => ({
       ...v,
+      inventory_hidden: Number(v.inventory_hidden) === 1,
       externalIds: {
         tiendaNubeVariant: v.tienda_nube_variant_id,
         mercadoLibreVariant: v.mercado_libre_variant_id,
@@ -977,7 +979,11 @@ export const getVariantById = async (req: Request, res: Response) => {
 /** Actualizar variante (SKU y/o external_sku). Si la variante está vinculada a ML/TN, envía el SKU a esas plataformas. */
 export const updateVariant = async (req: Request, res: Response) => {
   const { variantId } = req.params;
-  const { sku, externalSku } = req.body as { sku?: string; externalSku?: string };
+  const { sku, externalSku, inventoryHidden } = req.body as {
+    sku?: string;
+    externalSku?: string;
+    inventoryHidden?: boolean;
+  };
   if (!variantId) return res.status(400).json({ message: 'ID de variante requerido' });
   try {
     const updates: string[] = [];
@@ -1004,8 +1010,12 @@ export const updateVariant = async (req: Request, res: Response) => {
       updates.push('external_sku = ?');
       values.push(externalSku === '' ? null : String(externalSku).trim());
     }
+    if (inventoryHidden !== undefined) {
+      updates.push('inventory_hidden = ?');
+      values.push(inventoryHidden ? 1 : 0);
+    }
     if (updates.length === 0) {
-      return res.status(400).json({ message: 'Indicá al menos un campo a actualizar (sku o externalSku)' });
+      return res.status(400).json({ message: 'Indicá al menos un campo a actualizar (sku, externalSku o inventoryHidden)' });
     }
     values.push(variantId);
     await execute(
@@ -1014,7 +1024,7 @@ export const updateVariant = async (req: Request, res: Response) => {
     );
     await touchProductUpdatedAtByVariantId(variantId);
     const updated = await get(
-      `SELECT pv.id, pv.sku, pv.external_sku, pv.mercado_libre_item_id, pv.mercado_libre_variant_id, pv.tienda_nube_variant_id, p.tienda_nube_id
+      `SELECT pv.id, pv.sku, pv.external_sku, pv.inventory_hidden, pv.mercado_libre_item_id, pv.mercado_libre_variant_id, pv.tienda_nube_variant_id, p.tienda_nube_id
        FROM product_variants pv
        JOIN product_colors pc ON pc.id = pv.product_color_id
        JOIN products p ON p.id = pc.product_id
@@ -1023,7 +1033,7 @@ export const updateVariant = async (req: Request, res: Response) => {
     );
     if (!updated) return res.status(404).json({ message: 'Variante no encontrada' });
 
-    const skuToSend = skuToCanonicalString(updated.sku || updated.external_sku || '');
+    const skuToSend = sku !== undefined ? skuToCanonicalString(updated.sku || updated.external_sku || '') : '';
     if (skuToSend) {
       if (updated.mercado_libre_item_id && updated.mercado_libre_variant_id) {
         updateMercadoLibreSku(updated.mercado_libre_item_id, updated.mercado_libre_variant_id, skuToSend).catch(err =>
@@ -1037,7 +1047,12 @@ export const updateVariant = async (req: Request, res: Response) => {
       }
     }
 
-    res.json({ id: updated.id, sku: updated.sku, external_sku: updated.external_sku });
+    res.json({
+      id: updated.id,
+      sku: updated.sku,
+      external_sku: updated.external_sku,
+      inventory_hidden: Number(updated.inventory_hidden) === 1,
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Error actualizando variante' });
