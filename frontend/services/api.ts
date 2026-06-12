@@ -3624,6 +3624,7 @@ export const api = {
 export interface TiendaNubeCatalogColorVariant {
   name: string;
   sourceImage: string | null;
+  stock?: number;
 }
 
 export interface TiendaNubeCatalogProduct {

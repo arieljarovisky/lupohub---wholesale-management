@@ -14,6 +14,8 @@ const TN_BASE = 'https://api.tiendanube.com/v1';
 export type CatalogColorVariant = {
   name: string;
   sourceImage: string | null;
+  /** Stock total del color (suma de todos los talles en TN). */
+  stock: number;
 };
 
 /** Producto completo de catálogo, ya normalizado para el frontend. */
@@ -179,6 +181,7 @@ function mapProduct(p: any): CatalogProduct {
   const colorsSet = new Set<string>();
   const colorImageByName = new Map<string, string>();
   const colorImageCandidates = new Map<string, string[]>();
+  const colorStockByName = new Map<string, number>();
   let totalStock = 0;
   let price: number | null = null;
   let promotionalPrice: number | null = null;
@@ -195,6 +198,7 @@ function mapProduct(p: any): CatalogProduct {
       const c = lang(values[colorIdx]).trim();
       if (c) {
         colorsSet.add(c);
+        colorStockByName.set(c, (colorStockByName.get(c) || 0) + Math.max(0, Number(v?.stock) || 0));
         const imageId = Number(v?.image_id);
         if (Number.isFinite(imageId) && imageId > 0) {
           const src = imageById.get(imageId);
@@ -247,6 +251,7 @@ function mapProduct(p: any): CatalogProduct {
   const colorVariants: CatalogColorVariant[] = Array.from(colorsSet).map((name) => ({
     name,
     sourceImage: colorImageByName.get(name) ?? null,
+    stock: colorStockByName.get(name) ?? 0,
   }));
 
   return {
