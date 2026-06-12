@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, startTransition } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical, EyeOff, Copy, History, GitMerge } from 'lucide-react';
+import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical, Eye, EyeOff, Copy, History, GitMerge } from 'lucide-react';
 import { Product, Role, Attribute } from '../types';
 import { api } from '../services/api';
 import { labelTalle, codigoTalleParaSku, nombreTalleDesdeCodigo } from '../utils/tallesTango';
@@ -15,6 +15,7 @@ import {
   matchesSizeFilter,
   SIZE_ORDER_MODAL,
   SIZE_ORDER,
+  isVariantInventoryHidden,
 } from '../utils/inventoryUtils';
 import { useNotification } from '../context/NotificationContext';
 import * as XLSX from 'xlsx';
@@ -97,6 +98,7 @@ function mapInventoryVariantsFromApi(
     color: v.colorName,
     colorCode: v.colorCode,
     stock: v.stock,
+    inventoryHidden: v.inventoryHidden === true,
     integrations: {
       local: true,
       tiendaNube: isVariantLinkedToTiendaNube(v.externalIds),
@@ -141,6 +143,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const stored = getStoredInventoryState();
   const [searchTerm, setSearchTerm] = useState(stored.search);
   const [hideZeroStock, setHideZeroStock] = useState(stored.hideZeroStock ?? false);
+  const [showHiddenVariants, setShowHiddenVariants] = useState(stored.showHiddenVariants ?? false);
   const [syncLoading, setSyncLoading] = useState<'tn' | 'ml' | 'both' | 'fromML' | null>(null);
   const [syncResult, setSyncResult] = useState<{ platform: string; updated: number; errors: number; logs: string[]; fromML?: { imported: number; errorsFromML: number; sentToTN: number; errorsToTN: number } } | null>(null);
   const [showSyncResultModal, setShowSyncResultModal] = useState(false);
@@ -326,9 +329,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     setStoredInventoryState(searchTerm, currentPage, inventorySubView, hideZeroStock, {
       filterSize,
       filterCategory,
-      filterColor
+      filterColor,
+      showHiddenVariants,
     });
-  }, [searchTerm, currentPage, inventorySubView, hideZeroStock, filterSize, filterCategory, filterColor]);
+  }, [searchTerm, currentPage, inventorySubView, hideZeroStock, showHiddenVariants, filterSize, filterCategory, filterColor]);
 
   const availableSizes = useMemo(
     () => attributes.filter(a => a.type === 'size'),
@@ -1167,6 +1171,35 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     );
   };
 
+  const patchVariantHidden = (variantId: string, hidden: boolean) => {
+    setLoadedVariants((prev) => {
+      const next = { ...prev };
+      for (const gk of Object.keys(next)) {
+        const idx = next[gk].findIndex((p) => p.id === variantId);
+        if (idx >= 0) {
+          next[gk] = [...next[gk]];
+          (next[gk][idx] as Product & { inventoryHidden?: boolean }).inventoryHidden = hidden;
+          break;
+        }
+      }
+      return next;
+    });
+    setServerItems((prev) =>
+      prev.map((p) => (p.id === variantId ? { ...p, inventoryHidden: hidden } : p))
+    );
+  };
+
+  const toggleVariantHidden = async (variantId: string, currentlyHidden: boolean) => {
+    const nextHidden = !currentlyHidden;
+    try {
+      await api.updateVariant(variantId, { inventoryHidden: nextHidden });
+      patchVariantHidden(variantId, nextHidden);
+      showToast('success', nextHidden ? 'Variante oculta del inventario' : 'Variante visible de nuevo');
+    } catch (e: any) {
+      showToast('error', e?.message || 'No se pudo actualizar la variante');
+    }
+  };
+
   const adjustStock = (productId: string, currentStock: number, delta: number) => {
     if (!onUpdateStock) return;
     const newStock = Math.max(0, currentStock + delta);
@@ -1271,11 +1304,16 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     const lv = loadedVariants[groupKey];
     return (lv && lv.length > 0) ? lv : groupVariants;
   };
+  const applyInventoryVisibilityFilter = (list: Product[]) =>
+    showHiddenVariants
+      ? list
+      : list.filter((p) => !isVariantInventoryHidden(p as Product & { inventoryHidden?: boolean }));
+
   const getGroupFilteredVariants = (groupKey: string, groupVariants: Product[]) => {
     const raw = getGroupRawVariants(groupKey, groupVariants);
     const byColor = filterColor === 'ALL' ? raw : raw.filter(p => checkColorMatch(p, filterColor));
     if (filterSync === 'MISMATCH') {
-      return byColor.filter(p => {
+      return applyInventoryVisibilityFilter(byColor.filter(p => {
         const ext = extStocksForMismatchFilter[p.id];
         const ml = ext?.stockML;
         const tn = ext?.stockTN;
@@ -1283,9 +1321,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         // error de API o vínculo incompleto) no ocultamos la fila — antes la lista quedaba vacía.
         if (ml !== undefined && tn !== undefined) return ml !== tn;
         return true;
-      });
+      }));
     }
-    return byColor;
+    return applyInventoryVisibilityFilter(byColor);
   };
   const getGroupDisplayStock = (groupKey: string, groupVariants: Product[]) => {
     const variants = getGroupFilteredVariants(groupKey, groupVariants);
@@ -1298,23 +1336,15 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const getGroupDisplayStockResolved = (groupKey: string, groupVariants: Product[], totalStock: number): number => {
     const loaded = loadedVariants[groupKey];
     if (loaded?.length > 0) {
-      const list = filterColor === 'ALL' ? loaded : loaded.filter(p => checkColorMatch(p, filterColor));
+      const list = getGroupFilteredVariants(groupKey, groupVariants);
       return list.reduce((sum, p) => sum + Number((p as any).stock ?? (p as any).stock_total ?? 0), 0);
     }
-    return filterColor === 'ALL' ? totalStock : getGroupDisplayStock(groupKey, groupVariants);
+    return filterColor === 'ALL' && showHiddenVariants ? totalStock : getGroupDisplayStock(groupKey, groupVariants);
   };
   const getGroupHasLowStock = (groupKey: string, groupVariants: Product[]) => {
-    const loaded = loadedVariants[groupKey];
-    if (loaded?.length > 0) {
-      const list = filterColor === 'ALL' ? loaded : loaded.filter(p => checkColorMatch(p, filterColor));
-      return list.some(p => {
-        const val = Number((p as any).stock ?? (p as any).stock_total ?? 0);
-        return val > 0 && val < 20;
-      });
-    }
     const variants = getGroupFilteredVariants(groupKey, groupVariants);
     return variants.some(p => {
-      const val = (p as any).stock_total ?? (p as any).stock ?? 0;
+      const val = Number((p as any).stock ?? (p as any).stock_total ?? 0);
       return val > 0 && val < 20;
     });
   };
@@ -2959,7 +2989,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           >
             <Filter size={18} />
             <span className="hidden md:inline">Filtros</span>
-            {(filterCategory !== 'ALL' || filterSize !== 'ALL' || filterColor !== 'ALL' || filterStockLevel !== 'ALL' || filterSync !== 'ALL' || hideZeroStock) && (
+            {(filterCategory !== 'ALL' || filterSize !== 'ALL' || filterColor !== 'ALL' || filterStockLevel !== 'ALL' || filterSync !== 'ALL' || hideZeroStock || showHiddenVariants) && (
               <span className="w-2 h-2 rounded-full bg-blue-400"></span>
             )}
           </button>
@@ -3062,6 +3092,17 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 >
                   <EyeOff size={16} />
                   Ocultar sin stock
+                </button>
+             </div>
+             <div className="flex items-end">
+                <button
+                  type="button"
+                  onClick={() => { setShowHiddenVariants(prev => !prev); setCurrentPage(1); }}
+                  className={`w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg border text-sm font-bold transition-colors touch-manipulation min-h-[42px] ${showHiddenVariants ? 'bg-slate-700 border-violet-500 text-violet-300' : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'}`}
+                  title={showHiddenVariants ? 'Ocultar variantes marcadas como descontinuadas' : 'Ver variantes ocultas / descontinuadas'}
+                >
+                  <Eye size={16} />
+                  {showHiddenVariants ? 'Viendo ocultas' : 'Ver ocultas'}
                 </button>
              </div>
           </div>
@@ -3338,10 +3379,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                         <span>Cargando variantes…</span>
                       </div>
                     )}
-                    {!loadingVariantsByGroup[groupKey] && variantsToShow.length === 0 && (filterColor !== 'ALL' || hideZeroStock || filterSync === 'MISMATCH') && (
+                    {!loadingVariantsByGroup[groupKey] && variantsToShow.length === 0 && (filterColor !== 'ALL' || hideZeroStock || !showHiddenVariants || filterSync === 'MISMATCH') && (
                       <div className="bg-slate-800 rounded-xl p-4 border border-slate-700 text-slate-400 text-sm">
                         {hideZeroStock
                           ? 'No hay variantes con stock para mostrar.'
+                          : !showHiddenVariants
+                            ? 'No hay variantes visibles. Activá «Ver ocultas» si ocultaste variantes descontinuadas.'
                           : filterSync === 'MISMATCH'
                             ? 'No hay variantes con diferencia ML/TN en este artículo (o aún se están cargando los stocks externos).'
                             : 'No hay variantes para el color seleccionado.'}
@@ -3368,13 +3411,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                       const isLow = product.stock > 0 && product.stock < 20;
                       const isOut = product.stock <= 0;
                       const isEditing = editingStockId === product.id;
+                      const isHidden = isVariantInventoryHidden(product as Product & { inventoryHidden?: boolean });
                       const parts = (product.sku || '').toString().split('-');
                       const sizeLabel = product.size || (parts.length >= 3 ? parts[parts.length - 2] : '');
                       const colorLabel = product.color || (parts.length >= 3 ? parts[parts.length - 1] : '');
                       const talleDisplay = labelTalle(sizeLabel) || sizeLabel;
 
                       return (
-                        <div key={product.id} className="bg-slate-800 rounded-xl p-3 border border-slate-700 flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4">
+                        <div key={product.id} className={`bg-slate-800 rounded-xl p-3 border flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4 ${isHidden ? 'border-violet-800/60 opacity-60' : 'border-slate-700'}`}>
                            {isAdminOrWarehouse && selectionModeEnabled && (
                              <button
                                type="button"
@@ -3395,6 +3439,11 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                 <span className="text-[10px] font-mono text-blue-400 bg-blue-900/20 px-1.5 py-0.5 rounded border border-blue-900/30 truncate max-w-[140px] sm:max-w-none">
                                    {product.sku}
                                 </span>
+                                {isHidden && (
+                                  <span className="text-[9px] font-bold uppercase tracking-wide text-violet-300 bg-violet-950/50 px-1.5 py-0.5 rounded border border-violet-800/50">
+                                    Oculta
+                                  </span>
+                                )}
                                 <div className="flex gap-1 shrink-0">
                                   {isVariantLinkedToTiendaNube(product.externalIds) && <Cloud size={12} className="text-blue-400" />}
                                   {isVariantLinkedToMercadoLibre(product.externalIds) && <Zap size={12} className="text-yellow-500" />}
@@ -3483,6 +3532,18 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                            );
                                          })()}
                                        </div>
+                                      <button
+                                       type="button"
+                                       onClick={() => void toggleVariantHidden(product.id, isHidden)}
+                                       className={`p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg border transition-colors touch-manipulation ${
+                                         isHidden
+                                           ? 'bg-violet-900/40 border-violet-700 text-violet-300 hover:bg-violet-900/60'
+                                           : 'bg-slate-750 hover:bg-slate-700 border-slate-700 text-slate-400 hover:text-violet-300'
+                                       }`}
+                                       title={isHidden ? 'Mostrar variante en inventario' : 'Ocultar variante descontinuada'}
+                                      >
+                                       {isHidden ? <Eye size={16} /> : <EyeOff size={16} />}
+                                      </button>
                                       <button 
                                        onClick={() => handleOpenLinkModal(product)}
                                        className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-indigo-400 border border-slate-700 transition-colors touch-manipulation"
