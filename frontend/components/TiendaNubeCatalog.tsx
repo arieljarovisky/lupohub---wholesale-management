@@ -34,7 +34,9 @@ import {
 import ImageCropModal from './ImageCropModal';
 import { articleCodeForPrintGroup } from '../utils/wholesaleInvoiceHtml';
 import {
-  colorVariantDisplaySrc,
+  colorVariantThumbSources,
+  isCatalogImageUrl,
+  isCurrentApiCatalogImage,
   pickCatalogProductImages,
   resolveCatalogImageSrc,
 } from '../utils/catalogImageUrl';
@@ -704,10 +706,15 @@ function resolveColorVariants(ov: ProductOverride | undefined, p: TiendaNubeCata
 
   const enrich = (sv: ColorVariant): ColorVariant => {
     const tn = tnByName.get(sv.name);
+    const tnSource = resolveCatalogImageSrc(tn?.sourceImage) || undefined;
+    let image = sv.image ? resolveCatalogImageSrc(sv.image) : undefined;
+    if (image && isCatalogImageUrl(image) && !isCurrentApiCatalogImage(image)) {
+      image = undefined;
+    }
     return {
       name: sv.name,
-      sourceImage: resolveCatalogImageSrc(sv.sourceImage ?? tn?.sourceImage) || undefined,
-      image: sv.image ? resolveCatalogImageSrc(sv.image) : undefined,
+      sourceImage: resolveCatalogImageSrc(sv.sourceImage ?? tn?.sourceImage) || tnSource,
+      image,
     };
   };
 
@@ -1648,6 +1655,37 @@ const CatalogDetailSection: React.FC<{
   </div>
 );
 
+const CatalogColorThumb: React.FC<{
+  cv: { image?: string; sourceImage?: string };
+  colorLabel: string;
+  hex: string;
+}> = ({ cv, colorLabel, hex }) => {
+  const candidates = useMemo(() => colorVariantThumbSources(cv), [cv.image, cv.sourceImage]);
+  const [idx, setIdx] = useState(0);
+
+  useEffect(() => {
+    setIdx(0);
+  }, [cv.image, cv.sourceImage]);
+
+  const src = candidates[idx] || '';
+
+  if (!src) {
+    return <span className="block w-full h-full" style={{ backgroundColor: hex || '#e7e5e4' }} />;
+  }
+
+  return (
+    <img
+      src={src}
+      alt={colorLabel}
+      className="w-full h-full object-cover"
+      referrerPolicy="no-referrer"
+      onError={() => {
+        setIdx((cur) => (cur + 1 < candidates.length ? cur + 1 : candidates.length));
+      }}
+    />
+  );
+};
+
 const ProductDisplay: React.FC<{
   product: DisplayProduct;
   flip: boolean;
@@ -1779,15 +1817,10 @@ const ProductDisplay: React.FC<{
                     {product.colorVariants.map((cv, i) => {
                       const hex = colorToHex(cv.name);
                       const colorLabel = cv.name.replace(/^\d+\s*[·\-]?\s*/, '').trim() || cv.name;
-                      const thumbSrc = colorVariantDisplaySrc(cv);
                       return (
                         <div key={`${cv.name}-${i}`} className="flex flex-col items-start gap-1.5">
                           <div className="tn-color-thumb w-11 h-11 rounded-sm overflow-hidden bg-white border border-stone-200/90">
-                            {thumbSrc ? (
-                              <img src={thumbSrc} alt={colorLabel} className="w-full h-full object-cover" />
-                            ) : (
-                              <span className="block w-full h-full" style={{ backgroundColor: hex || '#e7e5e4' }} />
-                            )}
+                            <CatalogColorThumb cv={cv} colorLabel={colorLabel} hex={hex} />
                           </div>
                           <span className="tn-color-name text-[8px] uppercase tracking-[0.14em] text-stone-500 font-light leading-tight">
                             {colorLabel}
@@ -1813,7 +1846,13 @@ const ProductDisplay: React.FC<{
         {/* Imagen — full bleed */}
         <div className="tn-product-media md:w-[60%] bg-white flex items-center justify-center aspect-[4/5] md:aspect-auto md:min-h-0 overflow-hidden">
           {img ? (
-            <img src={img} alt={product.name} loading="lazy" className="w-full h-full object-cover" />
+            <img
+              src={img}
+              alt={product.name}
+              loading="lazy"
+              referrerPolicy="no-referrer"
+              className="w-full h-full object-cover"
+            />
           ) : (
             <div className="flex flex-col items-center text-stone-300 py-16">
               <ImageOff size={40} />
@@ -2051,6 +2090,7 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
           const variants = resolveColorVariants(ov, p);
           const imageCandidates = pickCatalogProductImages(p.images, ov?.images);
           for (const cv of variants) {
+            if (cv.image && isCurrentApiCatalogImage(resolveCatalogImageSrc(cv.image))) continue;
             if (!cv.sourceImage && imageCandidates.length === 0) continue;
             const key = `${CATALOG_COLOR_CROP_ALGO}:${p.id}:${cv.name}:${cv.sourceImage || ''}`;
             if (autoCropDoneRef.current.has(key)) continue;

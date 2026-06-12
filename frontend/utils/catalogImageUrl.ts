@@ -5,6 +5,7 @@ export function resolveCatalogImageSrc(src: string | undefined | null): string {
   if (!src) return '';
   const s = src.trim();
   if (!s) return '';
+  if (s.startsWith('//')) return `https:${s}`;
   if (s.startsWith('http://') || s.startsWith('https://')) return s;
   if (s.startsWith('/catalog-images/') || s.startsWith('catalog-images/')) {
     const base = getBaseUrl().replace(/\/$/, '');
@@ -12,6 +13,10 @@ export function resolveCatalogImageSrc(src: string | undefined | null): string {
     return `${base}${path}`;
   }
   return s;
+}
+
+export function isCatalogImageUrl(url: string): boolean {
+  return /\/catalog-images\//.test(url);
 }
 
 function isTnCdnUrl(url: string): boolean {
@@ -28,6 +33,10 @@ function isCurrentApiUrl(url: string): boolean {
   }
 }
 
+export function isCurrentApiCatalogImage(url: string): boolean {
+  return isCatalogImageUrl(url) && isCurrentApiUrl(url);
+}
+
 /** Prioriza overrides válidos; si son rutas rotas o de otro entorno, usa las de Tienda Nube. */
 export function pickCatalogProductImages(tnImages: string[], overrideImages?: string[]): string[] {
   const tn = tnImages.map(resolveCatalogImageSrc).filter(Boolean);
@@ -38,10 +47,30 @@ export function pickCatalogProductImages(tnImages: string[], overrideImages?: st
   return tn.length > 0 ? tn : resolved;
 }
 
-export function colorVariantDisplaySrc(cv: { image?: string; sourceImage?: string }): string {
+/** URLs a probar en orden para miniatura de color (crop local → foto TN). */
+export function colorVariantThumbSources(cv: { image?: string; sourceImage?: string }): string[] {
   const custom = resolveCatalogImageSrc(cv.image);
   const source = resolveCatalogImageSrc(cv.sourceImage);
-  if (custom && (isTnCdnUrl(custom) || isCurrentApiUrl(custom))) return custom;
-  if (source) return source;
-  return custom;
+  const out: string[] = [];
+
+  const push = (url: string) => {
+    if (url && !out.includes(url)) out.push(url);
+  };
+
+  if (custom) {
+    if (isTnCdnUrl(custom)) {
+      push(custom);
+    } else if (isCatalogImageUrl(custom)) {
+      if (isCurrentApiUrl(custom)) push(custom);
+    } else {
+      push(custom);
+    }
+  }
+  push(source);
+
+  return out;
+}
+
+export function colorVariantDisplaySrc(cv: { image?: string; sourceImage?: string }): string {
+  return colorVariantThumbSources(cv)[0] || '';
 }
