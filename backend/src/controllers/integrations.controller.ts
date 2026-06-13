@@ -803,10 +803,14 @@ export const getIntegrationStatus = async (req: Request, res: Response) => {
   try {
     const integrations = await query('SELECT platform, store_id, user_id FROM integrations');
     const tn = integrations.find((i: any) => i.platform === 'tiendanube');
+    const metaAds = integrations.find((i: any) => i.platform === 'meta_ads');
+    const googleAds = integrations.find((i: any) => i.platform === 'google_ads');
     const status = {
       mercadolibre: integrations.find((i: any) => i.platform === 'mercadolibre') ? true : false,
       tiendanube: !!tn,
       tiendanubeStoreId: (tn?.store_id || tn?.user_id) || null,
+      metaAds: !!(metaAds?.access_token && metaAds?.user_id) || !!(process.env.META_ADS_ACCESS_TOKEN && process.env.META_ADS_ACCOUNT_ID),
+      googleAds: !!(googleAds?.refresh_token && googleAds?.user_id) || !!(process.env.GOOGLE_ADS_REFRESH_TOKEN && process.env.GOOGLE_ADS_CUSTOMER_ID),
     };
     res.json(status);
   } catch (error) {

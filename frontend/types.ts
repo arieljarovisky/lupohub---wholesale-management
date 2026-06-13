@@ -3,7 +3,8 @@ export enum Role {
   SELLER = 'SELLER',
   WAREHOUSE = 'WAREHOUSE',
   DEPOSITO = 'DEPOSITO',
-  CUSTOMER = 'CUSTOMER'
+  CUSTOMER = 'CUSTOMER',
+  MARKETING = 'MARKETING'
 }
 
 export enum OrderStatus {

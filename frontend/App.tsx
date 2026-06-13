@@ -3,6 +3,14 @@ import Sidebar from './components/Sidebar';
 import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Percent, Megaphone, Wallet, ChevronRight } from 'lucide-react';
 import { isCompanyFinanceUser, COMPANY_FINANCE_VIEW } from './utils/companyFinanceAccess';
 import {
+  MARKETING_HUB_VIEW,
+  MARKETING_TOP_PRODUCTS_VIEW,
+  META_ADS_VIEW,
+  GOOGLE_ADS_VIEW,
+  isMarketingView,
+  canAccessMarketingView,
+} from './utils/marketingAccess';
+import {
   MOCK_VISITS,
   MOCK_CUSTOMERS,
   MOCK_ATTRIBUTES,
@@ -63,6 +71,10 @@ const SellersCommissions = lazyWithReload(() => import('./components/SellersComm
 const ChannelMargins = lazyWithReload(() => import('./components/ChannelMargins'));
 const CompanyFinance = lazyWithReload(() => import('./components/CompanyFinance'));
 const UserTaskManager = lazyWithReload(() => import('./components/UserTaskManager'));
+const MarketingHub = lazyWithReload(() => import('./components/MarketingHub'));
+const MarketingTopProducts = lazyWithReload(() => import('./components/MarketingTopProducts'));
+const MetaAdsCampaigns = lazyWithReload(() => import('./components/MetaAdsCampaigns'));
+const GoogleAdsCampaigns = lazyWithReload(() => import('./components/GoogleAdsCampaigns'));
 
 const ViewFallback = () => (
   <div className="flex items-center justify-center py-24">
@@ -151,6 +163,14 @@ const App: React.FC = () => {
     channel_margins: [Role.ADMIN, Role.WAREHOUSE],
     tiendanube_orders: [Role.ADMIN, Role.WAREHOUSE],
     mercadolibre_orders: [Role.ADMIN, Role.WAREHOUSE],
+    mercadolibre_canal_difusion: [Role.ADMIN, Role.WAREHOUSE, Role.MARKETING],
+    mercadolibre_product_ads: [Role.ADMIN, Role.WAREHOUSE, Role.MARKETING],
+    mercadolibre_brand_ads: [Role.ADMIN, Role.WAREHOUSE, Role.MARKETING],
+    mercadolibre_display_ads: [Role.ADMIN, Role.WAREHOUSE, Role.MARKETING],
+    marketing: [Role.ADMIN, Role.MARKETING],
+    marketing_top_products: [Role.ADMIN, Role.MARKETING],
+    meta_ads: [Role.ADMIN, Role.MARKETING],
+    google_ads: [Role.ADMIN, Role.MARKETING],
     stock_history: [Role.ADMIN, Role.WAREHOUSE],
     despachos: [Role.ADMIN],
     customers: [Role.ADMIN, Role.SELLER],
@@ -164,10 +184,13 @@ const App: React.FC = () => {
   const defaultViewForRole = useCallback((role: Role): string => {
     if (role === Role.DEPOSITO) return 'inventory';
     if (role === Role.CUSTOMER) return 'orders';
+    if (role === Role.MARKETING) return MARKETING_HUB_VIEW;
     return 'dashboard';
   }, []);
   const isViewAllowedForRole = useCallback((view: string, role: Role): boolean => {
-    return !!allowedByRole[view]?.includes(role);
+    const base = String(view || '').split('?')[0];
+    if (isMarketingView(base)) return canAccessMarketingView(base, role);
+    return !!allowedByRole[base]?.includes(role);
   }, []);
 
   /** Finanzas empresa: por email; el resto de vistas por rol. */
@@ -276,7 +299,7 @@ const App: React.FC = () => {
   }, [currentView]);
 
   useEffect(() => {
-    if (baseView === 'mercadolibre_marketing') setCurrentView('mercadolibre_orders');
+    if (baseView === 'mercadolibre_marketing') setCurrentView(MARKETING_HUB_VIEW);
   }, [baseView]);
 
   useEffect(() => {
@@ -321,6 +344,14 @@ const App: React.FC = () => {
         setCustomers(myC ? [myC] : []);
         setAttributes([]);
         setTransportes([]);
+      } else if (currentUser?.role === Role.MARKETING) {
+        setCustomers([]);
+        setTransportes([]);
+        setAttributes([]);
+        setUsers([]);
+        setPriceLists([]);
+        setOrders([]);
+        setProducts([]);
       } else {
         const [fetchedColors, fetchedSizes, fetchedCustomers, fetchedTransportes] = await Promise.all([
           api.getColors(),
@@ -381,7 +412,10 @@ const App: React.FC = () => {
     }
 
     if (currentUser) {
-      const runHeavy = () => loadHeavyCatalog();
+      const runHeavy = () => {
+        if (currentUser.role === Role.MARKETING) return;
+        loadHeavyCatalog();
+      };
       if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
         (window as unknown as { requestIdleCallback: (cb: () => void, opts?: { timeout?: number }) => number }).requestIdleCallback(
           runHeavy,
@@ -928,7 +962,13 @@ const App: React.FC = () => {
   }
 
   const mobileNavItems =
-    currentUser.role === Role.SELLER
+    currentUser.role === Role.MARKETING
+      ? [
+          { id: MARKETING_HUB_VIEW, icon: Megaphone, label: 'Marketing', roles: [Role.MARKETING] },
+          { id: MARKETING_TOP_PRODUCTS_VIEW, icon: LayoutDashboard, label: 'Top ventas', roles: [Role.MARKETING] },
+          { id: 'mercadolibre_product_ads', icon: Zap, label: 'ML Ads', roles: [Role.MARKETING] },
+        ]
+      : currentUser.role === Role.SELLER
       ? [
           { id: 'dashboard', icon: LayoutDashboard, label: 'Inicio', roles: [Role.SELLER] },
           { id: 'customers', icon: Users, label: 'Clientes', roles: [Role.SELLER] },
@@ -958,6 +998,16 @@ const App: React.FC = () => {
       { id: 'channel_margins', label: 'Márgenes', icon: DollarSign, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'tiendanube_orders', label: 'Tienda Nube', icon: ShoppingBag, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'mercadolibre_orders', label: 'Mercado Libre', icon: Zap, roles: [Role.ADMIN, Role.WAREHOUSE] },
+    ]},
+    { title: 'Marketing', items: [
+      { id: MARKETING_HUB_VIEW, label: 'Centro de Marketing', icon: Megaphone, roles: [Role.ADMIN, Role.MARKETING] },
+      { id: MARKETING_TOP_PRODUCTS_VIEW, label: 'Más vendidos', icon: LayoutDashboard, roles: [Role.ADMIN, Role.MARKETING] },
+      { id: 'mercadolibre_canal_difusion', label: 'ML — Difusión', icon: Zap, roles: [Role.ADMIN, Role.MARKETING] },
+      { id: 'mercadolibre_product_ads', label: 'ML — Product Ads', icon: Megaphone, roles: [Role.ADMIN, Role.MARKETING] },
+      { id: 'mercadolibre_brand_ads', label: 'ML — Brand Ads', icon: Megaphone, roles: [Role.ADMIN, Role.MARKETING] },
+      { id: 'mercadolibre_display_ads', label: 'ML — Display Ads', icon: Megaphone, roles: [Role.ADMIN, Role.MARKETING] },
+      { id: META_ADS_VIEW, label: 'Meta Ads', icon: Megaphone, roles: [Role.ADMIN, Role.MARKETING] },
+      { id: GOOGLE_ADS_VIEW, label: 'Google Ads', icon: Megaphone, roles: [Role.ADMIN, Role.MARKETING] },
     ]},
     { title: 'CRM y sistema', items: [
       { id: 'customers', label: 'Clientes', icon: Users, roles: [Role.ADMIN, Role.SELLER] },
@@ -1087,7 +1137,7 @@ const App: React.FC = () => {
           <header className="mb-4 md:mb-6 flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
              <div className="min-w-0">
                <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-white truncate">
-                 {baseView === 'dashboard' && 'Hola, ' + currentUser.name.split(' ')[0]}
+                 {baseView === 'dashboard' && (currentUser.role === Role.MARKETING ? 'Marketing — ' + currentUser.name.split(' ')[0] : 'Hola, ' + currentUser.name.split(' ')[0])}
                  {baseView === 'inventory' && 'Inventario'}
                  {baseView === 'orders' && (currentUser.role === Role.CUSTOMER ? 'Mis pedidos' : 'Pedidos Mayoristas')}
                  {baseView === 'bulk_invoicing' && 'Facturación masiva'}
@@ -1100,6 +1150,10 @@ const App: React.FC = () => {
                  {baseView === 'mercadolibre_brand_ads' && 'Brand Ads — campañas'}
                  {baseView === 'mercadolibre_display_ads' && 'Display Ads — campañas'}
                  {baseView === 'mercadolibre_stock' && 'Stock Mercado Libre'}
+                 {baseView === MARKETING_HUB_VIEW && 'Centro de Marketing'}
+                 {baseView === MARKETING_TOP_PRODUCTS_VIEW && 'Artículos más vendidos'}
+                 {baseView === META_ADS_VIEW && 'Meta Ads — campañas'}
+                 {baseView === GOOGLE_ADS_VIEW && 'Google Ads — campañas'}
                  {baseView === 'stock_history' && 'Historial de Stock'}
                  {baseView === 'despachos' && 'Despachos'}
                  {baseView === 'customers' && 'Clientes'}
@@ -1330,6 +1384,26 @@ const App: React.FC = () => {
           {baseView === 'mercadolibre_display_ads' && (
             <Suspense fallback={<ViewFallback />}>
               <MercadoLibreDisplayAds />
+            </Suspense>
+          )}
+          {baseView === MARKETING_HUB_VIEW && (
+            <Suspense fallback={<ViewFallback />}>
+              <MarketingHub onNavigate={handleChangeView} />
+            </Suspense>
+          )}
+          {baseView === MARKETING_TOP_PRODUCTS_VIEW && (
+            <Suspense fallback={<ViewFallback />}>
+              <MarketingTopProducts />
+            </Suspense>
+          )}
+          {baseView === META_ADS_VIEW && (
+            <Suspense fallback={<ViewFallback />}>
+              <MetaAdsCampaigns />
+            </Suspense>
+          )}
+          {baseView === GOOGLE_ADS_VIEW && (
+            <Suspense fallback={<ViewFallback />}>
+              <GoogleAdsCampaigns />
             </Suspense>
           )}
           {baseView === 'catalogs' && (

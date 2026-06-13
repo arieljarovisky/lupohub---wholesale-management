@@ -36,10 +36,10 @@ export const createUser = async (req: Request, res: Response) => {
     if (!name?.trim() || !email?.trim() || !password) {
       return res.status(400).json({ message: 'Nombre, email y contraseña son requeridos' });
     }
-    const validRoles = ['ADMIN', 'SELLER', 'WAREHOUSE', 'CUSTOMER'];
+    const validRoles = ['ADMIN', 'SELLER', 'WAREHOUSE', 'CUSTOMER', 'MARKETING'];
     const roleVal = (role || 'SELLER').toString().toUpperCase();
     if (!validRoles.includes(roleVal)) {
-      return res.status(400).json({ message: 'Rol inválido. Use ADMIN, SELLER, WAREHOUSE o CUSTOMER' });
+      return res.status(400).json({ message: 'Rol inválido. Use ADMIN, SELLER, WAREHOUSE, CUSTOMER o MARKETING' });
     }
 
     const existing = await get('SELECT id FROM users WHERE email = ?', [email.trim()]);

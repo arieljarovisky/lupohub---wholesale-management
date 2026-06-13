@@ -43,3 +43,10 @@ export const billingAccessMiddleware = (req: Request, res: Response, next: NextF
   if (role === 'ADMIN' || role === 'DEPOSITO' || role === 'WAREHOUSE') return next();
   return res.status(403).json({ message: 'Sin permiso para facturación' });
 };
+
+/** Campañas publicitarias Meta / Google. Admin y marketing. Requiere authMiddleware antes. */
+export const marketingAdsAccessMiddleware = (req: Request, res: Response, next: NextFunction) => {
+  const role = (req as any).user?.role;
+  if (role === 'ADMIN' || role === 'MARKETING') return next();
+  return res.status(403).json({ message: 'Sin permiso para campañas publicitarias' });
+};

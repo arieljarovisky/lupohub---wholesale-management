@@ -2170,7 +2170,13 @@ export const api = {
     }, { ok: false, variantCount: 0, batchesTotal: 0, batchesOk: 0, batchesFailed: 0, errors: [] }, 'syncLupoShopMlStockBulk');
   },
 
-  getIntegrationStatus: async (): Promise<{ mercadolibre: boolean; tiendanube: boolean; tiendanubeStoreId?: string | null }> => {
+  getIntegrationStatus: async (): Promise<{
+    mercadolibre: boolean;
+    tiendanube: boolean;
+    tiendanubeStoreId?: string | null;
+    metaAds?: boolean;
+    googleAds?: boolean;
+  }> => {
     return handleRequest(async () => {
       return await request<{ mercadolibre: boolean; tiendanube: boolean; tiendanubeStoreId?: string | null }>('/integrations/status', 'GET');
     }, { mercadolibre: false, tiendanube: false }, 'getIntegrationStatus');
@@ -2913,6 +2919,114 @@ export const api = {
     if (params.limit != null) q.set('limit', String(params.limit));
     if (params.offset != null) q.set('offset', String(params.offset));
     return await request(`/integrations/mercadolibre/display-ads/campaigns?${q.toString()}`, 'GET');
+  },
+
+  /** Meta Ads — configuración (admin) y campañas (admin + marketing). */
+  getAdsIntegrationsStatus: async (): Promise<{
+    meta: { configured: boolean; accountId: string; hasToken: boolean; source: 'db' | 'env' | null };
+    google: {
+      configured: boolean;
+      customerId: string;
+      loginCustomerId: string;
+      hasRefreshToken: boolean;
+      hasDeveloperToken: boolean;
+      hasClientCredentials: boolean;
+      source: 'db' | 'env' | null;
+    };
+  }> => {
+    return await request('/integrations/ads/status', 'GET');
+  },
+  getMetaAdsConfig: async (): Promise<{
+    configured: boolean;
+    accountId: string;
+    hasToken: boolean;
+    source: 'db' | 'env' | null;
+  }> => {
+    return await request('/integrations/meta-ads/config', 'GET');
+  },
+  saveMetaAdsConfig: async (data: {
+    accountId: string;
+    accessToken?: string;
+    keepExistingToken?: boolean;
+  }): Promise<{ ok: boolean; config: any }> => {
+    return await request('/integrations/meta-ads/config', 'PUT', data);
+  },
+  disconnectMetaAds: async (): Promise<{ ok: boolean }> => {
+    return await request('/integrations/meta-ads/config', 'DELETE');
+  },
+  getMetaAdsCampaigns: async (params: {
+    date_from: string;
+    date_to: string;
+  }): Promise<{
+    campaigns: Array<{
+      id: string;
+      name: string;
+      status: string;
+      objective: string;
+      dailyBudget: number | null;
+      impressions: number;
+      clicks: number;
+      spend: number;
+      cpc: number;
+      ctr: number;
+      reach: number;
+      conversions: number;
+    }>;
+    summary: Record<string, number>;
+  }> => {
+    const q = new URLSearchParams();
+    q.set('date_from', params.date_from);
+    q.set('date_to', params.date_to);
+    return await request(`/integrations/meta-ads/campaigns?${q.toString()}`, 'GET');
+  },
+
+  /** Google Ads — configuración (admin) y campañas (admin + marketing). */
+  getGoogleAdsConfig: async (): Promise<{
+    configured: boolean;
+    customerId: string;
+    loginCustomerId: string;
+    hasRefreshToken: boolean;
+    hasDeveloperToken: boolean;
+    hasClientCredentials: boolean;
+    source: 'db' | 'env' | null;
+  }> => {
+    return await request('/integrations/google-ads/config', 'GET');
+  },
+  saveGoogleAdsConfig: async (data: {
+    customerId: string;
+    loginCustomerId?: string;
+    developerToken?: string;
+    refreshToken?: string;
+    keepExistingDeveloperToken?: boolean;
+    keepExistingRefreshToken?: boolean;
+  }): Promise<{ ok: boolean; config: any }> => {
+    return await request('/integrations/google-ads/config', 'PUT', data);
+  },
+  disconnectGoogleAds: async (): Promise<{ ok: boolean }> => {
+    return await request('/integrations/google-ads/config', 'DELETE');
+  },
+  getGoogleAdsCampaigns: async (params: {
+    date_from: string;
+    date_to: string;
+  }): Promise<{
+    campaigns: Array<{
+      id: string;
+      name: string;
+      status: string;
+      channelType: string;
+      impressions: number;
+      clicks: number;
+      cost: number;
+      ctr: number;
+      cpc: number;
+      conversions: number;
+    }>;
+    summary: Record<string, number>;
+  }> => {
+    const q = new URLSearchParams();
+    q.set('date_from', params.date_from);
+    q.set('date_to', params.date_to);
+    return await request(`/integrations/google-ads/campaigns?${q.toString()}`, 'GET');
   },
 
   getTiendaNubeProductVariants: async (productId: string): Promise<{ variants: { variantId: number | string; sku: string; color: string; size: string; stock: number }[]; productId: number | string }> => {

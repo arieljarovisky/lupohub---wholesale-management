@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone, Copy, FileUp, FileSpreadsheet, Pencil, Ship, FileText, Receipt, Download, Bot, Upload } from 'lucide-react';
+import { Plus, Trash2, Tag, Palette, Cloud, Zap, RefreshCw, Link, ExternalLink, Check, AlertCircle, Loader2, Power, Save, Key, User as UserIcon, DollarSign, Shield, Mail, Lock, AlertTriangle, X, Package, Smartphone, Copy, FileUp, FileSpreadsheet, Pencil, Ship, FileText, Receipt, Download, Bot, Upload, Megaphone } from 'lucide-react';
 import { Attribute, Role, ApiConfig, User, PriceList } from '../types';
 import { api } from '../services/api';
 import { getApiConfig, saveApiConfig, getRemitente, saveRemitente } from '../services/apiIntegration';
@@ -171,7 +171,27 @@ const Settings: React.FC<SettingsProps> = ({
   const [healthMessage, setHealthMessage] = useState<string>('');
 
   // Integration Logic
-  const [integrations, setIntegrations] = useState<{ mercadolibre: boolean; tiendanube: boolean; tiendanubeStoreId?: string | null }>({ mercadolibre: false, tiendanube: false });
+  const [integrations, setIntegrations] = useState<{
+    mercadolibre: boolean;
+    tiendanube: boolean;
+    tiendanubeStoreId?: string | null;
+    metaAds?: boolean;
+    googleAds?: boolean;
+  }>({ mercadolibre: false, tiendanube: false });
+  const [metaAdsAccountId, setMetaAdsAccountId] = useState('');
+  const [metaAdsAccessToken, setMetaAdsAccessToken] = useState('');
+  const [metaAdsHasToken, setMetaAdsHasToken] = useState(false);
+  const [metaAdsConfigured, setMetaAdsConfigured] = useState(false);
+  const [savingMetaAds, setSavingMetaAds] = useState(false);
+  const [googleAdsCustomerId, setGoogleAdsCustomerId] = useState('');
+  const [googleAdsLoginCustomerId, setGoogleAdsLoginCustomerId] = useState('');
+  const [googleAdsDeveloperToken, setGoogleAdsDeveloperToken] = useState('');
+  const [googleAdsRefreshToken, setGoogleAdsRefreshToken] = useState('');
+  const [googleAdsHasDeveloperToken, setGoogleAdsHasDeveloperToken] = useState(false);
+  const [googleAdsHasRefreshToken, setGoogleAdsHasRefreshToken] = useState(false);
+  const [googleAdsHasClientCredentials, setGoogleAdsHasClientCredentials] = useState(false);
+  const [googleAdsConfigured, setGoogleAdsConfigured] = useState(false);
+  const [savingGoogleAds, setSavingGoogleAds] = useState(false);
   const [loadingIntegrations, setLoadingIntegrations] = useState(false);
   const [lupoWebhookConfig, setLupoWebhookConfig] = useState({
     enabled: false,
@@ -326,6 +346,31 @@ const Settings: React.FC<SettingsProps> = ({
       }
     };
     fetchStatus();
+
+    const fetchAdsConfig = async () => {
+      try {
+        const [meta, google] = await Promise.all([
+          api.getMetaAdsConfig().catch(() => null),
+          api.getGoogleAdsConfig().catch(() => null)
+        ]);
+        if (meta) {
+          setMetaAdsAccountId(meta.accountId || '');
+          setMetaAdsHasToken(!!meta.hasToken);
+          setMetaAdsConfigured(!!meta.configured);
+        }
+        if (google) {
+          setGoogleAdsCustomerId(google.customerId || '');
+          setGoogleAdsLoginCustomerId(google.loginCustomerId || '');
+          setGoogleAdsHasDeveloperToken(!!google.hasDeveloperToken);
+          setGoogleAdsHasRefreshToken(!!google.hasRefreshToken);
+          setGoogleAdsHasClientCredentials(!!google.hasClientCredentials);
+          setGoogleAdsConfigured(!!google.configured);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    fetchAdsConfig();
 
     const fetchLupoWebhookConfig = async () => {
       try {
@@ -1321,6 +1366,7 @@ const Settings: React.FC<SettingsProps> = ({
                       >
                          <option value={Role.SELLER}>Vendedor</option>
                          <option value={Role.WAREHOUSE}>Depósito</option>
+                         <option value={Role.MARKETING}>Marketing</option>
                          <option value={Role.CUSTOMER}>Cliente directo</option>
                          <option value={Role.ADMIN}>Administrador</option>
                       </select>
@@ -1412,7 +1458,7 @@ const Settings: React.FC<SettingsProps> = ({
                  <div key={u.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between group hover:border-slate-600 transition-colors">
                     <div className="flex items-center gap-4">
                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-xl ${
-                          u.role === Role.ADMIN ? 'bg-purple-600' : u.role === Role.WAREHOUSE ? 'bg-orange-600' : 'bg-blue-600'
+                          u.role === Role.ADMIN ? 'bg-purple-600' : u.role === Role.WAREHOUSE ? 'bg-orange-600' : u.role === Role.MARKETING ? 'bg-fuchsia-600' : 'bg-blue-600'
                        }`}>
                           {u.name.charAt(0)}
                        </div>
@@ -2716,6 +2762,233 @@ const Settings: React.FC<SettingsProps> = ({
                   </div>
                 )}
              </div>
+          </div>
+
+          {/* Meta Ads */}
+          <div className="bg-slate-800 rounded-3xl border border-slate-700 overflow-hidden shadow-xl">
+            <div className="p-6 bg-slate-900/50 border-b border-slate-700 flex justify-between items-center">
+              <div className="flex items-center gap-3">
+                <div className="bg-blue-600/20 p-2.5 rounded-2xl text-blue-400"><Megaphone size={24} /></div>
+                <h3 className="font-black text-white text-lg">Meta Ads</h3>
+              </div>
+              {metaAdsConfigured ? (
+                <div className="flex items-center gap-2">
+                  <span className="px-3 py-1 bg-green-500/20 text-green-400 rounded-full text-xs font-bold border border-green-500/50 flex items-center gap-2">
+                    <Check size={12} /> CONFIGURADO
+                  </span>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await api.disconnectMetaAds();
+                        setMetaAdsConfigured(false);
+                        setMetaAdsHasToken(false);
+                        setMetaAdsAccessToken('');
+                        setIntegrations((prev) => ({ ...prev, metaAds: false }));
+                        showToast('success', 'Meta Ads desconectado');
+                      } catch (e: any) {
+                        showToast('error', e?.message || 'Error desconectando Meta Ads');
+                      }
+                    }}
+                    className="px-3 py-1 bg-red-600/80 hover:bg-red-600 rounded-xl text-white text-xs font-bold"
+                  >
+                    Desconectar
+                  </button>
+                </div>
+              ) : (
+                <span className="px-3 py-1 bg-slate-700 text-slate-400 rounded-full text-xs font-bold">SIN CONFIGURAR</span>
+              )}
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-slate-400 text-sm">
+                Token de acceso de larga duración con permiso <code className="text-slate-500">ads_read</code> y el ID de la cuenta
+                publicitaria (sin <code className="text-slate-500">act_</code> o con él, ambos funcionan). También podés usar variables{' '}
+                <code className="text-slate-500">META_ADS_ACCESS_TOKEN</code> y <code className="text-slate-500">META_ADS_ACCOUNT_ID</code> en el .env del servidor.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-500 uppercase">ID cuenta publicitaria</label>
+                  <input
+                    type="text"
+                    value={metaAdsAccountId}
+                    onChange={(e) => setMetaAdsAccountId(e.target.value)}
+                    placeholder="Ej: 1234567890"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3 px-4 text-white text-sm outline-none focus:border-blue-500 font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-500 uppercase">
+                    Token de acceso {metaAdsHasToken && !metaAdsAccessToken ? '(guardado)' : ''}
+                  </label>
+                  <input
+                    type="password"
+                    value={metaAdsAccessToken}
+                    onChange={(e) => setMetaAdsAccessToken(e.target.value)}
+                    placeholder={metaAdsHasToken ? 'Dejar vacío para mantener el actual' : 'EAA...'}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3 px-4 text-white text-sm outline-none focus:border-blue-500 font-mono"
+                  />
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={savingMetaAds || !metaAdsAccountId.trim() || (!metaAdsAccessToken && !metaAdsHasToken)}
+                onClick={async () => {
+                  setSavingMetaAds(true);
+                  try {
+                    const res = await api.saveMetaAdsConfig({
+                      accountId: metaAdsAccountId.trim(),
+                      accessToken: metaAdsAccessToken.trim() || undefined,
+                      keepExistingToken: !metaAdsAccessToken.trim() && metaAdsHasToken
+                    });
+                    setMetaAdsConfigured(!!res.config?.configured);
+                    setMetaAdsHasToken(!!res.config?.hasToken);
+                    setMetaAdsAccessToken('');
+                    setIntegrations((prev) => ({ ...prev, metaAds: true }));
+                    showToast('success', 'Meta Ads guardado');
+                  } catch (e: any) {
+                    showToast('error', e?.message || 'Error guardando Meta Ads');
+                  } finally {
+                    setSavingMetaAds(false);
+                  }
+                }}
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl text-white text-sm font-bold disabled:opacity-50 flex items-center gap-2"
+              >
+                {savingMetaAds ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                Guardar Meta Ads
+              </button>
+            </div>
+          </div>
+
+          {/* Google Ads */}
+          <div className="bg-slate-800 rounded-3xl border border-slate-700 overflow-hidden shadow-xl">
+            <div className="p-6 bg-slate-900/50 border-b border-slate-700 flex justify-between items-center">
+              <div className="flex items-center gap-3">
+                <div className="bg-red-600/20 p-2.5 rounded-2xl text-red-400"><Megaphone size={24} /></div>
+                <h3 className="font-black text-white text-lg">Google Ads</h3>
+              </div>
+              {googleAdsConfigured ? (
+                <div className="flex items-center gap-2">
+                  <span className="px-3 py-1 bg-green-500/20 text-green-400 rounded-full text-xs font-bold border border-green-500/50 flex items-center gap-2">
+                    <Check size={12} /> CONFIGURADO
+                  </span>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await api.disconnectGoogleAds();
+                        setGoogleAdsConfigured(false);
+                        setGoogleAdsHasDeveloperToken(false);
+                        setGoogleAdsHasRefreshToken(false);
+                        setGoogleAdsDeveloperToken('');
+                        setGoogleAdsRefreshToken('');
+                        setIntegrations((prev) => ({ ...prev, googleAds: false }));
+                        showToast('success', 'Google Ads desconectado');
+                      } catch (e: any) {
+                        showToast('error', e?.message || 'Error desconectando Google Ads');
+                      }
+                    }}
+                    className="px-3 py-1 bg-red-600/80 hover:bg-red-600 rounded-xl text-white text-xs font-bold"
+                  >
+                    Desconectar
+                  </button>
+                </div>
+              ) : (
+                <span className="px-3 py-1 bg-slate-700 text-slate-400 rounded-full text-xs font-bold">SIN CONFIGURAR</span>
+              )}
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-slate-400 text-sm">
+                Requiere proyecto en Google Cloud con OAuth, developer token de Google Ads API, refresh token y Customer ID.
+                En el servidor (.env): <code className="text-slate-500">GOOGLE_ADS_CLIENT_ID</code> y{' '}
+                <code className="text-slate-500">GOOGLE_ADS_CLIENT_SECRET</code> (obligatorios).
+              </p>
+              {!googleAdsHasClientCredentials && (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-900/20 px-4 py-3 text-amber-200 text-sm">
+                  Faltan <code>GOOGLE_ADS_CLIENT_ID</code> y <code>GOOGLE_ADS_CLIENT_SECRET</code> en el .env del backend.
+                </div>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-500 uppercase">Customer ID</label>
+                  <input
+                    type="text"
+                    value={googleAdsCustomerId}
+                    onChange={(e) => setGoogleAdsCustomerId(e.target.value)}
+                    placeholder="Ej: 1234567890"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3 px-4 text-white text-sm outline-none focus:border-red-500 font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-500 uppercase">Login Customer ID (opcional, MCC)</label>
+                  <input
+                    type="text"
+                    value={googleAdsLoginCustomerId}
+                    onChange={(e) => setGoogleAdsLoginCustomerId(e.target.value)}
+                    placeholder="Solo si accedés vía cuenta manager"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3 px-4 text-white text-sm outline-none focus:border-red-500 font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-500 uppercase">
+                    Developer token {googleAdsHasDeveloperToken && !googleAdsDeveloperToken ? '(guardado)' : ''}
+                  </label>
+                  <input
+                    type="password"
+                    value={googleAdsDeveloperToken}
+                    onChange={(e) => setGoogleAdsDeveloperToken(e.target.value)}
+                    placeholder={googleAdsHasDeveloperToken ? 'Vacío = mantener actual' : 'Token de Google Ads API'}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3 px-4 text-white text-sm outline-none focus:border-red-500 font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-500 uppercase">
+                    Refresh token OAuth {googleAdsHasRefreshToken && !googleAdsRefreshToken ? '(guardado)' : ''}
+                  </label>
+                  <input
+                    type="password"
+                    value={googleAdsRefreshToken}
+                    onChange={(e) => setGoogleAdsRefreshToken(e.target.value)}
+                    placeholder={googleAdsHasRefreshToken ? 'Vacío = mantener actual' : '1//...'}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3 px-4 text-white text-sm outline-none focus:border-red-500 font-mono"
+                  />
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={
+                  savingGoogleAds ||
+                  !googleAdsCustomerId.trim() ||
+                  !googleAdsHasClientCredentials ||
+                  ((!googleAdsDeveloperToken && !googleAdsHasDeveloperToken) || (!googleAdsRefreshToken && !googleAdsHasRefreshToken))
+                }
+                onClick={async () => {
+                  setSavingGoogleAds(true);
+                  try {
+                    const res = await api.saveGoogleAdsConfig({
+                      customerId: googleAdsCustomerId.trim(),
+                      loginCustomerId: googleAdsLoginCustomerId.trim() || undefined,
+                      developerToken: googleAdsDeveloperToken.trim() || undefined,
+                      refreshToken: googleAdsRefreshToken.trim() || undefined,
+                      keepExistingDeveloperToken: !googleAdsDeveloperToken.trim() && googleAdsHasDeveloperToken,
+                      keepExistingRefreshToken: !googleAdsRefreshToken.trim() && googleAdsHasRefreshToken
+                    });
+                    setGoogleAdsConfigured(!!res.config?.configured);
+                    setGoogleAdsHasDeveloperToken(!!res.config?.hasDeveloperToken);
+                    setGoogleAdsHasRefreshToken(!!res.config?.hasRefreshToken);
+                    setGoogleAdsDeveloperToken('');
+                    setGoogleAdsRefreshToken('');
+                    setIntegrations((prev) => ({ ...prev, googleAds: true }));
+                    showToast('success', 'Google Ads guardado');
+                  } catch (e: any) {
+                    showToast('error', e?.message || 'Error guardando Google Ads');
+                  } finally {
+                    setSavingGoogleAds(false);
+                  }
+                }}
+                className="px-5 py-2.5 bg-red-600 hover:bg-red-500 rounded-xl text-white text-sm font-bold disabled:opacity-50 flex items-center gap-2"
+              >
+                {savingGoogleAds ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                Guardar Google Ads
+              </button>
+            </div>
           </div>
 
            {/* API Interna */}

@@ -1,7 +1,13 @@
 import React from 'react';
-import { LayoutDashboard, Package, ShoppingCart, Users, MapPin, LogOut, Shirt, Settings, ShoppingBag, Zap, ChevronRight, ChevronLeft, History, Ship, BookOpen, DollarSign, FileText, Percent, Wallet } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, MapPin, LogOut, Shirt, Settings, ShoppingBag, Zap, ChevronRight, ChevronLeft, History, Ship, BookOpen, DollarSign, FileText, Percent, Wallet, Megaphone, Award, Facebook, Chrome, Sparkles, LayoutGrid, Radio } from 'lucide-react';
 import { Role } from '../types';
 import { isCompanyFinanceUser, COMPANY_FINANCE_VIEW } from '../utils/companyFinanceAccess';
+import {
+  MARKETING_HUB_VIEW,
+  MARKETING_TOP_PRODUCTS_VIEW,
+  META_ADS_VIEW,
+  GOOGLE_ADS_VIEW,
+} from '../utils/marketingAccess';
 
 interface SidebarProps {
   currentView: string;
@@ -37,6 +43,19 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({ currentView, onChangeView,
         { id: 'channel_margins', label: 'Márgenes y precios', icon: DollarSign, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'emerald' },
         { id: 'tiendanube_orders', label: 'Tienda Nube', icon: ShoppingBag, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'cyan' },
         { id: 'mercadolibre_orders', label: 'Mercado Libre', icon: Zap, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'yellow' },
+      ]
+    },
+    {
+      title: 'Marketing',
+      items: [
+        { id: MARKETING_HUB_VIEW, label: 'Centro de Marketing', icon: Megaphone, roles: [Role.ADMIN, Role.MARKETING], color: 'purple' },
+        { id: MARKETING_TOP_PRODUCTS_VIEW, label: 'Más vendidos', icon: Award, roles: [Role.ADMIN, Role.MARKETING], color: 'emerald' },
+        { id: 'mercadolibre_canal_difusion', label: 'ML — Difusión', icon: Radio, roles: [Role.ADMIN, Role.MARKETING], color: 'yellow' },
+        { id: 'mercadolibre_product_ads', label: 'ML — Product Ads', icon: Megaphone, roles: [Role.ADMIN, Role.MARKETING], color: 'yellow' },
+        { id: 'mercadolibre_brand_ads', label: 'ML — Brand Ads', icon: Sparkles, roles: [Role.ADMIN, Role.MARKETING], color: 'yellow' },
+        { id: 'mercadolibre_display_ads', label: 'ML — Display Ads', icon: LayoutGrid, roles: [Role.ADMIN, Role.MARKETING], color: 'yellow' },
+        { id: META_ADS_VIEW, label: 'Meta Ads', icon: Facebook, roles: [Role.ADMIN, Role.MARKETING], color: 'indigo' },
+        { id: GOOGLE_ADS_VIEW, label: 'Google Ads', icon: Chrome, roles: [Role.ADMIN, Role.MARKETING], color: 'indigo' },
       ]
     },
     {
