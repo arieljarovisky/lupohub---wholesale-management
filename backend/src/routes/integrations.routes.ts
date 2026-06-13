@@ -85,6 +85,8 @@ import {
   getGoogleAdsCampaignsEndpoint,
   getGoogleAdsConfigEndpoint,
   getMetaAdsCampaignsEndpoint,
+  getMetaAdSetsEndpoint,
+  getMetaAdsForAdSetEndpoint,
   getMetaAdsConfigEndpoint,
   saveGoogleAdsConfigEndpoint,
   saveMetaAdsConfigEndpoint
@@ -187,6 +189,8 @@ router.put('/meta-ads/config', authMiddleware, saveMetaAdsConfigEndpoint);
 router.post('/meta-ads/config', authMiddleware, saveMetaAdsConfigEndpoint);
 router.delete('/meta-ads/config', authMiddleware, disconnectMetaAdsEndpoint);
 router.get('/meta-ads/campaigns', authMiddleware, marketingAdsAccessMiddleware, getMetaAdsCampaignsEndpoint);
+router.get('/meta-ads/campaigns/:campaignId/adsets', authMiddleware, marketingAdsAccessMiddleware, getMetaAdSetsEndpoint);
+router.get('/meta-ads/adsets/:adsetId/ads', authMiddleware, marketingAdsAccessMiddleware, getMetaAdsForAdSetEndpoint);
 router.get('/google-ads/config', authMiddleware, getGoogleAdsConfigEndpoint);
 router.put('/google-ads/config', authMiddleware, saveGoogleAdsConfigEndpoint);
 router.post('/google-ads/config', authMiddleware, saveGoogleAdsConfigEndpoint);

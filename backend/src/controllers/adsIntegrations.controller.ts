@@ -7,7 +7,7 @@ import {
   saveGoogleAdsConfig,
   saveMetaAdsConfig
 } from '../services/adsIntegrations.service';
-import { fetchMetaAdsCampaigns } from '../services/metaAds.service';
+import { fetchMetaAdSets, fetchMetaAdsCampaigns, fetchMetaAdsForAdSet } from '../services/metaAds.service';
 import { fetchGoogleAdsCampaigns } from '../services/googleAds.service';
 
 function isAdmin(req: Request): boolean {
@@ -130,6 +130,46 @@ export const getMetaAdsCampaignsEndpoint = async (req: Request, res: Response) =
     }
     console.error('getMetaAdsCampaignsEndpoint:', error);
     res.status(502).json({ message: error?.message || 'Error obteniendo campañas Meta' });
+  }
+};
+
+export const getMetaAdSetsEndpoint = async (req: Request, res: Response) => {
+  if (!canReadAds(req)) return res.status(403).json({ message: 'Sin permiso para ver conjuntos Meta' });
+  try {
+    const campaignId = String(req.params.campaignId || '').trim();
+    const dateFrom = String(req.query.date_from || '').trim();
+    const dateTo = String(req.query.date_to || '').trim();
+    if (!campaignId || !ymdValid(dateFrom) || !ymdValid(dateTo)) {
+      return res.status(400).json({ message: 'Parámetros requeridos: campaignId, date_from, date_to' });
+    }
+    const data = await fetchMetaAdSets(campaignId, dateFrom, dateTo);
+    res.json(data);
+  } catch (error: any) {
+    if (error?.code === 'NOT_CONFIGURED') {
+      return res.status(400).json({ message: 'Meta Ads no configurado', configured: false });
+    }
+    console.error('getMetaAdSetsEndpoint:', error);
+    res.status(502).json({ message: error?.message || 'Error obteniendo conjuntos Meta' });
+  }
+};
+
+export const getMetaAdsForAdSetEndpoint = async (req: Request, res: Response) => {
+  if (!canReadAds(req)) return res.status(403).json({ message: 'Sin permiso para ver anuncios Meta' });
+  try {
+    const adsetId = String(req.params.adsetId || '').trim();
+    const dateFrom = String(req.query.date_from || '').trim();
+    const dateTo = String(req.query.date_to || '').trim();
+    if (!adsetId || !ymdValid(dateFrom) || !ymdValid(dateTo)) {
+      return res.status(400).json({ message: 'Parámetros requeridos: adsetId, date_from, date_to' });
+    }
+    const data = await fetchMetaAdsForAdSet(adsetId, dateFrom, dateTo);
+    res.json(data);
+  } catch (error: any) {
+    if (error?.code === 'NOT_CONFIGURED') {
+      return res.status(400).json({ message: 'Meta Ads no configurado', configured: false });
+    }
+    console.error('getMetaAdsForAdSetEndpoint:', error);
+    res.status(502).json({ message: error?.message || 'Error obteniendo anuncios Meta' });
   }
 };
 

@@ -241,6 +241,25 @@ function mapCustomerFromApi(r: any): Customer {
   };
 }
 
+export type MetaAdsMetricsRow = {
+  id: string;
+  name: string;
+  status: string;
+  objective?: string;
+  dailyBudget: number | null;
+  impressions: number;
+  clicks: number;
+  spend: number;
+  cpc: number;
+  ctr: number;
+  reach: number;
+  frequency: number;
+  conversions: number;
+  purchaseValue: number;
+  roas: number;
+  cpa: number;
+};
+
 export const api = {
   login: async (email: string, password: string): Promise<{ user: User; token: string | null }> => {
     return await request<{ user: User; token: string | null }>(`/auth/login`, 'POST', { email, password });
@@ -2958,26 +2977,38 @@ export const api = {
     date_from: string;
     date_to: string;
   }): Promise<{
-    campaigns: Array<{
-      id: string;
-      name: string;
-      status: string;
-      objective: string;
-      dailyBudget: number | null;
-      impressions: number;
-      clicks: number;
-      spend: number;
-      cpc: number;
-      ctr: number;
-      reach: number;
-      conversions: number;
-    }>;
+    accountId: string;
+    campaigns: MetaAdsMetricsRow[];
     summary: Record<string, number>;
   }> => {
     const q = new URLSearchParams();
     q.set('date_from', params.date_from);
     q.set('date_to', params.date_to);
     return await request(`/integrations/meta-ads/campaigns?${q.toString()}`, 'GET');
+  },
+  getMetaAdSets: async (
+    campaignId: string,
+    params: { date_from: string; date_to: string }
+  ): Promise<{ adsets: MetaAdsMetricsRow[]; summary: Record<string, number> }> => {
+    const q = new URLSearchParams();
+    q.set('date_from', params.date_from);
+    q.set('date_to', params.date_to);
+    return await request(
+      `/integrations/meta-ads/campaigns/${encodeURIComponent(campaignId)}/adsets?${q.toString()}`,
+      'GET'
+    );
+  },
+  getMetaAdsForAdSet: async (
+    adsetId: string,
+    params: { date_from: string; date_to: string }
+  ): Promise<{ ads: MetaAdsMetricsRow[]; summary: Record<string, number> }> => {
+    const q = new URLSearchParams();
+    q.set('date_from', params.date_from);
+    q.set('date_to', params.date_to);
+    return await request(
+      `/integrations/meta-ads/adsets/${encodeURIComponent(adsetId)}/ads?${q.toString()}`,
+      'GET'
+    );
   },
 
   /** Google Ads — configuración (admin) y campañas (admin + marketing). */
