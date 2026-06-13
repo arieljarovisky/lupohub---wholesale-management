@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.importStockGridToDespacho = exports.importStockFromExcel = exports.importSalesHistory = exports.createStockSnapshot = exports.deleteStockSnapshot = exports.updateVariantStockEndpoint = exports.forceSyncStock = exports.getStockMovements = exports.updateTiendaNubeSku = exports.updateMercadoLibreSku = exports.updateMercadoLibreStockByVariant = exports.updateMercadoLibreStockByItem = exports.updateTiendaNubeStock = exports.syncStockToExternalPlatforms = exports.restoreStockForOrderItem = exports.restoreStockForOrder = exports.deductStockForOrder = exports.isWholesaleStockRestoredForOrder = exports.wholesaleOrderStockCancelRestoreReference = exports.wholesaleOrderStockManualRestoreReference = exports.isMayoristaStockDeductedForWholesale = exports.wholesaleOrderStockReference = exports.updateVariantStock = exports.logStockMovement = void 0;
+exports.importStockGridToDespacho = exports.importStockFromExcel = exports.importSalesHistory = exports.createStockSnapshot = exports.deleteStockSnapshot = exports.updateVariantStockEndpoint = exports.forceSyncStock = exports.getStockMovements = exports.updateTiendaNubeSku = exports.updateMercadoLibreSku = exports.updateMercadoLibreStockByVariant = exports.updateMercadoLibreStockByItem = exports.updateTiendaNubeStock = exports.syncStockToExternalPlatforms = exports.restoreStockForOrderItem = exports.restoreStockForOrder = exports.deductStockForOrder = exports.isWholesaleStockRestoredForOrder = exports.wholesaleOrderStockCancelRestoreReference = exports.wholesaleOrderStockManualRestoreReference = exports.isMayoristaStockDeductedForWholesale = exports.wholesaleOrderStockReference = exports.deductVariantStockForChannelSale = exports.updateVariantStock = exports.logStockMovement = void 0;
 exports.resolveVariantIdForGridCell = resolveVariantIdForGridCell;
 const db_1 = require("../database/db");
 const touchProductUpdatedAt_1 = require("../utils/touchProductUpdatedAt");
@@ -259,6 +259,22 @@ const updateVariantStock = (variantId_1, newStock_1, movementType_1, reference_1
     }
 });
 exports.updateVariantStock = updateVariantStock;
+/** Descuenta stock por venta ML/TN solo si hay unidades suficientes; si no, bloquea sin registrar movimiento. */
+const deductVariantStockForChannelSale = (variantId_1, unitsToDeduct_1, movementType_1, reference_1, ...args_1) => __awaiter(void 0, [variantId_1, unitsToDeduct_1, movementType_1, reference_1, ...args_1], void 0, function* (variantId, unitsToDeduct, movementType, reference, syncExternal = true) {
+    const units = Math.max(0, Math.floor(Number(unitsToDeduct) || 0));
+    if (units <= 0) {
+        return { ok: true, previousStock: 0, newStock: 0, unitsToDeduct: 0 };
+    }
+    const currentStockRow = yield (0, db_1.get)(`SELECT COALESCE(stock, 0) AS stock FROM stocks WHERE variant_id = ?`, [variantId]);
+    const previousStock = Number(currentStockRow === null || currentStockRow === void 0 ? void 0 : currentStockRow.stock) || 0;
+    if (previousStock < units) {
+        return { ok: false, blocked: true, previousStock, unitsToDeduct: units };
+    }
+    const newStock = previousStock - units;
+    const ok = yield (0, exports.updateVariantStock)(variantId, newStock, movementType, reference, syncExternal);
+    return { ok, previousStock, newStock, unitsToDeduct: units };
+});
+exports.deductVariantStockForChannelSale = deductVariantStockForChannelSale;
 // Unidades a descontar por ítem: si sell_as_pack=1, quantity está en packs → multiplicar por mayorista_pack_size
 function unitsToDeductForOrderItem(quantity, sellAsPack, mayoristaPackSize) {
     const packSize = Math.max(1, Number(mayoristaPackSize) || 1);

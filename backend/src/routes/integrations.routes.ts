@@ -184,10 +184,12 @@ router.delete('/:platform/disconnect', disconnectIntegration);
 router.get('/ads/status', authMiddleware, getAdsIntegrationsStatus);
 router.get('/meta-ads/config', authMiddleware, getMetaAdsConfigEndpoint);
 router.put('/meta-ads/config', authMiddleware, saveMetaAdsConfigEndpoint);
+router.post('/meta-ads/config', authMiddleware, saveMetaAdsConfigEndpoint);
 router.delete('/meta-ads/config', authMiddleware, disconnectMetaAdsEndpoint);
 router.get('/meta-ads/campaigns', authMiddleware, marketingAdsAccessMiddleware, getMetaAdsCampaignsEndpoint);
 router.get('/google-ads/config', authMiddleware, getGoogleAdsConfigEndpoint);
 router.put('/google-ads/config', authMiddleware, saveGoogleAdsConfigEndpoint);
+router.post('/google-ads/config', authMiddleware, saveGoogleAdsConfigEndpoint);
 router.delete('/google-ads/config', authMiddleware, disconnectGoogleAdsEndpoint);
 router.get('/google-ads/campaigns', authMiddleware, marketingAdsAccessMiddleware, getGoogleAdsCampaignsEndpoint);
 

@@ -120,7 +120,7 @@ export async function fetchMetaAdsCampaigns(
       acc.conversions += c.conversions;
       return acc;
     },
-    { impressions: 0, clicks: 0, spend: 0, reach: 0, conversions: 0 }
+    { impressions: 0, clicks: 0, spend: 0, reach: 0, conversions: 0, ctr: 0, cpc: 0 }
   );
   summary.ctr = summary.impressions > 0 ? (summary.clicks / summary.impressions) * 100 : 0;
   summary.cpc = summary.clicks > 0 ? summary.spend / summary.clicks : 0;

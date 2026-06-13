@@ -32,6 +32,7 @@ const customers_routes_1 = __importDefault(require("./routes/customers.routes"))
 const transportes_routes_1 = __importDefault(require("./routes/transportes.routes"));
 const price_lists_routes_1 = __importDefault(require("./routes/price_lists.routes"));
 const catalogs_routes_1 = __importDefault(require("./routes/catalogs.routes"));
+const catalogImages_routes_1 = __importDefault(require("./routes/catalogImages.routes"));
 const billing_routes_1 = __importDefault(require("./routes/billing.routes"));
 const afip_routes_1 = __importDefault(require("./routes/afip.routes"));
 const payments_routes_1 = __importDefault(require("./routes/payments.routes"));
@@ -46,6 +47,7 @@ const add_order_item_sell_as_pack_1 = require("./database/add_order_item_sell_as
 const add_order_item_despacho_id_1 = require("./database/add_order_item_despacho_id");
 const add_variant_publications_table_1 = require("./database/add_variant_publications_table");
 const add_external_sku_1 = require("./database/add_external_sku");
+const add_inventory_hidden_to_variants_1 = require("./database/add_inventory_hidden_to_variants");
 const add_mercado_libre_item_id_1 = require("./database/add_mercado_libre_item_id");
 const add_customer_direct_1 = require("./database/add_customer_direct");
 const add_customer_cuit_1 = require("./database/add_customer_cuit");
@@ -74,6 +76,7 @@ const add_lupo_stock_webhook_config_table_1 = require("./database/add_lupo_stock
 const add_variant_luposhop_stock_table_1 = require("./database/add_variant_luposhop_stock_table");
 const add_order_created_by_1 = require("./database/add_order_created_by");
 const add_order_matrix_import_label_1 = require("./database/add_order_matrix_import_label");
+const add_order_notes_1 = require("./database/add_order_notes");
 const add_user_tasks_table_1 = require("./database/add_user_tasks_table");
 const add_company_finance_table_1 = require("./database/add_company_finance_table");
 const add_company_finance_fixed_expenses_table_1 = require("./database/add_company_finance_fixed_expenses_table");
@@ -158,6 +161,7 @@ app.use('/api/customers', customers_routes_1.default);
 app.use('/api/transportes', transportes_routes_1.default);
 app.use('/api/price-lists', price_lists_routes_1.default);
 app.use('/api/catalogs', catalogs_routes_1.default);
+app.use('/api/catalog-images', catalogImages_routes_1.default);
 app.use('/api/afip', afip_routes_1.default);
 app.use('/api/billing', billing_routes_1.default);
 app.use('/api/payments', payments_routes_1.default);
@@ -197,6 +201,7 @@ function initDatabase() {
                 yield (0, add_order_item_despacho_id_1.addOrderItemDespachoId)();
                 yield (0, add_variant_publications_table_1.addVariantPublicationsTable)();
                 yield (0, add_external_sku_1.addExternalSkuToVariants)();
+                yield (0, add_inventory_hidden_to_variants_1.addInventoryHiddenToVariants)();
                 yield (0, add_mercado_libre_item_id_1.addMercadoLibreItemIdToVariants)();
                 yield (0, add_customer_direct_1.addCustomerDirect)();
                 yield (0, add_customer_cuit_1.addCustomerCuit)();
@@ -225,6 +230,7 @@ function initDatabase() {
                 yield (0, add_variant_luposhop_stock_table_1.addVariantLuposhopStockTable)();
                 yield (0, add_order_created_by_1.addOrderCreatedBy)();
                 yield (0, add_order_matrix_import_label_1.addOrderMatrixImportLabel)();
+                yield (0, add_order_notes_1.addOrderNotes)();
                 yield (0, add_user_tasks_table_1.addUserTasksTable)();
                 yield (0, add_company_finance_table_1.addCompanyFinanceTable)();
                 yield (0, add_company_finance_fixed_expenses_table_1.addCompanyFinanceFixedExpensesTable)();

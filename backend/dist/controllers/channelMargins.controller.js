@@ -8,8 +8,12 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getChannelMargins = void 0;
+exports.exportChannelMarginsXlsx = exports.getChannelMargins = void 0;
+const exceljs_1 = __importDefault(require("exceljs"));
 const db_1 = require("../database/db");
 const integrations_controller_1 = require("./integrations.controller");
 const channelMarginUtils_1 = require("../utils/channelMarginUtils");
@@ -85,14 +89,14 @@ function loadPublicationLinks(variantIds) {
         return map;
     });
 }
-/** GET /integrations/channel-margins — una fila por artículo (producto padre). */
-const getChannelMargins = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d;
-    try {
-        const search = String(req.query.search || '').trim();
-        const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
-        const limit = Math.min(100, Math.max(10, parseInt(String(req.query.limit || '50'), 10) || 50));
-        const channel = String(req.query.channel || 'all').toLowerCase();
+function computeChannelMargins() {
+    return __awaiter(this, arguments, void 0, function* (opts = {}) {
+        var _a, _b, _c, _d;
+        const search = String(opts.search || '').trim();
+        const page = Math.max(1, parseInt(String(opts.page || '1'), 10) || 1);
+        const limit = Math.min(100, Math.max(10, parseInt(String(opts.limit || '50'), 10) || 50));
+        const channel = String(opts.channel || 'all').toLowerCase();
+        const paginate = opts.paginate !== false;
         const offset = (page - 1) * limit;
         const channelWhere = variantChannelWhere(channel);
         const searchWhere = search
@@ -108,42 +112,42 @@ const getChannelMargins = (req, res) => __awaiter(void 0, void 0, void 0, functi
        WHERE 1=1 ${channelWhere} ${searchWhere}`;
         const countRow = (yield (0, db_1.get)(`SELECT COUNT(DISTINCT p.id) AS total ${joinFrom}`, searchParams));
         const total = Number((_a = countRow === null || countRow === void 0 ? void 0 : countRow.total) !== null && _a !== void 0 ? _a : 0);
-        const productRows = (yield (0, db_1.query)(`SELECT p.id AS product_id, p.name AS product_name, p.sku AS base_sku,
+        const productQuery = `SELECT p.id AS product_id, p.name AS product_name, p.sku AS base_sku,
               COUNT(DISTINCT pv.id) AS variant_count
        ${joinFrom}
        GROUP BY p.id, p.name, p.sku
-       ORDER BY p.name
-       LIMIT ? OFFSET ?`, [...searchParams, limit, offset]));
+       ORDER BY p.name${paginate ? ' LIMIT ? OFFSET ?' : ''}`;
+        const productRows = (yield (0, db_1.query)(productQuery, paginate ? [...searchParams, limit, offset] : searchParams));
         const fobInfo = yield (0, channelMarginUtils_1.resolveFobPriceList)();
-        const tnPreset = (0, channelMarginUtils_1.resolveTnFeePreset)(String(req.query.tnFeePreset || ''));
+        const tnPreset = (0, channelMarginUtils_1.resolveTnFeePreset)(String(opts.tnFeePreset || ''));
         if (productRows.length === 0) {
-            return res.json({
+            return {
                 config: buildConfigResponse(fobInfo, tnPreset),
                 total,
-                page,
-                limit,
+                page: paginate ? page : 1,
+                limit: paginate ? limit : total,
                 rows: [],
-            });
+            };
         }
         const productIds = productRows.map((p) => p.product_id);
         const placeholders = productIds.map(() => '?').join(',');
         const linkedVariantRows = (yield (0, db_1.query)(`SELECT pv.id AS variant_id, p.id AS product_id, pv.sku,
-              c.name AS color_name, s.size_code,
-              p.mercado_libre_id, pv.mercado_libre_item_id, pv.mercado_libre_variant_id,
-              p.tienda_nube_id, pv.tienda_nube_variant_id
-       FROM product_variants pv
-       JOIN product_colors pc ON pc.id = pv.product_color_id
-       JOIN products p ON p.id = pc.product_id
-       JOIN colors c ON c.id = pc.color_id
-       JOIN sizes s ON s.id = pv.size_id
-       WHERE p.id IN (${placeholders}) ${channelWhere}
-       ORDER BY p.id, s.size_code, c.name`, productIds));
+            c.name AS color_name, s.size_code,
+            p.mercado_libre_id, pv.mercado_libre_item_id, pv.mercado_libre_variant_id,
+            p.tienda_nube_id, pv.tienda_nube_variant_id
+     FROM product_variants pv
+     JOIN product_colors pc ON pc.id = pv.product_color_id
+     JOIN products p ON p.id = pc.product_id
+     JOIN colors c ON c.id = pc.color_id
+     JOIN sizes s ON s.id = pv.size_id
+     WHERE p.id IN (${placeholders}) ${channelWhere}
+     ORDER BY p.id, s.size_code, c.name`, productIds));
         const allVariantRows = (yield (0, db_1.query)(`SELECT pv.id AS variant_id, p.id AS product_id
-       FROM product_variants pv
-       JOIN product_colors pc ON pc.id = pv.product_color_id
-       JOIN products p ON p.id = pc.product_id
-       WHERE p.id IN (${placeholders})
-       ORDER BY p.id, pv.sku`, productIds));
+     FROM product_variants pv
+     JOIN product_colors pc ON pc.id = pv.product_color_id
+     JOIN products p ON p.id = pc.product_id
+     WHERE p.id IN (${placeholders})
+     ORDER BY p.id, pv.sku`, productIds));
         const allVariantIdsByProduct = new Map();
         for (const v of allVariantRows) {
             if (!allVariantIdsByProduct.has(v.product_id))
@@ -258,7 +262,7 @@ const getChannelMargins = (req, res) => __awaiter(void 0, void 0, void 0, functi
         }
         const mlListingFees = new Map();
         if ((mlToken === null || mlToken === void 0 ? void 0 : mlToken.access_token) && mlMarginJobs.length > 0) {
-            yield (0, channelMarginFetch_1.runPool)(mlMarginJobs, 8, (job) => __awaiter(void 0, void 0, void 0, function* () {
+            yield (0, channelMarginFetch_1.runPool)(mlMarginJobs, 8, (job) => __awaiter(this, void 0, void 0, function* () {
                 const fee = yield (0, channelMarginUtils_1.fetchListingSaleFeeAmount)(mlToken.access_token, job.item, job.priceML, feeCache);
                 mlListingFees.set(job.productId, fee);
             }));
@@ -272,13 +276,30 @@ const getChannelMargins = (req, res) => __awaiter(void 0, void 0, void 0, functi
                 row.ml = Object.assign(Object.assign({}, buildChannelSlice(job.priceML, totalMlFee, row.fob)), { feeListing: listingFee, feePayment: paymentCpt, linked: true });
             }
         }
-        res.json({
+        return {
             config: buildConfigResponse(fobInfo, tnPreset),
             total,
-            page,
-            limit,
+            page: paginate ? page : 1,
+            limit: paginate ? limit : total,
             rows: outRows,
+        };
+    });
+}
+function numOrBlank(v) {
+    return v != null && Number.isFinite(v) ? v : '';
+}
+/** GET /integrations/channel-margins â€” una fila por artÃ­culo (producto padre). */
+const getChannelMargins = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const result = yield computeChannelMargins({
+            search: String(req.query.search || ''),
+            channel: String(req.query.channel || 'all'),
+            tnFeePreset: String(req.query.tnFeePreset || ''),
+            page: parseInt(String(req.query.page || '1'), 10) || 1,
+            limit: parseInt(String(req.query.limit || '50'), 10) || 50,
+            paginate: true,
         });
+        res.json(result);
     }
     catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
@@ -287,6 +308,122 @@ const getChannelMargins = (req, res) => __awaiter(void 0, void 0, void 0, functi
     }
 });
 exports.getChannelMargins = getChannelMargins;
+/** GET /integrations/channel-margins/export â€” Excel con todos los artÃ­culos (respeta filtros). */
+const exportChannelMarginsXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
+    try {
+        const result = yield computeChannelMargins({
+            search: String(req.query.search || ''),
+            channel: String(req.query.channel || 'all'),
+            tnFeePreset: String(req.query.tnFeePreset || ''),
+            paginate: false,
+        });
+        const wb = new exceljs_1.default.Workbook();
+        wb.creator = 'LupoHub';
+        wb.created = new Date();
+        const ws = wb.addWorksheet('Margenes', {
+            views: [{ state: 'frozen', ySplit: 3 }],
+        });
+        ws.mergeCells('A1:P1');
+        ws.getCell('A1').value = 'Margenes por canal - LupoHub';
+        ws.getCell('A1').font = { bold: true, size: 14 };
+        ws.mergeCells('A2:P2');
+        ws.getCell('A2').value =
+            `FOB: ${result.config.fobListName || 'sin lista'} | TN: ${result.config.tnFeePresetLabel} | ML CPT: ${result.config.mlPaymentCptPercent}% | Generado: ${new Date().toLocaleString('es-AR')}`;
+        const headers = [
+            'SKU',
+            'Artículo',
+            'Variantes',
+            'FOB',
+            'ML Precio',
+            'ML Comisión',
+            'ML Com. venta',
+            'ML CPT cobro',
+            'ML Ganancia',
+            'ML Margen %',
+            'TN Precio',
+            'TN Comisión',
+            'TN Tasas',
+            'TN CPT',
+            'TN Ganancia',
+            'TN Margen %',
+        ];
+        const headerRow = ws.getRow(3);
+        headers.forEach((h, i) => {
+            const cell = headerRow.getCell(i + 1);
+            cell.value = h;
+            cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF334155' } };
+            cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        });
+        headerRow.height = 22;
+        for (const r of result.rows) {
+            ws.addRow([
+                r.baseSku,
+                r.productName,
+                r.variantCount,
+                numOrBlank(r.fob),
+                ((_a = r.ml) === null || _a === void 0 ? void 0 : _a.linked) && r.ml.price > 0 ? r.ml.price : '',
+                ((_b = r.ml) === null || _b === void 0 ? void 0 : _b.linked) && r.ml.price > 0 ? r.ml.fee : '',
+                ((_c = r.ml) === null || _c === void 0 ? void 0 : _c.feeListing) != null ? r.ml.feeListing : '',
+                ((_d = r.ml) === null || _d === void 0 ? void 0 : _d.feePayment) != null ? r.ml.feePayment : '',
+                numOrBlank((_e = r.ml) === null || _e === void 0 ? void 0 : _e.margin),
+                numOrBlank((_f = r.ml) === null || _f === void 0 ? void 0 : _f.marginPercent),
+                ((_g = r.tn) === null || _g === void 0 ? void 0 : _g.linked) && r.tn.price > 0 ? r.tn.price : '',
+                ((_h = r.tn) === null || _h === void 0 ? void 0 : _h.linked) && r.tn.price > 0 ? r.tn.fee : '',
+                ((_j = r.tn) === null || _j === void 0 ? void 0 : _j.feeRate) != null ? r.tn.feeRate : '',
+                ((_k = r.tn) === null || _k === void 0 ? void 0 : _k.feeCpt) != null ? r.tn.feeCpt : '',
+                numOrBlank((_l = r.tn) === null || _l === void 0 ? void 0 : _l.margin),
+                numOrBlank((_m = r.tn) === null || _m === void 0 ? void 0 : _m.marginPercent),
+            ]);
+        }
+        ws.columns = [
+            { width: 14 },
+            { width: 36 },
+            { width: 10 },
+            { width: 12 },
+            { width: 12 },
+            { width: 12 },
+            { width: 12 },
+            { width: 12 },
+            { width: 12 },
+            { width: 11 },
+            { width: 12 },
+            { width: 12 },
+            { width: 12 },
+            { width: 10 },
+            { width: 12 },
+            { width: 11 },
+        ];
+        const moneyCols = [4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15];
+        for (let rowIdx = 4; rowIdx <= ws.rowCount; rowIdx++) {
+            for (const col of moneyCols) {
+                const cell = ws.getRow(rowIdx).getCell(col);
+                if (typeof cell.value === 'number') {
+                    cell.numFmt = '#,##0.00';
+                }
+            }
+            const pctCell = ws.getRow(rowIdx).getCell(10);
+            if (typeof pctCell.value === 'number')
+                pctCell.numFmt = '0.0"%"';
+            const pctTnCell = ws.getRow(rowIdx).getCell(16);
+            if (typeof pctTnCell.value === 'number')
+                pctTnCell.numFmt = '0.0"%"';
+        }
+        const buf = yield wb.xlsx.writeBuffer();
+        const dateTag = new Date().toISOString().slice(0, 10);
+        const filename = `margenes_precios_${dateTag}.xlsx`;
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.send(Buffer.from(buf));
+    }
+    catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error('[exportChannelMarginsXlsx]', msg);
+        res.status(500).json({ message: 'Error exportando márgenes', detail: msg });
+    }
+});
+exports.exportChannelMarginsXlsx = exportChannelMarginsXlsx;
 function buildConfigResponse(fobInfo, tnPreset) {
     const ivaPercent = Math.round(((0, channelMarginUtils_1.getIvaMultiplier)() - 1) * 10000) / 100;
     return {

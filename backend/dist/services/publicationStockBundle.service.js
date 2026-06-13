@@ -275,18 +275,37 @@ function deductStockForBundleListing(bundle, quantitySold, movementType, referen
         const qty = Math.max(0, Math.floor(Number(quantitySold) || 0));
         if (qty <= 0 || !bundle.items.length)
             return { ok: true, lines: [] };
-        const { updateVariantStock } = yield Promise.resolve().then(() => __importStar(require('../controllers/stock.controller')));
+        const { deductVariantStockForChannelSale } = yield Promise.resolve().then(() => __importStar(require('../controllers/stock.controller')));
         const lines = [];
+        for (const it of bundle.items) {
+            const units = qty * Math.max(1, it.unitsPerSale);
+            const row = yield (0, db_1.get)(`SELECT COALESCE(stock, 0) AS stock FROM stocks WHERE variant_id = ?`, [it.variantId]);
+            const current = Number(row === null || row === void 0 ? void 0 : row.stock) || 0;
+            if (current < units) {
+                return {
+                    ok: false,
+                    blocked: true,
+                    lines: [
+                        `BLOQUEADO: ${it.sku || it.variantId} stock ${current} < ${units} requeridos (${qty} pack × ${it.unitsPerSale} ${it.colorName || ''})`
+                    ]
+                };
+            }
+        }
         let allOk = true;
         for (const it of bundle.items) {
             const units = qty * Math.max(1, it.unitsPerSale);
             const row = yield (0, db_1.get)(`SELECT COALESCE(stock, 0) AS stock FROM stocks WHERE variant_id = ?`, [it.variantId]);
             const current = Number(row === null || row === void 0 ? void 0 : row.stock) || 0;
-            const newStock = Math.max(0, current - units);
-            const ok = yield updateVariantStock(it.variantId, newStock, movementType, reference, true);
-            if (!ok)
+            const channelType = movementType === 'VENTA_MERCADO_LIBRE' || movementType === 'VENTA_TIENDA_NUBE'
+                ? movementType
+                : 'VENTA_MERCADO_LIBRE';
+            const result = yield deductVariantStockForChannelSale(it.variantId, units, channelType, reference, true);
+            if (result.blocked || !result.ok) {
                 allOk = false;
-            lines.push(`${it.sku || it.variantId}: -${units} (${qty} pack × ${it.unitsPerSale} ${it.colorName || ''}) ${current}→${newStock}`);
+                lines.push(`BLOQUEADO: ${it.sku || it.variantId}: stock insuficiente (${current} < ${units})`);
+                continue;
+            }
+            lines.push(`${it.sku || it.variantId}: -${units} (${qty} pack × ${it.unitsPerSale} ${it.colorName || ''}) ${result.previousStock}→${result.newStock}`);
         }
         return { ok: allOk, lines };
     });

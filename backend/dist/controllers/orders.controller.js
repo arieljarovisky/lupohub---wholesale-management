@@ -65,6 +65,14 @@ function getProductIdForVariant(variantId) {
         return (row === null || row === void 0 ? void 0 : row.product_id) || null;
     });
 }
+function normalizeOrderNotes(raw) {
+    if (raw == null)
+        return null;
+    const t = String(raw).trim();
+    if (!t)
+        return null;
+    return t.slice(0, 200);
+}
 /** ¿La factura vigente del pedido sigue siendo la misma que anuló esta NC total? (snapshot voided_* = invoice actual). */
 function totalCreditNoteStillVoidsCurrentInvoice(invoice, cn) {
     var _a, _b;
@@ -680,6 +688,7 @@ const getOrders = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
                 archived: !!(order.archived),
                 remitoNumber: order.remito_number != null ? Number(order.remito_number) : undefined,
                 matrixImportLabel: order.matrix_import_label ? String(order.matrix_import_label) : undefined,
+                notes: order.notes ? String(order.notes) : undefined,
                 items: itemsByOrderId[order.id] || [],
                 invoice: inv !== null && inv !== void 0 ? inv : undefined,
                 creditNotesCount: (_j = creditNotesCountByOrderId[order.id]) !== null && _j !== void 0 ? _j : 0,
@@ -714,7 +723,7 @@ function buildPersistedOrderResponse(orderId, newOrder, despachoWarnings) {
     return __awaiter(this, void 0, void 0, function* () {
         var _a, _b, _c, _d, _e;
         const created = yield (0, db_1.get)(`SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
-            o.created_by, o.matrix_import_label, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
+            o.created_by, o.matrix_import_label, o.notes, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
      FROM orders o
      LEFT JOIN users cu ON cu.id = o.created_by
      LEFT JOIN users su ON su.id = o.seller_id
@@ -777,6 +786,7 @@ function buildPersistedOrderResponse(orderId, newOrder, despachoWarnings) {
             matrixImportLabel: created.matrix_import_label
                 ? String(created.matrix_import_label)
                 : undefined,
+            notes: created.notes ? String(created.notes) : undefined,
             despachoWarnings,
         };
     });
@@ -827,6 +837,7 @@ function persistNewWholesaleOrder(newOrder, user, explicitOrderId) {
         const matrixImportLabelForSql = matrixImportLabelRaw != null && String(matrixImportLabelRaw).trim()
             ? String(matrixImportLabelRaw).trim().slice(0, 120)
             : null;
+        const notesForSql = normalizeOrderNotes(newOrder.notes);
         const skippedNoVariant = [];
         const despachoWarnings = [];
         const preparedRows = [];
@@ -883,7 +894,7 @@ function persistNewWholesaleOrder(newOrder, user, explicitOrderId) {
         const conn = yield db_1.pool.getConnection();
         try {
             yield conn.beginTransaction();
-            yield conn.execute(`INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact, created_by, matrix_import_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [orderId, newOrder.customerId, sellerId, sqlDate, statusToSave, totalRecalculated, paymentStatus, noStockImpact, createdBy, matrixImportLabelForSql]);
+            yield conn.execute(`INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact, created_by, matrix_import_label, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [orderId, newOrder.customerId, sellerId, sqlDate, statusToSave, totalRecalculated, paymentStatus, noStockImpact, createdBy, matrixImportLabelForSql, notesForSql]);
             for (const pr of preparedRows) {
                 for (const alloc of pr.allocations) {
                     if (!alloc.quantity || alloc.quantity <= 0)
@@ -1295,7 +1306,8 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         const sellerId = (_b = updated.sellerId) !== null && _b !== void 0 ? _b : null;
         const paymentStatus = updated.paymentStatus === 'pagado' || updated.paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
         const noStockImpact = updated.noStockImpact === true || updated.no_stock_impact === 1 ? 1 : 0;
-        yield (0, db_1.execute)('UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ?, payment_status = ?, no_stock_impact = ? WHERE id = ?', [updated.customerId, sellerId, sqlDate, updated.status, updated.total, paymentStatus, noStockImpact, id]);
+        const notesForSql = normalizeOrderNotes(updated.notes);
+        yield (0, db_1.execute)('UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ?, payment_status = ?, no_stock_impact = ?, notes = ? WHERE id = ?', [updated.customerId, sellerId, sqlDate, updated.status, updated.total, paymentStatus, noStockImpact, notesForSql, id]);
         yield (0, db_1.execute)("DELETE FROM order_items WHERE order_id = ?", [id]);
         for (const item of updated.items) {
             let variantId = item.variantId;
@@ -1334,7 +1346,7 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             }
         }
         const created = yield (0, db_1.get)(`SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
-              o.created_by, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
+              o.created_by, o.notes, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
        FROM orders o
        LEFT JOIN users cu ON cu.id = o.created_by
        LEFT JOIN users su ON su.id = o.seller_id
@@ -1393,6 +1405,7 @@ const updateOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             items: itemsMapped,
             paymentStatus: mapPaymentStatus(created),
             noStockImpact: !!created.no_stock_impact,
+            notes: created.notes ? String(created.notes) : undefined,
             despachoWarnings
         });
     }

@@ -512,11 +512,25 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
         }
         const normalizeDocType = (tipo, detalle) => (0, ledgerDocType_1.normalizeLedgerDocType)(tipo, detalle);
         const maxLineOrder = entries.reduce((m, e) => Math.max(m, Number(e.line_order || 0)), 0);
+        const invoiceByOrderId = new Map();
+        for (const inv of invoiceRows) {
+            const orderId = String(inv.order_id || '');
+            if (!orderId)
+                continue;
+            const agipRet = Number(inv.agip_ret_per || 0);
+            invoiceByOrderId.set(orderId, {
+                invoiceId: String(inv.id || ''),
+                numero: formatAfipComprobanteNumero(Number(inv.punto_venta || 0), Number(inv.cbte_desde || 0)),
+                agipRetPer: agipRet,
+                importeConIibb: (0, orderPricing_1.invoiceLedgerImporte)(Number(inv.total || 0), agipRet)
+            });
+        }
         const orderSaldoAsEntries = orderSaldoRows.filter((ord) => movementOnOrAfterOpening(ord.order_date)).map((ord, idx) => {
             const residual = Math.round(Number(ord.residual || 0) * 100) / 100;
+            const orderId = String(ord.order_id || '');
             const numero = ord.remito_number != null && Number(ord.remito_number) > 0
                 ? String(Number(ord.remito_number))
-                : String(ord.order_id || '').slice(0, 12);
+                : orderId.slice(0, 12);
             return {
                 lineOrder: maxLineOrder + 50000 + idx,
                 lineDate: ord.order_date,
@@ -526,8 +540,9 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 vto: null,
                 importe: residual > 0 ? residual : null,
                 saldo: null,
-                detalle: `Pedido ${ord.order_id || ''} · Saldo pendiente (sin factura)`,
+                detalle: `Pedido ${orderId} · Saldo pendiente (sin factura)`,
                 paginaPdf: null,
+                orderId: orderId || null,
                 source: 'system'
             };
         });
@@ -538,6 +553,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
             const importe = (0, orderPricing_1.invoiceLedgerImporte)(Number(inv.total || 0), agipRet);
             const numero = formatAfipComprobanteNumero(Number(inv.punto_venta || 0), Number(inv.cbte_desde || 0));
             const lineDate = inv.invoice_created_at || inv.line_date || inv.order_date;
+            const orderId = String(inv.order_id || '');
             return {
                 lineOrder: maxLineOrder + 60000 + idx,
                 lineDate,
@@ -547,8 +563,18 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 vto: null,
                 importe: importe > 0 ? importe : null,
                 saldo: null,
-                detalle: `Pedido ${inv.order_id || ''} · Factura AFIP LupoHub`,
+                detalle: `Pedido ${orderId} · Factura AFIP LupoHub`,
                 paginaPdf: null,
+                orderId: orderId || null,
+                invoiceId: String(inv.id || '') || null,
+                facLinks: {
+                    orderId: orderId || null,
+                    invoiceId: String(inv.id || '') || null,
+                    invoiceNumero: numero,
+                    agipRetPer: agipRet > 0.005 ? Math.round(agipRet * 100) / 100 : null,
+                    importeConIibb: importe > 0 ? importe : null,
+                    voidedForReinvoice: false
+                },
                 source: 'system'
             };
         });
@@ -558,19 +584,38 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
             Number(cn.voided_invoice_cbte_desde) > 0 &&
             ledgerMovementVisibleAfterOpening(openingBalanceDate, cn.order_date, cn.created_at))
             .map((cn, idx) => {
+            var _a, _b, _c;
             const importe = (0, orderPricing_1.ncLedgerImporte)(Number(cn.amount_credited || 0));
             const numero = formatAfipComprobanteNumero(Number(cn.voided_invoice_punto_venta || 0), Number(cn.voided_invoice_cbte_desde || 0));
+            const pedidoFecha = cn.order_date ? (0, multimediaHistorialExcel_1.sqlDateToDisplay)(cn.order_date) : '';
+            const detallePedido = pedidoFecha ? ` · pedido ${pedidoFecha}` : '';
+            const orderId = String(cn.order_id || '');
+            const issuedInv = orderId ? invoiceByOrderId.get(orderId) : undefined;
             return {
                 lineOrder: maxLineOrder + 54500 + idx,
-                lineDate: cn.order_date || cn.created_at,
+                /** Misma fecha que la NC/reemisión para agrupar arriba en el historial (no la fecha del pedido). */
+                lineDate: cn.created_at,
                 tipo: 'FAC',
                 numero,
                 edc: null,
                 vto: null,
                 importe: importe > 0 ? importe : null,
                 saldo: null,
-                detalle: `Pedido ${cn.order_id || ''} · Factura AFIP LupoHub`,
+                detalle: `Pedido ${orderId} · Factura anulada ${numero} (reemisión IIBB${detallePedido})`,
                 excluirDeSaldo: true,
+                voidedForReinvoice: true,
+                orderId: orderId || null,
+                facLinks: {
+                    orderId: orderId || null,
+                    invoiceId: (_a = issuedInv === null || issuedInv === void 0 ? void 0 : issuedInv.invoiceId) !== null && _a !== void 0 ? _a : null,
+                    invoiceNumero: (_b = issuedInv === null || issuedInv === void 0 ? void 0 : issuedInv.numero) !== null && _b !== void 0 ? _b : null,
+                    voidedInvoiceNumero: numero,
+                    agipRetPer: issuedInv && issuedInv.agipRetPer > 0.005
+                        ? Math.round(issuedInv.agipRetPer * 100) / 100
+                        : null,
+                    importeConIibb: (_c = issuedInv === null || issuedInv === void 0 ? void 0 : issuedInv.importeConIibb) !== null && _c !== void 0 ? _c : null,
+                    voidedForReinvoice: true
+                },
                 paginaPdf: null,
                 source: 'system'
             };
@@ -578,9 +623,26 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
         const creditNoteAsEntries = creditNoteRows
             .filter((cn) => ledgerMovementVisibleAfterOpening(openingBalanceDate, cn.created_at))
             .map((cn, idx) => {
+            var _a, _b, _c;
             const importe = (0, orderPricing_1.ncLedgerImporte)(Number(cn.amount_credited || 0));
-            const superseded = !!Number(cn.superseded_by_reinvoice);
+            const reemision = !!Number(cn.superseded_by_reinvoice);
             const numero = formatAfipComprobanteNumero(Number(cn.punto_venta || 0), Number(cn.cbte_desde || 0));
+            const voidedInvoiceNumero = cn.voided_invoice_cbte_desde != null && Number(cn.voided_invoice_cbte_desde) > 0
+                ? formatAfipComprobanteNumero(Number(cn.voided_invoice_punto_venta || 0), Number(cn.voided_invoice_cbte_desde))
+                : null;
+            const issuedInv = cn.order_id ? invoiceByOrderId.get(String(cn.order_id)) : undefined;
+            const ncLinks = voidedInvoiceNumero || issuedInv
+                ? {
+                    voidedInvoiceNumero,
+                    issuedInvoiceNumero: (_a = issuedInv === null || issuedInv === void 0 ? void 0 : issuedInv.numero) !== null && _a !== void 0 ? _a : null,
+                    issuedInvoiceIibb: issuedInv && issuedInv.agipRetPer > 0.005
+                        ? Math.round(issuedInv.agipRetPer * 100) / 100
+                        : null,
+                    issuedInvoiceImporte: (_b = issuedInv === null || issuedInv === void 0 ? void 0 : issuedInv.importeConIibb) !== null && _b !== void 0 ? _b : null,
+                    reissueWithIibb: reemision,
+                    orderId: (_c = cn.order_id) !== null && _c !== void 0 ? _c : null
+                }
+                : undefined;
             return {
                 lineOrder: maxLineOrder + 55000 + idx,
                 lineDate: cn.created_at,
@@ -590,9 +652,12 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 vto: null,
                 importe: importe > 0 ? importe : null,
                 saldo: null,
-                detalle: `Pedido ${cn.order_id || ''} · NC AFIP LupoHub`,
-                excluirDeSaldo: superseded,
+                detalle: reemision
+                    ? `Pedido ${cn.order_id || ''} · NC AFIP LupoHub (reemisión IIBB)`
+                    : `Pedido ${cn.order_id || ''} · NC AFIP LupoHub`,
                 paginaPdf: null,
+                orderId: cn.order_id ? String(cn.order_id) : null,
+                ncLinks,
                 source: 'system'
             };
         });
@@ -608,6 +673,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
             const detalleExtra = m.notes ? String(m.notes).trim() : '';
             const pdfNote = m.pdf_path ? ' · PDF adjunto' : '';
             const pedidoRef = m.ref_order_id ? `Pedido ${m.ref_order_id}` : 'Sin pedido';
+            const orderId = m.ref_order_id ? String(m.ref_order_id) : null;
             return {
                 lineOrder: maxLineOrder + 70000 + idx,
                 lineDate: m.fecha || m.created_at,
@@ -620,6 +686,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 detalle: `${pedidoRef} · Comprobante manual${pdfNote}${detalleExtra ? ` · ${detalleExtra}` : ''}`,
                 paginaPdf: null,
                 manualComprobanteId: m.id,
+                orderId,
                 source: 'system'
             };
         });

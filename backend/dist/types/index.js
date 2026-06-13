@@ -7,6 +7,7 @@ var Role;
     Role["SELLER"] = "SELLER";
     Role["WAREHOUSE"] = "WAREHOUSE";
     Role["CUSTOMER"] = "CUSTOMER";
+    Role["MARKETING"] = "MARKETING";
 })(Role || (exports.Role = Role = {}));
 var OrderStatus;
 (function (OrderStatus) {

@@ -189,6 +189,27 @@ function resolveMlOrderItemSku(accessToken, mlItemId, mlVariationId) {
         return '';
     });
 }
+/** Referencia por línea de orden ML (evita omitir ítems restantes si falló el procesamiento parcial). */
+function mlOrderLineReference(orderId, mlItemId, mlVariationId, itemIndex) {
+    const item = mlItemId != null && String(mlItemId).trim() !== '' ? String(mlItemId).trim() : 'item';
+    const variation = mlVariationId != null && String(mlVariationId).trim() !== '' ? String(mlVariationId).trim() : '0';
+    return `Orden ML: ${orderId} · ${item}:${variation}:${itemIndex}`;
+}
+/** True si la línea ya generó movimiento (formato nuevo por línea o legacy por variante). */
+function isMlOrderLineAlreadyProcessed(orderId, lineRef, variantId) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const byLine = yield (0, db_1.get)(`SELECT id FROM stock_movements WHERE movement_type = 'VENTA_MERCADO_LIBRE' AND reference = ? LIMIT 1`, [lineRef]);
+        if (byLine)
+            return true;
+        if (variantId) {
+            const legacyRef = `Orden ML: ${orderId}`;
+            const byLegacyVariant = yield (0, db_1.get)(`SELECT id FROM stock_movements WHERE movement_type = 'VENTA_MERCADO_LIBRE' AND reference = ? AND variant_id = ? LIMIT 1`, [legacyRef, variantId]);
+            if (byLegacyVariant)
+                return true;
+        }
+        return false;
+    });
+}
 /** Si llega un ID de catálogo (ej. URL /p/MLAU...), intentar resolver a item IDs reales. */
 function resolveMercadoLibreCatalogProductItems(productId, accessToken) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -308,6 +329,26 @@ function resolveMercadoLibreUserProductItems(userProductId, sellerId, accessToke
         }
     });
 }
+/** Una fila por SKU (o color+talle); evita duplicados al agregar varios ítems ML. */
+function dedupeMlVariationRows(rows) {
+    const byKey = new Map();
+    for (const row of rows) {
+        const skuKey = normSkuForMlStockMatch(row.sku);
+        const attrKey = skuKey ||
+            `${normTextForMlStockMatch(row.color)}|${normTextForMlStockMatch(row.size)}`;
+        const key = attrKey || String(row.variationId || '').trim();
+        if (!key)
+            continue;
+        const prev = byKey.get(key);
+        if (!prev) {
+            byKey.set(key, row);
+            continue;
+        }
+        if (!prev.sku && row.sku)
+            byKey.set(key, row);
+    }
+    return Array.from(byKey.values());
+}
 /** Extrae filas de variación desde un ítem ML (con o sin array item.variations). */
 function extractMlVariationsFromItemData(it) {
     var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
@@ -337,7 +378,7 @@ function extractMlVariationsFromItemData(it) {
                 stock: v.available_quantity || 0
             });
         }
-        return out;
+        return dedupeMlVariationRows(out);
     }
     const attrs = Array.isArray(it.attributes) ? it.attributes : [];
     const skuAttr = attrs.find((a) => ((a === null || a === void 0 ? void 0 : a.id) || '').toString().toUpperCase() === 'SELLER_SKU');
@@ -352,7 +393,79 @@ function extractMlVariationsFromItemData(it) {
         size: (sizeAttr ? ((_m = (_l = sizeAttr.value_name) !== null && _l !== void 0 ? _l : sizeAttr.value) !== null && _m !== void 0 ? _m : '') : parsed.size).toString().trim(),
         stock: it.available_quantity || 0
     });
-    return out;
+    return dedupeMlVariationRows(out);
+}
+function normSkuForMlStockMatch(s) {
+    const d = String(s !== null && s !== void 0 ? s : '').replace(/\D/g, '');
+    return (d.replace(/^0+/, '') || '0').toUpperCase();
+}
+function normTextForMlStockMatch(s) {
+    return String(s !== null && s !== void 0 ? s : '')
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+}
+function mlVariationSkuFromApi(v) {
+    var _a, _b, _c, _d;
+    const skuAttr = Array.isArray(v === null || v === void 0 ? void 0 : v.attributes) &&
+        v.attributes.find((a) => ((a === null || a === void 0 ? void 0 : a.id) || '').toString().toUpperCase() === 'SELLER_SKU');
+    const skuFromAttr = skuAttr ? ((_b = (_a = skuAttr.value_name) !== null && _a !== void 0 ? _a : skuAttr.value) !== null && _b !== void 0 ? _b : '').toString().trim() : '';
+    return skuFromAttr || ((_d = (_c = v === null || v === void 0 ? void 0 : v.seller_sku) !== null && _c !== void 0 ? _c : v === null || v === void 0 ? void 0 : v.seller_custom_field) !== null && _d !== void 0 ? _d : '').toString().trim();
+}
+function mlVariationColorSizeFromApi(v) {
+    let color = '';
+    let size = '';
+    ((v === null || v === void 0 ? void 0 : v.attribute_combinations) || []).forEach((attr) => {
+        const id = (attr.id || '').toString().toUpperCase();
+        const name = (attr.value_name || attr.name || '').toString().trim();
+        if (id === 'COLOR' || id === 'COLOUR' || id === 'COR')
+            color = name;
+        if (id === 'SIZE' || id === 'SIZE_TYPE' || id === 'TALLE' || id === 'Talla')
+            size = name;
+    });
+    return { color, size };
+}
+/** Empareja la variación ML correcta (evita usar el stock total del ítem cuando hay varias). */
+function matchMlVariationForVariantLink(variations, link) {
+    if (!variations.length)
+        return null;
+    const varId = link.variationId != null ? String(link.variationId).trim() : '';
+    if (varId) {
+        const byId = variations.find((x) => String(x === null || x === void 0 ? void 0 : x.id) === varId);
+        if (byId)
+            return byId;
+    }
+    const localSku = normSkuForMlStockMatch(link.sku);
+    if (localSku) {
+        const bySku = variations.find((v) => normSkuForMlStockMatch(mlVariationSkuFromApi(v)) === localSku);
+        if (bySku)
+            return bySku;
+    }
+    const colorN = normTextForMlStockMatch(link.color);
+    const sizeN = normTextForMlStockMatch(link.size);
+    if (colorN || sizeN) {
+        const byAttrs = variations.find((v) => {
+            const { color, size } = mlVariationColorSizeFromApi(v);
+            const c = normTextForMlStockMatch(color);
+            const s = normTextForMlStockMatch(size);
+            return (!colorN || c === colorN) && (!sizeN || s === sizeN);
+        });
+        if (byAttrs)
+            return byAttrs;
+    }
+    return null;
+}
+function resolveMlStockForVariantLink(item, link) {
+    var _a;
+    const variations = Array.isArray(item === null || item === void 0 ? void 0 : item.variations) ? item.variations : [];
+    if (!variations.length) {
+        return typeof (item === null || item === void 0 ? void 0 : item.available_quantity) === 'number' ? Number(item.available_quantity) : undefined;
+    }
+    const matched = matchMlVariationForVariantLink(variations, link);
+    if (!matched)
+        return undefined;
+    return Number((_a = matched.available_quantity) !== null && _a !== void 0 ? _a : 0);
 }
 /** ID de producto de catálogo (/p/MLA...) desde el permalink del ítem. */
 function catalogProductIdFromMercadoLibreItem(item) {
@@ -443,21 +556,19 @@ function gatherMercadoLibreItemIdsForAllVariations(opts) {
 /** Agrega variaciones de varias publicaciones ML (todos los colores/talles). */
 function aggregateMercadoLibreVariationsFromItemIds(itemIds, accessToken) {
     return __awaiter(this, void 0, void 0, function* () {
-        const byVariationId = {};
+        const merged = [];
         for (const candidate of itemIds) {
             try {
                 const itemRes = yield axios_1.default.get(`https://api.mercadolibre.com/items/${candidate}?include_attributes=all`, {
                     headers: { Authorization: `Bearer ${accessToken}` }
                 });
-                for (const row of extractMlVariationsFromItemData(itemRes === null || itemRes === void 0 ? void 0 : itemRes.data)) {
-                    byVariationId[row.variationId] = row;
-                }
+                merged.push(...extractMlVariationsFromItemData(itemRes === null || itemRes === void 0 ? void 0 : itemRes.data));
             }
             catch (_a) {
                 // ignorar ítem inválido
             }
         }
-        return Object.values(byVariationId);
+        return dedupeMlVariationRows(merged);
     });
 }
 /** Publicaciones del mismo vendedor con el mismo título base (un listing por talle/color). */
@@ -696,10 +807,14 @@ const getIntegrationStatus = (req, res) => __awaiter(void 0, void 0, void 0, fun
     try {
         const integrations = yield (0, db_1.query)('SELECT platform, store_id, user_id FROM integrations');
         const tn = integrations.find((i) => i.platform === 'tiendanube');
+        const metaAds = integrations.find((i) => i.platform === 'meta_ads');
+        const googleAds = integrations.find((i) => i.platform === 'google_ads');
         const status = {
             mercadolibre: integrations.find((i) => i.platform === 'mercadolibre') ? true : false,
             tiendanube: !!tn,
             tiendanubeStoreId: ((tn === null || tn === void 0 ? void 0 : tn.store_id) || (tn === null || tn === void 0 ? void 0 : tn.user_id)) || null,
+            metaAds: !!((metaAds === null || metaAds === void 0 ? void 0 : metaAds.access_token) && (metaAds === null || metaAds === void 0 ? void 0 : metaAds.user_id)) || !!(process.env.META_ADS_ACCESS_TOKEN && process.env.META_ADS_ACCOUNT_ID),
+            googleAds: !!((googleAds === null || googleAds === void 0 ? void 0 : googleAds.refresh_token) && (googleAds === null || googleAds === void 0 ? void 0 : googleAds.user_id)) || !!(process.env.GOOGLE_ADS_REFRESH_TOKEN && process.env.GOOGLE_ADS_CUSTOMER_ID),
         };
         res.json(status);
     }
@@ -1755,7 +1870,7 @@ const processTiendaNubeOrder = (orderId) => __awaiter(void 0, void 0, void 0, fu
             console.log(`[TN Order] Orden ${orderId} no está pagada (${order.payment_status}), ignorando`);
             return;
         }
-        const { updateVariantStock } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
+        const { deductVariantStockForChannelSale } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
         let discountedCount = 0;
         for (const item of order.products || []) {
             const tnVariantIdRaw = (_a = item.variant_id) !== null && _a !== void 0 ? _a : item.variantId;
@@ -1769,10 +1884,14 @@ const processTiendaNubeOrder = (orderId) => __awaiter(void 0, void 0, void 0, fu
                 const { findBundleByListing, deductStockForBundleListing } = yield Promise.resolve().then(() => __importStar(require('../services/publicationStockBundle.service')));
                 const bundle = yield findBundleByListing('tiendanube', tnProductId || tnVariantId || '', tnVariantId || '');
                 if ((_c = bundle === null || bundle === void 0 ? void 0 : bundle.items) === null || _c === void 0 ? void 0 : _c.length) {
-                    const { ok, lines } = yield deductStockForBundleListing(bundle, quantity, 'VENTA_TIENDA_NUBE', `Orden TN: ${orderId}`);
-                    if (ok)
+                    const { ok, blocked, lines } = yield deductStockForBundleListing(bundle, quantity, 'VENTA_TIENDA_NUBE', `Orden TN: ${orderId}`);
+                    if (blocked) {
+                        console.warn(`[TN Order] Pack multicolor BLOQUEADO (stock insuficiente) "${bundle.label || bundle.externalProductId}": ${lines.join('; ')}`);
+                    }
+                    else if (ok) {
                         discountedCount++;
-                    console.log(`[TN Order] Pack multicolor "${bundle.label || bundle.externalProductId}": ${lines.join('; ')}`);
+                        console.log(`[TN Order] Pack multicolor "${bundle.label || bundle.externalProductId}": ${lines.join('; ')}`);
+                    }
                     continue;
                 }
             }
@@ -1829,12 +1948,13 @@ const processTiendaNubeOrder = (orderId) => __awaiter(void 0, void 0, void 0, fu
             if (variant === null || variant === void 0 ? void 0 : variant.id) {
                 const tnPack = Math.max(1, Number(variant.tn_pack) || 1);
                 const unitsToDeduct = quantity * tnPack;
-                const currentStock = Number(variant.current_stock) || 0;
-                const newStock = Math.max(0, currentStock - unitsToDeduct);
-                const ok = yield updateVariantStock(variant.id, newStock, 'VENTA_TIENDA_NUBE', `Orden TN: ${orderId}`, true);
-                if (ok) {
+                const result = yield deductVariantStockForChannelSale(variant.id, unitsToDeduct, 'VENTA_TIENDA_NUBE', `Orden TN: ${orderId}`, true);
+                if (result.blocked) {
+                    console.warn(`[TN Order] BLOQUEADO: stock insuficiente variante ${variant.id} (tiene ${result.previousStock}, pide ${result.unitsToDeduct}) orden ${orderId}`);
+                }
+                else if (result.ok) {
                     discountedCount++;
-                    console.log(`[TN Order] Descontado ${unitsToDeduct} un. (${quantity} × pack x${tnPack}) variante ${variant.id}, stock: ${currentStock} -> ${newStock}; actualizado ML y TN`);
+                    console.log(`[TN Order] Descontado ${result.unitsToDeduct} un. (${quantity} × pack x${tnPack}) variante ${variant.id}, stock: ${result.previousStock} -> ${result.newStock}; actualizado ML y TN`);
                 }
                 else {
                     console.error(`[TN Order] No se pudo actualizar stock para variante ${variant.id}`);
@@ -2052,16 +2172,16 @@ const testMercadoLibreOrder = (req, res) => __awaiter(void 0, void 0, void 0, fu
                 message: 'Falta orderId. Ejemplo: POST con body { "orderId": "2000015720058034" } o GET ?orderId=2000015720058034'
             });
         }
-        const ref = `Orden ML: ${orderId}`;
-        const before = yield (0, db_1.get)(`SELECT COUNT(*) AS n FROM stock_movements WHERE movement_type = 'VENTA_MERCADO_LIBRE' AND reference = ?`, [ref]);
+        const refPrefix = `Orden ML: ${orderId}%`;
+        const before = yield (0, db_1.get)(`SELECT COUNT(*) AS n FROM stock_movements WHERE movement_type = 'VENTA_MERCADO_LIBRE' AND reference LIKE ?`, [refPrefix]);
         yield processMercadoLibreOrder(orderId);
-        const after = yield (0, db_1.get)(`SELECT COUNT(*) AS n FROM stock_movements WHERE movement_type = 'VENTA_MERCADO_LIBRE' AND reference = ?`, [ref]);
+        const after = yield (0, db_1.get)(`SELECT COUNT(*) AS n FROM stock_movements WHERE movement_type = 'VENTA_MERCADO_LIBRE' AND reference LIKE ?`, [refPrefix]);
         const beforeN = Number((_e = before === null || before === void 0 ? void 0 : before.n) !== null && _e !== void 0 ? _e : 0);
         const afterN = Number((_f = after === null || after === void 0 ? void 0 : after.n) !== null && _f !== void 0 ? _f : 0);
         const created = Math.max(0, afterN - beforeN);
         return res.json({
             orderId,
-            movementReference: ref,
+            movementReferencePattern: refPrefix,
             movementsBefore: beforeN,
             movementsAfter: afterN,
             createdMovements: created,
@@ -2178,12 +2298,6 @@ const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, 
             }
             throw e;
         }
-        // Idempotencia: evitar descontar dos veces por reintentos/notificaciones repetidas.
-        const alreadyProcessed = yield (0, db_1.get)(`SELECT id FROM stock_movements WHERE movement_type = 'VENTA_MERCADO_LIBRE' AND reference = ? LIMIT 1`, [`Orden ML: ${orderId}`]);
-        if (alreadyProcessed) {
-            console.log(`[ML Order] Orden ${orderId} ya procesada, omitiendo`);
-            return;
-        }
         const mlToken = yield getValidMLToken();
         if (!mlToken)
             return;
@@ -2199,11 +2313,12 @@ const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, 
         }
         // Enviar mensaje de agradecimiento al comprador
         yield sendThankYouMessage(orderId, order, mlToken.access_token);
-        const { updateVariantStock } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
-        for (const item of order.order_items || []) {
+        const { deductVariantStockForChannelSale } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
+        for (const [itemIndex, item] of (order.order_items || []).entries()) {
             const mlItemId = (_a = item.item) === null || _a === void 0 ? void 0 : _a.id;
             const mlVariationId = (_b = item.item) === null || _b === void 0 ? void 0 : _b.variation_id;
             const quantity = item.quantity;
+            const lineRef = mlOrderLineReference(orderId, mlItemId, mlVariationId, itemIndex);
             let itemSku = (((_c = item.item) === null || _c === void 0 ? void 0 : _c.sku) || item.sku || '').toString().trim();
             if (!itemSku) {
                 itemSku = yield resolveMlOrderItemSku(mlToken.access_token, mlItemId, mlVariationId);
@@ -2213,8 +2328,17 @@ const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, 
                 const extVar = (mlVariationId && String(mlVariationId).trim()) || '';
                 const bundle = yield findBundleByListing('mercadolibre', mlItemId, extVar);
                 if ((_d = bundle === null || bundle === void 0 ? void 0 : bundle.items) === null || _d === void 0 ? void 0 : _d.length) {
-                    const { ok, lines } = yield deductStockForBundleListing(bundle, quantity, 'VENTA_MERCADO_LIBRE', `Orden ML: ${orderId}`);
-                    console.log(`[ML Order] Pack multicolor "${bundle.label || bundle.externalProductId}": ${lines.join('; ')}`);
+                    if (yield isMlOrderLineAlreadyProcessed(orderId, lineRef)) {
+                        console.log(`[ML Order] Línea ${itemIndex + 1} de orden ${orderId} ya procesada (pack), omitiendo`);
+                        continue;
+                    }
+                    const { ok, blocked, lines } = yield deductStockForBundleListing(bundle, quantity, 'VENTA_MERCADO_LIBRE', lineRef);
+                    if (blocked) {
+                        console.warn(`[ML Order] Pack multicolor BLOQUEADO (stock insuficiente) "${bundle.label || bundle.externalProductId}": ${lines.join('; ')}`);
+                    }
+                    else if (ok) {
+                        console.log(`[ML Order] Pack multicolor "${bundle.label || bundle.externalProductId}": ${lines.join('; ')}`);
+                    }
                     continue;
                 }
             }
@@ -2227,8 +2351,17 @@ const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, 
                     variant = { id: fromPub.id, current_stock: Number((_e = row === null || row === void 0 ? void 0 : row.current_stock) !== null && _e !== void 0 ? _e : 0), ml_pack: Math.max(1, Number(fromPub.ml_pack) || 1) };
                 }
             }
-            // Fallback legacy: variantes vinculadas por columna pv.mercado_libre_item_id
-            if (!(variant === null || variant === void 0 ? void 0 : variant.id) && mlItemId) {
+            // Priorizar variation_id antes que item_id suelto (publicación con variaciones).
+            if (!(variant === null || variant === void 0 ? void 0 : variant.id) && mlVariationId) {
+                variant = yield (0, db_1.get)(`SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
+           FROM product_variants pv
+           JOIN product_colors pc ON pc.id = pv.product_color_id
+           JOIN products p ON p.id = pc.product_id
+           LEFT JOIN stocks s ON s.variant_id = pv.id
+           WHERE pv.mercado_libre_variant_id = ?`, [mlVariationId]);
+            }
+            // Fallback legacy: publicación propia por variante (sin variation_id en ML).
+            if (!(variant === null || variant === void 0 ? void 0 : variant.id) && mlItemId && !mlVariationId) {
                 variant = yield (0, db_1.get)(`SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
            FROM product_variants pv
            JOIN product_colors pc ON pc.id = pv.product_color_id
@@ -2276,14 +2409,6 @@ const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, 
                     }
                 }
             }
-            if (!(variant === null || variant === void 0 ? void 0 : variant.id) && mlVariationId) {
-                variant = yield (0, db_1.get)(`SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
-           FROM product_variants pv
-           JOIN product_colors pc ON pc.id = pv.product_color_id
-           JOIN products p ON p.id = pc.product_id
-           LEFT JOIN stocks s ON s.variant_id = pv.id
-           WHERE pv.mercado_libre_variant_id = ?`, [mlVariationId]);
-            }
             if (!(variant === null || variant === void 0 ? void 0 : variant.id) && itemSku) {
                 variant = yield (0, db_1.get)(`SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
            FROM product_variants pv
@@ -2319,12 +2444,22 @@ const processMercadoLibreOrder = (orderId) => __awaiter(void 0, void 0, void 0, 
                 }
             }
             if (variant === null || variant === void 0 ? void 0 : variant.id) {
+                if (yield isMlOrderLineAlreadyProcessed(orderId, lineRef, variant.id)) {
+                    console.log(`[ML Order] Línea ${itemIndex + 1} de orden ${orderId} ya procesada, omitiendo variante ${variant.id}`);
+                    continue;
+                }
                 const mlPack = Math.max(1, Number(variant.ml_pack) || 1);
                 const unitsToDeduct = quantity * mlPack;
-                const currentStock = Number(variant.current_stock) || 0;
-                const newStock = Math.max(0, currentStock - unitsToDeduct);
-                yield updateVariantStock(variant.id, newStock, 'VENTA_MERCADO_LIBRE', `Orden ML: ${orderId}`, true);
-                console.log(`[ML Order] Descontado ${unitsToDeduct} un. (${quantity} × pack x${mlPack}) variante ${variant.id}, stock: ${currentStock} -> ${newStock}; actualizado ML y TN`);
+                const result = yield deductVariantStockForChannelSale(variant.id, unitsToDeduct, 'VENTA_MERCADO_LIBRE', lineRef, true);
+                if (result.blocked) {
+                    console.warn(`[ML Order] BLOQUEADO: stock insuficiente variante ${variant.id} (tiene ${result.previousStock}, pide ${result.unitsToDeduct}) orden ${orderId}`);
+                }
+                else if (result.ok) {
+                    console.log(`[ML Order] Descontado ${result.unitsToDeduct} un. (${quantity} × pack x${mlPack}) variante ${variant.id}, stock: ${result.previousStock} -> ${result.newStock}; actualizado ML y TN`);
+                }
+                else {
+                    console.error(`[ML Order] No se pudo actualizar stock para variante ${variant.id} orden ${orderId}`);
+                }
             }
             else if (mlVariationId || itemSku) {
                 console.log(`[ML Order] Variante no encontrada para ML item_id=${mlItemId} variation_id=${mlVariationId} sku=${itemSku}`);
@@ -2805,7 +2940,7 @@ const syncSelectedStockToMercadoLibre = (req, res) => __awaiter(void 0, void 0, 
 exports.syncSelectedStockToMercadoLibre = syncSelectedStockToMercadoLibre;
 /** Obtener stock en ML y TN por variantes (para mostrar en inventario). */
 const getVariantExternalStocks = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c;
     try {
         const variantIds = Array.isArray((_a = req.body) === null || _a === void 0 ? void 0 : _a.variantIds) ? req.body.variantIds.filter((id) => typeof id === 'string' && id.length > 0).slice(0, 100) : [];
         if (variantIds.length === 0) {
@@ -2813,12 +2948,39 @@ const getVariantExternalStocks = (req, res) => __awaiter(void 0, void 0, void 0,
         }
         const placeholders = variantIds.map(() => '?').join(',');
         const rows = yield (0, db_1.query)(`SELECT pv.id AS variant_id,
+              COALESCE(pv.external_sku, pv.sku) AS sku,
+              c.code AS color_code, c.name AS color_name,
+              s.size_code,
               p.mercado_libre_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
               p.tienda_nube_id, pv.tienda_nube_variant_id
        FROM product_variants pv
        JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN colors c ON c.id = pc.color_id
        JOIN products p ON p.id = pc.product_id
+       LEFT JOIN sizes s ON s.id = pv.size_id
        WHERE pv.id IN (${placeholders})`, variantIds);
+        const pubsByVariant = new Map();
+        try {
+            const pubRows = yield (0, db_1.query)(`SELECT variant_id, external_product_id, external_variant_id
+         FROM variant_publications
+         WHERE platform = 'mercadolibre' AND variant_id IN (${placeholders})`, variantIds);
+            for (const pr of pubRows || []) {
+                const vid = String(pr.variant_id || '');
+                const itemId = String(pr.external_product_id || '').trim();
+                if (!vid || !itemId)
+                    continue;
+                if (!pubsByVariant.has(vid))
+                    pubsByVariant.set(vid, []);
+                const extVar = pr.external_variant_id;
+                pubsByVariant.get(vid).push({
+                    itemId,
+                    variationId: extVar != null && String(extVar).trim() !== '' ? String(extVar).trim() : null
+                });
+            }
+        }
+        catch (_d) {
+            /* variant_publications opcional */
+        }
         const stocks = {};
         for (const id of variantIds)
             stocks[id] = {};
@@ -2840,50 +3002,63 @@ const getVariantExternalStocks = (req, res) => __awaiter(void 0, void 0, void 0,
                 }
             }
         }
-        catch (_g) {
+        catch (_e) {
             // tabla aún no existe o error puntual: no rompe ML/TN
         }
         const mlToken = yield getValidMLToken();
         const tnIntegration = yield (0, db_1.get)(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
         if (mlToken === null || mlToken === void 0 ? void 0 : mlToken.access_token) {
-            const mlHeaders = { 'Authorization': `Bearer ${mlToken.access_token}` };
-            const mlItemIds = new Map();
+            const mlHeaders = { Authorization: `Bearer ${mlToken.access_token}` };
+            const mlItemLinks = new Map();
+            const pushMlLink = (itemId, link) => {
+                const id = String(itemId || '').trim();
+                if (!id)
+                    return;
+                if (!mlItemLinks.has(id))
+                    mlItemLinks.set(id, []);
+                mlItemLinks.get(id).push(link);
+            };
             for (const r of rows || []) {
-                const variantId = r.variant_id;
-                const ownItemId = r.mercado_libre_item_id != null && String(r.mercado_libre_item_id).trim() !== ''
-                    ? String(r.mercado_libre_item_id).trim()
-                    : null;
-                const mlItemId = ownItemId || r.mercado_libre_id;
-                const variationId = ownItemId
-                    ? null
-                    : r.mercado_libre_variant_id
-                        ? String(r.mercado_libre_variant_id)
-                        : null;
-                if (!mlItemId)
+                const variantId = String(r.variant_id || '');
+                if (!variantId)
                     continue;
-                if (!mlItemIds.has(mlItemId))
-                    mlItemIds.set(mlItemId, []);
-                mlItemIds.get(mlItemId).push({ variantId, variationId });
-            }
-            for (const [itemId, variants] of mlItemIds) {
-                try {
-                    const itemRes = yield axios_1.default.get(`https://api.mercadolibre.com/items/${itemId}`, { headers: mlHeaders });
-                    const item = itemRes.data;
-                    const variations = item.variations || [];
-                    for (const { variantId, variationId } of variants) {
-                        if (variations.length === 0) {
-                            stocks[variantId].stockML = (_d = item.available_quantity) !== null && _d !== void 0 ? _d : 0;
-                        }
-                        else if (variationId) {
-                            const v = variations.find((x) => String(x.id) === String(variationId));
-                            stocks[variantId].stockML = v ? ((_e = v.available_quantity) !== null && _e !== void 0 ? _e : 0) : undefined;
-                        }
-                        else {
-                            stocks[variantId].stockML = (_f = item.available_quantity) !== null && _f !== void 0 ? _f : 0;
-                        }
+                const baseLink = {
+                    variantId,
+                    variationId: null,
+                    sku: String(r.sku || '').trim(),
+                    color: String(r.color_name || r.color_code || '').trim(),
+                    size: String(r.size_code || '').trim()
+                };
+                const pubs = pubsByVariant.get(variantId) || [];
+                for (const pub of pubs) {
+                    pushMlLink(pub.itemId, Object.assign(Object.assign({}, baseLink), { variationId: pub.variationId }));
+                }
+                if (pubs.length === 0) {
+                    const ownItemId = r.mercado_libre_item_id != null && String(r.mercado_libre_item_id).trim() !== ''
+                        ? String(r.mercado_libre_item_id).trim()
+                        : null;
+                    const mlItemId = ownItemId || String(r.mercado_libre_id || '').trim();
+                    const mlVarId = r.mercado_libre_variant_id != null && String(r.mercado_libre_variant_id).trim() !== ''
+                        ? String(r.mercado_libre_variant_id).trim()
+                        : null;
+                    if (mlItemId) {
+                        pushMlLink(mlItemId, Object.assign(Object.assign({}, baseLink), { variationId: mlVarId }));
                     }
                 }
-                catch (_h) {
+            }
+            for (const [itemId, links] of mlItemLinks) {
+                try {
+                    const itemRes = yield axios_1.default.get(`https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}?include_attributes=all`, { headers: mlHeaders, validateStatus: () => true });
+                    if (itemRes.status !== 200 || !itemRes.data)
+                        continue;
+                    const item = itemRes.data;
+                    for (const link of links) {
+                        const qty = resolveMlStockForVariantLink(item, link);
+                        if (qty !== undefined)
+                            stocks[link.variantId].stockML = qty;
+                    }
+                }
+                catch (_f) {
                     // ignore per-item errors
                 }
             }
@@ -2937,7 +3112,7 @@ const getVariantExternalStocks = (req, res) => __awaiter(void 0, void 0, void 0,
                             stocks[variantId].stockTN = tv.stock;
                     }
                 }
-                catch (_j) {
+                catch (_g) {
                     // ignore per-product errors
                 }
             }
@@ -4803,6 +4978,22 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
             userProductResolveDebug = upResolved.debug;
         }
         const singleItemVariations = extractMlVariationsFromItemData(item);
+        const requestRaw = String(req.params.itemId || '');
+        const requestLooksLikeCatalog = /\/p\/MLA/i.test(requestRaw) ||
+            shouldResolveAsUserProduct ||
+            /^MLAU\d+$/i.test(requestedNormalized);
+        const itemHasVariationArray = Array.isArray(item.variations) && item.variations.length > 0;
+        // Publicación única con item.variations: usar solo ese ítem (evita 4×N duplicados al mezclar hermanos/UP).
+        if (itemHasVariationArray && singleItemVariations.length > 0 && !requestLooksLikeCatalog) {
+            return res.json({
+                variations: singleItemVariations,
+                singleProduct: singleItemVariations.length === 1,
+                itemId: item.id,
+                requestedItemId: requestRaw,
+                resolvedItemId,
+                resolvedFromItemVariationsOnly: true
+            });
+        }
         const allItemIds = yield gatherMercadoLibreItemIdsForAllVariations({
             requestedRaw: String(req.params.itemId || ''),
             requestedNormalized,
@@ -4934,7 +5125,7 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
             });
             if (catalogVariations.length > 1) {
                 return res.json({
-                    variations: catalogVariations,
+                    variations: dedupeMlVariationRows(catalogVariations),
                     singleProduct: false,
                     itemId: item.id,
                     requestedItemId: String(req.params.itemId || ''),
@@ -4978,9 +5169,10 @@ const getMercadoLibreItemVariations = (req, res) => __awaiter(void 0, void 0, vo
                         merged.push(row);
                     }
                 }
-                if (merged.length > singleItemVariations.length) {
+                const mergedDeduped = dedupeMlVariationRows(merged);
+                if (mergedDeduped.length > singleItemVariations.length) {
                     return res.json({
-                        variations: merged,
+                        variations: mergedDeduped,
                         singleProduct: false,
                         itemId: item.id,
                         requestedItemId: String(req.params.itemId || ''),

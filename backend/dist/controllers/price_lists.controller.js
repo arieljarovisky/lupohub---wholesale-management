@@ -39,12 +39,13 @@ function copyPriceListItems(sourceListId, targetListId, percentAdjust) {
         return count;
     });
 }
-/** Listar listas de precios. Solo ADMIN. */
+/** Listar listas de precios. ADMIN, WAREHOUSE y SELLER (solo lectura para catálogo/pedidos). */
 const listPriceLists = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
-        if (((_a = req.user) === null || _a === void 0 ? void 0 : _a.role) !== 'ADMIN') {
-            return res.status(403).json({ message: 'Solo administradores pueden listar listas de precios' });
+        const role = (_a = req.user) === null || _a === void 0 ? void 0 : _a.role;
+        if (!['ADMIN', 'WAREHOUSE', 'SELLER'].includes(role)) {
+            return res.status(403).json({ message: 'Sin permiso para listar listas de precios' });
         }
         const rows = yield (0, db_1.query)(`SELECT id, name, description, created_at AS createdAt, updated_at AS updatedAt FROM price_lists ORDER BY name`);
         res.json(rows || []);

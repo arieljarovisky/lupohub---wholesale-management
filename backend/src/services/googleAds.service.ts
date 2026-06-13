@@ -176,7 +176,7 @@ export async function fetchGoogleAdsCampaigns(
       acc.conversions += c.conversions;
       return acc;
     },
-    { impressions: 0, clicks: 0, cost: 0, conversions: 0 }
+    { impressions: 0, clicks: 0, cost: 0, conversions: 0, ctr: 0, cpc: 0 }
   );
   summary.ctr = summary.impressions > 0 ? (summary.clicks / summary.impressions) * 100 : 0;
   summary.cpc = summary.clicks > 0 ? summary.cost / summary.clicks : 0;

@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.billingAccessMiddleware = exports.adminOrDepositoMiddleware = exports.optionalAuthMiddleware = exports.authMiddleware = void 0;
+exports.marketingAdsAccessMiddleware = exports.billingAccessMiddleware = exports.adminOrDepositoMiddleware = exports.optionalAuthMiddleware = exports.authMiddleware = void 0;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const authMiddleware = (req, res, next) => {
     const header = req.headers.authorization || '';
@@ -56,3 +56,12 @@ const billingAccessMiddleware = (req, res, next) => {
     return res.status(403).json({ message: 'Sin permiso para facturación' });
 };
 exports.billingAccessMiddleware = billingAccessMiddleware;
+/** Campañas publicitarias Meta / Google. Admin y marketing. Requiere authMiddleware antes. */
+const marketingAdsAccessMiddleware = (req, res, next) => {
+    var _a;
+    const role = (_a = req.user) === null || _a === void 0 ? void 0 : _a.role;
+    if (role === 'ADMIN' || role === 'MARKETING')
+        return next();
+    return res.status(403).json({ message: 'Sin permiso para campañas publicitarias' });
+};
+exports.marketingAdsAccessMiddleware = marketingAdsAccessMiddleware;

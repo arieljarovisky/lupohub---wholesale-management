@@ -41,10 +41,10 @@ const createUser = (req, res) => __awaiter(void 0, void 0, void 0, function* () 
         if (!(name === null || name === void 0 ? void 0 : name.trim()) || !(email === null || email === void 0 ? void 0 : email.trim()) || !password) {
             return res.status(400).json({ message: 'Nombre, email y contraseña son requeridos' });
         }
-        const validRoles = ['ADMIN', 'SELLER', 'WAREHOUSE', 'CUSTOMER'];
+        const validRoles = ['ADMIN', 'SELLER', 'WAREHOUSE', 'CUSTOMER', 'MARKETING'];
         const roleVal = (role || 'SELLER').toString().toUpperCase();
         if (!validRoles.includes(roleVal)) {
-            return res.status(400).json({ message: 'Rol inválido. Use ADMIN, SELLER, WAREHOUSE o CUSTOMER' });
+            return res.status(400).json({ message: 'Rol inválido. Use ADMIN, SELLER, WAREHOUSE, CUSTOMER o MARKETING' });
         }
         const existing = yield (0, db_1.get)('SELECT id FROM users WHERE email = ?', [email.trim()]);
         if (existing) {

@@ -8,8 +8,11 @@ const channelPrices_controller_1 = require("../controllers/channelPrices.control
 const channelMargins_controller_1 = require("../controllers/channelMargins.controller");
 const tiendanubeSalesReport_controller_1 = require("../controllers/tiendanubeSalesReport.controller");
 const tiendanubeCategoryImages_controller_1 = require("../controllers/tiendanubeCategoryImages.controller");
+const tiendanubeCatalog_controller_1 = require("../controllers/tiendanubeCatalog.controller");
+const tiendanubeCatalogConfig_controller_1 = require("../controllers/tiendanubeCatalogConfig.controller");
 const auth_1 = require("../middleware/auth");
 const lupoWebhookSettings_controller_1 = require("../controllers/lupoWebhookSettings.controller");
+const adsIntegrations_controller_1 = require("../controllers/adsIntegrations.controller");
 const router = (0, express_1.Router)();
 router.get('/status', integrations_controller_1.getIntegrationStatus);
 router.get('/luposhop/webhook-config', auth_1.authMiddleware, lupoWebhookSettings_controller_1.getLupoWebhookConfigEndpoint);
@@ -40,6 +43,7 @@ router.post('/variant-external-stocks', integrations_controller_1.getVariantExte
 router.post('/variant-channel-prices', auth_1.authMiddleware, channelPrices_controller_1.getVariantChannelPrices);
 router.post('/variant-channel-prices/bulk', auth_1.authMiddleware, channelPrices_controller_1.bulkUpdateChannelPrices);
 router.get('/channel-margins', auth_1.authMiddleware, channelMargins_controller_1.getChannelMargins);
+router.get('/channel-margins/export', auth_1.authMiddleware, channelMargins_controller_1.exportChannelMarginsXlsx);
 router.get('/mercadolibre/auto-message', integrations_controller_1.getMLAutoMessageConfig);
 router.post('/mercadolibre/auto-message', integrations_controller_1.saveMLAutoMessageConfig);
 router.get('/mercadolibre/questions-ai', auth_1.authMiddleware, integrations_controller_1.getMLQuestionsAiConfig);
@@ -70,6 +74,9 @@ router.get('/tiendanube/stock/totals', integrations_controller_1.getTiendaNubeSt
 router.get('/tiendanube/sales-report-export', auth_1.authMiddleware, tiendanubeSalesReport_controller_1.exportTiendaNubeSalesReportXlsx);
 router.get('/tiendanube/category-images/preview', auth_1.authMiddleware, tiendanubeCategoryImages_controller_1.listTiendaNubeCategoryMatches);
 router.get('/tiendanube/category-images/download', auth_1.authMiddleware, tiendanubeCategoryImages_controller_1.downloadTiendaNubeCategoryImagesZip);
+router.get('/tiendanube/catalog', auth_1.authMiddleware, tiendanubeCatalog_controller_1.getTiendaNubeCatalog);
+router.get('/tiendanube/catalog/config', auth_1.authMiddleware, tiendanubeCatalogConfig_controller_1.getTiendaNubeCatalogConfig);
+router.put('/tiendanube/catalog/config', auth_1.authMiddleware, tiendanubeCatalogConfig_controller_1.saveTiendaNubeCatalogConfig);
 router.get('/tiendanube/products/:productId/variants', integrations_controller_1.getTiendaNubeProductVariants);
 router.post('/tiendanube/products', integrations_controller_1.createTiendaNubeProduct);
 router.post('/tiendanube/products/:productId/duplicate', integrations_controller_1.duplicateTiendaNubeProduct);
@@ -91,4 +98,16 @@ router.post('/tiendanube/invoice-bulk', auth_1.authMiddleware, integrations_cont
 router.get('/invoices/external', auth_1.authMiddleware, integrations_controller_1.getExternalInvoicesHistory);
 router.post('/invoices/external/:id/credit-note', auth_1.authMiddleware, integrations_controller_1.emitirNotaCreditoExternalInvoice);
 router.delete('/:platform/disconnect', integrations_controller_1.disconnectIntegration);
+/** Meta Ads y Google Ads — configuración (admin) y campañas (admin + marketing). */
+router.get('/ads/status', auth_1.authMiddleware, adsIntegrations_controller_1.getAdsIntegrationsStatus);
+router.get('/meta-ads/config', auth_1.authMiddleware, adsIntegrations_controller_1.getMetaAdsConfigEndpoint);
+router.put('/meta-ads/config', auth_1.authMiddleware, adsIntegrations_controller_1.saveMetaAdsConfigEndpoint);
+router.post('/meta-ads/config', auth_1.authMiddleware, adsIntegrations_controller_1.saveMetaAdsConfigEndpoint);
+router.delete('/meta-ads/config', auth_1.authMiddleware, adsIntegrations_controller_1.disconnectMetaAdsEndpoint);
+router.get('/meta-ads/campaigns', auth_1.authMiddleware, auth_1.marketingAdsAccessMiddleware, adsIntegrations_controller_1.getMetaAdsCampaignsEndpoint);
+router.get('/google-ads/config', auth_1.authMiddleware, adsIntegrations_controller_1.getGoogleAdsConfigEndpoint);
+router.put('/google-ads/config', auth_1.authMiddleware, adsIntegrations_controller_1.saveGoogleAdsConfigEndpoint);
+router.post('/google-ads/config', auth_1.authMiddleware, adsIntegrations_controller_1.saveGoogleAdsConfigEndpoint);
+router.delete('/google-ads/config', auth_1.authMiddleware, adsIntegrations_controller_1.disconnectGoogleAdsEndpoint);
+router.get('/google-ads/campaigns', auth_1.authMiddleware, auth_1.marketingAdsAccessMiddleware, adsIntegrations_controller_1.getGoogleAdsCampaignsEndpoint);
 exports.default = router;

@@ -1144,7 +1144,7 @@ const SQL_ORDER_CARGO_PENDIENTE_SUM = `SUM(ROUND((${orderPaymentBalance_service_
 const SQL_ORDER_NC_CREDIT_EXPR = (0, orderPricing_1.sqlNetoAfipToAmountWithIva)(`LEAST(COALESCE(cn.cn_total, 0), (${orderPaymentBalance_service_1.SQL_ORDER_NETO_AFIP}))`);
 const SQL_ORDER_NC_CREDIT_SUM = `SUM(${SQL_ORDER_NC_CREDIT_EXPR})`;
 const SQL_ORDER_ACTIVE_COND = `o.status NOT IN ('Cancelado', 'Borrador') AND (o.archived = 0 OR o.archived IS NULL)`;
-/** Facturas AFIP emitidas (total con IVA + IIBB), desde saldo inicial. Sin filtro de estado del pedido: si hay comprobante AFIP, cuenta en cartera (como el historial). */
+/** Facturas AFIP emitidas (total con IVA + IIBB), desde saldo inicial. Solo punto de venta 21. */
 const SQL_CARTERA_AFIP_INVOICES_SUBQUERY = `
   SELECT
     o.customer_id,
@@ -1152,12 +1152,13 @@ const SQL_CARTERA_AFIP_INVOICES_SUBQUERY = `
   FROM invoices i
   INNER JOIN orders o ON o.id = i.order_id
   INNER JOIN customers co ON co.id = o.customer_id
-  WHERE ${customerOpeningBalance_1.SQL_OPENING_AFIP_INVOICE_DATE_WHERE}
+  WHERE i.punto_venta = 21
+    AND ${customerOpeningBalance_1.SQL_OPENING_AFIP_INVOICE_DATE_WHERE}
   GROUP BY o.customer_id
 `;
 /**
- * NC AFIP (× IVA) que restan del saldo. Excluye NC de reemisión con IIBB: son trámite AFIP
- * (ya está el recibo y la factura nueva); si también restan, el cliente queda con saldo a favor.
+ * NC AFIP (× IVA) que restan del saldo. Solo punto de venta 21.
+ * Incluye NC de reemisión con IIBB: anulan la factura anterior y la nueva factura suma por separado.
  */
 const SQL_CARTERA_AFIP_NC_SUBQUERY = `
   SELECT
@@ -1166,7 +1167,7 @@ const SQL_CARTERA_AFIP_NC_SUBQUERY = `
   FROM credit_notes cn
   INNER JOIN orders o ON o.id = cn.order_id
   INNER JOIN customers co ON co.id = o.customer_id
-  WHERE COALESCE(cn.superseded_by_reinvoice, 0) = 0
+  WHERE cn.punto_venta = 21
     AND ${customerOpeningBalance_1.SQL_OPENING_AFIP_CN_DATE_WHERE}
   GROUP BY o.customer_id
 `;
@@ -1360,7 +1361,7 @@ const getSaldosPendientes = (req, res) => __awaiter(void 0, void 0, void 0, func
 exports.getSaldosPendientes = getSaldosPendientes;
 /**
  * Cartera unificada por cliente: saldo inicial + facturas AFIP + pedidos sin factura − NC − recibos.
- * Alineado con el historial (saldo corrido): importes de factura con IVA, todas las NC activas y todos los recibos LupoHub.
+ * Alineado con el historial (saldo corrido): importes de factura con IVA, todas las NC AFIP y todos los recibos LupoHub.
  */
 const getCarteraTotals = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const user = req.user;
@@ -3931,7 +3932,6 @@ function buildCustomerFinancialSummary(customerId) {
       FROM credit_notes cn
       JOIN orders o ON o.id = cn.order_id
       WHERE o.customer_id = ?
-        AND COALESCE(cn.superseded_by_reinvoice, 0) = 0
 
       UNION ALL
 
