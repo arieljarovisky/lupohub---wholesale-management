@@ -2,6 +2,7 @@ import { Role } from '../types';
 
 export const MARKETING_HUB_VIEW = 'marketing';
 export const MARKETING_TOP_PRODUCTS_VIEW = 'marketing_top_products';
+export const MARKETING_LEADS_VIEW = 'marketing_leads';
 export const META_ADS_VIEW = 'meta_ads';
 export const GOOGLE_ADS_VIEW = 'google_ads';
 
@@ -9,6 +10,7 @@ export const GOOGLE_ADS_VIEW = 'google_ads';
 export const MARKETING_VIEWS = [
   MARKETING_HUB_VIEW,
   MARKETING_TOP_PRODUCTS_VIEW,
+  MARKETING_LEADS_VIEW,
   'mercadolibre_canal_difusion',
   'mercadolibre_product_ads',
   'mercadolibre_brand_ads',

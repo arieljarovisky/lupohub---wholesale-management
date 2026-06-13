@@ -192,6 +192,19 @@ const Settings: React.FC<SettingsProps> = ({
   const [googleAdsHasClientCredentials, setGoogleAdsHasClientCredentials] = useState(false);
   const [googleAdsConfigured, setGoogleAdsConfigured] = useState(false);
   const [savingGoogleAds, setSavingGoogleAds] = useState(false);
+  const [leadsWebhookEnabled, setLeadsWebhookEnabled] = useState(true);
+  const [leadsWebhookSecret, setLeadsWebhookSecret] = useState('');
+  const [leadsWebhookHasSecret, setLeadsWebhookHasSecret] = useState(false);
+  const [leadsWebhookSecretMasked, setLeadsWebhookSecretMasked] = useState('');
+  const [leadsMetaVerifyToken, setLeadsMetaVerifyToken] = useState('');
+  const [leadsMetaAppSecret, setLeadsMetaAppSecret] = useState('');
+  const [leadsMetaHasAppSecret, setLeadsMetaHasAppSecret] = useState(false);
+  const [leadsMetaAppSecretMasked, setLeadsMetaAppSecretMasked] = useState('');
+  const [leadsMetaLeadsEnabled, setLeadsMetaLeadsEnabled] = useState(true);
+  const [leadsWhatsappEnabled, setLeadsWhatsappEnabled] = useState(true);
+  const [leadsInboundUrl, setLeadsInboundUrl] = useState('');
+  const [leadsMetaWebhookUrl, setLeadsMetaWebhookUrl] = useState('');
+  const [savingLeadsWebhook, setSavingLeadsWebhook] = useState(false);
   const [loadingIntegrations, setLoadingIntegrations] = useState(false);
   const [lupoWebhookConfig, setLupoWebhookConfig] = useState({
     enabled: false,
@@ -371,6 +384,28 @@ const Settings: React.FC<SettingsProps> = ({
       }
     };
     fetchAdsConfig();
+
+    const fetchLeadsWebhookConfig = async () => {
+      try {
+        const cfg = await api.getMarketingLeadsWebhookConfig();
+        setLeadsWebhookEnabled(!!cfg.enabled);
+        setLeadsWebhookHasSecret(!!cfg.hasWebhookSecret);
+        setLeadsWebhookSecretMasked(cfg.webhookSecretMasked || '');
+        if (cfg.webhookSecret) setLeadsWebhookSecret(cfg.webhookSecret);
+        setLeadsMetaVerifyToken(cfg.metaVerifyToken || '');
+        setLeadsMetaHasAppSecret(!!cfg.hasMetaAppSecret);
+        setLeadsMetaAppSecretMasked(cfg.metaAppSecretMasked || '');
+        setLeadsMetaLeadsEnabled(!!cfg.metaLeadsEnabled);
+        setLeadsWhatsappEnabled(!!cfg.whatsappEnabled);
+        setLeadsInboundUrl(cfg.inboundUrl || '');
+        setLeadsMetaWebhookUrl(cfg.metaWebhookUrl || '');
+        setLeadsWebhookSecret('');
+        setLeadsMetaAppSecret('');
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    fetchLeadsWebhookConfig();
 
     const fetchLupoWebhookConfig = async () => {
       try {
@@ -2988,6 +3023,217 @@ const Settings: React.FC<SettingsProps> = ({
                 {savingGoogleAds ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
                 Guardar Google Ads
               </button>
+            </div>
+          </div>
+
+          {/* Webhooks — Leads marketing */}
+          <div className="bg-slate-800 rounded-3xl border border-slate-700 overflow-hidden shadow-xl lg:col-span-2">
+            <div className="p-6 bg-slate-900/50 border-b border-slate-700 flex justify-between items-center flex-wrap gap-3">
+              <div className="flex items-center gap-3">
+                <div className="bg-teal-600/20 p-2.5 rounded-2xl text-teal-400"><UserIcon size={24} /></div>
+                <div>
+                  <h3 className="font-black text-white text-lg">Webhooks — Leads automáticos</h3>
+                  <p className="text-slate-500 text-xs mt-0.5">Meta Lead Ads, WhatsApp y formularios externos</p>
+                </div>
+              </div>
+              <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={leadsWebhookEnabled}
+                  onChange={(e) => setLeadsWebhookEnabled(e.target.checked)}
+                  className="rounded border-slate-600"
+                />
+                Activos
+              </label>
+            </div>
+            <div className="p-6 space-y-5">
+              <p className="text-slate-400 text-sm leading-relaxed">
+                Cuando alguien completa un formulario de Meta, escribe por WhatsApp Business o tu sitio envía un POST,
+                el lead aparece solo en <strong className="text-slate-300">Marketing → Leads y embudo</strong> en etapa
+                «Lead ingresado». Para formularios de Meta necesitás el token de Meta Ads con permiso{' '}
+                <code className="text-slate-500">leads_retrieval</code> además de <code className="text-slate-500">ads_read</code>.
+              </p>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="rounded-xl border border-slate-700 bg-slate-900/50 p-4 space-y-2">
+                  <p className="text-[10px] font-black text-slate-500 uppercase">Webhook genérico (formularios, Zapier, n8n)</p>
+                  <code className="block text-xs text-teal-300 break-all font-mono">{leadsInboundUrl || '…'}</code>
+                  <p className="text-xs text-slate-500">POST con header <code>X-Lupohub-Webhook-Secret</code> o <code>Authorization: Bearer …</code></p>
+                  {leadsInboundUrl && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(leadsInboundUrl);
+                        showToast('success', 'URL copiada');
+                      }}
+                      className="text-xs text-teal-400 hover:text-teal-300 flex items-center gap-1"
+                    >
+                      <Copy size={12} /> Copiar URL
+                    </button>
+                  )}
+                </div>
+                <div className="rounded-xl border border-slate-700 bg-slate-900/50 p-4 space-y-2">
+                  <p className="text-[10px] font-black text-slate-500 uppercase">Meta (Lead Ads + WhatsApp Cloud API)</p>
+                  <code className="block text-xs text-blue-300 break-all font-mono">{leadsMetaWebhookUrl || '…'}</code>
+                  <p className="text-xs text-slate-500">
+                    En Meta for Developers → Webhooks: suscribir <code>leadgen</code> y/o <code>messages</code>. Verify token abajo.
+                  </p>
+                  {leadsMetaWebhookUrl && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(leadsMetaWebhookUrl);
+                        showToast('success', 'URL Meta copiada');
+                      }}
+                      className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                    >
+                      <Copy size={12} /> Copiar URL Meta
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-700/80 bg-slate-900/30 p-4 text-xs text-slate-400 font-mono whitespace-pre-wrap">
+{`POST ${leadsInboundUrl || '/api/marketing/leads/webhook/inbound'}
+Headers: X-Lupohub-Webhook-Secret: <secreto>
+Body JSON:
+{
+  "name": "María López",
+  "phone": "54911...",
+  "email": "maria@mail.com",
+  "source": "WHATSAPP",
+  "campaignName": "Landing verano",
+  "externalId": "opcional-id-unico"
+}`}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-500 uppercase">
+                    Secreto webhook {leadsWebhookHasSecret && !leadsWebhookSecret ? `(${leadsWebhookSecretMasked})` : ''}
+                  </label>
+                  <input
+                    type="password"
+                    value={leadsWebhookSecret}
+                    onChange={(e) => setLeadsWebhookSecret(e.target.value)}
+                    placeholder={leadsWebhookHasSecret ? 'Vacío = mantener actual' : 'Secreto para POST genérico'}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3 px-4 text-white text-sm outline-none focus:border-teal-500 font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-500 uppercase">Verify token (Meta)</label>
+                  <input
+                    type="text"
+                    value={leadsMetaVerifyToken}
+                    onChange={(e) => setLeadsMetaVerifyToken(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3 px-4 text-white text-sm outline-none focus:border-teal-500 font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-slate-500 uppercase">
+                    App Secret Meta (opcional, firma){' '}
+                    {leadsMetaHasAppSecret && !leadsMetaAppSecret ? `(${leadsMetaAppSecretMasked})` : ''}
+                  </label>
+                  <input
+                    type="password"
+                    value={leadsMetaAppSecret}
+                    onChange={(e) => setLeadsMetaAppSecret(e.target.value)}
+                    placeholder={leadsMetaHasAppSecret ? 'Vacío = mantener actual' : 'Desde Meta App Dashboard'}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3 px-4 text-white text-sm outline-none focus:border-teal-500 font-mono"
+                  />
+                </div>
+                <div className="flex flex-col justify-end gap-3">
+                  <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={leadsMetaLeadsEnabled}
+                      onChange={(e) => setLeadsMetaLeadsEnabled(e.target.checked)}
+                      className="rounded border-slate-600"
+                    />
+                    Formularios Meta (leadgen)
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={leadsWhatsappEnabled}
+                      onChange={(e) => setLeadsWhatsappEnabled(e.target.checked)}
+                      className="rounded border-slate-600"
+                    />
+                    Mensajes WhatsApp Business
+                  </label>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={savingLeadsWebhook}
+                  onClick={async () => {
+                    setSavingLeadsWebhook(true);
+                    try {
+                      const res = await api.saveMarketingLeadsWebhookConfig({
+                        enabled: leadsWebhookEnabled,
+                        webhookSecret: leadsWebhookSecret.trim() || undefined,
+                        metaVerifyToken: leadsMetaVerifyToken.trim() || undefined,
+                        metaAppSecret: leadsMetaAppSecret.trim() || undefined,
+                        keepExistingMetaAppSecret: !leadsMetaAppSecret.trim(),
+                        metaLeadsEnabled: leadsMetaLeadsEnabled,
+                        whatsappEnabled: leadsWhatsappEnabled
+                      });
+                      const cfg = res.config;
+                      setLeadsWebhookHasSecret(!!cfg.hasWebhookSecret);
+                      setLeadsWebhookSecretMasked(cfg.webhookSecretMasked || '');
+                      if (cfg.webhookSecret) setLeadsWebhookSecret(cfg.webhookSecret);
+                      setLeadsMetaVerifyToken(cfg.metaVerifyToken || '');
+                      setLeadsMetaHasAppSecret(!!cfg.hasMetaAppSecret);
+                      setLeadsMetaAppSecretMasked(cfg.metaAppSecretMasked || '');
+                      setLeadsInboundUrl(cfg.inboundUrl || '');
+                      setLeadsMetaWebhookUrl(cfg.metaWebhookUrl || '');
+                      setLeadsWebhookSecret('');
+                      setLeadsMetaAppSecret('');
+                      showToast('success', 'Webhooks de leads guardados');
+                    } catch (e: any) {
+                      showToast('error', e?.message || 'Error guardando webhooks');
+                    } finally {
+                      setSavingLeadsWebhook(false);
+                    }
+                  }}
+                  className="px-5 py-2.5 bg-teal-600 hover:bg-teal-500 rounded-xl text-white text-sm font-bold disabled:opacity-50 flex items-center gap-2"
+                >
+                  {savingLeadsWebhook ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                  Guardar webhooks
+                </button>
+                <button
+                  type="button"
+                  disabled={savingLeadsWebhook}
+                  onClick={async () => {
+                    if (!window.confirm('¿Generar un nuevo secreto? Actualizá Zapier/formularios con el valor nuevo.')) return;
+                    setSavingLeadsWebhook(true);
+                    try {
+                      const res = await api.saveMarketingLeadsWebhookConfig({
+                        enabled: leadsWebhookEnabled,
+                        regenerateWebhookSecret: true,
+                        metaVerifyToken: leadsMetaVerifyToken.trim() || undefined,
+                        keepExistingMetaAppSecret: true,
+                        metaLeadsEnabled: leadsMetaLeadsEnabled,
+                        whatsappEnabled: leadsWhatsappEnabled
+                      });
+                      const cfg = res.config;
+                      setLeadsWebhookHasSecret(!!cfg.hasWebhookSecret);
+                      setLeadsWebhookSecretMasked(cfg.webhookSecretMasked || '');
+                      if (cfg.webhookSecret) setLeadsWebhookSecret(cfg.webhookSecret);
+                      showToast('success', 'Secreto regenerado — copiá el masked o definí uno manual');
+                    } catch (e: any) {
+                      showToast('error', e?.message || 'Error');
+                    } finally {
+                      setSavingLeadsWebhook(false);
+                    }
+                  }}
+                  className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 rounded-xl text-slate-200 text-sm font-bold disabled:opacity-50"
+                >
+                  Regenerar secreto
+                </button>
+              </div>
             </div>
           </div>
 

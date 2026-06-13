@@ -8,10 +8,12 @@ import {
   Chrome,
   TrendingUp,
   ChevronRight,
-  Radio
+  Radio,
+  UserPlus
 } from 'lucide-react';
 import {
   MARKETING_TOP_PRODUCTS_VIEW,
+  MARKETING_LEADS_VIEW,
   META_ADS_VIEW,
   GOOGLE_ADS_VIEW
 } from '../utils/marketingAccess';
@@ -33,6 +35,13 @@ const MarketingHub: React.FC<MarketingHubProps> = ({ onNavigate }) => {
           title: 'Artículos más vendidos',
           desc: 'Ranking por unidades vendidas en Tienda Nube y Mercado Libre.',
           color: 'from-emerald-500/20 to-green-600/10 border-emerald-500/30'
+        },
+        {
+          view: MARKETING_LEADS_VIEW,
+          icon: UserPlus,
+          title: 'Leads y embudo',
+          desc: 'Origen del lead, recorrido de venta y KPIs por campaña (CPA, ROAS).',
+          color: 'from-teal-500/20 to-cyan-600/10 border-teal-500/30'
         }
       ]
     },

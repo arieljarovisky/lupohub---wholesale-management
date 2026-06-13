@@ -65,6 +65,9 @@ import { addOrderNotes } from './database/add_order_notes';
 import { addUserTasksTable } from './database/add_user_tasks_table';
 import { addCompanyFinanceTable } from './database/add_company_finance_table';
 import { addCompanyFinanceFixedExpensesTable } from './database/add_company_finance_fixed_expenses_table';
+import { addMarketingLeadsTable } from './database/add_marketing_leads_table';
+import { addMarketingLeadsWebhookSupport } from './database/add_marketing_leads_webhook';
+import marketingLeadsRoutes from './routes/marketingLeads.routes';
 import companyFinanceRoutes from './routes/companyFinance.routes';
 import { addRemitoSequence } from './database/add_remito_sequence';
 import { addCustomerDeliveryAddresses } from './database/add_customer_delivery_addresses';
@@ -127,7 +130,15 @@ app.use((req, res, next) => {
   applyCorsHeaders(req, res);
   next();
 });
-app.use(express.json() as any);
+app.use(
+  express.json({
+    verify: (req: any, _res, buf) => {
+      if (String(req.originalUrl || req.url || '').includes('/api/marketing/leads/webhook/meta')) {
+        req.rawBody = buf;
+      }
+    }
+  }) as any
+);
 app.use((req, res, next) => {
   console.log('[backend]', req.method, req.path);
   next();
@@ -154,6 +165,7 @@ app.use('/api/billing', billingRoutes);
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/user-tasks', userTasksRoutes);
 app.use('/api/company-finance', companyFinanceRoutes);
+app.use('/api/marketing', marketingLeadsRoutes);
 
 // Manejador global de errores: devuelve JSON con el mensaje para que el front pueda mostrarlo
 app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
@@ -222,6 +234,8 @@ async function initDatabase() {
       await addUserTasksTable();
       await addCompanyFinanceTable();
       await addCompanyFinanceFixedExpensesTable();
+      await addMarketingLeadsTable();
+      await addMarketingLeadsWebhookSupport();
       await addRemitoSequence();
       await addCustomerDeliveryAddresses();
       await addCustomerSellerCommission();

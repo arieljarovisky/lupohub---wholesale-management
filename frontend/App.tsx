@@ -5,6 +5,7 @@ import { isCompanyFinanceUser, COMPANY_FINANCE_VIEW } from './utils/companyFinan
 import {
   MARKETING_HUB_VIEW,
   MARKETING_TOP_PRODUCTS_VIEW,
+  MARKETING_LEADS_VIEW,
   META_ADS_VIEW,
   GOOGLE_ADS_VIEW,
   isMarketingView,
@@ -75,6 +76,7 @@ const MarketingHub = lazyWithReload(() => import('./components/MarketingHub'));
 const MarketingTopProducts = lazyWithReload(() => import('./components/MarketingTopProducts'));
 const MetaAdsCampaigns = lazyWithReload(() => import('./components/MetaAdsCampaigns'));
 const GoogleAdsCampaigns = lazyWithReload(() => import('./components/GoogleAdsCampaigns'));
+const MarketingLeads = lazyWithReload(() => import('./components/MarketingLeads'));
 
 const ViewFallback = () => (
   <div className="flex items-center justify-center py-24">
@@ -1002,6 +1004,7 @@ const App: React.FC = () => {
     { title: 'Marketing', items: [
       { id: MARKETING_HUB_VIEW, label: 'Centro de Marketing', icon: Megaphone, roles: [Role.ADMIN, Role.MARKETING] },
       { id: MARKETING_TOP_PRODUCTS_VIEW, label: 'Más vendidos', icon: LayoutDashboard, roles: [Role.ADMIN, Role.MARKETING] },
+      { id: MARKETING_LEADS_VIEW, label: 'Leads y embudo', icon: Users, roles: [Role.ADMIN, Role.MARKETING] },
       { id: 'mercadolibre_canal_difusion', label: 'ML — Difusión', icon: Zap, roles: [Role.ADMIN, Role.MARKETING] },
       { id: 'mercadolibre_product_ads', label: 'ML — Product Ads', icon: Megaphone, roles: [Role.ADMIN, Role.MARKETING] },
       { id: 'mercadolibre_brand_ads', label: 'ML — Brand Ads', icon: Megaphone, roles: [Role.ADMIN, Role.MARKETING] },
@@ -1152,6 +1155,7 @@ const App: React.FC = () => {
                  {baseView === 'mercadolibre_stock' && 'Stock Mercado Libre'}
                  {baseView === MARKETING_HUB_VIEW && 'Centro de Marketing'}
                  {baseView === MARKETING_TOP_PRODUCTS_VIEW && 'Artículos más vendidos'}
+                 {baseView === MARKETING_LEADS_VIEW && 'Leads y embudo de ventas'}
                  {baseView === META_ADS_VIEW && 'Meta Ads — campañas'}
                  {baseView === GOOGLE_ADS_VIEW && 'Google Ads — campañas'}
                  {baseView === 'stock_history' && 'Historial de Stock'}
@@ -1394,6 +1398,11 @@ const App: React.FC = () => {
           {baseView === MARKETING_TOP_PRODUCTS_VIEW && (
             <Suspense fallback={<ViewFallback />}>
               <MarketingTopProducts />
+            </Suspense>
+          )}
+          {baseView === MARKETING_LEADS_VIEW && (
+            <Suspense fallback={<ViewFallback />}>
+              <MarketingLeads />
             </Suspense>
           )}
           {baseView === META_ADS_VIEW && (

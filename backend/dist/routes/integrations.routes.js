@@ -105,6 +105,8 @@ router.put('/meta-ads/config', auth_1.authMiddleware, adsIntegrations_controller
 router.post('/meta-ads/config', auth_1.authMiddleware, adsIntegrations_controller_1.saveMetaAdsConfigEndpoint);
 router.delete('/meta-ads/config', auth_1.authMiddleware, adsIntegrations_controller_1.disconnectMetaAdsEndpoint);
 router.get('/meta-ads/campaigns', auth_1.authMiddleware, auth_1.marketingAdsAccessMiddleware, adsIntegrations_controller_1.getMetaAdsCampaignsEndpoint);
+router.get('/meta-ads/campaigns/:campaignId/adsets', auth_1.authMiddleware, auth_1.marketingAdsAccessMiddleware, adsIntegrations_controller_1.getMetaAdSetsEndpoint);
+router.get('/meta-ads/adsets/:adsetId/ads', auth_1.authMiddleware, auth_1.marketingAdsAccessMiddleware, adsIntegrations_controller_1.getMetaAdsForAdSetEndpoint);
 router.get('/google-ads/config', auth_1.authMiddleware, adsIntegrations_controller_1.getGoogleAdsConfigEndpoint);
 router.put('/google-ads/config', auth_1.authMiddleware, adsIntegrations_controller_1.saveGoogleAdsConfigEndpoint);
 router.post('/google-ads/config', auth_1.authMiddleware, adsIntegrations_controller_1.saveGoogleAdsConfigEndpoint);

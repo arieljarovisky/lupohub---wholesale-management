@@ -260,6 +260,61 @@ export type MetaAdsMetricsRow = {
   cpa: number;
 };
 
+export type MarketingLead = {
+  id: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  source: 'FACEBOOK_ADS' | 'GOOGLE_ADS' | 'INSTAGRAM' | 'WHATSAPP' | 'REFERRAL';
+  stage: 'LEAD_ENTERED' | 'CONTACTED' | 'QUOTED' | 'SALE_CLOSED';
+  campaignId: string | null;
+  campaignName: string | null;
+  revenue: number | null;
+  notes: string | null;
+  enteredAt: string;
+  contactedAt: string | null;
+  quotedAt: string | null;
+  closedAt: string | null;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type MarketingLeadMetrics = {
+  funnel: Record<'LEAD_ENTERED' | 'CONTACTED' | 'QUOTED' | 'SALE_CLOSED', number>;
+  bySource: Array<{
+    source: MarketingLead['source'];
+    leads: number;
+    contacted: number;
+    quoted: number;
+    sales: number;
+    revenue: number;
+    conversionRate: number;
+  }>;
+  byCampaign: Array<{
+    key: string;
+    source: MarketingLead['source'];
+    campaignId: string | null;
+    campaignName: string | null;
+    leads: number;
+    sales: number;
+    revenue: number;
+    spend: number;
+    conversionRate: number;
+    cpa: number;
+    roas: number;
+  }>;
+  totals: {
+    leads: number;
+    sales: number;
+    revenue: number;
+    spend: number;
+    conversionRate: number;
+    cpa: number;
+    roas: number;
+  };
+};
+
 export const api = {
   login: async (email: string, password: string): Promise<{ user: User; token: string | null }> => {
     return await request<{ user: User; token: string | null }>(`/auth/login`, 'POST', { email, password });
@@ -3058,6 +3113,96 @@ export const api = {
     q.set('date_from', params.date_from);
     q.set('date_to', params.date_to);
     return await request(`/integrations/google-ads/campaigns?${q.toString()}`, 'GET');
+  },
+
+  getMarketingLeads: async (params?: {
+    date_from?: string;
+    date_to?: string;
+    source?: string;
+    stage?: string;
+    campaign_id?: string;
+  }): Promise<{ leads: MarketingLead[] }> => {
+    const q = new URLSearchParams();
+    if (params?.date_from) q.set('date_from', params.date_from);
+    if (params?.date_to) q.set('date_to', params.date_to);
+    if (params?.source) q.set('source', params.source);
+    if (params?.stage) q.set('stage', params.stage);
+    if (params?.campaign_id) q.set('campaign_id', params.campaign_id);
+    const qs = q.toString();
+    return await request(`/marketing/leads${qs ? `?${qs}` : ''}`, 'GET');
+  },
+
+  getMarketingLeadMetrics: async (params: {
+    date_from: string;
+    date_to: string;
+  }): Promise<MarketingLeadMetrics> => {
+    const q = new URLSearchParams();
+    q.set('date_from', params.date_from);
+    q.set('date_to', params.date_to);
+    return await request(`/marketing/leads/metrics?${q.toString()}`, 'GET');
+  },
+
+  createMarketingLead: async (data: {
+    name: string;
+    phone?: string;
+    email?: string;
+    source: string;
+    campaignId?: string;
+    campaignName?: string;
+    notes?: string;
+  }): Promise<{ lead: MarketingLead }> => {
+    return await request('/marketing/leads', 'POST', data);
+  },
+
+  updateMarketingLead: async (
+    id: string,
+    data: {
+      name?: string;
+      phone?: string | null;
+      email?: string | null;
+      source?: string;
+      stage?: string;
+      campaignId?: string | null;
+      campaignName?: string | null;
+      revenue?: number | null;
+      notes?: string | null;
+    }
+  ): Promise<{ lead: MarketingLead }> => {
+    return await request(`/marketing/leads/${encodeURIComponent(id)}`, 'PATCH', data);
+  },
+
+  deleteMarketingLead: async (id: string): Promise<{ ok: boolean }> => {
+    return await request(`/marketing/leads/${encodeURIComponent(id)}`, 'DELETE');
+  },
+
+  getMarketingLeadsWebhookConfig: async (): Promise<{
+    enabled: boolean;
+    webhookSecret?: string;
+    hasWebhookSecret: boolean;
+    webhookSecretMasked: string;
+    metaVerifyToken: string;
+    hasMetaAppSecret: boolean;
+    metaAppSecretMasked: string;
+    metaLeadsEnabled: boolean;
+    whatsappEnabled: boolean;
+    inboundUrl: string;
+    metaWebhookUrl: string;
+    whatsappWebhookUrl: string;
+  }> => {
+    return await request('/marketing/leads/webhook/config', 'GET');
+  },
+
+  saveMarketingLeadsWebhookConfig: async (data: {
+    enabled?: boolean;
+    webhookSecret?: string;
+    regenerateWebhookSecret?: boolean;
+    metaVerifyToken?: string;
+    metaAppSecret?: string;
+    keepExistingMetaAppSecret?: boolean;
+    metaLeadsEnabled?: boolean;
+    whatsappEnabled?: boolean;
+  }): Promise<{ ok: boolean; config: any }> => {
+    return await request('/marketing/leads/webhook/config', 'PUT', data);
   },
 
   getTiendaNubeProductVariants: async (productId: string): Promise<{ variants: { variantId: number | string; sku: string; color: string; size: string; stock: number }[]; productId: number | string }> => {

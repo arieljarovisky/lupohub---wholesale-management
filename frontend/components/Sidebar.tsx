@@ -1,10 +1,11 @@
 import React from 'react';
-import { LayoutDashboard, Package, ShoppingCart, Users, MapPin, LogOut, Shirt, Settings, ShoppingBag, Zap, ChevronRight, ChevronLeft, History, Ship, BookOpen, DollarSign, FileText, Percent, Wallet, Megaphone, Award, Facebook, Chrome, Sparkles, LayoutGrid, Radio } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, MapPin, LogOut, Shirt, Settings, ShoppingBag, Zap, ChevronRight, ChevronLeft, History, Ship, BookOpen, DollarSign, FileText, Percent, Wallet, Megaphone, Award, Facebook, Chrome, Sparkles, LayoutGrid, Radio, UserPlus } from 'lucide-react';
 import { Role } from '../types';
 import { isCompanyFinanceUser, COMPANY_FINANCE_VIEW } from '../utils/companyFinanceAccess';
 import {
   MARKETING_HUB_VIEW,
   MARKETING_TOP_PRODUCTS_VIEW,
+  MARKETING_LEADS_VIEW,
   META_ADS_VIEW,
   GOOGLE_ADS_VIEW,
 } from '../utils/marketingAccess';
@@ -50,6 +51,7 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({ currentView, onChangeView,
       items: [
         { id: MARKETING_HUB_VIEW, label: 'Centro de Marketing', icon: Megaphone, roles: [Role.ADMIN, Role.MARKETING], color: 'purple' },
         { id: MARKETING_TOP_PRODUCTS_VIEW, label: 'Más vendidos', icon: Award, roles: [Role.ADMIN, Role.MARKETING], color: 'emerald' },
+        { id: MARKETING_LEADS_VIEW, label: 'Leads y embudo', icon: UserPlus, roles: [Role.ADMIN, Role.MARKETING], color: 'teal' },
         { id: 'mercadolibre_canal_difusion', label: 'ML — Difusión', icon: Radio, roles: [Role.ADMIN, Role.MARKETING], color: 'yellow' },
         { id: 'mercadolibre_product_ads', label: 'ML — Product Ads', icon: Megaphone, roles: [Role.ADMIN, Role.MARKETING], color: 'yellow' },
         { id: 'mercadolibre_brand_ads', label: 'ML — Brand Ads', icon: Sparkles, roles: [Role.ADMIN, Role.MARKETING], color: 'yellow' },
