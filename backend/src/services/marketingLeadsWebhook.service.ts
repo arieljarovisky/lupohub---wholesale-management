@@ -238,7 +238,8 @@ async function fetchMetaLeadgen(leadgenId: string): Promise<{
   }
 
   const data = res.data || {};
-  const fields = Array.isArray(data.field_data) ? data.field_data : [];
+  type MetaFieldRow = { name?: string; values?: string[] };
+  const fields: MetaFieldRow[] = Array.isArray(data.field_data) ? data.field_data : [];
   const name =
     pickFieldData(fields, ['full_name', 'nombre_completo', 'nombre', 'name', 'first_name', 'nombres']) ||
     'Lead Meta';
