@@ -30,7 +30,7 @@ const MarketingHub: React.FC<MarketingHubProps> = ({ onNavigate }) => {
           view: MARKETING_TOP_PRODUCTS_VIEW,
           icon: Award,
           title: 'Artículos más vendidos',
-          desc: 'Ranking por unidades vendidas en Tienda Nube y Mercado Libre.',
+          desc: 'Ranking por unidades vendidas en Tienda Nube, Mercado Libre y mayorista.',
           color: 'from-emerald-500/20 to-green-600/10 border-emerald-500/30'
         },
         {

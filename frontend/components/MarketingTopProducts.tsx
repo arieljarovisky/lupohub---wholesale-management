@@ -2,8 +2,16 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Award, Loader2, RefreshCw, BarChart3 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { api } from '../services/api';
+import { Order, OrderStatus } from '../types';
 
 type DateRange = '7' | '15' | '30' | '60' | '90';
+type ChannelFilter = 'all' | 'tn' | 'ml' | 'mayorista';
+
+const CHANNEL_LABELS: Record<Exclude<ChannelFilter, 'all'>, string> = {
+  tn: 'Tienda Nube',
+  ml: 'Mercado Libre',
+  mayorista: 'Mayorista'
+};
 
 function parseAmount(value: unknown): number {
   if (value === null || value === undefined) return 0;
@@ -30,7 +38,9 @@ const MarketingTopProducts: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [tnOrders, setTnOrders] = useState<any[]>([]);
   const [mlOrders, setMlOrders] = useState<any[]>([]);
+  const [wholesaleOrders, setWholesaleOrders] = useState<Order[]>([]);
   const [dateRange, setDateRange] = useState<DateRange>('60');
+  const [channelFilter, setChannelFilter] = useState<ChannelFilter>('all');
 
   const getDateRange = (days: number) => {
     const to = new Date();
@@ -42,20 +52,29 @@ const MarketingTopProducts: React.FC = () => {
     };
   };
 
+  const isInDateRange = (dateStr: string | undefined, from: string, to: string) => {
+    if (!dateStr) return false;
+    const day = dateStr.slice(0, 10);
+    return day >= from && day <= to;
+  };
+
   const loadData = async () => {
     setLoading(true);
     const dates = getDateRange(parseInt(dateRange, 10));
     try {
-      const [tnRes, mlRes] = await Promise.all([
+      const [tnRes, mlRes, ordersRes] = await Promise.all([
         api.getTiendaNubeOrders({ per_page: 100, created_at_min: dates.from, created_at_max: dates.to }).catch(() => ({ orders: [] })),
-        api.getMercadoLibreOrders({ limit: 100, date_from: dates.from, date_to: dates.to }).catch(() => ({ orders: [] }))
+        api.getMercadoLibreOrders({ limit: 100, date_from: dates.from, date_to: dates.to }).catch(() => ({ orders: [] })),
+        api.getOrders().catch(() => [] as Order[])
       ]);
       setTnOrders(tnRes.orders || []);
       setMlOrders(mlRes.orders || []);
+      setWholesaleOrders(Array.isArray(ordersRes) ? ordersRes : []);
     } catch (e) {
       console.error('Error cargando ventas:', e);
       setTnOrders([]);
       setMlOrders([]);
+      setWholesaleOrders([]);
     } finally {
       setLoading(false);
     }
@@ -66,33 +85,61 @@ const MarketingTopProducts: React.FC = () => {
   }, [dateRange]);
 
   const topProducts = useMemo(() => {
+    const dates = getDateRange(parseInt(dateRange, 10));
+    const includeTn = channelFilter === 'all' || channelFilter === 'tn';
+    const includeMl = channelFilter === 'all' || channelFilter === 'ml';
+    const includeMay = channelFilter === 'all' || channelFilter === 'mayorista';
     const sales: Record<string, { name: string; qty: number; rev: number; channels: Set<string> }> = {};
 
-    tnOrders.filter((o) => o.paymentStatus === 'paid').forEach((order) => {
-      (order.products || []).forEach((p: any) => {
-        const key = p.name || p.sku || 'Producto';
-        if (!sales[key]) sales[key] = { name: key, qty: 0, rev: 0, channels: new Set() };
-        sales[key].qty += p.quantity || 1;
-        sales[key].rev += parseAmount(p.price) * (p.quantity || 1);
-        sales[key].channels.add('TN');
+    if (includeTn) {
+      tnOrders.filter((o) => o.paymentStatus === 'paid').forEach((order) => {
+        (order.products || []).forEach((p: any) => {
+          const key = p.name || p.sku || 'Producto';
+          if (!sales[key]) sales[key] = { name: key, qty: 0, rev: 0, channels: new Set() };
+          sales[key].qty += p.quantity || 1;
+          sales[key].rev += parseAmount(p.price) * (p.quantity || 1);
+          sales[key].channels.add('TN');
+        });
       });
-    });
+    }
 
-    mlOrders.filter((o) => o.status === 'paid').forEach((order) => {
-      (order.items || []).forEach((item: any) => {
-        const key = item.title || item.sku || 'Producto';
-        if (!sales[key]) sales[key] = { name: key, qty: 0, rev: 0, channels: new Set() };
-        sales[key].qty += item.quantity || 1;
-        sales[key].rev += parseAmount(item.unitPrice) * (item.quantity || 1);
-        sales[key].channels.add('ML');
+    if (includeMl) {
+      mlOrders.filter((o) => o.status === 'paid').forEach((order) => {
+        (order.items || []).forEach((item: any) => {
+          const key = item.title || item.sku || 'Producto';
+          if (!sales[key]) sales[key] = { name: key, qty: 0, rev: 0, channels: new Set() };
+          sales[key].qty += item.quantity || 1;
+          sales[key].rev += parseAmount(item.unitPrice) * (item.quantity || 1);
+          sales[key].channels.add('ML');
+        });
       });
-    });
+    }
+
+    if (includeMay) {
+      wholesaleOrders
+        .filter(
+          (o) =>
+            o.status !== OrderStatus.DRAFT &&
+            o.status !== OrderStatus.CANCELLED &&
+            isInDateRange(o.date, dates.from, dates.to)
+        )
+        .forEach((order) => {
+          (order.items || []).forEach((item) => {
+            const key = item.productName || item.sku || 'Producto';
+            if (!sales[key]) sales[key] = { name: key, qty: 0, rev: 0, channels: new Set() };
+            const qty = item.quantity || 1;
+            sales[key].qty += qty;
+            sales[key].rev += parseAmount(item.priceAtMoment) * qty;
+            sales[key].channels.add('Mayorista');
+          });
+        });
+    }
 
     return Object.values(sales)
       .map((s) => ({ ...s, channels: Array.from(s.channels).join(' + ') }))
       .sort((a, b) => b.qty - a.qty)
       .slice(0, 20);
-  }, [tnOrders, mlOrders]);
+  }, [tnOrders, mlOrders, wholesaleOrders, dateRange, channelFilter]);
 
   const chartData = topProducts.slice(0, 10).map((p) => ({
     name: p.name.length > 28 ? `${p.name.slice(0, 28)}…` : p.name,
@@ -120,10 +167,22 @@ const MarketingTopProducts: React.FC = () => {
             Artículos más vendidos
           </h2>
           <p className="text-slate-400 text-sm mt-1">
-            Ventas pagadas en Tienda Nube y Mercado Libre (sin pedidos mayoristas).
+            {channelFilter === 'all'
+              ? 'Ventas pagadas en Tienda Nube, Mercado Libre y pedidos mayoristas confirmados.'
+              : `Ventas en ${CHANNEL_LABELS[channelFilter]}.`}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={channelFilter}
+            onChange={(e) => setChannelFilter(e.target.value as ChannelFilter)}
+            className="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm outline-none focus:border-fuchsia-500"
+          >
+            <option value="all">Todos los canales</option>
+            <option value="tn">Tienda Nube</option>
+            <option value="ml">Mercado Libre</option>
+            <option value="mayorista">Mayorista</option>
+          </select>
           <select
             value={dateRange}
             onChange={(e) => setDateRange(e.target.value as DateRange)}
