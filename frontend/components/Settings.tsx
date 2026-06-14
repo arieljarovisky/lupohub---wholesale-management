@@ -3138,7 +3138,7 @@ Body JSON:
                     type="password"
                     value={leadsMetaAppSecret}
                     onChange={(e) => setLeadsMetaAppSecret(e.target.value)}
-                    placeholder={leadsMetaHasAppSecret ? 'Vacío = mantener actual' : 'Desde Meta App Dashboard'}
+                    placeholder={leadsMetaHasAppSecret ? 'Vacío + Guardar = quitar App Secret' : 'Desde Meta → Configuración básica'}
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3 px-4 text-white text-sm outline-none focus:border-teal-500 font-mono"
                   />
                   <p className="text-xs text-slate-500">
@@ -3180,7 +3180,7 @@ Body JSON:
                         webhookSecret: leadsWebhookSecret.trim() || undefined,
                         metaVerifyToken: leadsMetaVerifyToken.trim() || undefined,
                         metaAppSecret: leadsMetaAppSecret.trim() || undefined,
-                        keepExistingMetaAppSecret: !leadsMetaAppSecret.trim(),
+                        keepExistingMetaAppSecret: false,
                         metaLeadsEnabled: leadsMetaLeadsEnabled,
                         whatsappEnabled: leadsWhatsappEnabled
                       });

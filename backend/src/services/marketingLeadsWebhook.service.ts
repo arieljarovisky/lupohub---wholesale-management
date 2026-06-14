@@ -116,6 +116,8 @@ export async function saveMarketingLeadsWebhookConfig(input: {
     metaAppSecret = input.metaAppSecret.trim();
   } else if (input.keepExistingMetaAppSecret) {
     metaAppSecret = row.meta_app_secret;
+  } else {
+    metaAppSecret = null;
   }
 
   await execute(
