@@ -1138,7 +1138,7 @@ const App: React.FC = () => {
                  {baseView === 'mercadolibre_product_ads' && 'Product Ads — campañas y publicaciones'}
                  {baseView === 'mercadolibre_stock' && 'Stock Mercado Libre'}
                  {baseView === MARKETING_HUB_VIEW && 'Centro de Marketing'}
-                 {baseView === MARKETING_TOP_PRODUCTS_VIEW && 'Artículos más vendidos'}
+                 {baseView === MARKETING_TOP_PRODUCTS_VIEW && 'Ventas e inventario'}
                  {baseView === MARKETING_LEADS_VIEW && 'Leads y embudo de ventas'}
                  {baseView === META_ADS_VIEW && 'Meta Ads — campañas'}
                  {baseView === GOOGLE_ADS_VIEW && 'Google Ads — campañas'}
