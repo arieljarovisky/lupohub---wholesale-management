@@ -3044,6 +3044,281 @@ export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: nu
   return { updated, errors };
 }
 
+export type MlTnSyncIssueRow = {
+  variant_id: string;
+  variant_sku: string;
+  product_sku: string;
+  product_name: string;
+  color_name: string;
+  size_code: string;
+  stock_lupohub: number;
+  sync_mode: string;
+  ml_id: string;
+  ml_variant_id: string;
+  ml_item_id: string;
+  tn_product_id: string;
+  tn_variant_id: string;
+  issue_type: string;
+  issue_message: string;
+};
+
+function hasCompleteMlLink(r: { ml_id?: string | null; ml_variant_id?: string | null; ml_item_id?: string | null }): boolean {
+  const itemId = r.ml_item_id != null && String(r.ml_item_id).trim() !== '';
+  const parent = r.ml_id != null && String(r.ml_id).trim() !== '' && r.ml_variant_id != null && String(r.ml_variant_id).trim() !== '';
+  return itemId || parent;
+}
+
+function hasCompleteTnLink(r: { tn_id?: string | null; tn_variant_id?: string | null }): boolean {
+  return r.tn_id != null && String(r.tn_id).trim() !== '' && r.tn_variant_id != null && String(r.tn_variant_id).trim() !== '';
+}
+
+function hasPartialChannelLink(r: {
+  ml_id?: string | null;
+  ml_variant_id?: string | null;
+  ml_item_id?: string | null;
+  tn_id?: string | null;
+  tn_variant_id?: string | null;
+}): boolean {
+  return !!(
+    (r.ml_id && String(r.ml_id).trim()) ||
+    (r.ml_variant_id && String(r.ml_variant_id).trim()) ||
+    (r.ml_item_id && String(r.ml_item_id).trim()) ||
+    (r.tn_id && String(r.tn_id).trim()) ||
+    (r.tn_variant_id && String(r.tn_variant_id).trim())
+  );
+}
+
+/** Diagnóstico de sincronización ML→TN (sin modificar stock). Misma lógica que runAutoSyncMLtoTN. */
+export async function diagnoseMlTnSyncIssues(): Promise<MlTnSyncIssueRow[]> {
+  const issues: MlTnSyncIssueRow[] = [];
+  const pushIssue = (
+    r: any,
+    syncMode: string,
+    issueType: string,
+    issueMessage: string
+  ) => {
+    issues.push({
+      variant_id: String(r.variant_id),
+      variant_sku: String(r.variant_sku || ''),
+      product_sku: String(r.product_sku || ''),
+      product_name: String(r.product_name || ''),
+      color_name: String(r.color_name || ''),
+      size_code: String(r.size_code || ''),
+      stock_lupohub: Number(r.stock_lupohub ?? 0),
+      sync_mode: syncMode,
+      ml_id: r.ml_id != null ? String(r.ml_id) : '',
+      ml_variant_id: r.ml_variant_id != null ? String(r.ml_variant_id) : '',
+      ml_item_id: r.ml_item_id != null ? String(r.ml_item_id) : '',
+      tn_product_id: r.tn_id != null ? String(r.tn_id) : '',
+      tn_variant_id: r.tn_variant_id != null ? String(r.tn_variant_id) : '',
+      issue_type: issueType,
+      issue_message: issueMessage,
+    });
+  };
+
+  const rows = await query(`
+    SELECT pv.id AS variant_id, pv.sku AS variant_sku,
+           p.sku AS product_sku, p.name AS product_name,
+           pc.name AS color_name, sz.code AS size_code,
+           COALESCE(st.stock, 0) AS stock_lupohub,
+           p.mercado_libre_id AS ml_id,
+           pv.mercado_libre_variant_id AS ml_variant_id,
+           pv.mercado_libre_item_id AS ml_item_id,
+           p.tienda_nube_id AS tn_id,
+           pv.tienda_nube_variant_id AS tn_variant_id
+    FROM product_variants pv
+    JOIN product_colors pc ON pc.id = pv.product_color_id
+    JOIN products p ON p.id = pc.product_id
+    LEFT JOIN sizes sz ON sz.id = pv.size_id
+    LEFT JOIN stocks st ON st.variant_id = pv.id
+    WHERE (
+      (p.mercado_libre_id IS NOT NULL AND TRIM(p.mercado_libre_id) != '')
+      OR (pv.mercado_libre_variant_id IS NOT NULL AND TRIM(pv.mercado_libre_variant_id) != '')
+      OR (pv.mercado_libre_item_id IS NOT NULL AND TRIM(pv.mercado_libre_item_id) != '')
+      OR (p.tienda_nube_id IS NOT NULL AND TRIM(CAST(p.tienda_nube_id AS CHAR)) != '')
+      OR (pv.tienda_nube_variant_id IS NOT NULL AND TRIM(CAST(pv.tienda_nube_variant_id AS CHAR)) != '')
+    )
+    ORDER BY p.sku, pv.sku
+  `);
+  if (!rows?.length) return issues;
+
+  const mlToken = await getValidMLToken();
+  const tnIntegration = await get(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
+  const tnHeaders = tnIntegration?.access_token
+    ? { Authentication: `bearer ${tnIntegration.access_token}`, 'User-Agent': TN_USER_AGENT }
+    : null;
+  const tnStoreId = tnIntegration?.store_id ? String(tnIntegration.store_id) : '';
+
+  const mlItemCache = new Map<string, any | null>();
+  const fetchMlItem = async (id: string): Promise<any | null> => {
+    if (!id || !mlToken?.access_token) return null;
+    if (mlItemCache.has(id)) return mlItemCache.get(id) ?? null;
+    try {
+      const data = await axios.get(`https://api.mercadolibre.com/items/${id}?include_attributes=all`, {
+        headers: { Authorization: `Bearer ${mlToken.access_token}` },
+      }).then((res) => res.data);
+      mlItemCache.set(id, data);
+      return data;
+    } catch {
+      mlItemCache.set(id, null);
+      return null;
+    }
+  };
+
+  const tnProductCache = new Map<string, any | null>();
+  const fetchTnProduct = async (productId: string): Promise<any | null> => {
+    if (!productId || !tnHeaders || !tnStoreId) return null;
+    if (tnProductCache.has(productId)) return tnProductCache.get(productId) ?? null;
+    try {
+      const data = await axios.get(
+        `https://api.tiendanube.com/v1/${tnStoreId}/products/${productId}`,
+        { headers: tnHeaders }
+      ).then((res) => res.data);
+      tnProductCache.set(productId, data);
+      if (TN_RATE_LIMIT_DELAY_MS > 0) await sleep(TN_RATE_LIMIT_DELAY_MS);
+      return data;
+    } catch {
+      tnProductCache.set(productId, null);
+      if (TN_RATE_LIMIT_DELAY_MS > 0) await sleep(TN_RATE_LIMIT_DELAY_MS);
+      return null;
+    }
+  };
+
+  const tnVariantExists = async (productId: string, variantId: string): Promise<boolean | null> => {
+    if (!tnHeaders || !tnStoreId) return null;
+    const product = await fetchTnProduct(productId);
+    if (!product) return false;
+    const variants = product.variants || [];
+    return variants.some((v: any) => String(v.id) === String(variantId));
+  };
+
+  const pendingMlParent: any[] = [];
+  const pendingMlOwn: any[] = [];
+
+  for (const row of rows as any[]) {
+    const mlComplete = hasCompleteMlLink(row);
+    const tnComplete = hasCompleteTnLink(row);
+    if (!hasPartialChannelLink(row)) continue;
+
+    const syncMode = row.ml_item_id
+      ? 'publicacion_propia'
+      : row.ml_id && row.ml_variant_id
+        ? 'publicacion_padre'
+        : 'vinculo_incompleto';
+
+    if (!mlComplete && !tnComplete) {
+      pushIssue(row, syncMode, 'SIN_VINCULOS', 'Faltan vínculos completos con Mercado Libre y Tienda Nube.');
+      continue;
+    }
+    if (!mlComplete && tnComplete) {
+      const missing: string[] = [];
+      if (!row.ml_item_id && !row.ml_id) missing.push('publicación ML');
+      if (!row.ml_item_id && !row.ml_variant_id) missing.push('variación ML');
+      if (row.ml_item_id == null && !row.ml_id && !row.ml_variant_id) missing.push('ítem ML propio');
+      pushIssue(row, syncMode, 'SIN_ML', `Tiene Tienda Nube pero falta vínculo ML (${missing.join(', ') || 'incompleto'}).`);
+      continue;
+    }
+    if (mlComplete && !tnComplete) {
+      const missing: string[] = [];
+      if (!row.tn_id) missing.push('producto TN');
+      if (!row.tn_variant_id) missing.push('variante TN');
+      pushIssue(row, syncMode, 'SIN_TN', `Tiene Mercado Libre pero falta vínculo TN (${missing.join(', ') || 'incompleto'}).`);
+      continue;
+    }
+
+    if (row.ml_item_id) pendingMlOwn.push(row);
+    else if (row.ml_id && row.ml_variant_id) pendingMlParent.push(row);
+  }
+
+  const mlParentIds = Array.from(new Set(pendingMlParent.map((r) => String(r.ml_id))));
+  for (let i = 0; i < mlParentIds.length; i += 10) {
+    await Promise.all(mlParentIds.slice(i, i + 10).map((id) => fetchMlItem(id)));
+  }
+
+  for (const r of pendingMlParent) {
+    const item = await fetchMlItem(String(r.ml_id));
+    const syncMode = 'publicacion_padre';
+    if (!item) {
+      pushIssue(r, syncMode, 'ML_NO_ENCONTRADO', `No se pudo obtener la publicación ML ${r.ml_id}. Puede estar pausada, finalizada o eliminada.`);
+      continue;
+    }
+    const variations = item.variations || [];
+    const v = variations.find((x: any) => String(x.id) === String(r.ml_variant_id));
+    if (!v && variations.length > 0) {
+      pushIssue(
+        r,
+        syncMode,
+        'ML_VARIACION_NO_ENCONTRADA',
+        `La variación ML ${r.ml_variant_id} no existe en la publicación ${r.ml_id}. Se evita enviar stock incorrecto a TN.`
+      );
+      continue;
+    }
+    const tnOk = await tnVariantExists(String(r.tn_id), String(r.tn_variant_id));
+    if (tnOk === false) {
+      pushIssue(
+        r,
+        syncMode,
+        'TN_NO_ENCONTRADO',
+        `Producto/variante TN ${r.tn_id}/${r.tn_variant_id} no encontrado (404). Revisá o limpiá el vínculo en LupoHub.`
+      );
+    } else if (tnOk === null) {
+      pushIssue(r, syncMode, 'TN_NO_VERIFICADO', 'No hay integración activa con Tienda Nube para verificar el vínculo.');
+    }
+  }
+
+  const mlOwnIds = Array.from(new Set(pendingMlOwn.map((r) => String(r.ml_item_id))));
+  for (let i = 0; i < mlOwnIds.length; i += 10) {
+    await Promise.all(mlOwnIds.slice(i, i + 10).map((id) => fetchMlItem(id)));
+  }
+
+  for (const r of pendingMlOwn) {
+    const item = await fetchMlItem(String(r.ml_item_id));
+    const syncMode = 'publicacion_propia';
+    if (!item) {
+      pushIssue(
+        r,
+        syncMode,
+        'ML_NO_ENCONTRADO',
+        `No se pudo obtener el ítem ML ${r.ml_item_id} (SKU ${r.variant_sku}). Puede estar pausado, finalizado o eliminado.`
+      );
+      continue;
+    }
+    const variations = item.variations || [];
+    if (variations.length > 1) {
+      pushIssue(
+        r,
+        syncMode,
+        'ML_MULTI_VARIACIONES',
+        `El ítem ML ${r.ml_item_id} tiene ${variations.length} variaciones; no se puede inferir una única para sincronizar stock a TN.`
+      );
+      continue;
+    }
+    const tnOk = await tnVariantExists(String(r.tn_id), String(r.tn_variant_id));
+    if (tnOk === false) {
+      pushIssue(
+        r,
+        syncMode,
+        'TN_NO_ENCONTRADO',
+        `Producto/variante TN ${r.tn_id}/${r.tn_variant_id} no encontrado (404). Revisá o limpiá el vínculo en LupoHub.`
+      );
+    } else if (tnOk === null) {
+      pushIssue(r, syncMode, 'TN_NO_VERIFICADO', 'No hay integración activa con Tienda Nube para verificar el vínculo.');
+    }
+  }
+
+  return issues;
+}
+
+export const getMlTnSyncIssues = async (req: Request, res: Response) => {
+  try {
+    const rows = await diagnoseMlTnSyncIssues();
+    res.json({ rows, count: rows.length });
+  } catch (error: any) {
+    console.error('[ML→TN Sync Issues]', error);
+    res.status(500).json({ message: error?.message || 'Error al diagnosticar sincronización ML→TN' });
+  }
+};
+
 // Sincronizar todo el stock local a Tienda Nube
 export const syncAllStockToTiendaNube = async (req: Request, res: Response) => {
   try {

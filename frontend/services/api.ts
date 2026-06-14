@@ -2630,6 +2630,34 @@ export const api = {
     }, { message: 'Offline', updated: 0, errors: 0 }, 'syncMLtoTN');
   },
 
+  /** Diagnóstico ML→TN: artículos con vínculos incompletos o errores de sincronización. */
+  getMlTnSyncIssues: async (): Promise<Array<{
+    variant_id: string;
+    variant_sku: string;
+    product_sku: string;
+    product_name: string;
+    color_name: string;
+    size_code: string;
+    stock_lupohub: number;
+    sync_mode: string;
+    ml_id: string;
+    ml_variant_id: string;
+    ml_item_id: string;
+    tn_product_id: string;
+    tn_variant_id: string;
+    issue_type: string;
+    issue_message: string;
+  }>> => {
+    const res = await request<{ rows: any[]; count: number }>(
+      '/integrations/mercadolibre/sync-issues',
+      'GET',
+      undefined,
+      undefined,
+      300000
+    );
+    return res?.rows ?? [];
+  },
+
   importStockFromMercadoLibre: async (): Promise<{ message: string; updated: number; errors: number; sentToTN?: number; errorsToTN?: number; logs: string[] }> => {
     return handleRequest(async () => {
       return await request<{ message: string; updated: number; errors: number; sentToTN?: number; errorsToTN?: number; logs: string[] }>('/integrations/mercadolibre/import-stock', 'POST', undefined, undefined, 180000);

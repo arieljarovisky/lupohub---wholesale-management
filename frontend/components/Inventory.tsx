@@ -273,6 +273,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [importingStockExcel, setImportingStockExcel] = useState(false);
   const [stockExcelResult, setStockExcelResult] = useState<{ updated: number; notFoundCount: number; notFound?: string[]; errors?: string[] } | null>(null);
   const [exportingExcel, setExportingExcel] = useState(false);
+  const [exportingSyncIssues, setExportingSyncIssues] = useState(false);
   const [inventorySubView, setInventorySubView] = useState<'mine' | 'ml' | 'tn'>(stored.subView);
   const [showPublicationBundles, setShowPublicationBundles] = useState(false);
   const [mlSearchTerm, setMlSearchTerm] = useState('');
@@ -845,6 +846,62 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       showToast('error', 'Error al exportar. Revisá que el backend esté conectado.');
     } finally {
       setExportingExcel(false);
+    }
+  };
+
+  const SYNC_MODE_LABELS: Record<string, string> = {
+    publicacion_padre: 'Publicación padre ML',
+    publicacion_propia: 'Publicación propia ML',
+    vinculo_incompleto: 'Vínculo incompleto',
+  };
+
+  const ISSUE_TYPE_LABELS: Record<string, string> = {
+    SIN_VINCULOS: 'Sin vínculos',
+    SIN_ML: 'Sin Mercado Libre',
+    SIN_TN: 'Sin Tienda Nube',
+    ML_NO_ENCONTRADO: 'ML no encontrado',
+    ML_VARIACION_NO_ENCONTRADA: 'Variación ML no encontrada',
+    ML_MULTI_VARIACIONES: 'ML con múltiples variaciones',
+    TN_NO_ENCONTRADO: 'TN no encontrado (404)',
+    TN_NO_VERIFICADO: 'TN no verificado',
+  };
+
+  const exportSyncIssuesToExcel = async () => {
+    setExportingSyncIssues(true);
+    try {
+      showToast('info', 'Analizando sincronización ML→TN… puede tardar unos minutos.');
+      const rows = await api.getMlTnSyncIssues();
+      if (!rows.length) {
+        showToast('success', 'No hay artículos con problemas de sincronización ML→TN.');
+        return;
+      }
+      const excelRows = rows.map((r) => ({
+        'Código artículo': r.product_sku,
+        'Nombre producto': r.product_name,
+        'SKU variante': r.variant_sku,
+        'Talle': r.size_code || '',
+        'Color': r.color_name || '',
+        'Stock LupoHub': Number(r.stock_lupohub ?? 0),
+        'Modo sync': SYNC_MODE_LABELS[r.sync_mode] || r.sync_mode,
+        'ML publicación': r.ml_id || '',
+        'ML variación': r.ml_variant_id || '',
+        'ML ítem propio': r.ml_item_id || '',
+        'TN producto': r.tn_product_id || '',
+        'TN variante': r.tn_variant_id || '',
+        'Tipo error': ISSUE_TYPE_LABELS[r.issue_type] || r.issue_type,
+        'Detalle': r.issue_message,
+      }));
+      const worksheet = XLSX.utils.json_to_sheet(excelRows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Sync ML-TN');
+      const filename = `sync_ml_tn_errores_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      XLSX.writeFile(workbook, filename);
+      showToast('success', `Exportados ${rows.length} artículo(s) con problemas de sincronización.`);
+    } catch (e: any) {
+      console.error(e);
+      showToast('error', e?.message || 'Error al exportar problemas de sincronización.');
+    } finally {
+      setExportingSyncIssues(false);
     }
   };
 
@@ -2955,6 +3012,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               <button type="button" onClick={() => { setTopDotsOpen(false); exportProductsToExcel(); }} disabled={exportingExcel} className="w-full flex items-center gap-3 mx-1.5 px-3 py-2.5 text-left text-sm text-slate-300 hover:bg-white/5 hover:text-white rounded-xl disabled:opacity-50 max-w-[calc(100%-12px)]">
                 {exportingExcel ? <Loader2 size={17} className="animate-spin shrink-0" /> : <Download size={17} className="text-slate-400 shrink-0" />}
                 Exportar Excel
+              </button>
+              <button type="button" onClick={() => { setTopDotsOpen(false); exportSyncIssuesToExcel(); }} disabled={exportingSyncIssues} className="w-full flex items-center gap-3 mx-1.5 px-3 py-2.5 text-left text-sm text-amber-200/90 hover:bg-amber-500/10 hover:text-amber-100 rounded-xl disabled:opacity-50 max-w-[calc(100%-12px)]">
+                {exportingSyncIssues ? <Loader2 size={17} className="animate-spin shrink-0 text-amber-400" /> : <AlertTriangle size={17} className="text-amber-400 shrink-0" />}
+                Exportar errores sync ML→TN
               </button>
               {(canManagePublicationBundles || isAdminOrWarehouse) && (
                 <div className="my-1.5 mx-3 border-t border-slate-700/50" />
