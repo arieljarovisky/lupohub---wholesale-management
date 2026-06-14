@@ -537,7 +537,7 @@ const MarketingLeads: React.FC = () => {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-slate-500 border-b border-slate-800">
-                    <th className="py-2.5 px-3 font-medium">Lead</th>
+                    <th className="py-2.5 px-3 font-medium">Lead / mensaje</th>
                     <th className="py-2.5 px-3 font-medium">Origen</th>
                     <th className="py-2.5 px-3 font-medium">Campaña</th>
                     <th className="py-2.5 px-3 font-medium">Etapa</th>
@@ -557,11 +557,19 @@ const MarketingLeads: React.FC = () => {
                   ) : (
                     leads.map((lead) => (
                       <tr key={lead.id} className="border-b border-slate-800/60 hover:bg-slate-800/20">
-                        <td className="py-2.5 px-3">
+                        <td className="py-2.5 px-3 max-w-[280px]">
                           <p className="text-white font-medium">{lead.name}</p>
                           <p className="text-xs text-slate-500">
                             {[lead.phone, lead.email].filter(Boolean).join(' · ') || '—'}
                           </p>
+                          {lead.notes?.trim() && (
+                            <p
+                              className="text-xs text-teal-300/90 mt-1 whitespace-pre-wrap break-words line-clamp-3"
+                              title={lead.notes}
+                            >
+                              {lead.notes}
+                            </p>
+                          )}
                         </td>
                         <td className="py-2.5 px-3">
                           <SourceBadge source={lead.source} />

@@ -204,6 +204,37 @@ export async function ingestGenericLeadWebhook(
   });
 }
 
+function extractWhatsAppMessageText(msg: any): string | null {
+  const type = String(msg?.type || '');
+  switch (type) {
+    case 'text':
+      return msg.text?.body?.trim() || null;
+    case 'button':
+      return msg.button?.text?.trim() || msg.button?.payload?.trim() || null;
+    case 'interactive':
+      return (
+        msg.interactive?.button_reply?.title?.trim() ||
+        msg.interactive?.list_reply?.title?.trim() ||
+        msg.interactive?.list_reply?.description?.trim() ||
+        null
+      );
+    case 'image':
+      return msg.image?.caption?.trim() || '(imagen)';
+    case 'video':
+      return msg.video?.caption?.trim() || '(video)';
+    case 'audio':
+      return '(audio)';
+    case 'document':
+      return msg.document?.caption?.trim() || msg.document?.filename?.trim() || '(documento)';
+    case 'sticker':
+      return '(sticker)';
+    case 'location':
+      return msg.location?.name?.trim() || msg.location?.address?.trim() || '(ubicación)';
+    default:
+      return null;
+  }
+}
+
 function verifyMetaSignature(appSecret: string | null, rawBody: Buffer | string, signatureHeader: string): boolean {
   if (!appSecret?.trim() || !signatureHeader?.startsWith('sha256=')) return true;
   const expected = crypto.createHmac('sha256', appSecret.trim()).update(rawBody).digest('hex');
@@ -329,13 +360,12 @@ export async function handleMetaLeadWebhook(
         const messages = Array.isArray(value.messages) ? value.messages : [];
         const contacts = Array.isArray(value.contacts) ? value.contacts : [];
         for (const msg of messages) {
-          if (String(msg.type) !== 'text' && String(msg.type) !== 'button') continue;
+          const text = extractWhatsAppMessageText(msg);
+          if (!text) continue;
           const from = String(msg.from || '');
           if (!from) continue;
           const contact = contacts.find((c: any) => String(c.wa_id) === from);
           const name = contact?.profile?.name || `WhatsApp ${from}`;
-          const text =
-            msg.text?.body || msg.button?.text || msg.button?.payload || '(mensaje sin texto)';
           try {
             const { created } = await createMarketingLeadFromWebhook({
               name,

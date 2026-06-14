@@ -222,7 +222,10 @@ export async function createMarketingLeadFromWebhook(input: {
         const prev = existing.notes ? String(existing.notes) : '';
         const stamp = new Date().toLocaleString('es-AR');
         const merged = prev ? `${prev}\n---\n[${stamp}] ${input.notes.trim()}` : `[${stamp}] ${input.notes.trim()}`;
-        await execute('UPDATE marketing_leads SET notes = ? WHERE id = ?', [merged, existing.id]);
+        await execute(
+          'UPDATE marketing_leads SET notes = ?, entered_at = NOW() WHERE id = ?',
+          [merged, existing.id]
+        );
         const row = await get('SELECT * FROM marketing_leads WHERE id = ?', [existing.id]);
         return { lead: mapRow(row), created: false };
       }
