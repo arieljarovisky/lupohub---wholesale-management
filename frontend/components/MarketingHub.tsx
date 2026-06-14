@@ -2,13 +2,10 @@ import React from 'react';
 import {
   Award,
   Megaphone,
-  Sparkles,
-  LayoutGrid,
   Facebook,
   Chrome,
   TrendingUp,
   ChevronRight,
-  Radio,
   UserPlus
 } from 'lucide-react';
 import {
@@ -49,32 +46,11 @@ const MarketingHub: React.FC<MarketingHubProps> = ({ onNavigate }) => {
       title: 'Mercado Libre — Mercado Ads',
       items: [
         {
-          view: 'mercadolibre_canal_difusion',
-          icon: Radio,
-          title: 'Canal de difusión',
-          desc: 'Guía, recomendaciones y accesos a todas las herramientas de ML.',
-          color: 'from-amber-500/20 to-yellow-600/10 border-amber-500/30'
-        },
-        {
           view: 'mercadolibre_product_ads',
           icon: Megaphone,
           title: 'Product Ads',
           desc: 'Campañas y métricas por publicación (ROAS, ACOS, inversión).',
           color: 'from-yellow-500/15 to-amber-600/10 border-yellow-500/25'
-        },
-        {
-          view: 'mercadolibre_brand_ads',
-          icon: Sparkles,
-          title: 'Brand Ads',
-          desc: 'Campañas de visibilidad de marca en Mercado Libre.',
-          color: 'from-violet-500/15 to-purple-600/10 border-violet-500/25'
-        },
-        {
-          view: 'mercadolibre_display_ads',
-          icon: LayoutGrid,
-          title: 'Display Ads',
-          desc: 'Banners y campañas de display en el ecosistema ML.',
-          color: 'from-cyan-500/15 to-teal-600/10 border-cyan-500/25'
         }
       ]
     },

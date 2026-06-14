@@ -11,10 +11,7 @@ export const MARKETING_VIEWS = [
   MARKETING_HUB_VIEW,
   MARKETING_TOP_PRODUCTS_VIEW,
   MARKETING_LEADS_VIEW,
-  'mercadolibre_canal_difusion',
   'mercadolibre_product_ads',
-  'mercadolibre_brand_ads',
-  'mercadolibre_display_ads',
   META_ADS_VIEW,
   GOOGLE_ADS_VIEW,
 ] as const;

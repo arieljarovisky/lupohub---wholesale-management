@@ -57,14 +57,7 @@ const Customers = lazyWithReload(() => import('./components/Customers'));
 const OrderPicking = lazyWithReload(() => import('./components/OrderPicking'));
 const TiendaNubeOrders = lazyWithReload(() => import('./components/TiendaNubeOrders'));
 const MercadoLibreOrders = lazyWithReload(() => import('./components/MercadoLibreOrders'));
-const MercadoLibreCanalDifusion = lazyWithReload(() => import('./components/MercadoLibreCanalDifusion'));
 const MercadoLibreProductAds = lazyWithReload(() => import('./components/MercadoLibreProductAds'));
-const MercadoLibreBrandAds = lazyWithReload(() =>
-  import('./components/MercadoLibreBrandDisplayAds').then((m) => ({ default: m.MercadoLibreBrandAds }))
-);
-const MercadoLibreDisplayAds = lazyWithReload(() =>
-  import('./components/MercadoLibreBrandDisplayAds').then((m) => ({ default: m.MercadoLibreDisplayAds }))
-);
 const BulkInvoicing = lazyWithReload(() => import('./components/BulkInvoicing'));
 const StockHistory = lazyWithReload(() => import('./components/StockHistory'));
 const Despachos = lazyWithReload(() => import('./components/Despachos'));
@@ -165,10 +158,7 @@ const App: React.FC = () => {
     channel_margins: [Role.ADMIN, Role.WAREHOUSE],
     tiendanube_orders: [Role.ADMIN, Role.WAREHOUSE],
     mercadolibre_orders: [Role.ADMIN, Role.WAREHOUSE],
-    mercadolibre_canal_difusion: [Role.ADMIN, Role.WAREHOUSE, Role.MARKETING],
     mercadolibre_product_ads: [Role.ADMIN, Role.WAREHOUSE, Role.MARKETING],
-    mercadolibre_brand_ads: [Role.ADMIN, Role.WAREHOUSE, Role.MARKETING],
-    mercadolibre_display_ads: [Role.ADMIN, Role.WAREHOUSE, Role.MARKETING],
     marketing: [Role.ADMIN, Role.MARKETING],
     marketing_top_products: [Role.ADMIN, Role.MARKETING],
     meta_ads: [Role.ADMIN, Role.MARKETING],
@@ -1005,10 +995,7 @@ const App: React.FC = () => {
       { id: MARKETING_HUB_VIEW, label: 'Centro de Marketing', icon: Megaphone, roles: [Role.ADMIN, Role.MARKETING] },
       { id: MARKETING_TOP_PRODUCTS_VIEW, label: 'Más vendidos', icon: LayoutDashboard, roles: [Role.ADMIN, Role.MARKETING] },
       { id: MARKETING_LEADS_VIEW, label: 'Leads y embudo', icon: Users, roles: [Role.ADMIN, Role.MARKETING] },
-      { id: 'mercadolibre_canal_difusion', label: 'ML — Difusión', icon: Zap, roles: [Role.ADMIN, Role.MARKETING] },
       { id: 'mercadolibre_product_ads', label: 'ML — Product Ads', icon: Megaphone, roles: [Role.ADMIN, Role.MARKETING] },
-      { id: 'mercadolibre_brand_ads', label: 'ML — Brand Ads', icon: Megaphone, roles: [Role.ADMIN, Role.MARKETING] },
-      { id: 'mercadolibre_display_ads', label: 'ML — Display Ads', icon: Megaphone, roles: [Role.ADMIN, Role.MARKETING] },
       { id: META_ADS_VIEW, label: 'Meta Ads', icon: Megaphone, roles: [Role.ADMIN, Role.MARKETING] },
       { id: GOOGLE_ADS_VIEW, label: 'Google Ads', icon: Megaphone, roles: [Role.ADMIN, Role.MARKETING] },
     ]},
@@ -1148,10 +1135,7 @@ const App: React.FC = () => {
                  {baseView === COMPANY_FINANCE_VIEW && 'Resultados empresa'}
                  {baseView === 'tiendanube_orders' && 'Tienda Nube'}
                  {baseView === 'mercadolibre_orders' && 'Mercado Libre'}
-                 {baseView === 'mercadolibre_canal_difusion' && 'Canal de difusión — Mercado Libre'}
                  {baseView === 'mercadolibre_product_ads' && 'Product Ads — campañas y publicaciones'}
-                 {baseView === 'mercadolibre_brand_ads' && 'Brand Ads — campañas'}
-                 {baseView === 'mercadolibre_display_ads' && 'Display Ads — campañas'}
                  {baseView === 'mercadolibre_stock' && 'Stock Mercado Libre'}
                  {baseView === MARKETING_HUB_VIEW && 'Centro de Marketing'}
                  {baseView === MARKETING_TOP_PRODUCTS_VIEW && 'Artículos más vendidos'}
@@ -1370,24 +1354,9 @@ const App: React.FC = () => {
               <MercadoLibreOrders />
             </Suspense>
           )}
-          {baseView === 'mercadolibre_canal_difusion' && (
-            <Suspense fallback={<ViewFallback />}>
-              <MercadoLibreCanalDifusion onNavigate={handleChangeView} />
-            </Suspense>
-          )}
           {baseView === 'mercadolibre_product_ads' && (
             <Suspense fallback={<ViewFallback />}>
               <MercadoLibreProductAds />
-            </Suspense>
-          )}
-          {baseView === 'mercadolibre_brand_ads' && (
-            <Suspense fallback={<ViewFallback />}>
-              <MercadoLibreBrandAds />
-            </Suspense>
-          )}
-          {baseView === 'mercadolibre_display_ads' && (
-            <Suspense fallback={<ViewFallback />}>
-              <MercadoLibreDisplayAds />
             </Suspense>
           )}
           {baseView === MARKETING_HUB_VIEW && (
