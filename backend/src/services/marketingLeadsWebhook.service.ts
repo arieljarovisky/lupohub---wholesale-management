@@ -345,12 +345,28 @@ export async function handleMetaLeadWebhook(
   const results: Array<{ ok: boolean; message: string }> = [];
   let processed = 0;
   const entries = Array.isArray(body?.entry) ? body.entry : [];
+  const objectType = String(body?.object || '');
+
+  if (entries.length === 0) {
+    console.warn('[metaLeadWebhook] POST sin entries', { object: objectType });
+  }
 
   for (const entry of entries) {
     const changes = Array.isArray(entry?.changes) ? entry.changes : [];
     for (const change of changes) {
       const field = String(change?.field || '');
       const value = change?.value || {};
+
+      if (field === 'messages') {
+        const msgCount = Array.isArray(value.messages) ? value.messages.length : 0;
+        const statusCount = Array.isArray(value.statuses) ? value.statuses.length : 0;
+        console.log('[metaLeadWebhook] messages event', {
+          object: objectType,
+          msgCount,
+          statusCount,
+          whatsappEnabled: !!row.whatsapp_enabled
+        });
+      }
 
       if (field === 'leadgen' && row.meta_leads_enabled) {
         const leadgenId = String(value.leadgen_id || '');
