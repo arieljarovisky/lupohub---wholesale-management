@@ -3119,7 +3119,7 @@ export async function diagnoseMlTnSyncIssues(): Promise<MlTnSyncIssueRow[]> {
   const rows = await query(`
     SELECT pv.id AS variant_id, pv.sku AS variant_sku,
            p.sku AS product_sku, p.name AS product_name,
-           pc.name AS color_name, sz.code AS size_code,
+           c.name AS color_name, sz.size_code AS size_code,
            COALESCE(st.stock, 0) AS stock_lupohub,
            p.mercado_libre_id AS ml_id,
            pv.mercado_libre_variant_id AS ml_variant_id,
@@ -3129,6 +3129,7 @@ export async function diagnoseMlTnSyncIssues(): Promise<MlTnSyncIssueRow[]> {
     FROM product_variants pv
     JOIN product_colors pc ON pc.id = pv.product_color_id
     JOIN products p ON p.id = pc.product_id
+    LEFT JOIN colors c ON c.id = pc.color_id
     LEFT JOIN sizes sz ON sz.id = pv.size_id
     LEFT JOIN stocks st ON st.variant_id = pv.id
     WHERE (

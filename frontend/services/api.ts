@@ -805,6 +805,11 @@ export const api = {
     color_name: string;
     stock: number;
     talle_display?: string;
+    tienda_nube_id?: string | number | null;
+    mercado_libre_id?: string | null;
+    tienda_nube_variant_id?: string | number | null;
+    mercado_libre_variant_id?: string | null;
+    mercado_libre_item_id?: string | null;
   }>> => {
     const res = await request<{ rows: any[] }>('/products/export-inventory', 'GET', undefined, undefined, PRODUCTS_LIST_TIMEOUT_MS);
     return res?.rows ?? [];

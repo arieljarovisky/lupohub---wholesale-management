@@ -3,6 +3,7 @@ import { Award, Loader2, RefreshCw, BarChart3, Package, AlertTriangle, Search } 
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { api } from '../services/api';
 import { Order, OrderStatus } from '../types';
+import { useNotification } from '../context/NotificationContext';
 
 type DateRange = '7' | '15' | '30' | '60' | '90';
 type ChannelFilter = 'all' | 'tn' | 'ml' | 'mayorista' | 'tn_ml';
@@ -67,10 +68,12 @@ type VariantRow = {
     mercadoLibre?: string;
     tiendaNubeVariant?: string;
     mercadoLibreVariant?: string;
+    mercadoLibreItemId?: string;
   };
 };
 
 const MarketingTopProducts: React.FC = () => {
+  const { showToast } = useNotification();
   const [loading, setLoading] = useState(true);
   const [tnOrders, setTnOrders] = useState<any[]>([]);
   const [mlOrders, setMlOrders] = useState<any[]>([]);
@@ -103,18 +106,34 @@ const MarketingTopProducts: React.FC = () => {
     setLoading(true);
     const dates = getDateRange(parseInt(dateRange, 10));
     try {
-      const [tnRes, mlRes, ordersRes, productsRes] = await Promise.all([
+      const [tnRes, mlRes, ordersRes, inventoryRows] = await Promise.all([
         api.getTiendaNubeOrders({ per_page: 100, created_at_min: dates.from, created_at_max: dates.to }).catch(() => ({ orders: [] })),
         api.getMercadoLibreOrders({ limit: 100, date_from: dates.from, date_to: dates.to }).catch(() => ({ orders: [] })),
         api.getOrders().catch(() => [] as Order[]),
-        api.getProductsPaged(1, 5000, '', 'stock', 'asc', 'ALL', { skipTotal: true }).catch(() => ({ items: [] }))
+        api.exportInventory().catch(() => [] as Awaited<ReturnType<typeof api.exportInventory>>)
       ]);
       setTnOrders(tnRes.orders || []);
       setMlOrders(mlRes.orders || []);
       setWholesaleOrders(Array.isArray(ordersRes) ? ordersRes : []);
-      setVariants((productsRes.items || []) as VariantRow[]);
-    } catch (e) {
+      setVariants(
+        (inventoryRows || []).map((row) => ({
+          product_id: row.product_sku,
+          base_sku: row.product_sku,
+          sku: row.variant_sku || row.product_sku,
+          name: row.product_name,
+          stock_total: Number(row.stock ?? 0),
+          externalIds: {
+            tiendaNube: row.tienda_nube_id != null ? String(row.tienda_nube_id) : undefined,
+            mercadoLibre: row.mercado_libre_id || undefined,
+            tiendaNubeVariant: row.tienda_nube_variant_id != null ? String(row.tienda_nube_variant_id) : undefined,
+            mercadoLibreVariant: row.mercado_libre_variant_id || undefined,
+            mercadoLibreItemId: row.mercado_libre_item_id || undefined
+          }
+        }))
+      );
+    } catch (e: any) {
       console.error('Error cargando ventas:', e);
+      showToast('error', e?.message || 'Error cargando ventas e inventario');
       setTnOrders([]);
       setMlOrders([]);
       setWholesaleOrders([]);
@@ -192,7 +211,11 @@ const MarketingTopProducts: React.FC = () => {
     variants.forEach((v) => {
       const key = v.product_id || v.base_sku || v.sku;
       const stock = Number(v.stock_total ?? v.stock ?? 0);
-      const hasMl = !!(v.externalIds?.mercadoLibre || v.externalIds?.mercadoLibreVariant);
+      const hasMl = !!(
+        v.externalIds?.mercadoLibre ||
+        v.externalIds?.mercadoLibreVariant ||
+        v.externalIds?.mercadoLibreItemId
+      );
       const hasTn = !!(v.externalIds?.tiendaNube || v.externalIds?.tiendaNubeVariant);
       const existing = map.get(key);
       if (existing) {

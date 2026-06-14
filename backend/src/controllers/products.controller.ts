@@ -122,9 +122,9 @@ export const getProducts = async (req: Request, res: Response) => {
     }));
 
     res.json({ items: mapped, page: pageNum, per_page: perPageNum, total });
-  } catch (error) {
+  } catch (error: any) {
     console.error(error);
-    res.status(500).json({ message: "Error fetching products" });
+    res.status(500).json({ message: error?.message || 'Error fetching products' });
   }
 };
 
@@ -1871,7 +1871,12 @@ export const exportInventory = async (req: Request, res: Response) => {
         p.name AS product_name,
         p.category,
         p.base_price,
+        p.tienda_nube_id,
+        p.mercado_libre_id,
         pv.sku AS variant_sku,
+        pv.tienda_nube_variant_id,
+        pv.mercado_libre_variant_id,
+        pv.mercado_libre_item_id,
         s.size_code,
         s.name AS size_name,
         c.code AS color_code,
@@ -1892,7 +1897,7 @@ export const exportInventory = async (req: Request, res: Response) => {
     res.json({ rows: withTalleLabel });
   } catch (error: any) {
     console.error('Export inventory:', error);
-    res.status(500).json({ message: 'Error exportando inventario', error: error?.message });
+    res.status(500).json({ message: error?.message || 'Error exportando inventario' });
   }
 };
 
