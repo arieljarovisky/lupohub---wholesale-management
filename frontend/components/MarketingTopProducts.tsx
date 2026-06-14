@@ -7,6 +7,8 @@ import { Order, OrderStatus } from '../types';
 type DateRange = '7' | '15' | '30' | '60' | '90';
 type ChannelFilter = 'all' | 'tn' | 'ml' | 'mayorista' | 'tn_ml';
 type StockFilter = 'all' | 'out' | 'low' | 'ok';
+type StockSortBy = 'stock' | 'name' | 'sku';
+type SortDir = 'asc' | 'desc';
 
 const CHANNEL_FILTER_LABELS: Record<ChannelFilter, string> = {
   all: 'Todos los canales',
@@ -78,6 +80,8 @@ const MarketingTopProducts: React.FC = () => {
   const [channelFilter, setChannelFilter] = useState<ChannelFilter>('all');
   const [stockFilter, setStockFilter] = useState<StockFilter>('all');
   const [stockSearch, setStockSearch] = useState('');
+  const [stockSortBy, setStockSortBy] = useState<StockSortBy>('stock');
+  const [stockSortDir, setStockSortDir] = useState<SortDir>('asc');
 
   const getDateRange = (days: number) => {
     const to = new Date();
@@ -209,7 +213,7 @@ const MarketingTopProducts: React.FC = () => {
       }
     });
 
-    return Array.from(map.values()).sort((a, b) => a.stock - b.stock);
+    return Array.from(map.values());
   }, [variants]);
 
   const stockMetrics = useMemo(() => {
@@ -222,14 +226,21 @@ const MarketingTopProducts: React.FC = () => {
 
   const filteredStock = useMemo(() => {
     const q = stockSearch.trim().toLowerCase();
-    return stockByProduct.filter((p) => {
+    const filtered = stockByProduct.filter((p) => {
       if (stockFilter === 'out' && p.stock !== 0) return false;
       if (stockFilter === 'low' && (p.stock === 0 || p.stock >= 10)) return false;
       if (stockFilter === 'ok' && p.stock < 10) return false;
       if (q && !p.name.toLowerCase().includes(q) && !p.sku.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [stockByProduct, stockFilter, stockSearch]);
+
+    const dir = stockSortDir === 'asc' ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      if (stockSortBy === 'stock') return (a.stock - b.stock) * dir;
+      if (stockSortBy === 'name') return a.name.localeCompare(b.name, 'es') * dir;
+      return a.sku.localeCompare(b.sku, 'es', { numeric: true }) * dir;
+    });
+  }, [stockByProduct, stockFilter, stockSearch, stockSortBy, stockSortDir]);
 
   const chartData = topProducts.slice(0, 10).map((p) => ({
     name: p.name.length > 28 ? `${p.name.slice(0, 28)}…` : p.name,
@@ -411,6 +422,27 @@ const MarketingTopProducts: React.FC = () => {
             <option value="out">Sin stock</option>
             <option value="low">Stock bajo</option>
             <option value="ok">Stock OK (≥10 u)</option>
+          </select>
+          <select
+            value={stockSortBy}
+            onChange={(e) => setStockSortBy(e.target.value as StockSortBy)}
+            className="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm outline-none focus:border-cyan-500"
+          >
+            <option value="stock">Orden: stock</option>
+            <option value="name">Orden: nombre</option>
+            <option value="sku">Orden: código</option>
+          </select>
+          <select
+            value={stockSortDir}
+            onChange={(e) => setStockSortDir(e.target.value as SortDir)}
+            className="bg-slate-800 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm outline-none focus:border-cyan-500"
+          >
+            <option value="asc">
+              {stockSortBy === 'stock' ? 'Menor → mayor' : 'A → Z'}
+            </option>
+            <option value="desc">
+              {stockSortBy === 'stock' ? 'Mayor → menor' : 'Z → A'}
+            </option>
           </select>
         </div>
 
