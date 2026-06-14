@@ -133,9 +133,7 @@ app.use((req, res, next) => {
 app.use(
   express.json({
     verify: (req: any, _res, buf) => {
-      if (String(req.originalUrl || req.url || '').includes('/api/marketing/leads/webhook/meta')) {
-        req.rawBody = buf;
-      }
+      if (buf?.length) req.rawBody = buf;
     }
   }) as any
 );

@@ -3227,6 +3227,7 @@ export const api = {
     metaVerifyToken?: string;
     metaAppSecret?: string;
     keepExistingMetaAppSecret?: boolean;
+    clearMetaAppSecret?: boolean;
     metaLeadsEnabled?: boolean;
     whatsappEnabled?: boolean;
   }): Promise<{ ok: boolean; config: any }> => {

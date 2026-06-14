@@ -32,6 +32,7 @@ export const saveLeadsWebhookConfig = async (req: Request, res: Response) => {
       metaVerifyToken: body.metaVerifyToken,
       metaAppSecret: body.metaAppSecret,
       keepExistingMetaAppSecret: !!body.keepExistingMetaAppSecret,
+      clearMetaAppSecret: !!body.clearMetaAppSecret,
       metaLeadsEnabled: body.metaLeadsEnabled,
       whatsappEnabled: body.whatsappEnabled
     });
@@ -59,11 +60,14 @@ export const inboundLeadWebhook = async (req: Request, res: Response) => {
 
 export const metaLeadWebhook = async (req: Request, res: Response) => {
   try {
-    const rawBody = (req as any).rawBody || JSON.stringify(req.body || {});
+    const rawBody = (req as any).rawBody as Buffer | undefined;
+    if (req.method === 'POST' && !rawBody?.length) {
+      console.warn('metaLeadWebhook: POST sin rawBody — la firma de Meta puede fallar');
+    }
     const result = await handleMetaLeadWebhook(
       req.body,
       req.query as any,
-      rawBody,
+      rawBody || Buffer.from(JSON.stringify(req.body || {}), 'utf8'),
       String(req.headers['x-hub-signature-256'] || '')
     );
 

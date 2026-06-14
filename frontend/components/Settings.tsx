@@ -3141,6 +3141,10 @@ Body JSON:
                     placeholder={leadsMetaHasAppSecret ? 'Vacío = mantener actual' : 'Desde Meta App Dashboard'}
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl py-3 px-4 text-white text-sm outline-none focus:border-teal-500 font-mono"
                   />
+                  <p className="text-xs text-slate-500">
+                    Meta → Configuración básica → <strong className="text-slate-400">Clave secreta de la app</strong>.
+                    Si ves «Firma Meta inválida», pegá el secret actual o quitá el guardado (opcional).
+                  </p>
                 </div>
                 <div className="flex flex-col justify-end gap-3">
                   <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
@@ -3202,6 +3206,35 @@ Body JSON:
                 >
                   {savingLeadsWebhook ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
                   Guardar webhooks
+                </button>
+                <button
+                  type="button"
+                  disabled={savingLeadsWebhook || !leadsMetaHasAppSecret}
+                  onClick={async () => {
+                    if (!window.confirm('¿Quitar el App Secret guardado? Los webhooks seguirán funcionando sin validar firma.')) return;
+                    setSavingLeadsWebhook(true);
+                    try {
+                      const res = await api.saveMarketingLeadsWebhookConfig({
+                        enabled: leadsWebhookEnabled,
+                        clearMetaAppSecret: true,
+                        metaVerifyToken: leadsMetaVerifyToken.trim() || undefined,
+                        metaLeadsEnabled: leadsMetaLeadsEnabled,
+                        whatsappEnabled: leadsWhatsappEnabled
+                      });
+                      const cfg = res.config;
+                      setLeadsMetaHasAppSecret(!!cfg.hasMetaAppSecret);
+                      setLeadsMetaAppSecretMasked(cfg.metaAppSecretMasked || '');
+                      setLeadsMetaAppSecret('');
+                      showToast('success', 'App Secret quitado');
+                    } catch (e: any) {
+                      showToast('error', e?.message || 'Error');
+                    } finally {
+                      setSavingLeadsWebhook(false);
+                    }
+                  }}
+                  className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 rounded-xl text-slate-200 text-sm font-bold disabled:opacity-50"
+                >
+                  Quitar App Secret
                 </button>
                 <button
                   type="button"

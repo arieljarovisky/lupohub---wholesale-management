@@ -92,6 +92,7 @@ export async function saveMarketingLeadsWebhookConfig(input: {
   metaVerifyToken?: string;
   metaAppSecret?: string;
   keepExistingMetaAppSecret?: boolean;
+  clearMetaAppSecret?: boolean;
   metaLeadsEnabled?: boolean;
   whatsappEnabled?: boolean;
 }): Promise<MarketingLeadsWebhookConfigUi> {
@@ -109,8 +110,13 @@ export async function saveMarketingLeadsWebhookConfig(input: {
   if (input.metaVerifyToken?.trim()) metaVerifyToken = input.metaVerifyToken.trim();
 
   let metaAppSecret = row.meta_app_secret;
-  if (input.metaAppSecret?.trim()) metaAppSecret = input.metaAppSecret.trim();
-  else if (input.keepExistingMetaAppSecret) metaAppSecret = row.meta_app_secret;
+  if (input.clearMetaAppSecret) {
+    metaAppSecret = null;
+  } else if (input.metaAppSecret?.trim()) {
+    metaAppSecret = input.metaAppSecret.trim();
+  } else if (input.keepExistingMetaAppSecret) {
+    metaAppSecret = row.meta_app_secret;
+  }
 
   await execute(
     `UPDATE marketing_leads_webhook_config SET
@@ -236,11 +242,14 @@ function extractWhatsAppMessageText(msg: any): string | null {
 }
 
 function verifyMetaSignature(appSecret: string | null, rawBody: Buffer | string, signatureHeader: string): boolean {
-  if (!appSecret?.trim() || !signatureHeader?.startsWith('sha256=')) return true;
-  const expected = crypto.createHmac('sha256', appSecret.trim()).update(rawBody).digest('hex');
-  const received = signatureHeader.slice(7);
+  if (!appSecret?.trim()) return true;
+  if (!signatureHeader?.startsWith('sha256=')) return false;
+  const payload = Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(String(rawBody), 'utf8');
+  const expected = crypto.createHmac('sha256', appSecret.trim()).update(payload).digest('hex');
+  const received = signatureHeader.slice(7).trim();
+  if (expected.length !== received.length) return false;
   try {
-    return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(received));
+    return crypto.timingSafeEqual(Buffer.from(expected, 'utf8'), Buffer.from(received, 'utf8'));
   } catch {
     return false;
   }
@@ -325,7 +334,10 @@ export async function handleMetaLeadWebhook(
 
   if (!row.enabled) return { processed: 0, results: [{ ok: false, message: 'Webhooks deshabilitados' }] };
   if (!verifyMetaSignature(row.meta_app_secret, rawBody, signatureHeader)) {
-    throw Object.assign(new Error('Firma Meta inválida'), { status: 401 });
+    const hint = row.meta_app_secret
+      ? 'Revisá que el App Secret en Lupohub coincida con «Clave secreta de la app» en Meta, o quitá el App Secret en Configuración.'
+      : 'Meta envió firma pero no hay App Secret configurado.';
+    throw Object.assign(new Error(`Firma Meta inválida. ${hint}`), { status: 401 });
   }
 
   const results: Array<{ ok: boolean; message: string }> = [];
