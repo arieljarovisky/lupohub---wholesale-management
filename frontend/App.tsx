@@ -47,6 +47,7 @@ function lazyWithReload<T extends React.ComponentType<any>>(
 
 const Dashboard = lazyWithReload(() => import('./components/Dashboard'));
 const Inventory = lazyWithReload(() => import('./components/Inventory'));
+const LinkPublicationPage = lazyWithReload(() => import('./components/LinkPublicationPage'));
 const Catalogs = lazyWithReload(() => import('./components/Catalogs'));
 const Orders = lazyWithReload(() => import('./components/Orders'));
 const Visits = lazyWithReload(() => import('./components/Visits'));
@@ -152,6 +153,7 @@ const App: React.FC = () => {
   const allowedByRole: Record<string, Role[]> = {
     dashboard: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
     inventory: [Role.ADMIN, Role.WAREHOUSE, Role.DEPOSITO],
+    link_publication: [Role.ADMIN, Role.WAREHOUSE, Role.DEPOSITO],
     orders: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER, Role.DEPOSITO],
     create_order: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
     bulk_invoicing: [Role.ADMIN, Role.WAREHOUSE],
@@ -422,6 +424,14 @@ const App: React.FC = () => {
   /** Al entrar a crear/editar pedido, cargar productos con la lista de precios elegida; al salir, restaurar productos del contexto normal. */
   const inCreateOrderView = baseView === 'create_order' || !!editingOrder;
   const isOrderFormView = baseView === 'create_order' || baseView === 'create_order_template';
+  const isLinkPublicationView = baseView === 'link_publication';
+  const isFullHeightSubview = isOrderFormView || isLinkPublicationView;
+  const linkPublicationVariantId = useMemo(() => {
+    if (!isLinkPublicationView) return '';
+    const q = currentView.indexOf('?');
+    if (q < 0) return '';
+    return new URLSearchParams(currentView.slice(q + 1)).get('variantId')?.trim() || '';
+  }, [isLinkPublicationView, currentView]);
   useEffect(() => {
     if (!currentUser) return;
     if (inCreateOrderView) {
@@ -1047,7 +1057,7 @@ const App: React.FC = () => {
         className={`flex-1 min-h-0 relative scroll-area-ios mobile-main-scroll transition-[margin] duration-200 ${
           sidebarCollapsed ? 'md:ml-0' : 'md:ml-64'
         } ${
-          isOrderFormView
+          isFullHeightSubview
             ? 'flex flex-col h-full min-h-0 overflow-hidden overflow-x-hidden p-2 md:p-3 pt-[max(0.5rem,env(safe-area-inset-top))]'
             : 'overflow-x-hidden overflow-y-auto pl-3 pr-3 pb-4 pt-[max(0.75rem,env(safe-area-inset-top))] md:p-8'
         }`}
@@ -1061,12 +1071,12 @@ const App: React.FC = () => {
 
         <div
           className={`mx-auto w-full ${
-            isOrderFormView
+            isFullHeightSubview
               ? 'flex flex-col flex-1 min-h-0 h-full max-w-none overflow-hidden'
               : `max-w-6xl pb-24 md:pb-8 px-1 sm:px-0 ${inCreateOrderView ? 'overflow-x-clip' : 'overflow-x-hidden'}`
           }`}
         >
-          {showDamianTasksBanner && !isOrderFormView && (
+          {showDamianTasksBanner && !isFullHeightSubview && (
             <div
               role="status"
               aria-live="polite"
@@ -1108,7 +1118,7 @@ const App: React.FC = () => {
               </div>
             </div>
           )}
-          {myUserTasks.length > 0 && !isOrderFormView && (
+          {myUserTasks.length > 0 && !isFullHeightSubview && (
             <div className="mb-5 space-y-2">
               {myUserTasks.map((t) => (
                 <div
@@ -1123,7 +1133,7 @@ const App: React.FC = () => {
               ))}
             </div>
           )}
-          {!isOrderFormView && (
+          {!isFullHeightSubview && (
           <header className="mb-4 md:mb-6 flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
              <div className="min-w-0">
                <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-white truncate">
@@ -1187,8 +1197,31 @@ const App: React.FC = () => {
                 onCreateProducts={handleCreateProducts}
                 onUpdateStock={handleUpdateStock}
                 onImportComplete={loadData}
+                onNavigate={handleChangeView}
               />
             </Suspense>
+          )}
+          {isLinkPublicationView && linkPublicationVariantId && (
+            <Suspense fallback={<ViewFallback />}>
+              <LinkPublicationPage
+                variantId={linkPublicationVariantId}
+                onNavigate={handleChangeView}
+                onImportComplete={loadData}
+                showToast={showToast}
+              />
+            </Suspense>
+          )}
+          {isLinkPublicationView && !linkPublicationVariantId && (
+            <div className="flex flex-col items-center justify-center py-16 text-slate-400 gap-3">
+              <p>Falta el ID de la variante.</p>
+              <button
+                type="button"
+                onClick={() => handleChangeView('inventory')}
+                className="px-4 py-2 rounded-xl bg-slate-700 text-white text-sm font-medium"
+              >
+                Volver al inventario
+              </button>
+            </div>
           )}
           {baseView === 'orders' && (
             <Suspense fallback={<ViewFallback />}>
@@ -1402,7 +1435,7 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900/95 border-t border-slate-800 px-2 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] z-50 flex justify-around items-stretch backdrop-blur-md">
+      <nav className={`md:hidden fixed bottom-0 left-0 right-0 bg-slate-900/95 border-t border-slate-800 px-2 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] z-50 flex justify-around items-stretch backdrop-blur-md ${isLinkPublicationView ? 'hidden' : ''}`}>
         {mobileNavItems.map(item => {
           if (!item.roles.includes(currentUser.role)) return null;
           const isActive = baseView === item.id;

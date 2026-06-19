@@ -22,7 +22,6 @@ import * as XLSX from 'xlsx';
 import MercadoLibreStock from './MercadoLibreStock';
 import TiendaNubeStock from './TiendaNubeStock';
 import PublicationStockBundles from './PublicationStockBundles';
-import LinkVariantModal from './LinkVariantModal';
 import {
   normalizeMercadoLibreItemId,
   extractMercadoLibreVariationIdFromUrl,
@@ -51,6 +50,7 @@ interface InventoryProps {
   onCreateProducts?: (products: Product[]) => void;
   onUpdateStock?: (productId: string, newStock: number) => void | Promise<void>;
   onImportComplete?: () => void;
+  onNavigate?: (view: string) => void;
 }
 
 interface ArticleStockMovement {
@@ -139,7 +139,7 @@ function variantsColorFamilyMatch(a: Product, b: Product): boolean {
   return false;
 }
 
-const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, onCreateProducts, onUpdateStock, onImportComplete }) => {
+const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, onCreateProducts, onUpdateStock, onImportComplete, onNavigate }) => {
   const { showToast, showConfirm } = useNotification();
   const stored = getStoredInventoryState();
   const [searchTerm, setSearchTerm] = useState(stored.search);
@@ -176,9 +176,6 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [selectedSizes, setSelectedSizes] = useState<string[]>([]);
   const [selectedColorIds, setSelectedColorIds] = useState<string[]>([]);
   const [initialStock, setInitialStock] = useState('0');
-
-  // Linking Modal State
-  const [linkingVariant, setLinkingVariant] = useState<Product | null>(null);
 
   // Vincular grupo en lote
   const [showBulkLinkModal, setShowBulkLinkModal] = useState(false);
@@ -2193,25 +2190,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   };
 
   const handleOpenLinkModal = (product: Product) => {
-    setLinkingVariant(product);
+    if (onNavigate) {
+      onNavigate(`link_publication?variantId=${encodeURIComponent(product.id)}`);
+      return;
+    }
+    showToast('info', 'No se pudo abrir la página de vinculación');
   };
-
-  const refreshLinkVariantInventory = useCallback((groupKey?: string) => {
-    setServerListRefreshKey((k) => k + 1);
-    onImportComplete?.();
-    if (!groupKey) return;
-    api.getVariantsBySku(groupKey, INVENTORY_PRODUCT_FETCH_OPTS).then((variants) => {
-      const mapped = mapInventoryVariantsFromApi(groupKey, variants, {
-        name: groupedProducts[groupKey]?.[0]?.name || '',
-        category: groupedProducts[groupKey]?.[0]?.category || 'General',
-        price: groupedProducts[groupKey]?.[0]?.price || 0,
-      });
-      setLoadedVariants((prev) => ({ ...prev, [groupKey]: mapped }));
-      api.getVariantExternalStocks(mapped.map((p) => p.id)).then((res) => {
-        if (res?.stocks) setVariantExternalStocks((prev) => ({ ...prev, ...res.stocks }));
-      }).catch(() => {});
-    }).catch(() => {});
-  }, [groupedProducts, onImportComplete]);
 
   // --- Creation Logic ---
 
@@ -4184,12 +4168,6 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         </div>
       )}
 
-      <LinkVariantModal
-        variant={linkingVariant}
-        onClose={() => setLinkingVariant(null)}
-        onSaved={({ groupKey }) => refreshLinkVariantInventory(groupKey)}
-        showToast={showToast}
-      />
 
       {/* Modal Vincular grupo en lote */}
       {showBulkLinkModal && bulkLinkGroupKey && (
