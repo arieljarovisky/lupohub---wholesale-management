@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Cloud, Loader2, Plus, Search, Trash2, Zap } from 'lucide-react';
 import { api } from '../services/api';
 import { labelTalle, codigoTalleParaSku } from '../utils/tallesTango';
@@ -72,21 +72,23 @@ const VariantExtraPublicationsPanel: React.FC<VariantExtraPublicationsPanelProps
 
   const isMl = addPubPlatform === 'mercadolibre';
   const skuToMatch = variantSku.trim();
+  const onCountChangeRef = useRef(onCountChange);
+  onCountChangeRef.current = onCountChange;
 
   const refreshPublications = useCallback(() => {
     setLoadingPublications(true);
-    api
+    return api
       .getVariantPublications(variantId)
       .then((rows) => {
         setPublications(rows);
-        onCountChange?.(rows.length);
+        onCountChangeRef.current?.(rows.length);
       })
       .catch(() => {
         setPublications([]);
-        onCountChange?.(0);
+        onCountChangeRef.current?.(0);
       })
       .finally(() => setLoadingPublications(false));
-  }, [variantId, onCountChange]);
+  }, [variantId]);
 
   useEffect(() => {
     setAddPubPlatform('mercadolibre');
@@ -95,8 +97,30 @@ const VariantExtraPublicationsPanel: React.FC<VariantExtraPublicationsPanelProps
     setAddPubPackSize(packMl);
     setAddPubVariants(null);
     setAddPubSearch('');
-    refreshPublications();
-  }, [variantId, packMl, refreshPublications]);
+  }, [variantId, packMl, packTn]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingPublications(true);
+    api
+      .getVariantPublications(variantId)
+      .then((rows) => {
+        if (cancelled) return;
+        setPublications(rows);
+        onCountChangeRef.current?.(rows.length);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setPublications([]);
+        onCountChangeRef.current?.(0);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingPublications(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [variantId]);
 
   const mapMlRows = (
     rows: { variationId: number | string; sku: string; color: string; size: string; stock: number }[]
