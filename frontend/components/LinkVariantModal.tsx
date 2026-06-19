@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  ArrowLeft,
   Link,
+  X,
   Zap,
   Cloud,
   Tag,
@@ -59,22 +59,15 @@ function platformShort(platform: string): string {
   return platform === 'mercadolibre' ? 'ML' : 'TN';
 }
 
-export interface LinkPublicationPageProps {
-  variantId: string;
-  onNavigate: (view: string) => void;
-  onImportComplete?: () => void;
+export interface LinkVariantModalProps {
+  variant: Product | null;
+  onClose: () => void;
+  onSaved?: (payload: { groupKey?: string; variantId: string }) => void;
   showToast: (type: 'success' | 'error' | 'info' | 'warning', message: string) => void;
 }
 
-const LinkPublicationPage: React.FC<LinkPublicationPageProps> = ({
-  variantId,
-  onNavigate,
-  onImportComplete,
-  showToast,
-}) => {
-  const [variant, setVariant] = useState<Product | null>(null);
-  const [loadingVariant, setLoadingVariant] = useState(true);
-  const [linkExternalSku, setLinkExternalSku] = useState('');
+const LinkVariantModal: React.FC<LinkVariantModalProps> = ({ variant, onClose, onSaved, showToast }) => {
+    const [linkExternalSku, setLinkExternalSku] = useState('');
   const [linkProduct, setLinkProduct] = useState<{
     id: string;
     name?: string;
@@ -99,77 +92,25 @@ const LinkPublicationPage: React.FC<LinkPublicationPageProps> = ({
   const [addPubSearch, setAddPubSearch] = useState('');
   const [mobilePanel, setMobilePanel] = useState<'linked' | 'add' | 'settings'>('add');
 
-  const goBack = useCallback(() => onNavigate('inventory'), [onNavigate]);
-
   const refreshPublications = useCallback(() => {
-    if (!variantId) {
+    if (!variant?.id) {
       setVariantPublications([]);
       return;
     }
     setLoadingPublications(true);
     api
-      .getVariantPublications(variantId)
+      .getVariantPublications(variant!.id)
       .then(setVariantPublications)
       .catch(() => setVariantPublications([]))
       .finally(() => setLoadingPublications(false));
-  }, [variantId]);
+  }, [variant?.id]);
 
   useEffect(() => {
-    if (!variantId) {
-      setLoadingVariant(false);
-      return;
-    }
-    setLoadingVariant(true);
-    api
-      .getVariantById(variantId)
-      .then((v) => {
-        if (!v) {
-          showToast('error', 'Variante no encontrada');
-          goBack();
-          return;
-        }
-        const mapped: Product = {
-          id: v.id,
-          sku: v.sku ?? '',
-          name: v.product_name ?? '',
-          category: 'General',
-          price: 0,
-          stock: v.stock ?? 0,
-          size: v.size_code,
-          color: v.color_name,
-          integrations: { local: true, tiendaNube: false, mercadoLibre: false },
-        };
-        setVariant(mapped);
-        setLinkExternalSku((v.external_sku ?? v.sku ?? '').toString());
-
-        const groupKey = (v.base_sku || '').toString().trim();
-        if (!groupKey) return;
-        api.getProductBySku(groupKey, INVENTORY_PRODUCT_FETCH_OPTS).then((p) => {
-          if (p) {
-            setLinkProduct({
-              id: p.id,
-              name: p.name,
-              sku: p.sku,
-              price: p.base_price,
-              category: p.category,
-              description: (p as any).description,
-            });
-            setLinkPackMl(p.mercado_libre_pack_size ?? 1);
-            setLinkPackTn(p.tienda_nube_pack_size ?? 1);
-            const variantRow = (p as any).variants?.find((x: any) => x.variant_id === variantId);
-            setLinkExternalSku((variantRow?.external_sku ?? v.external_sku ?? v.sku ?? '').toString());
-          }
-        });
-      })
-      .catch(() => {
-        showToast('error', 'No se pudo cargar la variante');
-        goBack();
-      })
-      .finally(() => setLoadingVariant(false));
-  }, [variantId, goBack, showToast]);
-
-  useEffect(() => {
-    if (!variantId) return;
+    if (!variant) return;
+    setLinkExternalSku((variant.sku ?? '').toString());
+    setLinkProduct(null);
+    setLinkPackMl(1);
+    setLinkPackTn(1);
     setAddPubPlatform('mercadolibre');
     setAddPubProductId('');
     setAddPubSelectedVariantId('');
@@ -177,7 +118,20 @@ const LinkPublicationPage: React.FC<LinkPublicationPageProps> = ({
     setAddPubVariants(null);
     setAddPubSearch('');
     refreshPublications();
-  }, [variantId, refreshPublications]);
+    api.getVariantById(variant.id).then((v) => {
+      const groupKey = (v?.base_sku || '').toString().trim();
+      if (!groupKey) return;
+      api.getProductBySku(groupKey, INVENTORY_PRODUCT_FETCH_OPTS).then((p) => {
+        if (p) {
+          setLinkProduct({ id: p.id, name: p.name, sku: p.sku, price: p.base_price, category: p.category, description: (p as any).description });
+          setLinkPackMl(p.mercado_libre_pack_size ?? 1);
+          setLinkPackTn(p.tienda_nube_pack_size ?? 1);
+          const variantRow = (p as any).variants?.find((x: any) => x.variant_id === variant.id);
+          setLinkExternalSku((variantRow?.external_sku ?? variant.sku ?? '').toString());
+        }
+      });
+    });
+  }, [variant, refreshPublications]);
 
   const skuToMatch = (linkExternalSku || variant?.sku || '').toString().trim();
 
@@ -244,11 +198,11 @@ const LinkPublicationPage: React.FC<LinkPublicationPageProps> = ({
     externalProductId: string,
     externalVariantId: string
   ) => {
-    const v = await api.getVariantById(variantId);
+    const v = await api.getVariantById(variant!.id);
     const row = v as any;
     if (platform === 'tiendanube') {
       if (row?.tienda_nube_variant_id) return;
-      await api.updateVariantExternalIds(variantId, {
+      await api.updateVariantExternalIds(variant!.id, {
         tiendaNubeVariantId: externalVariantId || undefined,
         tiendaNubeProductId: externalProductId,
         externalSku: linkExternalSku.trim() || undefined,
@@ -261,7 +215,7 @@ const LinkPublicationPage: React.FC<LinkPublicationPageProps> = ({
       const hasVariation = !!externalVariantId;
       const isOwnPublication = isCatalog && !hasVariation;
       if (row?.mercado_libre_item_id || row?.mercado_libre_variant_id) return;
-      await api.updateVariantExternalIds(variantId, {
+      await api.updateVariantExternalIds(variant!.id, {
         mercadoLibreItemId: isOwnPublication ? externalProductId : undefined,
         mercadoLibreVariantId: isOwnPublication
           ? undefined
@@ -310,7 +264,7 @@ const LinkPublicationPage: React.FC<LinkPublicationPageProps> = ({
 
     setAddPubSaving(true);
     try {
-      await api.addVariantPublication(variantId, {
+      await api.addVariantPublication(variant!.id, {
         platform: addPubPlatform,
         externalProductId,
         externalVariantId: externalVariantId || undefined,
@@ -324,7 +278,7 @@ const LinkPublicationPage: React.FC<LinkPublicationPageProps> = ({
       setAddPubSearch('');
       setAddPubPackSize(addPubPlatform === 'mercadolibre' ? linkPackMl : linkPackTn);
       refreshPublications();
-      onImportComplete?.();
+      onSaved?.({ variantId: variant!.id });
     } catch (e: any) {
       showToast('error', e?.message || 'Error agregando publicación');
     } finally {
@@ -334,10 +288,10 @@ const LinkPublicationPage: React.FC<LinkPublicationPageProps> = ({
 
   const handleDeletePublication = async (publicationId: string) => {
     try {
-      await api.deleteVariantPublication(variantId, publicationId);
+      await api.deleteVariantPublication(variant!.id, publicationId);
       showToast('success', 'Publicación desvinculada');
       refreshPublications();
-      onImportComplete?.();
+      onSaved?.({ variantId: variant!.id });
     } catch (e: any) {
       showToast('error', e?.message || 'Error al desvincular');
     }
@@ -346,7 +300,7 @@ const LinkPublicationPage: React.FC<LinkPublicationPageProps> = ({
   const handleSave = async () => {
     setSaving(true);
     try {
-      await api.updateVariantExternalIds(variantId, {
+      await api.updateVariantExternalIds(variant!.id, {
         externalSku: linkExternalSku.trim() || undefined,
       });
       if (linkProduct) {
@@ -361,8 +315,10 @@ const LinkPublicationPage: React.FC<LinkPublicationPageProps> = ({
         } as Product & { mercadoLibrePackSize: number; tiendaNubePackSize: number });
       }
       showToast('success', 'Configuración guardada');
-      onImportComplete?.();
-      goBack();
+      const v = await api.getVariantById(variant!.id);
+      const groupKey = (v?.base_sku || '').toString().trim();
+      onSaved?.({ groupKey, variantId: variant!.id });
+      onClose();
     } catch {
       showToast('error', 'Error guardando configuración');
     } finally {
@@ -384,20 +340,12 @@ const LinkPublicationPage: React.FC<LinkPublicationPageProps> = ({
             : { tiendaNube: false, mercadoLibre: true, variants: true };
       await api.unlinkProductPlatforms(linkProduct.id, opts);
       showToast('success', platform === 'both' ? 'Desvinculado de TN y ML' : platform === 'tiendanube' ? 'Desvinculado de TN' : 'Desvinculado de ML');
-      onImportComplete?.();
-      goBack();
+      onSaved?.({ variantId: variant!.id });
+      onClose();
     } catch (e: any) {
       showToast('error', e?.message || 'Error al desvincular');
     }
   };
-
-  if (loadingVariant) {
-    return (
-      <div className="flex flex-1 items-center justify-center min-h-[50vh]">
-        <Loader2 size={36} className="text-indigo-400 animate-spin" />
-      </div>
-    );
-  }
 
   if (!variant) return null;
 
@@ -411,35 +359,26 @@ const LinkPublicationPage: React.FC<LinkPublicationPageProps> = ({
   });
 
   return (
-    <div className="flex flex-col h-full min-h-0 overflow-hidden -mx-1 sm:mx-0">
-      {/* Header */}
-      <header className="shrink-0 flex flex-wrap items-center gap-3 pb-4 border-b border-slate-700/80">
-        <button
-          type="button"
-          onClick={goBack}
-          className="flex items-center gap-2 px-3 py-2 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 transition text-sm font-medium"
-        >
-          <ArrowLeft size={18} />
-          Inventario
-        </button>
-        <div className="flex-1 min-w-0">
-          <h1 className="text-xl font-bold text-white flex items-center gap-2">
-            <Link size={20} className="text-indigo-400 shrink-0" />
+    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-end sm:items-center justify-center p-0 sm:p-4">
+      <div className="bg-slate-900 rounded-t-2xl sm:rounded-2xl border border-slate-700/80 w-full sm:max-w-5xl flex flex-col shadow-2xl max-h-[92vh] overflow-hidden">
+      <div className="shrink-0 p-4 sm:p-5 border-b border-slate-700/80 flex justify-between items-start gap-3">
+        <div className="min-w-0">
+          <h3 className="text-lg font-bold text-white flex items-center gap-2">
+            <Link size={18} className="text-indigo-400 shrink-0" />
             Vincular publicaciones
-          </h1>
-          <p className="text-sm text-slate-400 truncate mt-0.5">{variant.name}</p>
+          </h3>
+          <p className="text-sm text-slate-400 truncate mt-1">{variant.name}</p>
+          <div className="flex flex-wrap items-center gap-2 mt-2">
+            <span className="font-mono text-xs text-white bg-slate-800 px-2 py-1 rounded-lg border border-slate-600">{variant.sku}</span>
+            {(variantSize || variantColor) && (
+              <span className="text-xs text-slate-400">{[variantSize, variantColor].filter(Boolean).join(' · ')}</span>
+            )}
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-mono text-xs text-white bg-slate-800 px-2.5 py-1.5 rounded-lg border border-slate-600">
-            {variant.sku}
-          </span>
-          {(variantSize || variantColor) && (
-            <span className="text-xs text-slate-400">
-              {[variantSize, variantColor].filter(Boolean).join(' · ')}
-            </span>
-          )}
-        </div>
-      </header>
+        <button type="button" onClick={onClose} className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-700/80 shrink-0" aria-label="Cerrar">
+          <X size={20} />
+        </button>
+      </div>
 
       {/* Tabs móvil */}
       <div className="lg:hidden shrink-0 flex gap-1 p-1 rounded-xl bg-slate-800/80 border border-slate-700 mb-3">
@@ -465,7 +404,8 @@ const LinkPublicationPage: React.FC<LinkPublicationPageProps> = ({
       </div>
 
       {/* Main grid — ocupa el alto disponible sin scroll de página */}
-      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-4 overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 min-h-0">
         {/* Columna izquierda: publicaciones vinculadas */}
         <section
           className={`lg:col-span-3 flex flex-col min-h-0 rounded-xl border border-slate-700/60 bg-slate-900/50 overflow-hidden ${
@@ -761,12 +701,12 @@ const LinkPublicationPage: React.FC<LinkPublicationPageProps> = ({
           </div>
         </section>
       </div>
+      </div>
 
-      {/* Footer fijo */}
-      <footer className="shrink-0 flex flex-col sm:flex-row gap-2 sm:justify-end pt-3 pb-[max(0.5rem,env(safe-area-inset-bottom))] md:pb-0 border-t border-slate-700/80">
+      <footer className="shrink-0 flex flex-col sm:flex-row gap-2 sm:justify-end p-4 sm:p-5 border-t border-slate-700/80 bg-slate-900/80">
         <button
           type="button"
-          onClick={goBack}
+          onClick={onClose}
           className="sm:order-1 px-5 py-2.5 rounded-xl font-semibold text-slate-300 bg-slate-700/60 hover:bg-slate-600 border border-slate-600/60 text-sm"
         >
           Cancelar
@@ -778,11 +718,12 @@ const LinkPublicationPage: React.FC<LinkPublicationPageProps> = ({
           className="sm:order-2 px-6 py-2.5 rounded-xl font-semibold bg-indigo-600 text-white hover:bg-indigo-500 flex items-center justify-center gap-2 text-sm disabled:opacity-50"
         >
           {saving ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
-          Guardar y volver
+          Guardar
         </button>
       </footer>
+      </div>
     </div>
   );
 };
 
-export default LinkPublicationPage;
+export default LinkVariantModal;

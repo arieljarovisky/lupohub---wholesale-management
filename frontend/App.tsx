@@ -47,7 +47,7 @@ function lazyWithReload<T extends React.ComponentType<any>>(
 
 const Dashboard = lazyWithReload(() => import('./components/Dashboard'));
 const Inventory = lazyWithReload(() => import('./components/Inventory'));
-const LinkPublicationPage = lazyWithReload(() => import('./components/LinkPublicationPage'));
+const BulkLinkGroupPage = lazyWithReload(() => import('./components/BulkLinkGroupPage'));
 const Catalogs = lazyWithReload(() => import('./components/Catalogs'));
 const Orders = lazyWithReload(() => import('./components/Orders'));
 const Visits = lazyWithReload(() => import('./components/Visits'));
@@ -153,7 +153,7 @@ const App: React.FC = () => {
   const allowedByRole: Record<string, Role[]> = {
     dashboard: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
     inventory: [Role.ADMIN, Role.WAREHOUSE, Role.DEPOSITO],
-    link_publication: [Role.ADMIN, Role.WAREHOUSE, Role.DEPOSITO],
+    link_group: [Role.ADMIN, Role.WAREHOUSE, Role.DEPOSITO],
     orders: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER, Role.DEPOSITO],
     create_order: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
     bulk_invoicing: [Role.ADMIN, Role.WAREHOUSE],
@@ -424,14 +424,14 @@ const App: React.FC = () => {
   /** Al entrar a crear/editar pedido, cargar productos con la lista de precios elegida; al salir, restaurar productos del contexto normal. */
   const inCreateOrderView = baseView === 'create_order' || !!editingOrder;
   const isOrderFormView = baseView === 'create_order' || baseView === 'create_order_template';
-  const isLinkPublicationView = baseView === 'link_publication';
-  const isFullHeightSubview = isOrderFormView || isLinkPublicationView;
-  const linkPublicationVariantId = useMemo(() => {
-    if (!isLinkPublicationView) return '';
+  const isLinkGroupView = baseView === 'link_group';
+  const isFullHeightSubview = isOrderFormView || isLinkGroupView;
+  const linkGroupKey = useMemo(() => {
+    if (!isLinkGroupView) return '';
     const q = currentView.indexOf('?');
     if (q < 0) return '';
-    return new URLSearchParams(currentView.slice(q + 1)).get('variantId')?.trim() || '';
-  }, [isLinkPublicationView, currentView]);
+    return new URLSearchParams(currentView.slice(q + 1)).get('groupKey')?.trim() || '';
+  }, [isLinkGroupView, currentView]);
   useEffect(() => {
     if (!currentUser) return;
     if (inCreateOrderView) {
@@ -1201,19 +1201,19 @@ const App: React.FC = () => {
               />
             </Suspense>
           )}
-          {isLinkPublicationView && linkPublicationVariantId && (
+          {isLinkGroupView && linkGroupKey && (
             <Suspense fallback={<ViewFallback />}>
-              <LinkPublicationPage
-                variantId={linkPublicationVariantId}
+              <BulkLinkGroupPage
+                groupKey={linkGroupKey}
                 onNavigate={handleChangeView}
                 onImportComplete={loadData}
                 showToast={showToast}
               />
             </Suspense>
           )}
-          {isLinkPublicationView && !linkPublicationVariantId && (
+          {isLinkGroupView && !linkGroupKey && (
             <div className="flex flex-col items-center justify-center py-16 text-slate-400 gap-3">
-              <p>Falta el ID de la variante.</p>
+              <p>Falta el código del artículo (groupKey).</p>
               <button
                 type="button"
                 onClick={() => handleChangeView('inventory')}
@@ -1435,7 +1435,7 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      <nav className={`md:hidden fixed bottom-0 left-0 right-0 bg-slate-900/95 border-t border-slate-800 px-2 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] z-50 flex justify-around items-stretch backdrop-blur-md ${isLinkPublicationView ? 'hidden' : ''}`}>
+      <nav className={`md:hidden fixed bottom-0 left-0 right-0 bg-slate-900/95 border-t border-slate-800 px-2 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] z-50 flex justify-around items-stretch backdrop-blur-md ${isLinkGroupView ? 'hidden' : ''}`}>
         {mobileNavItems.map(item => {
           if (!item.roles.includes(currentUser.role)) return null;
           const isActive = baseView === item.id;
