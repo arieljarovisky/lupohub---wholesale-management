@@ -596,6 +596,7 @@ export const updateVariantExternalIds = async (req: any, res: any) => {
     const mlPubItemId = mlItemOnVariant
       || (mlVarOnVariant && productRow?.mercado_libre_id ? String(productRow.mercado_libre_id).trim() : null);
 
+    // Solo borrar publicaciones de una plataforma si se desvincula explícitamente (no al actualizar el vínculo principal).
     if (hasTnVar && (!tnProductId || !tnVariantId)) {
       await execute(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'tiendanube'`, [variantId]);
     }
@@ -606,8 +607,8 @@ export const updateVariantExternalIds = async (req: any, res: any) => {
       }
     }
 
+    // Upsert del vínculo principal sin borrar otras publicaciones del mismo canal.
     if (tnProductId && tnVariantId) {
-      await execute(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'tiendanube'`, [variantId]);
       await execute(
         `INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
          VALUES (?, ?, 'tiendanube', ?, ?, ?)
@@ -616,7 +617,6 @@ export const updateVariantExternalIds = async (req: any, res: any) => {
       );
     }
     if (mlPubItemId) {
-      await execute(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'mercadolibre'`, [variantId]);
       await execute(
         `INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
          VALUES (?, ?, 'mercadolibre', ?, ?, ?)
@@ -846,7 +846,6 @@ export const bulkLinkVariants = async (req: Request, res: Response) => {
       }
 
       if (tnVarId && tnProductIdForPub) {
-        await execute(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'tiendanube'`, [variantId]);
         await execute(
           `INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
            VALUES (?, ?, 'tiendanube', ?, ?, ?)
@@ -856,7 +855,6 @@ export const bulkLinkVariants = async (req: Request, res: Response) => {
       }
 
       if (mlItemId || mlVarId) {
-        await execute(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'mercadolibre'`, [variantId]);
         const pubItemId = mlItemId || mlParentIdForPub;
         if (pubItemId) {
           await execute(
@@ -1948,6 +1946,13 @@ export const addVariantPublication = async (req: Request, res: Response) => {
       'SELECT id, variant_id, platform, external_product_id, external_variant_id, pack_size, created_at FROM variant_publications WHERE id = ?',
       [id]
     );
+    try {
+      const stockRow = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [variantId]);
+      const currentStock = Number(stockRow?.stock ?? 0);
+      await syncStockToExternalPlatforms(variantId, currentStock);
+    } catch (syncErr: any) {
+      console.warn('[addVariantPublication] Error enviando stock:', syncErr?.message || syncErr);
+    }
     res.status(201).json(row);
   } catch (error: any) {
     if (error.code === 'ER_DUP_ENTRY') {
