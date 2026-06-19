@@ -15,6 +15,8 @@ import {
   ChevronDown,
   ChevronUp,
   Layers,
+  Plus,
+  Trash2,
 } from 'lucide-react';
 import { api } from '../services/api';
 import VariantExtraPublicationsPanel from './VariantExtraPublicationsPanel';
@@ -54,6 +56,68 @@ const bulkLinkSkuMatch = (skuA: string, skuB: string) => {
 
 type RowLinkStatus = 'complete' | 'partial' | 'empty';
 
+type PublicationSource = {
+  id: string;
+  variationCount?: number;
+  loadError?: string;
+};
+
+type MlVariationRow = {
+  itemId: string;
+  variationId: string;
+  sku: string;
+  color: string;
+  size: string;
+};
+
+type TnVariantRow = {
+  productId: string;
+  variantId: string;
+  sku: string;
+  color: string;
+  size: string;
+};
+
+type VariantAssignment = {
+  ml?: string;
+  mlItemId?: string;
+  tn?: string;
+  tnProductId?: string;
+};
+
+function parseIdsFromInput(raw: string, platform: 'ml' | 'tn'): string[] {
+  const parts = raw
+    .split(/[\n,;]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const out: string[] = [];
+  for (const part of parts) {
+    const id =
+      platform === 'ml' ? normalizeMercadoLibreItemId(part) : normalizeTiendaNubeProductId(part);
+    if (!id) continue;
+    if (platform === 'tn' && !/^\d+$/.test(id)) continue;
+    if (!out.includes(id)) out.push(id);
+  }
+  return out;
+}
+
+function matchLocalToRow(
+  local: { sku: string; size: string; color: string },
+  row: { sku?: string; size?: string; color?: string }
+): boolean {
+  const skuN = norm(local.sku);
+  if (skuN && row.sku && norm(row.sku) === skuN) return true;
+  return norm(row.size || '') === norm(local.size) && norm(row.color || '') === norm(local.color);
+}
+
+function mlOptionKey(row: MlVariationRow): string {
+  return `${row.itemId}::${row.variationId}`;
+}
+
+function tnOptionKey(row: TnVariantRow): string {
+  return `${row.productId}::${row.variantId}`;
+}
+
 function getRowLinkStatus(ml?: string, tn?: string): RowLinkStatus {
   const hasMl = !!ml?.trim();
   const hasTn = !!tn?.trim();
@@ -80,16 +144,14 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
   const [variants, setVariants] = useState<
     Array<{ variantId: string; sku: string; size: string; color: string; externalIds?: any }>
   >([]);
-  const [mlId, setMlId] = useState('');
-  const [tnId, setTnId] = useState('');
-  const [mlVariations, setMlVariations] = useState<
-    { variationId: number | string; sku: string; color: string; size: string }[]
-  >([]);
-  const [tnVariants, setTnVariants] = useState<
-    { variantId: number | string; sku: string; color: string; size: string }[]
-  >([]);
+  const [mlSources, setMlSources] = useState<PublicationSource[]>([]);
+  const [tnSources, setTnSources] = useState<PublicationSource[]>([]);
+  const [mlDraft, setMlDraft] = useState('');
+  const [tnDraft, setTnDraft] = useState('');
+  const [mlVariations, setMlVariations] = useState<MlVariationRow[]>([]);
+  const [tnVariants, setTnVariants] = useState<TnVariantRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [assignments, setAssignments] = useState<Record<string, { ml?: string; tn?: string }>>({});
+  const [assignments, setAssignments] = useState<Record<string, VariantAssignment>>({});
   const [skuEdits, setSkuEdits] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [mlSearch, setMlSearch] = useState('');
@@ -106,12 +168,12 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
 
   const runAutoMatch = (
     localVariants: typeof variants,
-    mlList: typeof mlVariations,
-    tnList: typeof tnVariants,
-    current?: Record<string, { ml?: string; tn?: string }>
-  ): Record<string, { ml?: string; tn?: string }> => {
+    mlList: MlVariationRow[],
+    tnList: TnVariantRow[],
+    current?: Record<string, VariantAssignment>
+  ): Record<string, VariantAssignment> => {
     const prev = current ?? assignments;
-    const next: Record<string, { ml?: string; tn?: string }> = { ...prev };
+    const next: Record<string, VariantAssignment> = { ...prev };
     localVariants.forEach((local) => {
       const skuN = norm(local.sku);
       const sizeN = norm(local.size);
@@ -120,14 +182,24 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       if (!next[local.variantId].ml && mlList.length > 0) {
         let match = skuN ? mlList.find((m) => norm(m.sku) === skuN) : null;
         if (!match) match = mlList.find((m) => norm(m.size) === sizeN && norm(m.color) === colorN);
-        if (match) next[local.variantId].ml = String(match.variationId);
-        else if (mlList.length === 1) next[local.variantId].ml = String(mlList[0].variationId);
+        if (match) {
+          next[local.variantId].ml = match.variationId;
+          next[local.variantId].mlItemId = match.itemId;
+        } else if (mlList.length === 1) {
+          next[local.variantId].ml = mlList[0].variationId;
+          next[local.variantId].mlItemId = mlList[0].itemId;
+        }
       }
       if (!next[local.variantId].tn && tnList.length > 0) {
         let match = skuN ? tnList.find((t) => norm(t.sku) === skuN) : null;
         if (!match) match = tnList.find((t) => norm(t.size) === sizeN && norm(t.color) === colorN);
-        if (match) next[local.variantId].tn = String(match.variantId);
-        else if (tnList.length === 1) next[local.variantId].tn = String(tnList[0].variantId);
+        if (match) {
+          next[local.variantId].tn = match.variantId;
+          next[local.variantId].tnProductId = match.productId;
+        } else if (tnList.length === 1) {
+          next[local.variantId].tn = tnList[0].variantId;
+          next[local.variantId].tnProductId = tnList[0].productId;
+        }
       }
     });
     setAssignments(next);
@@ -136,12 +208,27 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
 
   const optionMatch = (
     query: string,
-    item: { sku?: string; size?: string; color?: string; variationId?: string | number; variantId?: string | number }
+    item: {
+      sku?: string;
+      size?: string;
+      color?: string;
+      itemId?: string;
+      productId?: string;
+      variationId?: string;
+      variantId?: string;
+    }
   ) => {
     const q = norm(query);
     if (!q) return true;
-    const id = item.variationId ?? item.variantId ?? '';
-    const text = [item.sku || '', formatSizeForLink(item.size), item.color || '', String(id)].join(' ');
+    const id = item.variationId ?? item.variantId ?? item.itemId ?? item.productId ?? '';
+    const text = [
+      item.sku || '',
+      formatSizeForLink(item.size),
+      item.color || '',
+      item.itemId || '',
+      item.productId || '',
+      String(id),
+    ].join(' ');
     return norm(text).includes(q);
   };
 
@@ -186,28 +273,45 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
     }
   }, [loading, variants, assignments, catalogsLoaded]);
 
-  const getVisibleTnOptions = (selectedValue?: string) => {
+  const getVisibleTnOptions = (selectedValue?: string, selectedProductId?: string) => {
     const selected = (selectedValue || '').trim();
     const base = filteredTn.length > 0 ? filteredTn : tnVariants;
     if (!selected) return base;
-    if (base.some((t) => String(t.variantId) === selected)) return base;
-    const opt = tnVariants.find((t) => String(t.variantId) === selected);
+    if (
+      base.some(
+        (t) => String(t.variantId) === selected && (!selectedProductId || t.productId === selectedProductId)
+      )
+    ) {
+      return base;
+    }
+    const opt = tnVariants.find(
+      (t) => String(t.variantId) === selected && (!selectedProductId || t.productId === selectedProductId)
+    );
     return opt ? [opt, ...base] : base;
   };
 
-  const resolveMlLabel = (value?: string) => {
-    const id = (value || '').trim();
-    if (!id) return null;
-    if (/^ML[A-Z]{1,5}\d+$/i.test(id)) return `Publicación ${id.toUpperCase()}`;
-    const opt = mlVariations.find((m) => String(m.variationId) === id);
-    return opt ? formatOptionLabel(opt) : `Variación ${id}`;
+  const resolveMlLabel = (variantId: string) => {
+    const a = assignments[variantId];
+    const value = (a?.ml || '').trim();
+    if (!value) return null;
+    if (/^ML[A-Z]{1,5}\d+$/i.test(value)) return `Publicación ${value.toUpperCase()}`;
+    const opt = mlVariations.find(
+      (m) =>
+        m.variationId === value && (!a?.mlItemId || m.itemId === a.mlItemId)
+    );
+    if (opt) return `${opt.itemId} · ${formatOptionLabel(opt)}`;
+    return a?.mlItemId ? `${a.mlItemId} / ${value}` : `Variación ${value}`;
   };
 
-  const resolveTnLabel = (value?: string) => {
-    const id = (value || '').trim();
-    if (!id) return null;
-    const opt = tnVariants.find((t) => String(t.variantId) === id);
-    return opt ? formatOptionLabel(opt) : `Variante ${id}`;
+  const resolveTnLabel = (variantId: string) => {
+    const a = assignments[variantId];
+    const value = (a?.tn || '').trim();
+    if (!value) return null;
+    const opt = tnVariants.find(
+      (t) => t.variantId === value && (!a?.tnProductId || t.productId === a.tnProductId)
+    );
+    if (opt) return `${opt.productId} · ${formatOptionLabel(opt)}`;
+    return a?.tnProductId ? `${a.tnProductId} / ${value}` : `Variante ${value}`;
   };
 
   const refreshPublicationCount = useCallback((variantId: string, count: number) => {
@@ -239,7 +343,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
     setLoading(true);
     api
       .getProductBySku(groupKey, INVENTORY_PRODUCT_FETCH_OPTS)
-      .then((p: any) => {
+      .then(async (p: any) => {
         if (!p) {
           showToast('error', 'Artículo no encontrado');
           goBack();
@@ -247,10 +351,14 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
         }
         setProductId(p.id);
         setProductName(p.name || groupKey);
-        setMlId(p.externalIds?.mercadoLibre || '');
-        setTnId(p.externalIds?.tiendaNube || '');
         setPackMl(p.mercado_libre_pack_size ?? 1);
         setPackTn(p.tienda_nube_pack_size ?? 1);
+        const mlSet = new Set<string>();
+        const tnSet = new Set<string>();
+        const parentMl = normalizeMercadoLibreItemId(p.externalIds?.mercadoLibre || '');
+        const parentTn = normalizeTiendaNubeProductId(p.externalIds?.tiendaNube || '');
+        if (parentMl) mlSet.add(parentMl);
+        if (parentTn && /^\d+$/.test(parentTn)) tnSet.add(parentTn);
         const list = (p.variants || []).map((v: any) => {
           const variantId = v.variant_id;
           const rawSku = (v.variant_sku ?? '').toString().trim();
@@ -267,7 +375,22 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
           };
         });
         setVariants(list);
-        const nextAssign: Record<string, { ml: string; tn: string }> = {};
+        const pubResults = await Promise.all(
+          list.map((v: { variantId: string }) =>
+            api.getVariantPublications(v.variantId).catch(() => [] as Array<{ platform: string; external_product_id: string }>)
+          )
+        );
+        pubResults.flat().forEach((pub) => {
+          if (pub.platform === 'mercadolibre' && pub.external_product_id) {
+            mlSet.add(pub.external_product_id);
+          }
+          if (pub.platform === 'tiendanube' && pub.external_product_id) {
+            tnSet.add(pub.external_product_id);
+          }
+        });
+        setMlSources([...mlSet].map((id) => ({ id })));
+        setTnSources([...tnSet].map((id) => ({ id })));
+        const nextAssign: Record<string, VariantAssignment> = {};
         list.forEach((v: any) => {
           const mlVal =
             v.externalIds?.mercadoLibreVariant != null &&
@@ -277,9 +400,15 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                   String(v.externalIds.mercadoLibreItemId).trim() !== ''
                 ? String(v.externalIds.mercadoLibreItemId).trim()
                 : '';
+          const mlItemId =
+            mlVal && /^ML[A-Z]{1,5}\d+$/i.test(mlVal)
+              ? undefined
+              : parentMl || undefined;
           nextAssign[v.variantId] = {
             ml: mlVal,
+            mlItemId,
             tn: v.externalIds?.tiendaNubeVariant ? String(v.externalIds.tiendaNubeVariant) : '',
+            tnProductId: parentTn || undefined,
           };
         });
         setAssignments(nextAssign);
@@ -293,88 +422,186 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       .finally(() => setLoading(false));
   }, [groupKey]);
 
-  const handleLoadMl = async () => {
-    const id = normalizeMercadoLibreItemId(mlId);
-    if (!id) return;
-    setLoading(true);
-    try {
-      const res = await api.getMercadoLibreItemVariations(id);
-      const mlList = res.variations || [];
-      setMlVariations(mlList);
-      runAutoMatch(variants, mlList, tnVariants);
-      if (mlList.length > 0 && variants.length > mlList.length) {
-        showToast(
-          'info',
-          `ML devolvió ${mlList.length} opción(es) para ${variants.length} variantes locales.`
-        );
-      }
-    } catch {
-      showToast('error', 'No se pudieron cargar las variaciones de ML.');
-    } finally {
-      setLoading(false);
+  const appendMlSources = (raw: string) => {
+    const ids = parseIdsFromInput(raw, 'ml');
+    if (ids.length === 0) {
+      showToast('error', 'No se pudo obtener ningún ID de ML');
+      return false;
     }
+    setMlSources((prev) => {
+      const seen = new Set(prev.map((s) => s.id));
+      const next = [...prev];
+      ids.forEach((id) => {
+        if (!seen.has(id)) {
+          seen.add(id);
+          next.push({ id });
+        }
+      });
+      return next;
+    });
+    return true;
   };
 
-  const handleLoadTn = async () => {
-    const id = normalizeTiendaNubeProductId(tnId);
-    if (!id || !/^\d+$/.test(id)) {
-      showToast('error', 'No se pudo obtener el ID del producto TN.');
+  const appendTnSources = (raw: string) => {
+    const ids = parseIdsFromInput(raw, 'tn');
+    if (ids.length === 0) {
+      showToast('error', 'No se pudo obtener ningún ID de TN');
+      return false;
+    }
+    setTnSources((prev) => {
+      const seen = new Set(prev.map((s) => s.id));
+      const next = [...prev];
+      ids.forEach((id) => {
+        if (!seen.has(id)) {
+          seen.add(id);
+          next.push({ id });
+        }
+      });
+      return next;
+    });
+    return true;
+  };
+
+  const fetchMlCatalogRows = async (sources: PublicationSource[]) => {
+    const allRows: MlVariationRow[] = [];
+    const nextSources = await Promise.all(
+      sources.map(async (src) => {
+        try {
+          const res = await api.getMercadoLibreItemVariations(src.id);
+          const rows = (res.variations || []).map((v) => ({
+            itemId: src.id,
+            variationId: String(v.variationId),
+            sku: v.sku,
+            color: v.color,
+            size: v.size,
+          }));
+          allRows.push(...rows);
+          return { ...src, variationCount: rows.length, loadError: undefined };
+        } catch (e: any) {
+          return { ...src, loadError: e?.message || 'Error al cargar' };
+        }
+      })
+    );
+    setMlSources(nextSources);
+    setMlVariations(allRows);
+    return { rows: allRows, sources: nextSources };
+  };
+
+  const fetchTnCatalogRows = async (sources: PublicationSource[]) => {
+    const allRows: TnVariantRow[] = [];
+    const nextSources = await Promise.all(
+      sources.map(async (src) => {
+        try {
+          const res = await api.getTiendaNubeProductVariants(src.id);
+          const rows = (res.variants || []).map((v) => ({
+            productId: src.id,
+            variantId: String(v.variantId),
+            sku: v.sku,
+            color: v.color,
+            size: v.size,
+          }));
+          allRows.push(...rows);
+          return { ...src, variationCount: rows.length, loadError: undefined };
+        } catch (e: any) {
+          return { ...src, loadError: e?.message || 'Error al cargar' };
+        }
+      })
+    );
+    setTnSources(nextSources);
+    setTnVariants(allRows);
+    return { rows: allRows, sources: nextSources };
+  };
+
+  const handleLoadAllMl = async () => {
+    if (mlSources.length === 0) {
+      showToast('info', 'Agregá al menos una publicación ML.');
       return;
     }
     setLoading(true);
-    try {
-      const res = await api.getTiendaNubeProductVariants(id);
-      const tnList = res.variants || [];
-      setTnVariants(tnList);
-      runAutoMatch(variants, mlVariations, tnList);
-    } catch {
-      showToast('error', 'No se pudieron cargar las variantes de TN.');
-    } finally {
-      setLoading(false);
-    }
+    const { rows: mlList } = await fetchMlCatalogRows(mlSources);
+    runAutoMatch(variants, mlList, tnVariants);
+    setLoading(false);
+    showToast('success', `Cargadas ${mlList.length} variaciones de ${mlSources.length} publicación(es) ML.`);
   };
 
-  const handleLoadBoth = async () => {
-    const mlNorm = normalizeMercadoLibreItemId(mlId);
-    const tnNorm = normalizeTiendaNubeProductId(tnId);
-    if (!mlNorm || !tnNorm || !/^\d+$/.test(tnNorm)) {
-      showToast('info', 'Ingresá ambos enlaces o IDs (ML y TN).');
+  const handleLoadAllTn = async () => {
+    if (tnSources.length === 0) {
+      showToast('info', 'Agregá al menos un producto TN.');
       return;
     }
     setLoading(true);
-    const [mlSettled, tnSettled] = await Promise.allSettled([
-      api.getMercadoLibreItemVariations(mlNorm),
-      api.getTiendaNubeProductVariants(tnNorm),
+    const { rows: tnList } = await fetchTnCatalogRows(tnSources);
+    runAutoMatch(variants, mlVariations, tnList);
+    setLoading(false);
+    showToast('success', `Cargadas ${tnList.length} variantes de ${tnSources.length} producto(s) TN.`);
+  };
+
+  const handleLoadAllAndMatch = async () => {
+    if (mlSources.length === 0 && tnSources.length === 0) {
+      showToast('info', 'Agregá publicaciones ML y/o TN en el paso 1.');
+      return;
+    }
+    setLoading(true);
+    const [mlResult, tnResult] = await Promise.all([
+      mlSources.length > 0 ? fetchMlCatalogRows(mlSources) : Promise.resolve({ rows: [] as MlVariationRow[], sources: [] as PublicationSource[] }),
+      tnSources.length > 0 ? fetchTnCatalogRows(tnSources) : Promise.resolve({ rows: [] as TnVariantRow[], sources: [] as PublicationSource[] }),
     ]);
-    let mlList: typeof mlVariations = [];
-    let tnList: typeof tnVariants = [];
+    const next = runAutoMatch(variants, mlResult.rows, tnResult.rows);
+    setLoading(false);
     const errors: string[] = [];
-    if (mlSettled.status === 'fulfilled') {
-      mlList = mlSettled.value?.variations || [];
-      setMlVariations(mlList);
-      if (mlList.length === 0) errors.push('ML no devolvió variaciones.');
-    } else {
-      errors.push(`Mercado Libre: ${String(mlSettled.reason?.message || mlSettled.reason)}`);
-    }
-    if (tnSettled.status === 'fulfilled') {
-      tnList = tnSettled.value?.variants || [];
-      setTnVariants(tnList);
-      if (tnList.length === 0) errors.push('TN no devolvió variantes.');
-    } else {
-      errors.push(`Tienda Nube: ${String(tnSettled.reason?.message || tnSettled.reason)}`);
-    }
-    const next = runAutoMatch(variants, mlList, tnList);
+    [...mlResult.sources, ...tnResult.sources].forEach((s) => {
+      if (s.loadError) errors.push(`${s.id}: ${s.loadError}`);
+    });
     if (errors.length) showToast('error', errors.join(' '));
     else {
       const linked = Object.values(next).filter((a) => a.ml?.trim() || a.tn?.trim()).length;
       showToast(
         'success',
         linked > 0
-          ? `Emparejadas ${linked} variantes. Revisá la tabla y guardá.`
+          ? `Emparejadas ${linked} variantes desde ${mlSources.length} ML y ${tnSources.length} TN.`
           : 'Listas cargadas; no hubo emparejamiento automático.'
       );
     }
-    setLoading(false);
+  };
+
+  const syncAllSourcePublications = async () => {
+    let added = 0;
+    for (const v of variants) {
+      const local = {
+        sku: (skuEdits[v.variantId] ?? v.sku ?? '').toString(),
+        size: v.size,
+        color: v.color,
+      };
+      for (const row of mlVariations) {
+        if (!matchLocalToRow(local, row)) continue;
+        try {
+          await api.addVariantPublication(v.variantId, {
+            platform: 'mercadolibre',
+            externalProductId: row.itemId,
+            externalVariantId: row.variationId,
+            packSize: packMl,
+          });
+          added++;
+        } catch {
+          /* ya vinculada */
+        }
+      }
+      for (const row of tnVariants) {
+        if (!matchLocalToRow(local, row)) continue;
+        try {
+          await api.addVariantPublication(v.variantId, {
+            platform: 'tiendanube',
+            externalProductId: row.productId,
+            externalVariantId: row.variantId,
+            packSize: packTn,
+          });
+          added++;
+        } catch {
+          /* ya vinculada */
+        }
+      }
+    }
+    return added;
   };
 
   const handleSave = async () => {
@@ -388,13 +615,14 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       }
       const links = variants
         .map((v) => {
-          const ml = assignments[v.variantId]?.ml?.trim() || '';
-          const tn = assignments[v.variantId]?.tn?.trim() || '';
+          const a = assignments[v.variantId];
+          const ml = a?.ml?.trim() || '';
+          const tn = a?.tn?.trim() || '';
           const isMlItemId = /^ML[A-Z]{1,5}\d+$/i.test(ml);
           return {
             variantId: String(v.variantId),
             mercadoLibreVariantId: !isMlItemId && ml ? ml : undefined,
-            mercadoLibreItemId: isMlItemId ? ml : undefined,
+            mercadoLibreItemId: isMlItemId ? ml : a?.mlItemId?.trim() || undefined,
             tiendaNubeVariantId: tn || undefined,
           };
         })
@@ -411,23 +639,23 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
           const ml = assignments[l.variantId]?.ml?.trim() || '';
           return !ml || /^ML[A-Z]{1,5}\d+$/i.test(ml);
         }) && links.some((l) => /^ML[A-Z]{1,5}\d+$/i.test(assignments[l.variantId]?.ml?.trim() || ''));
+      const primaryMl = mlSources[0]?.id;
+      const primaryTn = tnSources[0]?.id;
       const res = await api.bulkLinkVariants({
         productId,
-        mercadoLibreItemId: allMlOwn ? undefined : normalizeMercadoLibreItemId(mlId) || undefined,
-        tiendaNubeProductId: (() => {
-          const n = normalizeTiendaNubeProductId(tnId);
-          return /^\d+$/.test(n) ? n : tnId.trim() || undefined;
-        })(),
+        mercadoLibreItemId: allMlOwn ? undefined : primaryMl || undefined,
+        tiendaNubeProductId: primaryTn && /^\d+$/.test(primaryTn) ? primaryTn : undefined,
         links,
       });
+      const extraPubs = await syncAllSourcePublications();
       const updated = (res as any)?.updated ?? links.length;
       const synced = (res as any)?.synced ?? 0;
       onImportComplete?.();
       showToast(
         'success',
         synced > 0
-          ? `Guardadas ${updated} vinculación(es). Stock enviado a ${synced} variante(s).`
-          : `Guardadas ${updated} vinculación(es).`
+          ? `Guardadas ${updated} vinculación(es). Stock enviado a ${synced} variante(s).${extraPubs > 0 ? ` ${extraPubs} publicación(es) extra sincronizadas.` : ''}`
+          : `Guardadas ${updated} vinculación(es).${extraPubs > 0 ? ` ${extraPubs} publicación(es) extra sincronizadas.` : ''}`
       );
       goBack();
     } catch (e: any) {
@@ -532,10 +760,10 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
               ) : (
                 <Circle size={16} className="text-slate-500 shrink-0" />
               )}
-              <span className="text-sm font-semibold text-slate-200">Paso 1 · Publicaciones externas</span>
+              <span className="text-sm font-semibold text-slate-200">Paso 1 · Publicaciones a sincronizar</span>
               <span className="text-xs text-slate-500 truncate hidden sm:inline">
-                {mlId.trim() ? `ML ${mlId.trim()}` : 'ML sin ID padre'}
-                {tnId.trim() ? ` · TN ${tnId.trim()}` : ''}
+                {mlSources.length} publicación{mlSources.length === 1 ? '' : 'es'} ML
+                {tnSources.length > 0 ? ` · ${tnSources.length} TN` : ''}
               </span>
             </div>
             <span className="text-xs text-indigo-400 font-medium flex items-center gap-1 shrink-0">
@@ -546,10 +774,11 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
           <>
         <div className="px-4 py-3 border-b border-slate-700/60 flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h2 className="text-sm font-bold text-white">Paso 1 · Publicaciones externas</h2>
+            <h2 className="text-sm font-bold text-white">Paso 1 · Publicaciones a sincronizar</h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Pegá el link o ID. El sistema empareja por <strong className="text-slate-300">SKU</strong> y, si no
-              coincide, por <strong className="text-slate-300">talle y color</strong>.
+              Agregá todas las publicaciones ML y productos TN de este artículo. Al guardar, el stock se sincroniza
+              en cada una según el emparejamiento por <strong className="text-slate-300">SKU</strong> o{' '}
+              <strong className="text-slate-300">talle y color</strong>.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -573,13 +802,13 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
 
         {showMlTip && (
           <div className="mx-4 mt-3 mb-1 text-xs text-amber-100/90 bg-amber-950/30 border border-amber-700/40 rounded-xl px-3 py-2.5 leading-relaxed">
-            Si cada variante es una publicación ML distinta (sin ID padre compartido), dejá vacío el campo ML de
-            arriba y escribí el MLA completo en cada fila de la tabla.
+            Podés agregar varias publicaciones ML (pack x2, catálogo, publicación por color, etc.) y varios productos TN.
+            Si una variante es una publicación ML propia, escribí el MLA completo en la fila del paso 2.
           </div>
         )}
 
         <div className="p-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* ML card */}
+          {/* ML sources */}
           <div className="rounded-xl border border-amber-700/40 bg-amber-950/15 p-4 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
@@ -588,40 +817,84 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                 </span>
                 <div>
                   <p className="text-sm font-bold text-amber-100">Mercado Libre</p>
-                  <p className="text-[11px] text-amber-200/60">Publicación padre (opcional)</p>
+                  <p className="text-[11px] text-amber-200/60">{mlSources.length} publicación(es)</p>
                 </div>
               </div>
-              {mlVariations.length > 0 ? (
+              {mlVariations.length > 0 && (
                 <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-600/30">
                   {mlVariations.length} variaciones
                 </span>
+              )}
+            </div>
+            <div className="space-y-2 max-h-[160px] overflow-y-auto">
+              {mlSources.length === 0 ? (
+                <p className="text-xs text-slate-500 py-2 text-center border border-dashed border-amber-800/40 rounded-lg">
+                  Sin publicaciones ML
+                </p>
               ) : (
-                <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-full bg-slate-700/60 text-slate-400">
-                  Sin cargar
-                </span>
+                mlSources.map((src) => (
+                  <div
+                    key={src.id}
+                    className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-slate-900/50 border border-amber-800/30"
+                  >
+                    <span className="flex-1 min-w-0 font-mono text-xs text-amber-100 truncate">{src.id}</span>
+                    {src.variationCount != null && (
+                      <span className="text-[10px] text-emerald-400 shrink-0">{src.variationCount} var.</span>
+                    )}
+                    {src.loadError && (
+                      <span className="text-[10px] text-red-400 shrink-0" title={src.loadError}>
+                        Error
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setMlSources((prev) => prev.filter((s) => s.id !== src.id))}
+                      className="p-1 text-slate-500 hover:text-red-400 shrink-0"
+                      aria-label="Quitar"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))
               )}
             </div>
             <div className="flex gap-2">
               <input
                 type="text"
-                value={mlId}
-                onChange={(e) => setMlId(e.target.value)}
-                placeholder="Link o MLA…"
-                className="flex-1 min-w-0 bg-slate-900/60 border border-amber-800/50 rounded-lg px-3 py-2.5 text-white font-mono text-sm outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30"
+                value={mlDraft}
+                onChange={(e) => setMlDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && mlDraft.trim()) {
+                    e.preventDefault();
+                    if (appendMlSources(mlDraft)) setMlDraft('');
+                  }
+                }}
+                placeholder="Link o MLA… (varios separados por coma o Enter)"
+                className="flex-1 min-w-0 bg-slate-900/60 border border-amber-800/50 rounded-lg px-3 py-2 text-white font-mono text-xs outline-none focus:border-amber-500"
               />
               <button
                 type="button"
-                onClick={handleLoadMl}
-                disabled={!mlId.trim() || loading}
-                className="shrink-0 px-4 py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold disabled:opacity-50 flex items-center gap-1.5 transition-colors"
+                onClick={() => {
+                  if (appendMlSources(mlDraft)) setMlDraft('');
+                }}
+                disabled={!mlDraft.trim()}
+                className="shrink-0 px-3 py-2 rounded-lg bg-amber-700 hover:bg-amber-600 text-white text-xs font-bold disabled:opacity-50"
               >
-                {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
-                Cargar
+                <Plus size={14} />
               </button>
             </div>
+            <button
+              type="button"
+              onClick={handleLoadAllMl}
+              disabled={mlSources.length === 0 || loading}
+              className="w-full px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold disabled:opacity-50 flex items-center justify-center gap-1.5"
+            >
+              {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+              Cargar todas ML
+            </button>
           </div>
 
-          {/* TN card */}
+          {/* TN sources */}
           <div className="rounded-xl border border-cyan-700/40 bg-cyan-950/15 p-4 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
@@ -630,49 +903,93 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                 </span>
                 <div>
                   <p className="text-sm font-bold text-cyan-100">Tienda Nube</p>
-                  <p className="text-[11px] text-cyan-200/60">Producto padre</p>
+                  <p className="text-[11px] text-cyan-200/60">{tnSources.length} producto(s)</p>
                 </div>
               </div>
-              {tnVariants.length > 0 ? (
+              {tnVariants.length > 0 && (
                 <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-600/30">
                   {tnVariants.length} variantes
                 </span>
+              )}
+            </div>
+            <div className="space-y-2 max-h-[160px] overflow-y-auto">
+              {tnSources.length === 0 ? (
+                <p className="text-xs text-slate-500 py-2 text-center border border-dashed border-cyan-800/40 rounded-lg">
+                  Sin productos TN
+                </p>
               ) : (
-                <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-full bg-slate-700/60 text-slate-400">
-                  Sin cargar
-                </span>
+                tnSources.map((src) => (
+                  <div
+                    key={src.id}
+                    className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-slate-900/50 border border-cyan-800/30"
+                  >
+                    <span className="flex-1 min-w-0 font-mono text-xs text-cyan-100 truncate">{src.id}</span>
+                    {src.variationCount != null && (
+                      <span className="text-[10px] text-emerald-400 shrink-0">{src.variationCount} var.</span>
+                    )}
+                    {src.loadError && (
+                      <span className="text-[10px] text-red-400 shrink-0" title={src.loadError}>
+                        Error
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setTnSources((prev) => prev.filter((s) => s.id !== src.id))}
+                      className="p-1 text-slate-500 hover:text-red-400 shrink-0"
+                      aria-label="Quitar"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))
               )}
             </div>
             <div className="flex gap-2">
               <input
                 type="text"
-                value={tnId}
-                onChange={(e) => setTnId(e.target.value)}
-                placeholder="Link o número de producto"
-                className="flex-1 min-w-0 bg-slate-900/60 border border-cyan-800/50 rounded-lg px-3 py-2.5 text-white font-mono text-sm outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/30"
+                value={tnDraft}
+                onChange={(e) => setTnDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && tnDraft.trim()) {
+                    e.preventDefault();
+                    if (appendTnSources(tnDraft)) setTnDraft('');
+                  }
+                }}
+                placeholder="Link o ID TN… (varios separados por coma)"
+                className="flex-1 min-w-0 bg-slate-900/60 border border-cyan-800/50 rounded-lg px-3 py-2 text-white font-mono text-xs outline-none focus:border-cyan-500"
               />
               <button
                 type="button"
-                onClick={handleLoadTn}
-                disabled={!tnId.trim() || loading}
-                className="shrink-0 px-4 py-2.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-semibold disabled:opacity-50 flex items-center gap-1.5 transition-colors"
+                onClick={() => {
+                  if (appendTnSources(tnDraft)) setTnDraft('');
+                }}
+                disabled={!tnDraft.trim()}
+                className="shrink-0 px-3 py-2 rounded-lg bg-cyan-700 hover:bg-cyan-600 text-white text-xs font-bold disabled:opacity-50"
               >
-                {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
-                Cargar
+                <Plus size={14} />
               </button>
             </div>
+            <button
+              type="button"
+              onClick={handleLoadAllTn}
+              disabled={tnSources.length === 0 || loading}
+              className="w-full px-3 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold disabled:opacity-50 flex items-center justify-center gap-1.5"
+            >
+              {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+              Cargar todas TN
+            </button>
           </div>
         </div>
 
         <div className="px-4 pb-4 flex flex-wrap items-center gap-3">
           <button
             type="button"
-            onClick={handleLoadBoth}
-            disabled={!mlId.trim() || !tnId.trim() || loading || variants.length === 0}
+            onClick={handleLoadAllAndMatch}
+            disabled={(mlSources.length === 0 && tnSources.length === 0) || loading || variants.length === 0}
             className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-indigo-900/30 transition-colors"
           >
             {loading ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-            Cargar ambos y emparejar
+            Cargar todas y emparejar
           </button>
           {catalogsLoaded && (
             <button
@@ -701,8 +1018,9 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
             <div>
               <h2 className="text-sm font-bold text-white">Paso 2 · Emparejar variantes</h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                Revisá cada fila. Podés editar SKU, elegir de la lista o pegar IDs manualmente. Usá{' '}
-                <strong className="text-indigo-300">Más publ.</strong> para sincronizar stock en publicaciones adicionales.
+                Revisá cada fila. Podés editar SKU, elegir de la lista o pegar IDs manualmente. Al guardar se
+                sincroniza stock en todas las publicaciones del paso 1. Usá{' '}
+                <strong className="text-indigo-300">Más publ.</strong> para agregar una publicación puntual.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2 text-[11px]">
@@ -778,9 +1096,10 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                 {variants.map((v) => {
                   const mlVal = assignments[v.variantId]?.ml ?? '';
                   const tnVal = assignments[v.variantId]?.tn ?? '';
+                  const tnProductId = assignments[v.variantId]?.tnProductId ?? '';
                   const status = getRowLinkStatus(mlVal, tnVal);
-                  const mlLabel = resolveMlLabel(mlVal);
-                  const tnLabel = resolveTnLabel(tnVal);
+                  const mlLabel = resolveMlLabel(v.variantId);
+                  const tnLabel = resolveTnLabel(v.variantId);
                   const pubCount = pubCounts[v.variantId] ?? 0;
                   const isExtraOpen = expandedExtraVariantId === v.variantId;
 
@@ -828,7 +1147,13 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                             onChange={(e) =>
                               setAssignments((prev) => ({
                                 ...prev,
-                                [v.variantId]: { ...prev[v.variantId], ml: e.target.value.trim() },
+                                [v.variantId]: {
+                                  ...prev[v.variantId],
+                                  ml: e.target.value.trim(),
+                                  mlItemId: /^ML[A-Z]{1,5}\d+$/i.test(e.target.value.trim())
+                                    ? undefined
+                                    : prev[v.variantId]?.mlItemId,
+                                },
                               }))
                             }
                             placeholder={mlVariations.length > 0 ? 'ID variación o MLA' : 'MLA o variación'}
@@ -845,17 +1170,22 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                               onChange={(e) => {
                                 const val = e.target.value;
                                 if (!val) return;
+                                const [itemId, variationId] = val.split('::');
                                 setAssignments((prev) => ({
                                   ...prev,
-                                  [v.variantId]: { ...prev[v.variantId], ml: val },
+                                  [v.variantId]: {
+                                    ...prev[v.variantId],
+                                    ml: variationId,
+                                    mlItemId: itemId,
+                                  },
                                 }));
                               }}
                               className="w-full bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-slate-300 text-xs outline-none focus:border-amber-500/60"
                             >
                               <option value="">Elegir de ML cargado…</option>
                               {filteredMl.map((m) => (
-                                <option key={String(m.variationId)} value={String(m.variationId)}>
-                                  {formatOptionLabel(m)}
+                                <option key={mlOptionKey(m)} value={mlOptionKey(m)}>
+                                  {m.itemId} · {formatOptionLabel(m)}
                                 </option>
                               ))}
                             </select>
@@ -870,32 +1200,48 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                         <div className="space-y-1.5">
                           {tnVariants.length > 0 ? (
                             <select
-                              value={tnVal}
+                              value={
+                                tnVal && tnProductId ? tnOptionKey({ productId: tnProductId, variantId: tnVal } as TnVariantRow) : tnVal
+                              }
                               onChange={(e) => {
-                                const tnValNew = e.target.value;
-                                const tnOpt = tnVariants.find((t) => String(t.variantId) === tnValNew);
+                                const raw = e.target.value;
+                                if (!raw) {
+                                  setAssignments((prev) => ({
+                                    ...prev,
+                                    [v.variantId]: { ...prev[v.variantId], tn: '', tnProductId: undefined },
+                                  }));
+                                  return;
+                                }
+                                const [productId, tnValNew] = raw.includes('::')
+                                  ? raw.split('::')
+                                  : ['', raw];
+                                const tnOpt = tnVariants.find(
+                                  (t) => t.variantId === tnValNew && (!productId || t.productId === productId)
+                                );
                                 const mlMatch =
                                   tnOpt && mlVariations.find((m) => bulkLinkSkuMatch(tnOpt.sku, m.sku));
                                 setAssignments((prev) => ({
                                   ...prev,
                                   [v.variantId]: {
-                                    ml: mlMatch ? String(mlMatch.variationId) : prev[v.variantId]?.ml ?? '',
+                                    ml: mlMatch ? mlMatch.variationId : prev[v.variantId]?.ml ?? '',
+                                    mlItemId: mlMatch ? mlMatch.itemId : prev[v.variantId]?.mlItemId,
                                     tn: tnValNew,
+                                    tnProductId: tnOpt?.productId || productId || undefined,
                                   },
                                 }));
                               }}
                               className="w-full bg-slate-800/80 border border-cyan-800/40 rounded-lg px-2.5 py-2 text-white text-xs outline-none focus:border-cyan-500/70"
                             >
                               <option value="">Elegir variante TN…</option>
-                              {getVisibleTnOptions(tnVal).map((t) => (
-                                <option key={String(t.variantId)} value={String(t.variantId)}>
-                                  {formatOptionLabel(t)}
+                              {getVisibleTnOptions(tnVal, tnProductId).map((t) => (
+                                <option key={tnOptionKey(t)} value={tnOptionKey(t)}>
+                                  {t.productId} · {formatOptionLabel(t)}
                                 </option>
                               ))}
                             </select>
                           ) : (
                             <div className="rounded-lg border border-dashed border-slate-600 bg-slate-800/40 px-2.5 py-2 text-[11px] text-slate-500">
-                              Cargá Tienda Nube arriba para ver opciones
+                              Cargá productos TN en el paso 1
                             </div>
                           )}
                           {tnLabel && tnVal && (
