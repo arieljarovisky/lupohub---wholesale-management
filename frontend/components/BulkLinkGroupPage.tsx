@@ -67,9 +67,9 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
     mlList: typeof mlVariations,
     tnList: typeof tnVariants,
     current?: Record<string, { ml?: string; tn?: string }>
-  ) => {
+  ): Record<string, { ml?: string; tn?: string }> => {
     const prev = current ?? assignments;
-    const next = { ...prev };
+    const next: Record<string, { ml?: string; tn?: string }> = { ...prev };
     localVariants.forEach((local) => {
       const skuN = norm(local.sku);
       const sizeN = norm(local.size);
