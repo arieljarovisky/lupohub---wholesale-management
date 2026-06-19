@@ -304,54 +304,7 @@ const VariantExtraPublicationsPanel: React.FC<VariantExtraPublicationsPanelProps
         )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="space-y-2 min-h-[80px]">
-          {loadingPublications ? (
-            <div className="flex justify-center py-6">
-              <Loader2 size={18} className="animate-spin text-slate-500" />
-            </div>
-          ) : publications.length === 0 ? (
-            <p className="text-xs text-slate-500 py-4 text-center rounded-lg border border-dashed border-slate-700">
-              Sin publicaciones extra. Agregá otra ML o TN para sincronizar stock en más canales.
-            </p>
-          ) : (
-            publications.map((pub) => {
-              const isPubMl = pub.platform === 'mercadolibre';
-              return (
-                <div
-                  key={pub.id}
-                  className={`flex items-start gap-2 p-2.5 rounded-lg border text-sm ${
-                    isPubMl ? 'bg-amber-950/25 border-amber-800/40' : 'bg-cyan-950/25 border-cyan-800/40'
-                  }`}
-                >
-                  <span
-                    className={`shrink-0 text-[9px] font-black uppercase px-1.5 py-0.5 rounded ${
-                      isPubMl ? 'bg-amber-500/25 text-amber-300' : 'bg-cyan-500/25 text-cyan-300'
-                    }`}
-                  >
-                    {platformShort(pub.platform)}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[11px] font-mono text-slate-200 break-all leading-tight">
-                      {pub.external_product_id}
-                      {pub.external_variant_id ? ` / ${pub.external_variant_id}` : ''}
-                    </p>
-                    <p className="text-[10px] text-slate-500 mt-0.5">Pack x{pub.pack_size}</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleDeletePublication(pub.id)}
-                    className="p-1 rounded text-slate-500 hover:text-red-400 shrink-0"
-                    aria-label="Quitar publicación"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              );
-            })
-          )}
-        </div>
-
+      <div className="flex flex-col gap-4">
         <div className="rounded-xl border border-indigo-700/40 bg-indigo-950/15 p-3 space-y-3">
           <p className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider">Agregar publicación</p>
           <div className="flex gap-1.5 p-1 rounded-lg bg-slate-800/80 border border-slate-700">
@@ -480,6 +433,54 @@ const VariantExtraPublicationsPanel: React.FC<VariantExtraPublicationsPanelProps
             {addPubSaving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
             Vincular y sincronizar stock
           </button>
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Vinculadas</p>
+          {loadingPublications ? (
+            <div className="flex justify-center py-6">
+              <Loader2 size={18} className="animate-spin text-slate-500" />
+            </div>
+          ) : publications.length === 0 ? (
+            <p className="text-xs text-slate-500 py-4 text-center rounded-lg border border-dashed border-slate-700">
+              Sin publicaciones extra. Agregá otra ML o TN para sincronizar stock en más canales.
+            </p>
+          ) : (
+            publications.map((pub) => {
+              const isPubMl = pub.platform === 'mercadolibre';
+              return (
+                <div
+                  key={pub.id}
+                  className={`flex items-start gap-2 p-2.5 rounded-lg border text-sm ${
+                    isPubMl ? 'bg-amber-950/25 border-amber-800/40' : 'bg-cyan-950/25 border-cyan-800/40'
+                  }`}
+                >
+                  <span
+                    className={`shrink-0 text-[9px] font-black uppercase px-1.5 py-0.5 rounded ${
+                      isPubMl ? 'bg-amber-500/25 text-amber-300' : 'bg-cyan-500/25 text-cyan-300'
+                    }`}
+                  >
+                    {platformShort(pub.platform)}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11px] font-mono text-slate-200 break-all leading-tight">
+                      {pub.external_product_id}
+                      {pub.external_variant_id ? ` / ${pub.external_variant_id}` : ''}
+                    </p>
+                    <p className="text-[10px] text-slate-500 mt-0.5">Pack x{pub.pack_size}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleDeletePublication(pub.id)}
+                    className="p-1 rounded text-slate-500 hover:text-red-400 shrink-0"
+                    aria-label="Quitar publicación"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
     </div>
