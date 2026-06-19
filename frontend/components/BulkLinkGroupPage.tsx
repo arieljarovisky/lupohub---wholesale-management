@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   Link,
@@ -14,8 +14,10 @@ import {
   Sparkles,
   ChevronDown,
   ChevronUp,
+  Layers,
 } from 'lucide-react';
 import { api } from '../services/api';
+import VariantExtraPublicationsPanel from './VariantExtraPublicationsPanel';
 import { labelTalle, codigoTalleParaSku } from '../utils/tallesTango';
 import { normalizeMercadoLibreItemId } from '../utils/mercadoLibreItemId';
 import { normalizeTiendaNubeProductId } from '../utils/tiendaNubeUrl';
@@ -95,6 +97,10 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
   const [showMlTip, setShowMlTip] = useState(false);
   const [step1Expanded, setStep1Expanded] = useState(true);
   const autoCollapsedStep1Ref = useRef(false);
+  const [packMl, setPackMl] = useState(1);
+  const [packTn, setPackTn] = useState(1);
+  const [expandedExtraVariantId, setExpandedExtraVariantId] = useState<string | null>(null);
+  const [pubCounts, setPubCounts] = useState<Record<string, number>>({});
 
   const goBack = () => onNavigate('inventory');
 
@@ -204,6 +210,30 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
     return opt ? formatOptionLabel(opt) : `Variante ${id}`;
   };
 
+  const refreshPublicationCount = useCallback((variantId: string, count: number) => {
+    setPubCounts((prev) => ({ ...prev, [variantId]: count }));
+  }, []);
+
+  useEffect(() => {
+    if (variants.length === 0) return;
+    let cancelled = false;
+    Promise.all(
+      variants.map(async (v) => {
+        try {
+          const pubs = await api.getVariantPublications(v.variantId);
+          return [v.variantId, pubs.length] as const;
+        } catch {
+          return [v.variantId, 0] as const;
+        }
+      })
+    ).then((entries) => {
+      if (!cancelled) setPubCounts(Object.fromEntries(entries));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [variants]);
+
   useEffect(() => {
     if (!groupKey) return;
     setLoading(true);
@@ -219,6 +249,8 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
         setProductName(p.name || groupKey);
         setMlId(p.externalIds?.mercadoLibre || '');
         setTnId(p.externalIds?.tiendaNube || '');
+        setPackMl(p.mercado_libre_pack_size ?? 1);
+        setPackTn(p.tienda_nube_pack_size ?? 1);
         const list = (p.variants || []).map((v: any) => {
           const variantId = v.variant_id;
           const rawSku = (v.variant_sku ?? '').toString().trim();
@@ -669,7 +701,8 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
             <div>
               <h2 className="text-sm font-bold text-white">Paso 2 · Emparejar variantes</h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                Revisá cada fila. Podés editar SKU, elegir de la lista o pegar IDs manualmente.
+                Revisá cada fila. Podés editar SKU, elegir de la lista o pegar IDs manualmente. Usá{' '}
+                <strong className="text-indigo-300">Más publ.</strong> para sincronizar stock en publicaciones adicionales.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2 text-[11px]">
@@ -723,7 +756,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
           <p className="text-slate-500 text-center py-16 text-sm">Este artículo no tiene variantes.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-sm">
+            <table className="w-full min-w-[860px] text-sm">
               <thead className="sticky top-0 z-10 bg-slate-800/95 backdrop-blur-sm">
                 <tr className="border-b border-slate-700/80">
                   <th className="text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider p-3 w-8" />
@@ -736,6 +769,9 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                   <th className="text-left text-[11px] font-bold text-cyan-400/90 uppercase tracking-wider p-3">
                     Tienda Nube
                   </th>
+                  <th className="text-left text-[11px] font-bold text-indigo-400/90 uppercase tracking-wider p-3 w-[120px]">
+                    Más publ.
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -745,17 +781,19 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                   const status = getRowLinkStatus(mlVal, tnVal);
                   const mlLabel = resolveMlLabel(mlVal);
                   const tnLabel = resolveTnLabel(tnVal);
+                  const pubCount = pubCounts[v.variantId] ?? 0;
+                  const isExtraOpen = expandedExtraVariantId === v.variantId;
 
                   return (
+                    <React.Fragment key={v.variantId}>
                     <tr
-                      key={v.variantId}
                       className={`border-b border-slate-700/40 transition-colors hover:bg-slate-800/40 ${
                         status === 'complete'
                           ? 'bg-emerald-950/10'
                           : status === 'partial'
                             ? 'bg-amber-950/10'
                             : ''
-                      }`}
+                      } ${isExtraOpen ? 'bg-indigo-950/20' : ''}`}
                     >
                       <td className="p-3 align-top">
                         {status === 'complete' ? (
@@ -867,7 +905,43 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                           )}
                         </div>
                       </td>
+                      <td className="p-3 align-top">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedExtraVariantId((prev) => (prev === v.variantId ? null : v.variantId))
+                          }
+                          className={`w-full flex flex-col items-center gap-1 px-2 py-2 rounded-lg border text-xs font-semibold transition-colors ${
+                            isExtraOpen
+                              ? 'border-indigo-500 bg-indigo-600/25 text-indigo-200'
+                              : pubCount > 0
+                                ? 'border-indigo-700/50 bg-indigo-950/30 text-indigo-300 hover:bg-indigo-950/50'
+                                : 'border-slate-600 bg-slate-800/50 text-slate-400 hover:text-indigo-300 hover:border-indigo-700/50'
+                          }`}
+                          title="Gestionar publicaciones adicionales para sincronizar stock"
+                        >
+                          <Layers size={16} />
+                          <span>{pubCount > 0 ? `${pubCount}` : '+'}</span>
+                          <span className="text-[9px] font-normal opacity-80">{isExtraOpen ? 'Cerrar' : 'Más'}</span>
+                        </button>
+                      </td>
                     </tr>
+                    {isExtraOpen && (
+                      <tr className="border-b border-slate-700/40">
+                        <td colSpan={5} className="p-0">
+                          <VariantExtraPublicationsPanel
+                            variantId={v.variantId}
+                            variantSku={skuEdits[v.variantId] ?? v.sku ?? ''}
+                            productId={productId}
+                            packMl={packMl}
+                            packTn={packTn}
+                            showToast={showToast}
+                            onCountChange={(count) => refreshPublicationCount(v.variantId, count)}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>
