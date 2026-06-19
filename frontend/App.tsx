@@ -425,7 +425,7 @@ const App: React.FC = () => {
   const inCreateOrderView = baseView === 'create_order' || !!editingOrder;
   const isOrderFormView = baseView === 'create_order' || baseView === 'create_order_template';
   const isLinkGroupView = baseView === 'link_group';
-  const isFullHeightSubview = isOrderFormView || isLinkGroupView;
+  const isFullHeightSubview = isOrderFormView;
   const linkGroupKey = useMemo(() => {
     if (!isLinkGroupView) return '';
     const q = currentView.indexOf('?');
@@ -1203,14 +1203,12 @@ const App: React.FC = () => {
           )}
           {isLinkGroupView && linkGroupKey && (
             <Suspense fallback={<ViewFallback />}>
-              <div className="flex flex-col flex-1 min-h-0 h-full w-full max-w-none">
-                <BulkLinkGroupPage
-                  groupKey={linkGroupKey}
-                  onNavigate={handleChangeView}
-                  onImportComplete={loadData}
-                  showToast={showToast}
-                />
-              </div>
+              <BulkLinkGroupPage
+                groupKey={linkGroupKey}
+                onNavigate={handleChangeView}
+                onImportComplete={loadData}
+                showToast={showToast}
+              />
             </Suspense>
           )}
           {isLinkGroupView && !linkGroupKey && (
