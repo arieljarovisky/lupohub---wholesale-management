@@ -1,5 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Link, Loader2, History } from 'lucide-react';
+import {
+  ArrowLeft,
+  Link,
+  Loader2,
+  History,
+  Zap,
+  CheckCircle2,
+  AlertCircle,
+  Circle,
+  Search,
+  Cloud,
+  HelpCircle,
+  Sparkles,
+} from 'lucide-react';
 import { api } from '../services/api';
 import { labelTalle, codigoTalleParaSku } from '../utils/tallesTango';
 import { normalizeMercadoLibreItemId } from '../utils/mercadoLibreItemId';
@@ -15,6 +28,14 @@ function formatSizeForLink(size: string | undefined | null): string {
   return code && code !== s ? `${code} - ${s}` : s;
 }
 
+function formatOptionLabel(item: { sku?: string; size?: string; color?: string }): string {
+  const parts = [
+    item.sku?.trim() || '',
+    [formatSizeForLink(item.size), item.color].filter(Boolean).join(' / '),
+  ].filter(Boolean);
+  return parts.join(' · ') || '—';
+}
+
 const norm = (s: string) => (s || '').toString().trim().toLowerCase().replace(/\s+/g, ' ');
 
 const bulkLinkSkuMatch = (skuA: string, skuB: string) => {
@@ -26,6 +47,16 @@ const bulkLinkSkuMatch = (skuA: string, skuB: string) => {
   const bBase = b.replace(/\s+ac\.?$/i, '').replace(/\s*—.*$/, '').trim();
   return aBase === bBase || a.startsWith(bBase) || b.startsWith(aBase);
 };
+
+type RowLinkStatus = 'complete' | 'partial' | 'empty';
+
+function getRowLinkStatus(ml?: string, tn?: string): RowLinkStatus {
+  const hasMl = !!ml?.trim();
+  const hasTn = !!tn?.trim();
+  if (hasMl && hasTn) return 'complete';
+  if (hasMl || hasTn) return 'partial';
+  return 'empty';
+}
 
 export interface BulkLinkGroupPageProps {
   groupKey: string;
@@ -59,6 +90,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
   const [saving, setSaving] = useState(false);
   const [mlSearch, setMlSearch] = useState('');
   const [tnSearch, setTnSearch] = useState('');
+  const [showMlTip, setShowMlTip] = useState(false);
 
   const goBack = () => onNavigate('inventory');
 
@@ -112,6 +144,26 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
     [tnVariants, tnSearch]
   );
 
+  const linkStats = useMemo(() => {
+    let ml = 0;
+    let tn = 0;
+    let both = 0;
+    variants.forEach((v) => {
+      const a = assignments[v.variantId];
+      const hasMl = !!a?.ml?.trim();
+      const hasTn = !!a?.tn?.trim();
+      if (hasMl) ml++;
+      if (hasTn) tn++;
+      if (hasMl && hasTn) both++;
+    });
+    const total = variants.length;
+    const progress = total ? Math.round(((ml + tn) / (total * 2)) * 100) : 0;
+    return { total, ml, tn, both, progress };
+  }, [variants, assignments]);
+
+  const catalogsLoaded = mlVariations.length > 0 || tnVariants.length > 0;
+  const currentStep = catalogsLoaded ? 2 : 1;
+
   const getVisibleTnOptions = (selectedValue?: string) => {
     const selected = (selectedValue || '').trim();
     const base = filteredTn.length > 0 ? filteredTn : tnVariants;
@@ -119,6 +171,21 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
     if (base.some((t) => String(t.variantId) === selected)) return base;
     const opt = tnVariants.find((t) => String(t.variantId) === selected);
     return opt ? [opt, ...base] : base;
+  };
+
+  const resolveMlLabel = (value?: string) => {
+    const id = (value || '').trim();
+    if (!id) return null;
+    if (/^ML[A-Z]{1,5}\d+$/i.test(id)) return `Publicación ${id.toUpperCase()}`;
+    const opt = mlVariations.find((m) => String(m.variationId) === id);
+    return opt ? formatOptionLabel(opt) : `Variación ${id}`;
+  };
+
+  const resolveTnLabel = (value?: string) => {
+    const id = (value || '').trim();
+    if (!id) return null;
+    const opt = tnVariants.find((t) => String(t.variantId) === id);
+    return opt ? formatOptionLabel(opt) : `Variante ${id}`;
   };
 
   useEffect(() => {
@@ -324,244 +391,483 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
 
   if (loading && variants.length === 0) {
     return (
-      <div className="flex flex-1 items-center justify-center min-h-[40vh]">
+      <div className="flex flex-1 flex-col items-center justify-center min-h-[40vh] gap-3">
         <Loader2 size={36} className="text-indigo-400 animate-spin" />
+        <p className="text-sm text-slate-400">Cargando variantes del artículo…</p>
       </div>
     );
   }
 
+  const steps = [
+    { n: 1, label: 'Cargar publicaciones', active: currentStep === 1, done: catalogsLoaded },
+    { n: 2, label: 'Revisar emparejamientos', active: currentStep === 2, done: linkStats.ml > 0 || linkStats.tn > 0 },
+    { n: 3, label: 'Guardar', active: false, done: false },
+  ];
+
   return (
-    <div className="flex flex-col h-full min-h-0 overflow-hidden">
-      <header className="shrink-0 flex flex-wrap items-center gap-3 pb-4 border-b border-slate-700/80">
+    <div className="flex flex-col h-full min-h-0 overflow-hidden gap-4">
+      {/* Header */}
+      <header className="shrink-0 flex flex-wrap items-start gap-4 pb-1">
         <button
           type="button"
           onClick={goBack}
-          className="flex items-center gap-2 px-3 py-2 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 text-sm font-medium"
+          className="flex items-center gap-2 px-3 py-2 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800/80 text-sm font-medium transition-colors"
         >
           <ArrowLeft size={18} />
           Inventario
         </button>
         <div className="flex-1 min-w-0">
-          <h1 className="text-xl font-bold text-white flex items-center gap-2">
-            <Link size={20} className="text-indigo-400 shrink-0" />
+          <h1 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-2.5">
+            <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-indigo-600/20 border border-indigo-500/30">
+              <Link size={18} className="text-indigo-400" />
+            </span>
             Vincular grupo con ML y TN
           </h1>
-          <p className="text-sm text-slate-400 mt-0.5 truncate">
-            {productName} · <span className="font-mono text-slate-300">{groupKey}</span>
+          <p className="text-sm text-slate-400 mt-1 truncate">
+            <span className="text-slate-200">{productName}</span>
+            <span className="mx-2 text-slate-600">·</span>
+            <span className="font-mono text-slate-300">{groupKey}</span>
+            <span className="mx-2 text-slate-600">·</span>
+            <span>{linkStats.total} variantes</span>
           </p>
         </div>
+        <button
+          type="button"
+          onClick={() => onNavigate('stock_history')}
+          className="shrink-0 px-3 py-2 rounded-xl bg-slate-800 hover:bg-violet-600/80 border border-slate-700 text-slate-300 hover:text-white text-sm font-medium flex items-center gap-2 transition-colors"
+        >
+          <History size={16} />
+          Historial
+        </button>
       </header>
 
-      <div className="shrink-0 py-4 space-y-3">
-        <p className="text-sm text-slate-400">
-          Pegá el link o ID de ML y TN. Se empareja por <strong className="text-slate-200">SKU</strong> y, si no
-          coincide, por <strong className="text-slate-200">talle y color</strong>.
-        </p>
-        <p className="text-sm text-amber-200/90 bg-amber-900/20 border border-amber-700/40 rounded-lg px-3 py-2">
-          Si cada variante es una publicación ML distinta, dejá vacío el ID padre ML y escribí el MLA en cada fila.
-        </p>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <label className="text-xs font-semibold text-slate-400">Link o ID publicación ML</label>
+      {/* Pasos */}
+      <div className="shrink-0 flex flex-wrap items-center gap-2 sm:gap-0">
+        {steps.map((step, i) => (
+          <React.Fragment key={step.n}>
+            <div
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold transition-colors ${
+                step.active
+                  ? 'bg-indigo-600/25 text-indigo-200 border border-indigo-500/40'
+                  : step.done
+                    ? 'bg-emerald-950/40 text-emerald-300 border border-emerald-700/40'
+                    : 'bg-slate-800/60 text-slate-500 border border-slate-700/60'
+              }`}
+            >
+              <span
+                className={`flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-black ${
+                  step.done ? 'bg-emerald-600 text-white' : step.active ? 'bg-indigo-500 text-white' : 'bg-slate-700 text-slate-400'
+                }`}
+              >
+                {step.done ? '✓' : step.n}
+              </span>
+              {step.label}
+            </div>
+            {i < steps.length - 1 && (
+              <div className="hidden sm:block w-8 h-px bg-slate-700 mx-1" aria-hidden />
+            )}
+          </React.Fragment>
+        ))}
+      </div>
+
+      {/* Paso 1: cargar publicaciones */}
+      <section className="shrink-0 rounded-2xl border border-slate-700/80 bg-slate-800/40 overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-700/60 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-bold text-white">Paso 1 · Publicaciones externas</h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Pegá el link o ID. El sistema empareja por <strong className="text-slate-300">SKU</strong> y, si no
+              coincide, por <strong className="text-slate-300">talle y color</strong>.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowMlTip((v) => !v)}
+            className="flex items-center gap-1.5 text-xs text-amber-300/90 hover:text-amber-200 px-2 py-1 rounded-lg hover:bg-amber-950/30 transition-colors"
+          >
+            <HelpCircle size={14} />
+            {showMlTip ? 'Ocultar ayuda' : '¿Publicaciones ML separadas?'}
+          </button>
+        </div>
+
+        {showMlTip && (
+          <div className="mx-4 mt-3 mb-1 text-xs text-amber-100/90 bg-amber-950/30 border border-amber-700/40 rounded-xl px-3 py-2.5 leading-relaxed">
+            Si cada variante es una publicación ML distinta (sin ID padre compartido), dejá vacío el campo ML de
+            arriba y escribí el MLA completo en cada fila de la tabla.
+          </div>
+        )}
+
+        <div className="p-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* ML card */}
+          <div className="rounded-xl border border-amber-700/40 bg-amber-950/15 p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-amber-500/20">
+                  <Zap size={16} className="text-amber-400" />
+                </span>
+                <div>
+                  <p className="text-sm font-bold text-amber-100">Mercado Libre</p>
+                  <p className="text-[11px] text-amber-200/60">Publicación padre (opcional)</p>
+                </div>
+              </div>
+              {mlVariations.length > 0 ? (
+                <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-600/30">
+                  {mlVariations.length} variaciones
+                </span>
+              ) : (
+                <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-full bg-slate-700/60 text-slate-400">
+                  Sin cargar
+                </span>
+              )}
+            </div>
             <div className="flex gap-2">
               <input
                 type="text"
                 value={mlId}
                 onChange={(e) => setMlId(e.target.value)}
                 placeholder="Link o MLA…"
-                className="flex-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white font-mono text-sm outline-none focus:border-amber-500"
+                className="flex-1 min-w-0 bg-slate-900/60 border border-amber-800/50 rounded-lg px-3 py-2.5 text-white font-mono text-sm outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/30"
               />
               <button
                 type="button"
                 onClick={handleLoadMl}
                 disabled={!mlId.trim() || loading}
-                className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium disabled:opacity-50"
+                className="shrink-0 px-4 py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold disabled:opacity-50 flex items-center gap-1.5 transition-colors"
               >
+                {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
                 Cargar
               </button>
             </div>
           </div>
-          <div className="space-y-2">
-            <label className="text-xs font-semibold text-slate-400">Link o ID producto TN</label>
+
+          {/* TN card */}
+          <div className="rounded-xl border border-cyan-700/40 bg-cyan-950/15 p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="flex items-center justify-center w-8 h-8 rounded-lg bg-cyan-500/20">
+                  <Cloud size={16} className="text-cyan-400" />
+                </span>
+                <div>
+                  <p className="text-sm font-bold text-cyan-100">Tienda Nube</p>
+                  <p className="text-[11px] text-cyan-200/60">Producto padre</p>
+                </div>
+              </div>
+              {tnVariants.length > 0 ? (
+                <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-600/30">
+                  {tnVariants.length} variantes
+                </span>
+              ) : (
+                <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-full bg-slate-700/60 text-slate-400">
+                  Sin cargar
+                </span>
+              )}
+            </div>
             <div className="flex gap-2">
               <input
                 type="text"
                 value={tnId}
                 onChange={(e) => setTnId(e.target.value)}
-                placeholder="Link o número"
-                className="flex-1 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white font-mono text-sm outline-none focus:border-cyan-500"
+                placeholder="Link o número de producto"
+                className="flex-1 min-w-0 bg-slate-900/60 border border-cyan-800/50 rounded-lg px-3 py-2.5 text-white font-mono text-sm outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/30"
               />
               <button
                 type="button"
                 onClick={handleLoadTn}
                 disabled={!tnId.trim() || loading}
-                className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-medium disabled:opacity-50"
+                className="shrink-0 px-4 py-2.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-semibold disabled:opacity-50 flex items-center gap-1.5 transition-colors"
               >
+                {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
                 Cargar
               </button>
             </div>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
+
+        <div className="px-4 pb-4 flex flex-wrap items-center gap-3">
           <button
             type="button"
             onClick={handleLoadBoth}
             disabled={!mlId.trim() || !tnId.trim() || loading || variants.length === 0}
-            className="px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold disabled:opacity-50 flex items-center gap-2"
+            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-indigo-900/30 transition-colors"
           >
-            <Link size={16} />
-            Cargar y emparejar todo
+            {loading ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+            Cargar ambos y emparejar
           </button>
-          {(mlVariations.length > 0 || tnVariants.length > 0) && (
+          {catalogsLoaded && (
             <button
               type="button"
               onClick={() => runAutoMatch(variants, mlVariations, tnVariants)}
-              className="text-sm text-indigo-400 hover:text-indigo-300"
+              className="text-sm text-indigo-400 hover:text-indigo-300 font-medium px-2 py-1 rounded-lg hover:bg-indigo-950/40 transition-colors"
             >
-              Volver a emparejar
+              Volver a emparejar automáticamente
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => onNavigate('stock_history')}
-            className="px-3 py-2 rounded-lg bg-slate-700 hover:bg-violet-600 text-slate-200 text-sm font-semibold flex items-center gap-2"
-          >
-            <History size={16} />
-            Historial
-          </button>
+          {loading && (
+            <span className="text-xs text-slate-500 flex items-center gap-1.5">
+              <Loader2 size={12} className="animate-spin" />
+              Consultando APIs…
+            </span>
+          )}
         </div>
-        {(mlVariations.length > 0 || tnVariants.length > 0) && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-            <input
-              type="text"
-              value={mlSearch}
-              onChange={(e) => setMlSearch(e.target.value)}
-              placeholder={`Filtrar ML (${mlVariations.length})`}
-              className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white text-xs outline-none"
-            />
-            <input
-              type="text"
-              value={tnSearch}
-              onChange={(e) => setTnSearch(e.target.value)}
-              placeholder={`Filtrar TN (${tnVariants.length})`}
-              className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white text-xs outline-none"
-            />
-          </div>
-        )}
-      </div>
+      </section>
 
-      <div className="flex-1 min-h-0 rounded-xl border border-slate-700 overflow-hidden flex flex-col bg-slate-900/40">
+      {/* Progreso + tabla */}
+      <section className="flex-1 min-h-0 flex flex-col rounded-2xl border border-slate-700/80 bg-slate-900/30 overflow-hidden">
+        <div className="shrink-0 px-4 py-3 border-b border-slate-700/60 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-bold text-white">Paso 2 · Emparejar variantes</h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Revisá cada fila. Podés editar SKU, elegir de la lista o pegar IDs manualmente.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-[11px]">
+              <span className="px-2 py-1 rounded-lg bg-amber-950/40 text-amber-300 border border-amber-800/40 font-semibold">
+                ML {linkStats.ml}/{linkStats.total}
+              </span>
+              <span className="px-2 py-1 rounded-lg bg-cyan-950/40 text-cyan-300 border border-cyan-800/40 font-semibold">
+                TN {linkStats.tn}/{linkStats.total}
+              </span>
+              <span className="px-2 py-1 rounded-lg bg-emerald-950/40 text-emerald-300 border border-emerald-800/40 font-semibold">
+                Completas {linkStats.both}/{linkStats.total}
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-2 rounded-full bg-slate-800 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-indigo-600 to-emerald-500 transition-all duration-500"
+                style={{ width: `${linkStats.progress}%` }}
+              />
+            </div>
+            <span className="text-xs font-mono text-slate-400 w-10 text-right">{linkStats.progress}%</span>
+          </div>
+          {catalogsLoaded && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <div className="relative">
+                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+                <input
+                  type="text"
+                  value={mlSearch}
+                  onChange={(e) => setMlSearch(e.target.value)}
+                  placeholder={`Filtrar opciones ML (${mlVariations.length})`}
+                  className="w-full bg-slate-800/80 border border-slate-600/80 rounded-lg pl-8 pr-3 py-2 text-white text-xs outline-none focus:border-amber-500/60"
+                />
+              </div>
+              <div className="relative">
+                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+                <input
+                  type="text"
+                  value={tnSearch}
+                  onChange={(e) => setTnSearch(e.target.value)}
+                  placeholder={`Filtrar opciones TN (${tnVariants.length})`}
+                  className="w-full bg-slate-800/80 border border-slate-600/80 rounded-lg pl-8 pr-3 py-2 text-white text-xs outline-none focus:border-cyan-500/60"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
         {variants.length === 0 ? (
-          <p className="text-slate-500 text-center py-12">Este artículo no tiene variantes.</p>
+          <p className="text-slate-500 text-center py-16 text-sm">Este artículo no tiene variantes.</p>
         ) : (
           <div className="flex-1 min-h-0 overflow-auto">
-            <table className="w-full min-w-[640px] text-sm">
+            <table className="w-full min-w-[720px] text-sm">
               <thead className="sticky top-0 z-10 bg-slate-800/95 backdrop-blur-sm">
-                <tr className="border-b border-slate-700">
-                  <th className="text-left text-slate-400 font-semibold p-3">Mi variante</th>
-                  <th className="text-left text-slate-400 font-semibold p-3">Variación ML</th>
-                  <th className="text-left text-slate-400 font-semibold p-3">Variante TN</th>
+                <tr className="border-b border-slate-700/80">
+                  <th className="text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider p-3 w-8" />
+                  <th className="text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider p-3">
+                    Mi variante
+                  </th>
+                  <th className="text-left text-[11px] font-bold text-amber-400/90 uppercase tracking-wider p-3">
+                    Mercado Libre
+                  </th>
+                  <th className="text-left text-[11px] font-bold text-cyan-400/90 uppercase tracking-wider p-3">
+                    Tienda Nube
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {variants.map((v) => (
-                  <tr key={v.variantId} className="border-b border-slate-700/50 hover:bg-slate-800/30">
-                    <td className="p-3 align-top">
-                      <input
-                        type="text"
-                        value={skuEdits[v.variantId] ?? v.sku ?? ''}
-                        onChange={(e) => setSkuEdits((prev) => ({ ...prev, [v.variantId]: e.target.value }))}
-                        className="w-full max-w-[220px] bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-blue-200 text-xs font-mono outline-none"
-                      />
-                      <span className="text-slate-500 text-xs block mt-1">
-                        {formatSizeForLink(v.size)} / {v.color}
-                      </span>
-                    </td>
-                    <td className="p-3 align-top">
-                      <input
-                        type="text"
-                        value={assignments[v.variantId]?.ml ?? ''}
-                        onChange={(e) =>
-                          setAssignments((prev) => ({
-                            ...prev,
-                            [v.variantId]: { ...prev[v.variantId], ml: e.target.value.trim() },
-                          }))
-                        }
-                        placeholder="MLA o variación"
-                        className="w-full max-w-[240px] bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-white text-xs font-mono outline-none"
-                      />
-                      {mlVariations.length > 0 && (
-                        <select
-                          value=""
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            if (!val) return;
-                            setAssignments((prev) => ({
-                              ...prev,
-                              [v.variantId]: { ...prev[v.variantId], ml: val },
-                            }));
-                          }}
-                          className="w-full max-w-[240px] mt-1.5 bg-slate-700 border border-slate-600 rounded-lg px-2 py-1 text-slate-300 text-xs outline-none"
-                        >
-                          <option value="">Desde publicación cargada…</option>
-                          {filteredMl.map((m) => (
-                            <option key={String(m.variationId)} value={String(m.variationId)}>
-                              {m.sku || '—'} — {[formatSizeForLink(m.size), m.color].filter(Boolean).join(' / ')}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                    </td>
-                    <td className="p-3 align-top">
-                      <select
-                        value={assignments[v.variantId]?.tn ?? ''}
-                        onChange={(e) => {
-                          const tnVal = e.target.value;
-                          const tnOpt = tnVariants.find((t) => String(t.variantId) === tnVal);
-                          const mlMatch =
-                            tnOpt && mlVariations.find((m) => bulkLinkSkuMatch(tnOpt.sku, m.sku));
-                          setAssignments((prev) => ({
-                            ...prev,
-                            [v.variantId]: {
-                              ml: mlMatch ? String(mlMatch.variationId) : prev[v.variantId]?.ml ?? '',
-                              tn: tnVal,
-                            },
-                          }));
-                        }}
-                        className="w-full max-w-[240px] bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-white text-xs outline-none"
-                      >
-                        <option value="">—</option>
-                        {getVisibleTnOptions(assignments[v.variantId]?.tn).map((t) => (
-                          <option key={String(t.variantId)} value={String(t.variantId)}>
-                            {t.sku || '—'} — {[formatSizeForLink(t.size), t.color].filter(Boolean).join(' / ')}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                  </tr>
-                ))}
+                {variants.map((v) => {
+                  const mlVal = assignments[v.variantId]?.ml ?? '';
+                  const tnVal = assignments[v.variantId]?.tn ?? '';
+                  const status = getRowLinkStatus(mlVal, tnVal);
+                  const mlLabel = resolveMlLabel(mlVal);
+                  const tnLabel = resolveTnLabel(tnVal);
+
+                  return (
+                    <tr
+                      key={v.variantId}
+                      className={`border-b border-slate-700/40 transition-colors hover:bg-slate-800/40 ${
+                        status === 'complete'
+                          ? 'bg-emerald-950/10'
+                          : status === 'partial'
+                            ? 'bg-amber-950/10'
+                            : ''
+                      }`}
+                    >
+                      <td className="p-3 align-top">
+                        {status === 'complete' ? (
+                          <CheckCircle2 size={18} className="text-emerald-400" title="ML y TN vinculados" />
+                        ) : status === 'partial' ? (
+                          <AlertCircle size={18} className="text-amber-400" title="Falta ML o TN" />
+                        ) : (
+                          <Circle size={18} className="text-slate-600" title="Sin vincular" />
+                        )}
+                      </td>
+                      <td className="p-3 align-top min-w-[180px]">
+                        <div className="space-y-1.5">
+                          <input
+                            type="text"
+                            value={skuEdits[v.variantId] ?? v.sku ?? ''}
+                            onChange={(e) => setSkuEdits((prev) => ({ ...prev, [v.variantId]: e.target.value }))}
+                            className="w-full bg-slate-800/80 border border-slate-600 rounded-lg px-2.5 py-2 text-blue-200 text-xs font-mono outline-none focus:border-indigo-500/60"
+                            title="SKU (editable para mejorar el emparejamiento)"
+                          />
+                          <p className="text-xs text-slate-400 pl-0.5">
+                            <span className="text-slate-300 font-medium">{formatSizeForLink(v.size)}</span>
+                            <span className="text-slate-600 mx-1">·</span>
+                            {v.color}
+                          </p>
+                        </div>
+                      </td>
+                      <td className="p-3 align-top min-w-[220px]">
+                        <div className="space-y-1.5">
+                          <input
+                            type="text"
+                            value={mlVal}
+                            onChange={(e) =>
+                              setAssignments((prev) => ({
+                                ...prev,
+                                [v.variantId]: { ...prev[v.variantId], ml: e.target.value.trim() },
+                              }))
+                            }
+                            placeholder={mlVariations.length > 0 ? 'ID variación o MLA' : 'MLA o variación'}
+                            className="w-full bg-slate-800/80 border border-amber-800/40 rounded-lg px-2.5 py-2 text-white text-xs font-mono outline-none focus:border-amber-500/70"
+                          />
+                          {mlLabel && (
+                            <p className="text-[10px] text-amber-200/70 truncate pl-0.5" title={mlLabel}>
+                              ↳ {mlLabel}
+                            </p>
+                          )}
+                          {mlVariations.length > 0 ? (
+                            <select
+                              value=""
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (!val) return;
+                                setAssignments((prev) => ({
+                                  ...prev,
+                                  [v.variantId]: { ...prev[v.variantId], ml: val },
+                                }));
+                              }}
+                              className="w-full bg-slate-800 border border-slate-600 rounded-lg px-2 py-1.5 text-slate-300 text-xs outline-none focus:border-amber-500/60"
+                            >
+                              <option value="">Elegir de ML cargado…</option>
+                              {filteredMl.map((m) => (
+                                <option key={String(m.variationId)} value={String(m.variationId)}>
+                                  {formatOptionLabel(m)}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            !mlVal && (
+                              <p className="text-[10px] text-slate-500 pl-0.5">Cargá ML arriba o pegá un MLA</p>
+                            )
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-3 align-top min-w-[220px]">
+                        <div className="space-y-1.5">
+                          {tnVariants.length > 0 ? (
+                            <select
+                              value={tnVal}
+                              onChange={(e) => {
+                                const tnValNew = e.target.value;
+                                const tnOpt = tnVariants.find((t) => String(t.variantId) === tnValNew);
+                                const mlMatch =
+                                  tnOpt && mlVariations.find((m) => bulkLinkSkuMatch(tnOpt.sku, m.sku));
+                                setAssignments((prev) => ({
+                                  ...prev,
+                                  [v.variantId]: {
+                                    ml: mlMatch ? String(mlMatch.variationId) : prev[v.variantId]?.ml ?? '',
+                                    tn: tnValNew,
+                                  },
+                                }));
+                              }}
+                              className="w-full bg-slate-800/80 border border-cyan-800/40 rounded-lg px-2.5 py-2 text-white text-xs outline-none focus:border-cyan-500/70"
+                            >
+                              <option value="">Elegir variante TN…</option>
+                              {getVisibleTnOptions(tnVal).map((t) => (
+                                <option key={String(t.variantId)} value={String(t.variantId)}>
+                                  {formatOptionLabel(t)}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            <div className="rounded-lg border border-dashed border-slate-600 bg-slate-800/40 px-2.5 py-2 text-[11px] text-slate-500">
+                              Cargá Tienda Nube arriba para ver opciones
+                            </div>
+                          )}
+                          {tnLabel && tnVal && (
+                            <p className="text-[10px] text-cyan-200/70 truncate pl-0.5" title={tnLabel}>
+                              ↳ {tnLabel}
+                            </p>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
-      </div>
+      </section>
 
-      <footer className="shrink-0 flex flex-col sm:flex-row gap-2 sm:justify-end pt-4 border-t border-slate-700/80 mt-4">
-        <button
-          type="button"
-          onClick={goBack}
-          className="px-5 py-2.5 rounded-xl font-semibold text-slate-300 bg-slate-700/60 hover:bg-slate-600 text-sm"
-        >
-          Cancelar
-        </button>
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving || !productId || variants.length === 0}
-          className="px-6 py-2.5 rounded-xl font-semibold bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50 text-sm"
-        >
-          {saving ? 'Guardando…' : 'Guardar vinculaciones'}
-        </button>
+      {/* Footer */}
+      <footer className="shrink-0 flex flex-col sm:flex-row sm:items-center gap-3 pt-1 border-t border-slate-700/60">
+        <div className="flex-1 text-xs text-slate-400">
+          {linkStats.ml + linkStats.tn > 0 ? (
+            <>
+              <span className="text-slate-300 font-medium">{linkStats.ml + linkStats.tn}</span> vínculos listos
+              {linkStats.both < linkStats.total && (
+                <span className="text-amber-400/90 ml-1">
+                  · faltan {linkStats.total - linkStats.both} variantes sin ML+TN completos
+                </span>
+              )}
+            </>
+          ) : (
+            'Cargá las publicaciones y emparejá al menos una variante para guardar.'
+          )}
+        </div>
+        <div className="flex gap-2 sm:justify-end">
+          <button
+            type="button"
+            onClick={goBack}
+            className="px-5 py-2.5 rounded-xl font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-sm transition-colors"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving || !productId || variants.length === 0}
+            className="px-6 py-2.5 rounded-xl font-bold bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50 text-sm shadow-lg shadow-indigo-900/25 flex items-center justify-center gap-2 min-w-[180px] transition-colors"
+          >
+            {saving ? (
+              <>
+                <Loader2 size={16} className="animate-spin" />
+                Guardando…
+              </>
+            ) : (
+              <>
+                <CheckCircle2 size={16} />
+                Guardar vinculaciones
+              </>
+            )}
+          </button>
+        </div>
       </footer>
     </div>
   );
