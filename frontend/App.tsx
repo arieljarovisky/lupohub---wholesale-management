@@ -1203,12 +1203,14 @@ const App: React.FC = () => {
           )}
           {isLinkGroupView && linkGroupKey && (
             <Suspense fallback={<ViewFallback />}>
-              <BulkLinkGroupPage
-                groupKey={linkGroupKey}
-                onNavigate={handleChangeView}
-                onImportComplete={loadData}
-                showToast={showToast}
-              />
+              <div className="flex flex-col flex-1 min-h-0 h-full w-full max-w-none">
+                <BulkLinkGroupPage
+                  groupKey={linkGroupKey}
+                  onNavigate={handleChangeView}
+                  onImportComplete={loadData}
+                  showToast={showToast}
+                />
+              </div>
             </Suspense>
           )}
           {isLinkGroupView && !linkGroupKey && (

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   Link,
@@ -12,6 +12,8 @@ import {
   Cloud,
   HelpCircle,
   Sparkles,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { labelTalle, codigoTalleParaSku } from '../utils/tallesTango';
@@ -91,6 +93,8 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
   const [mlSearch, setMlSearch] = useState('');
   const [tnSearch, setTnSearch] = useState('');
   const [showMlTip, setShowMlTip] = useState(false);
+  const [step1Expanded, setStep1Expanded] = useState(true);
+  const autoCollapsedStep1Ref = useRef(false);
 
   const goBack = () => onNavigate('inventory');
 
@@ -163,6 +167,18 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
 
   const catalogsLoaded = mlVariations.length > 0 || tnVariants.length > 0;
   const currentStep = catalogsLoaded ? 2 : 1;
+
+  useEffect(() => {
+    if (loading || autoCollapsedStep1Ref.current) return;
+    const hasLinks = variants.some((v) => {
+      const a = assignments[v.variantId];
+      return !!(a?.ml?.trim() || a?.tn?.trim());
+    });
+    if (catalogsLoaded || hasLinks) {
+      autoCollapsedStep1Ref.current = true;
+      setStep1Expanded(false);
+    }
+  }, [loading, variants, assignments, catalogsLoaded]);
 
   const getVisibleTnOptions = (selectedValue?: string) => {
     const selected = (selectedValue || '').trim();
@@ -405,7 +421,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
   ];
 
   return (
-    <div className="flex flex-col h-full min-h-0 overflow-hidden gap-4">
+    <div className="flex flex-col flex-1 min-h-0 h-full overflow-hidden gap-2">
       {/* Header */}
       <header className="shrink-0 flex flex-wrap items-start gap-4 pb-1">
         <button
@@ -472,6 +488,26 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
 
       {/* Paso 1: cargar publicaciones */}
       <section className="shrink-0 rounded-2xl border border-slate-700/80 bg-slate-800/40 overflow-hidden">
+        {!step1Expanded ? (
+          <button
+            type="button"
+            onClick={() => setStep1Expanded(true)}
+            className="w-full px-4 py-3 flex flex-wrap items-center justify-between gap-2 text-left hover:bg-slate-800/60 transition-colors"
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+              <span className="text-sm font-semibold text-slate-200">Paso 1 · Publicaciones cargadas</span>
+              <span className="text-xs text-slate-500 truncate">
+                {mlId.trim() ? `ML ${mlId.trim()}` : 'ML sin ID padre'}
+                {tnId.trim() ? ` · TN ${tnId.trim()}` : ''}
+              </span>
+            </div>
+            <span className="text-xs text-indigo-400 font-medium flex items-center gap-1 shrink-0">
+              Mostrar <ChevronDown size={14} />
+            </span>
+          </button>
+        ) : (
+          <>
         <div className="px-4 py-3 border-b border-slate-700/60 flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="text-sm font-bold text-white">Paso 1 · Publicaciones externas</h2>
@@ -480,6 +516,16 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
               coincide, por <strong className="text-slate-300">talle y color</strong>.
             </p>
           </div>
+          <div className="flex items-center gap-2">
+            {catalogsLoaded && (
+              <button
+                type="button"
+                onClick={() => setStep1Expanded(false)}
+                className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-200 px-2 py-1 rounded-lg hover:bg-slate-700/50 transition-colors"
+              >
+                Ocultar <ChevronUp size={14} />
+              </button>
+            )}
           <button
             type="button"
             onClick={() => setShowMlTip((v) => !v)}
@@ -488,6 +534,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
             <HelpCircle size={14} />
             {showMlTip ? 'Ocultar ayuda' : '¿Publicaciones ML separadas?'}
           </button>
+          </div>
         </div>
 
         {showMlTip && (
@@ -609,9 +656,11 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
             </span>
           )}
         </div>
+          </>
+        )}
       </section>
 
-      {/* Progreso + tabla */}
+      {/* Progreso + tabla — ocupa todo el alto restante con scroll interno */}
       <section className="flex-1 min-h-0 flex flex-col rounded-2xl border border-slate-700/80 bg-slate-900/30 overflow-hidden">
         <div className="shrink-0 px-4 py-3 border-b border-slate-700/60 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -671,7 +720,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
         {variants.length === 0 ? (
           <p className="text-slate-500 text-center py-16 text-sm">Este artículo no tiene variantes.</p>
         ) : (
-          <div className="flex-1 min-h-0 overflow-auto">
+          <div className="flex-1 min-h-0 overflow-y-auto overflow-x-auto touch-scroll overscroll-contain scroll-area-ios">
             <table className="w-full min-w-[720px] text-sm">
               <thead className="sticky top-0 z-10 bg-slate-800/95 backdrop-blur-sm">
                 <tr className="border-b border-slate-700/80">
@@ -826,7 +875,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       </section>
 
       {/* Footer */}
-      <footer className="shrink-0 flex flex-col sm:flex-row sm:items-center gap-3 pt-1 border-t border-slate-700/60">
+      <footer className="shrink-0 flex flex-col sm:flex-row sm:items-center gap-3 pt-2 border-t border-slate-700/60">
         <div className="flex-1 text-xs text-slate-400">
           {linkStats.ml + linkStats.tn > 0 ? (
             <>
