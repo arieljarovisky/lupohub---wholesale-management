@@ -3268,7 +3268,7 @@ export const api = {
     mode: 'off' | 'suggest' | 'auto';
     extraSystemPrompt: string;
     openAiConfigured: boolean;
-    llmProvider: 'gemini' | 'groq' | 'openai' | null;
+    llmProvider: 'gemini' | 'groq' | 'openai' | 'ollama' | null;
     llmLabel: string;
   }> => {
     return await request('/integrations/mercadolibre/questions-ai', 'GET');

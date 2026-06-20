@@ -48,9 +48,11 @@ const modeBanner: Record<AiMode, { text: string; className: string } | null> = {
 const QuestionAiPanel: React.FC<{
   question: MlQuestionRow;
   llmOk: boolean;
+  llmLabel: string;
+  llmConfigLoaded: boolean;
   onUpdated: () => void;
   onMetricsRefresh?: () => void;
-}> = ({ question, llmOk, onUpdated, onMetricsRefresh }) => {
+}> = ({ question, llmOk, llmLabel, llmConfigLoaded, onUpdated, onMetricsRefresh }) => {
   const qid = String(question.id);
   const [draft, setDraft] = useState(question.aiSuggestion?.text || '');
   const [busy, setBusy] = useState<'suggest' | 'send' | 'reject' | null>(null);
@@ -127,21 +129,47 @@ const QuestionAiPanel: React.FC<{
         placeholder="Escribí tu respuesta o usá «Sugerir con IA» para un borrador…"
       />
       {localError && <p className="text-xs text-red-300">{localError}</p>}
+      {!canSend && (
+        <p className="text-[11px] text-slate-500">
+          Escribí tu respuesta en el cuadro de arriba para habilitar <strong className="text-slate-400">Enviar a ML</strong>.
+        </p>
+      )}
+      {llmConfigLoaded && !llmOk && (
+        <p className="text-[11px] text-amber-300/90">
+          <strong>Sugerir con IA</strong> requiere una clave en el servidor (<code className="text-amber-200/80">GEMINI_API_KEY</code> o <code className="text-amber-200/80">GROQ_API_KEY</code>). Podés responder igual escribiendo a mano.
+        </p>
+      )}
       <div className="flex flex-wrap gap-1.5">
         <button
           type="button"
           disabled={!canSend || busy !== null}
           onClick={handleSend}
-          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-700/90 hover:bg-emerald-600 text-white disabled:opacity-40"
+          title={canSend ? 'Publicar respuesta en Mercado Libre' : 'Escribí una respuesta primero'}
+          className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            canSend
+              ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-900/30'
+              : 'bg-slate-700 text-slate-500 cursor-not-allowed'
+          } disabled:opacity-60`}
         >
           {busy === 'send' ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
           Enviar a ML
         </button>
         <button
           type="button"
-          disabled={!llmOk || busy !== null}
-          onClick={() => handleSuggest(!!draft.trim())}
-          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-cyan-700/80 hover:bg-cyan-600 text-white disabled:opacity-40"
+          disabled={busy !== null}
+          onClick={() => {
+            if (!llmOk) {
+              setLocalError('IA no disponible: configurá GEMINI_API_KEY o GROQ_API_KEY en el servidor (Railway/.env).');
+              return;
+            }
+            handleSuggest(!!draft.trim());
+          }}
+          title={llmOk ? 'Generar borrador con IA' : 'Falta clave de IA en el servidor'}
+          className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            llmOk
+              ? 'bg-cyan-600 hover:bg-cyan-500 text-white'
+              : 'bg-slate-700 text-slate-400 hover:bg-slate-600 hover:text-slate-200'
+          } disabled:opacity-60`}
         >
           {busy === 'suggest' ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
           {draft.trim() ? 'Regenerar con IA' : 'Sugerir con IA'}
@@ -184,15 +212,24 @@ const MercadoLibreQuestions: React.FC = () => {
   const [dateTo, setDateTo] = useState('');
   const [aiMode, setAiMode] = useState<AiMode>('off');
   const [llmOk, setLlmOk] = useState(false);
+  const [llmLabel, setLlmLabel] = useState('');
+  const [llmConfigLoaded, setLlmConfigLoaded] = useState(false);
   const [unchangedRate, setUnchangedRate] = useState<number | null>(null);
   const [readyForAuto, setReadyForAuto] = useState(false);
   const limit = 15;
 
   useEffect(() => {
-    api.getMLQuestionsAiConfig().then((cfg) => {
-      setAiMode(cfg.mode || (cfg.enabled ? 'auto' : 'off'));
-      setLlmOk(!!cfg.openAiConfigured);
-    }).catch(() => {});
+    api.getMLQuestionsAiConfig()
+      .then((cfg) => {
+        setAiMode(cfg.mode || (cfg.enabled ? 'auto' : 'off'));
+        setLlmOk(!!cfg.openAiConfigured);
+        setLlmLabel(cfg.llmLabel || '');
+      })
+      .catch(() => {
+        setLlmOk(false);
+        setLlmLabel('');
+      })
+      .finally(() => setLlmConfigLoaded(true));
     api.getMLQuestionsAiMetrics().then((m) => {
       setUnchangedRate(m.unchangedRate);
       setReadyForAuto(m.readyForAuto);
@@ -254,6 +291,17 @@ const MercadoLibreQuestions: React.FC = () => {
 
   return (
     <div className="space-y-4">
+      {llmConfigLoaded && !llmOk && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          La IA no está configurada en el servidor. Podés <strong>escribir y enviar manualmente</strong> en cada pregunta, o agregar <code className="text-amber-200">GEMINI_API_KEY</code> (gratis) en Railway/variables de entorno.
+        </div>
+      )}
+      {llmConfigLoaded && llmOk && llmLabel && (
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-2 text-xs text-emerald-200">
+          IA activa: {llmLabel}
+        </div>
+      )}
+
       {banner && (
         <div className={`rounded-xl border px-4 py-3 text-sm flex items-start gap-2 ${banner.className}`}>
           <Bot size={18} className="shrink-0 mt-0.5" />
@@ -404,6 +452,8 @@ const MercadoLibreQuestions: React.FC = () => {
                         <QuestionAiPanel
                           question={q}
                           llmOk={llmOk}
+                          llmLabel={llmLabel}
+                          llmConfigLoaded={llmConfigLoaded}
                           onUpdated={fetchQuestions}
                           onMetricsRefresh={refreshMetrics}
                         />

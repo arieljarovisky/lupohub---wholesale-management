@@ -348,11 +348,23 @@ function hasOpenAiKey(): boolean {
   return !!(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim());
 }
 
-export type LlmProviderId = 'gemini' | 'groq' | 'openai';
+function ollamaBaseUrl(): string {
+  const raw = (process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').trim();
+  return raw.replace(/\/$/, '');
+}
 
-/** Orden por defecto: primero opciones con tier gratuito. */
+function hasOllama(): boolean {
+  const explicit = (process.env.LLM_PROVIDER || process.env.AI_PROVIDER || '').trim().toLowerCase() === 'ollama';
+  if (explicit) return true;
+  return !!(process.env.OLLAMA_BASE_URL && process.env.OLLAMA_BASE_URL.trim());
+}
+
+export type LlmProviderId = 'gemini' | 'groq' | 'openai' | 'ollama';
+
+/** Orden por defecto: primero opciones con tier gratuito en la nube; Ollama si es el único configurado. */
 function resolveProvider(): LlmProviderId | null {
   const explicit = (process.env.LLM_PROVIDER || process.env.AI_PROVIDER || '').trim().toLowerCase();
+  if (explicit === 'ollama' && hasOllama()) return 'ollama';
   if (explicit === 'gemini' && hasGeminiKey()) return 'gemini';
   if (explicit === 'groq' && hasGroqKey()) return 'groq';
   if (explicit === 'openai' && hasOpenAiKey()) return 'openai';
@@ -361,6 +373,7 @@ function resolveProvider(): LlmProviderId | null {
   if (hasGeminiKey()) return 'gemini';
   if (hasGroqKey()) return 'groq';
   if (hasOpenAiKey()) return 'openai';
+  if (hasOllama()) return 'ollama';
   return null;
 }
 
@@ -382,7 +395,8 @@ export function getLlmStatus(): {
   const labels: Record<LlmProviderId, string> = {
     gemini: 'Google Gemini (gratis en AI Studio)',
     groq: 'Groq (gratis)',
-    openai: 'OpenAI (de pago)'
+    openai: 'OpenAI (de pago)',
+    ollama: `Ollama local (${process.env.OLLAMA_MODEL?.trim() || 'llama3.2'})`
   };
   return {
     configured: provider !== null,
@@ -641,6 +655,37 @@ async function callOpenAiAnswer(params: { userPrompt: string; extraSystem?: stri
   return truncateAnswer(text);
 }
 
+async function callOllamaAnswer(params: { userPrompt: string; extraSystem?: string | null }): Promise<string> {
+  const model = process.env.OLLAMA_MODEL?.trim() || 'llama3.2';
+  const system = [DEFAULT_SYSTEM, params.extraSystem?.trim()].filter(Boolean).join('\n\n');
+  const url = `${ollamaBaseUrl()}/v1/chat/completions`;
+  const timeoutMs = Math.min(
+    300000,
+    Math.max(30000, parseInt(process.env.OLLAMA_TIMEOUT_MS || '120000', 10) || 120000)
+  );
+
+  const res = await axios.post(
+    url,
+    {
+      model,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: params.userPrompt }
+      ],
+      temperature: 0.4,
+      stream: false
+    },
+    {
+      headers: { 'Content-Type': 'application/json' },
+      timeout: timeoutMs
+    }
+  );
+
+  const text = res.data?.choices?.[0]?.message?.content?.trim();
+  if (!text) throw new Error('Ollama no devolvió texto');
+  return truncateAnswer(text);
+}
+
 async function generateLlmAnswer(params: {
   itemTitle: string;
   description: string;
@@ -654,7 +699,7 @@ async function generateLlmAnswer(params: {
   const provider = resolveProvider();
   if (!provider) {
     throw new Error(
-      'Ningún proveedor de IA configurado. Agregá GEMINI_API_KEY (recomendado, gratis), GROQ_API_KEY (gratis) u OPENAI_API_KEY en el servidor.'
+      'Ningún proveedor de IA configurado. Opciones: GEMINI_API_KEY, GROQ_API_KEY, OPENAI_API_KEY, o Ollama local (LLM_PROVIDER=ollama).'
     );
   }
   const userPrompt = buildMlQuestionUserPrompt({
@@ -668,6 +713,7 @@ async function generateLlmAnswer(params: {
   const common = { userPrompt, extraSystem: params.extraSystem };
   if (provider === 'gemini') return callGeminiAnswer(common);
   if (provider === 'groq') return callGroqAnswer(common);
+  if (provider === 'ollama') return callOllamaAnswer(common);
   return callOpenAiAnswer(common);
 }
 

@@ -2738,8 +2738,22 @@ const Settings: React.FC<SettingsProps> = ({
                         </div>
                       </div>
                       <p className="text-slate-500 text-xs mb-3">
-                        Empezá en <strong>modo sugerencias</strong>: la IA propone respuestas y vos las revisás en la pestaña Preguntas. Cuando estés conforme con la calidad, pasá a <strong>respuesta automática</strong>. La IA usa la publicación de ML y el inventario LupoHub (SKU, talle, color, stock). Claves gratis: <code className="text-slate-400">GEMINI_API_KEY</code> o <code className="text-slate-400">GROQ_API_KEY</code>. Webhook ML con tema <strong>questions</strong> para procesar al instante.
+                        Proveedor recomendado: <strong>Google Gemini</strong> (gratis). Creá la clave en{' '}
+                        <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">
+                          Google AI Studio
+                        </a>{' '}
+                        y agregá <code className="text-slate-400">GEMINI_API_KEY</code> en Railway → Variables del backend. Empezá en <strong>modo sugerencias</strong> y revisá en la pestaña Preguntas.
                       </p>
+                      {!mlQuestionsAiOpenAiOk && (
+                        <div className="mb-3 p-3 rounded-xl bg-cyan-900/20 border border-cyan-600/40 text-cyan-100 text-xs space-y-2">
+                          <p className="font-bold">Activar Gemini (3 pasos)</p>
+                          <ol className="list-decimal list-inside space-y-1 text-cyan-200/90">
+                            <li>Entrá a <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="underline">aistudio.google.com/apikey</a> → Create API key</li>
+                            <li>Railway → tu backend → <strong>Variables</strong> → <code>GEMINI_API_KEY</code> = la clave</li>
+                            <li>Redeploy y recargá esta página (debería decir «IA lista: Google Gemini»)</li>
+                          </ol>
+                        </div>
+                      )}
                       <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Modo de operación</label>
                       <select
                         value={mlQuestionsAiMode}
@@ -2747,7 +2761,7 @@ const Settings: React.FC<SettingsProps> = ({
                         className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white mb-3 focus:ring-2 focus:ring-cyan-500 outline-none"
                       >
                         <option value="off">Desactivado</option>
-                        <option value="suggest">Solo sugerencias (revisión humana)</option>
+                        <option value="suggest">Solo sugerencias (recomendado al empezar)</option>
                         <option value="auto">Respuesta automática</option>
                       </select>
                       {mlQuestionsAiMode === 'suggest' && (
@@ -2820,11 +2834,6 @@ const Settings: React.FC<SettingsProps> = ({
                       {mlQuestionsAiOpenAiOk && mlQuestionsAiLlmLabel && (
                         <div className="mb-3 p-2 rounded-lg bg-emerald-900/20 border border-emerald-700/40 text-emerald-200 text-xs">
                           IA lista: {mlQuestionsAiLlmLabel}
-                        </div>
-                      )}
-                      {!mlQuestionsAiOpenAiOk && (
-                        <div className="mb-3 p-3 rounded-xl bg-amber-900/20 border border-amber-700/40 text-amber-200 text-xs">
-                          Falta una clave de IA en el backend (GEMINI_API_KEY, GROQ_API_KEY u OPENAI_API_KEY). Sin eso no se pueden generar respuestas.
                         </div>
                       )}
                       <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Instrucciones extra para la IA (opcional)</label>
