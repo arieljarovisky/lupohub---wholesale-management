@@ -2742,7 +2742,7 @@ const Settings: React.FC<SettingsProps> = ({
                         <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">
                           Google AI Studio
                         </a>{' '}
-                        y agregá <code className="text-slate-400">GEMINI_API_KEY</code> en Railway → Variables del backend. Empezá en <strong>modo sugerencias</strong> y revisá en la pestaña Preguntas.
+                        y agregá <code className="text-slate-400">GEMINI_API_KEY</code> en Railway → Variables del backend. Con Gemini, si falta info en la ficha, <strong>busca en Google</strong> automáticamente (marca/modelo del artículo). Empezá en <strong>modo sugerencias</strong>.
                       </p>
                       {!mlQuestionsAiOpenAiOk && (
                         <div className="mb-3 p-3 rounded-xl bg-cyan-900/20 border border-cyan-600/40 text-cyan-100 text-xs space-y-2">

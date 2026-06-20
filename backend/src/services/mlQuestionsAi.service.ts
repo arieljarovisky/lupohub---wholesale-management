@@ -23,7 +23,8 @@ Reglas:
   2) mencioná hasta 3 opciones concretas (nombre/SKU/talle/color) que sí estén en catálogo,
   3) si no hay alternativas, decilo claramente.
 - Cuando afirmes que "sí hay", apoyate en datos visibles del catálogo. No inventes productos ni talles.
-- Si algo no figura en la guía de talles, la descripción ni el catálogo (envíos, garantías, plazos, políticas), no inventes: decí que no tenés ese dato y ofrecé canalizar por mensaje de compra o consulta en la publicación.
+- Si un detalle del producto (material, si enrolla/estira, composición, cuidados, etc.) NO figura en la guía de talles, la descripción ni el catálogo, BUSCÁ en internet por marca, modelo y nombre del artículo antes de responder. Usá resultados confiables (fabricante, tiendas oficiales, fichas técnicas). Solo si después de buscar no hay dato creíble, decilo con honestidad y ofrecé consultar por mensaje post-compra.
+- Para envíos, garantías, plazos de retiro o políticas del vendedor que no estén en la ficha, no inventes: decí que no tenés ese dato operativo y ofrecé canalizar por mensaje de compra.
 - No uses markdown ni emojis en exceso (como mucho uno).
 - Máximo ~1200 caracteres. Sin listas largas. Siempre cerrá oraciones: la respuesta debe ser un texto completo y útil, nunca truncada a mitad de idea.`;
 
@@ -513,10 +514,44 @@ async function getCachedCatalogSummary(): Promise<string> {
 
 const ML_SIZE_CHART_MAX_CHARS = 14000;
 
+function webSearchEnabled(): boolean {
+  const v = (process.env.ML_QUESTIONS_AI_WEB_SEARCH || 'true').trim().toLowerCase();
+  return v !== '0' && v !== 'false' && v !== 'no';
+}
+
+/** Atributos ML útiles para buscar el producto en internet (marca, modelo, etc.). */
+function extractItemSearchHints(item: any): string {
+  const lines: string[] = [];
+  const attrs = Array.isArray(item?.attributes) ? item.attributes : [];
+  const pick = (ids: string[]): string | null => {
+    for (const id of ids) {
+      const a = attrs.find((x: any) => String(x?.id || '').toUpperCase() === id.toUpperCase());
+      if (!a) continue;
+      const name = a.value_name ?? a.value_id;
+      if (name != null && String(name).trim()) return String(name).trim();
+      if (Array.isArray(a.values) && a.values[0]?.name) return String(a.values[0].name).trim();
+    }
+    return null;
+  };
+  const brand = pick(['BRAND', 'MARCA']);
+  const model = pick(['MODEL', 'MODELO']);
+  const line = pick(['LINE', 'LINEA']);
+  const gender = pick(['GENDER', 'GÉNERO', 'GENERO']);
+  const material = pick(['MATERIAL', 'MAIN_MATERIAL', 'FABRIC']);
+  if (brand) lines.push(`Marca: ${brand}`);
+  if (model) lines.push(`Modelo: ${model}`);
+  if (line) lines.push(`Línea: ${line}`);
+  if (gender) lines.push(`Género: ${gender}`);
+  if (material) lines.push(`Material: ${material}`);
+  if (item?.category_id) lines.push(`Categoría ML: ${item.category_id}`);
+  return lines.length ? lines.join('\n') : '';
+}
+
 function buildMlQuestionUserPrompt(params: {
   catalogSummary: string;
   itemListingId: string;
   itemTitle: string;
+  itemSearchHints?: string;
   description: string;
   sizeGuideFromMl: string;
   questionText: string;
@@ -529,14 +564,26 @@ function buildMlQuestionUserPrompt(params: {
   const guideBlock = guide
     ? `Guía de talles (Mercado Libre, publicación actual):\n${guide}\n\n---\n\n`
     : '';
+  const hints = params.itemSearchHints?.trim();
+  const hintsBlock = hints ? `Datos del ítem para buscar en internet si hace falta:\n${hints}\n\n` : '';
   return (
     `${catBlock}` +
     `Publicación de Mercado Libre donde está la pregunta (ID ítem: ${params.itemListingId}):\n` +
     `Título: ${params.itemTitle}\n\n` +
+    `${hintsBlock}` +
     `${guideBlock}` +
     `Descripción (texto plano):\n${params.description || '(sin descripción)'}\n\n` +
-    `Pregunta del comprador:\n${params.questionText}`
+    `Pregunta del comprador:\n${params.questionText}\n\n` +
+    `(Si la respuesta no está en la ficha ni en el catálogo, buscá en internet el producto por título/marca/modelo antes de decir que no tenés el dato.)`
   );
+}
+
+function isGeminiToolConfigError(err: unknown): boolean {
+  if (!axios.isAxiosError(err)) return false;
+  const st = err.response?.status;
+  if (st === 400 || st === 422) return true;
+  const msg = JSON.stringify(err.response?.data || '').toLowerCase();
+  return msg.includes('google_search') || msg.includes('tool') || msg.includes('googlesearch');
 }
 
 async function callGeminiAnswer(params: { userPrompt: string; extraSystem?: string | null }): Promise<string> {
@@ -545,43 +592,78 @@ async function callGeminiAnswer(params: { userPrompt: string; extraSystem?: stri
 
   const system = [DEFAULT_SYSTEM, params.extraSystem?.trim()].filter(Boolean).join('\n\n');
   const user = params.userPrompt;
-
-  const body = {
-    systemInstruction: { parts: [{ text: system }] },
-    contents: [{ role: 'user', parts: [{ text: user }] }],
-    generationConfig: {
-      temperature: 0.4,
-      /** Gemini 2.5 puede usar parte del cupo en razonamiento interno; 1024 dejaba respuestas cortadas a mitad de frase. */
-      maxOutputTokens: 4096
-    }
-  };
+  const useWebSearch = webSearchEnabled();
+  const timeoutMs = useWebSearch ? 120000 : 60000;
 
   let lastErr: unknown;
   for (const model of geminiModelAttempts()) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
-    try {
-      const res = await axios.post(url, body, {
-        headers: { 'Content-Type': 'application/json' },
-        timeout: 60000
+    const attempts: Array<{ label: string; body: Record<string, unknown> }> = [];
+    if (useWebSearch) {
+      attempts.push({
+        label: 'google_search',
+        body: {
+          systemInstruction: { parts: [{ text: system }] },
+          contents: [{ role: 'user', parts: [{ text: user }] }],
+          tools: [{ google_search: {} }],
+          generationConfig: { temperature: 0.4, maxOutputTokens: 4096 }
+        }
       });
+      attempts.push({
+        label: 'googleSearch',
+        body: {
+          systemInstruction: { parts: [{ text: system }] },
+          contents: [{ role: 'user', parts: [{ text: user }] }],
+          tools: [{ googleSearch: {} }],
+          generationConfig: { temperature: 0.4, maxOutputTokens: 4096 }
+        }
+      });
+    }
+    attempts.push({
+      label: 'plain',
+      body: {
+        systemInstruction: { parts: [{ text: system }] },
+        contents: [{ role: 'user', parts: [{ text: user }] }],
+        generationConfig: { temperature: 0.4, maxOutputTokens: 4096 }
+      }
+    });
 
-      const cand = res.data?.candidates?.[0];
-      const finish = cand?.finishReason;
-      if (finish && finish !== 'STOP') {
-        console.warn(`[ML Questions AI] Gemini finishReason=${finish} (respuesta puede estar incompleta)`);
+    for (const attempt of attempts) {
+      if (attempt.label !== 'plain' && !useWebSearch) continue;
+      try {
+        const res = await axios.post(url, attempt.body, {
+          headers: { 'Content-Type': 'application/json' },
+          timeout: timeoutMs
+        });
+
+        const cand = res.data?.candidates?.[0];
+        const finish = cand?.finishReason;
+        if (finish && finish !== 'STOP') {
+          console.warn(`[ML Questions AI] Gemini finishReason=${finish} (respuesta puede estar incompleta)`);
+        }
+        const grounding = res.data?.candidates?.[0]?.groundingMetadata;
+        if (grounding && attempt.label !== 'plain') {
+          const queries = grounding?.webSearchQueries || grounding?.searchEntryPoint;
+          console.log('[ML Questions AI] Gemini usó búsqueda web', queries ? JSON.stringify(queries).slice(0, 200) : '');
+        }
+        const block = finish && finish !== 'STOP' ? ` (${finish})` : '';
+        const text =
+          cand?.content?.parts?.map((p: { text?: string }) => p.text || '').join('')?.trim() || '';
+        if (!text) throw new Error(`Gemini no devolvió texto${block}`);
+        return truncateAnswer(text);
+      } catch (err) {
+        lastErr = err;
+        if (attempt.label !== 'plain' && isGeminiToolConfigError(err)) {
+          console.warn(`[ML Questions AI] Búsqueda web no disponible (${model}, ${attempt.label}), probando…`);
+          continue;
+        }
+        if (isGeminiModelNotFound(err)) break;
+        if (attempt.label === 'plain') throw err;
       }
-      const block = finish && finish !== 'STOP' ? ` (${finish})` : '';
-      const text =
-        cand?.content?.parts?.map((p: { text?: string }) => p.text || '').join('')?.trim() || '';
-      if (!text) throw new Error(`Gemini no devolvió texto${block}`);
-      return truncateAnswer(text);
-    } catch (err) {
-      lastErr = err;
-      if (isGeminiModelNotFound(err)) {
-        console.warn(`[ML Questions AI] Modelo Gemini no disponible (${model}), probando siguiente…`);
-        continue;
-      }
-      throw err;
+    }
+    if (isGeminiModelNotFound(lastErr)) {
+      console.warn(`[ML Questions AI] Modelo Gemini no disponible (${model}), probando siguiente…`);
+      continue;
     }
   }
 
@@ -688,6 +770,7 @@ async function callOllamaAnswer(params: { userPrompt: string; extraSystem?: stri
 
 async function generateLlmAnswer(params: {
   itemTitle: string;
+  itemSearchHints?: string;
   description: string;
   questionText: string;
   extraSystem?: string | null;
@@ -706,6 +789,7 @@ async function generateLlmAnswer(params: {
     catalogSummary: params.catalogSummary,
     itemListingId: params.itemListingId,
     itemTitle: params.itemTitle,
+    itemSearchHints: params.itemSearchHints,
     description: params.description,
     sizeGuideFromMl: params.sizeGuideFromMl ?? '',
     questionText: params.questionText
@@ -879,6 +963,7 @@ type QuestionContext = {
   itemId: string;
   questionText: string;
   itemTitle: string;
+  itemSearchHints: string;
   description: string;
   sizeGuideFromMl: string;
   catalogSummary: string;
@@ -901,6 +986,7 @@ async function loadQuestionContext(accessToken: string, questionId: string): Pro
 
   const item = await fetchItem(accessToken, itemId);
   const title = String(item?.title || '(sin título)');
+  const itemSearchHints = extractItemSearchHints(item);
   const description = await fetchDescription(accessToken, itemId);
   const sizeGridId = extractSizeGridIdFromItem(item);
   const sizeGuideFromMl = sizeGridId ? await fetchMlSizeChartForPrompt(accessToken, sizeGridId) : '';
@@ -911,6 +997,7 @@ async function loadQuestionContext(accessToken: string, questionId: string): Pro
     itemId,
     questionText,
     itemTitle: title,
+    itemSearchHints,
     description,
     sizeGuideFromMl,
     catalogSummary
@@ -923,6 +1010,7 @@ async function generateAnswerFromContext(
 ): Promise<string> {
   return generateLlmAnswer({
     itemTitle: ctx.itemTitle,
+    itemSearchHints: ctx.itemSearchHints,
     description: ctx.description,
     questionText: ctx.questionText,
     extraSystem: extraSystemPrompt,
