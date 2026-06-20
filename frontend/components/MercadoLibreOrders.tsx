@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Package, User, Truck, ChevronLeft, ChevronRight, Loader2, Zap, Calendar, Search, X, Clock, CheckCircle, XCircle, ChevronDown, ExternalLink, ShoppingCart } from 'lucide-react';
+import { RefreshCw, Package, User, Truck, ChevronLeft, ChevronRight, Loader2, Zap, Calendar, Search, X, Clock, CheckCircle, XCircle, ChevronDown, ExternalLink, ShoppingCart, MessageCircle } from 'lucide-react';
 import { api } from '../services/api';
 import MercadoLibreQuestions from './MercadoLibreQuestions';
 
@@ -42,7 +42,14 @@ interface MercadoLibreOrder {
   };
 }
 
-const MercadoLibreOrders: React.FC = () => {
+type MlSection = 'orders' | 'questions';
+
+interface MercadoLibreOrdersProps {
+  defaultSection?: MlSection;
+  onSectionChange?: (section: MlSection) => void;
+}
+
+const MercadoLibreOrders: React.FC<MercadoLibreOrdersProps> = ({ defaultSection = 'orders', onSectionChange }) => {
   const [orders, setOrders] = useState<MercadoLibreOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [offset, setOffset] = useState(0);
@@ -64,8 +71,17 @@ const MercadoLibreOrders: React.FC = () => {
   } | null>(null);
   const [selectingAllFiltered, setSelectingAllFiltered] = useState(false);
   const [bulkCbteTipo, setBulkCbteTipo] = useState<'auto' | 'A' | 'B'>('auto');
-  const [mlSection, setMlSection] = useState<'orders' | 'questions'>('orders');
+  const [mlSection, setMlSection] = useState<MlSection>(defaultSection);
   const limit = 15;
+
+  useEffect(() => {
+    setMlSection(defaultSection);
+  }, [defaultSection]);
+
+  const switchSection = (section: MlSection) => {
+    setMlSection(section);
+    onSectionChange?.(section);
+  };
 
   const fetchOrders = async () => {
     setLoading(true);
@@ -312,7 +328,7 @@ const MercadoLibreOrders: React.FC = () => {
       <div className="flex gap-1 border-b border-slate-700/80 pb-0">
         <button
           type="button"
-          onClick={() => setMlSection('orders')}
+          onClick={() => switchSection('orders')}
           className={`px-4 py-2.5 rounded-t-xl text-sm font-bold transition-colors ${
             mlSection === 'orders'
               ? 'bg-slate-800 text-white border border-b-0 border-slate-600'
@@ -323,13 +339,14 @@ const MercadoLibreOrders: React.FC = () => {
         </button>
         <button
           type="button"
-          onClick={() => setMlSection('questions')}
-          className={`px-4 py-2.5 rounded-t-xl text-sm font-bold transition-colors ${
+          onClick={() => switchSection('questions')}
+          className={`px-4 py-2.5 rounded-t-xl text-sm font-bold transition-colors flex items-center gap-1.5 ${
             mlSection === 'questions'
-              ? 'bg-slate-800 text-white border border-b-0 border-slate-600'
-              : 'text-slate-500 hover:text-slate-300'
+              ? 'bg-slate-800 text-cyan-200 border border-b-0 border-cyan-600/50'
+              : 'text-slate-500 hover:text-cyan-300/90'
           }`}
         >
+          <MessageCircle size={16} />
           Preguntas
         </button>
       </div>

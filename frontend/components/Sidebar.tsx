@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Package, ShoppingCart, Users, MapPin, LogOut, Shirt, Settings, ShoppingBag, Zap, ChevronRight, ChevronLeft, History, Ship, BookOpen, DollarSign, FileText, Percent, Wallet, Megaphone, Award, Facebook, Chrome, UserPlus } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, MapPin, LogOut, Shirt, Settings, ShoppingBag, Zap, ChevronRight, ChevronLeft, History, Ship, BookOpen, DollarSign, FileText, Percent, Wallet, Megaphone, Award, Facebook, Chrome, UserPlus, MessageCircle } from 'lucide-react';
 import { Role } from '../types';
 import { isCompanyFinanceUser, COMPANY_FINANCE_VIEW } from '../utils/companyFinanceAccess';
 import {
@@ -44,6 +44,7 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({ currentView, onChangeView,
         { id: 'channel_margins', label: 'Márgenes y precios', icon: DollarSign, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'emerald' },
         { id: 'tiendanube_orders', label: 'Tienda Nube', icon: ShoppingBag, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'cyan' },
         { id: 'mercadolibre_orders', label: 'Mercado Libre', icon: Zap, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'yellow' },
+        { id: 'mercadolibre_questions', label: 'ML — Preguntas', icon: MessageCircle, roles: [Role.ADMIN, Role.WAREHOUSE], color: 'cyan' },
       ]
     },
     {

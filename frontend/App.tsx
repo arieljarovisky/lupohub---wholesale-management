@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, lazy, Suspense, useCallback, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
-import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Percent, Megaphone, Wallet, ChevronRight } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Percent, Megaphone, Wallet, ChevronRight, MessageCircle } from 'lucide-react';
 import { isCompanyFinanceUser, COMPANY_FINANCE_VIEW } from './utils/companyFinanceAccess';
 import {
   MARKETING_HUB_VIEW,
@@ -160,6 +160,7 @@ const App: React.FC = () => {
     channel_margins: [Role.ADMIN, Role.WAREHOUSE],
     tiendanube_orders: [Role.ADMIN, Role.WAREHOUSE],
     mercadolibre_orders: [Role.ADMIN, Role.WAREHOUSE],
+    mercadolibre_questions: [Role.ADMIN, Role.WAREHOUSE],
     mercadolibre_product_ads: [Role.ADMIN, Role.WAREHOUSE, Role.MARKETING],
     marketing: [Role.ADMIN, Role.MARKETING],
     marketing_top_products: [Role.ADMIN, Role.MARKETING],
@@ -1000,6 +1001,7 @@ const App: React.FC = () => {
       { id: 'channel_margins', label: 'Márgenes', icon: DollarSign, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'tiendanube_orders', label: 'Tienda Nube', icon: ShoppingBag, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'mercadolibre_orders', label: 'Mercado Libre', icon: Zap, roles: [Role.ADMIN, Role.WAREHOUSE] },
+      { id: 'mercadolibre_questions', label: 'ML — Preguntas', icon: MessageCircle, roles: [Role.ADMIN, Role.WAREHOUSE] },
     ]},
     { title: 'Marketing', items: [
       { id: MARKETING_HUB_VIEW, label: 'Centro de Marketing', icon: Megaphone, roles: [Role.ADMIN, Role.MARKETING] },
@@ -1144,7 +1146,8 @@ const App: React.FC = () => {
                  {baseView === 'channel_margins' && 'Márgenes y precios'}
                  {baseView === COMPANY_FINANCE_VIEW && 'Resultados empresa'}
                  {baseView === 'tiendanube_orders' && 'Tienda Nube'}
-                 {baseView === 'mercadolibre_orders' && 'Mercado Libre'}
+                 {baseView === 'mercadolibre_orders' && 'Mercado Libre — Ventas'}
+                 {baseView === 'mercadolibre_questions' && 'Mercado Libre — Preguntas'}
                  {baseView === 'mercadolibre_product_ads' && 'Product Ads — campañas y publicaciones'}
                  {baseView === 'mercadolibre_stock' && 'Stock Mercado Libre'}
                  {baseView === MARKETING_HUB_VIEW && 'Centro de Marketing'}
@@ -1382,9 +1385,15 @@ const App: React.FC = () => {
               <CompanyFinance />
             </Suspense>
           )}
-          {baseView === 'mercadolibre_orders' && (
+          {(baseView === 'mercadolibre_orders' || baseView === 'mercadolibre_questions') && (
             <Suspense fallback={<ViewFallback />}>
-              <MercadoLibreOrders />
+              <MercadoLibreOrders
+                defaultSection={baseView === 'mercadolibre_questions' ? 'questions' : 'orders'}
+                onSectionChange={(section) => {
+                  const target = section === 'questions' ? 'mercadolibre_questions' : 'mercadolibre_orders';
+                  if (baseView !== target) handleChangeView(target);
+                }}
+              />
             </Suspense>
           )}
           {baseView === 'mercadolibre_product_ads' && (
