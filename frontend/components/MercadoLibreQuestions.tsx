@@ -61,6 +61,7 @@ const QuestionAiPanel: React.FC<{
   }, [question.aiSuggestion?.text, qid]);
 
   const hasPending = question.aiSuggestion?.status === 'pending' && !!draft.trim();
+  const canSend = !!draft.trim();
   const isUnanswered = question.status === 'UNANSWERED' && !question.answerText;
 
   if (!isUnanswered) return null;
@@ -118,41 +119,35 @@ const QuestionAiPanel: React.FC<{
           <Bot size={12} /> Sugerencia IA
         </span>
       )}
-      {hasPending ? (
-        <textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          rows={4}
-          className="w-full bg-slate-900/80 border border-cyan-700/40 rounded-xl px-3 py-2 text-sm text-cyan-50 placeholder-slate-500 focus:ring-2 focus:ring-cyan-500 outline-none resize-y min-h-[80px]"
-          placeholder="Editá la sugerencia antes de enviar…"
-        />
-      ) : (
-        <p className="text-slate-500 text-xs">Sin sugerencia aún.</p>
-      )}
+      <textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        rows={4}
+        className="w-full bg-slate-900/80 border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:ring-2 focus:ring-cyan-500 outline-none resize-y min-h-[80px]"
+        placeholder="Escribí tu respuesta o usá «Sugerir con IA» para un borrador…"
+      />
       {localError && <p className="text-xs text-red-300">{localError}</p>}
       <div className="flex flex-wrap gap-1.5">
-        {!hasPending && (
-          <button
-            type="button"
-            disabled={!llmOk || busy !== null}
-            onClick={() => handleSuggest(false)}
-            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-cyan-700/80 hover:bg-cyan-600 text-white disabled:opacity-40"
-          >
-            {busy === 'suggest' ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
-            Sugerir con IA
-          </button>
-        )}
+        <button
+          type="button"
+          disabled={!canSend || busy !== null}
+          onClick={handleSend}
+          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-700/90 hover:bg-emerald-600 text-white disabled:opacity-40"
+        >
+          {busy === 'send' ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+          Enviar a ML
+        </button>
+        <button
+          type="button"
+          disabled={!llmOk || busy !== null}
+          onClick={() => handleSuggest(!!draft.trim())}
+          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-cyan-700/80 hover:bg-cyan-600 text-white disabled:opacity-40"
+        >
+          {busy === 'suggest' ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+          {draft.trim() ? 'Regenerar con IA' : 'Sugerir con IA'}
+        </button>
         {hasPending && (
           <>
-            <button
-              type="button"
-              disabled={!draft.trim() || busy !== null}
-              onClick={handleSend}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-700/90 hover:bg-emerald-600 text-white disabled:opacity-40"
-            >
-              {busy === 'send' ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
-              Enviar
-            </button>
             <button
               type="button"
               disabled={busy !== null}
@@ -169,7 +164,7 @@ const QuestionAiPanel: React.FC<{
               className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-800 border border-slate-600 text-slate-300 hover:text-white disabled:opacity-40"
             >
               {busy === 'reject' ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
-              Descartar
+              Descartar sugerencia
             </button>
           </>
         )}
