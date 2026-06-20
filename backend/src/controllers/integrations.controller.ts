@@ -2484,7 +2484,7 @@ export const handleMercadoLibreWebhook = async (req: Request, res: Response) => 
       }
     }
 
-    /** Preguntas: responder con IA si está habilitado (no bloquea la respuesta 200 al webhook). */
+    /** Preguntas: IA según modo (sugerencia o auto-respuesta). */
     if (topic === 'questions') {
       const qm = resourceRaw.match(/questions\/(\d+)/);
       const questionId = qm?.[1];
@@ -2493,13 +2493,14 @@ export const handleMercadoLibreWebhook = async (req: Request, res: Response) => 
           (async () => {
             try {
               const cfg = await mlQuestionsAi.getMlQuestionsAiConfigRow();
-              if (!cfg.enabled || !mlQuestionsAi.openAiConfigured()) return;
+              if (cfg.mode === 'off' || !mlQuestionsAi.openAiConfigured()) return;
               const t = await getValidMLToken();
               if (!t) return;
-              await mlQuestionsAi.processOneQuestion(t.access_token, questionId, {
-                extraSystemPrompt: cfg.extraSystemPrompt
+              const r = await mlQuestionsAi.processOneQuestion(t.access_token, questionId, {
+                extraSystemPrompt: cfg.extraSystemPrompt,
+                mode: cfg.mode
               });
-              console.log(`[ML Questions AI] Procesada pregunta ${questionId}`);
+              console.log(`[ML Questions AI] Pregunta ${questionId}: ${r.status}`);
             } catch (e: any) {
               console.error('[ML Questions AI] Error:', e?.response?.data || e?.message || e);
             }
@@ -5006,8 +5007,24 @@ export const getMercadoLibreQuestions = async (req: Request, res: Response) => {
         return tb - ta;
       });
 
+    const ids = questions.map((q: { id: string | number }) => String(q.id));
+    const suggestions = await mlQuestionsAi.getSuggestionsByQuestionIds(ids);
+    const enriched = questions.map((q: { id: string | number }) => {
+      const s = suggestions.get(String(q.id));
+      if (!s || s.status !== 'pending') return q;
+      return {
+        ...q,
+        aiSuggestion: {
+          text: s.suggestionText,
+          status: s.status,
+          provider: s.llmProvider,
+          updatedAt: s.updatedAt
+        }
+      };
+    });
+
     res.json({
-      questions,
+      questions: enriched,
       total: typeof data.total === 'number' ? data.total : questions.length,
       offset: typeof data.offset === 'number' ? data.offset : offsetNum,
       limit: typeof data.limit === 'number' ? data.limit : limitNum,
@@ -6701,6 +6718,7 @@ export const getMLQuestionsAiConfig = async (req: Request, res: Response) => {
     const st = mlQuestionsAi.getLlmStatus();
     res.json({
       enabled: cfg.enabled,
+      mode: cfg.mode,
       extraSystemPrompt: cfg.extraSystemPrompt || '',
       openAiConfigured: st.configured,
       llmProvider: st.provider,
@@ -6714,8 +6732,18 @@ export const getMLQuestionsAiConfig = async (req: Request, res: Response) => {
 
 export const saveMLQuestionsAiConfig = async (req: Request, res: Response) => {
   try {
-    const { enabled, extraSystemPrompt } = req.body || {};
-    await mlQuestionsAi.saveMlQuestionsAiConfig(!!enabled, extraSystemPrompt != null ? String(extraSystemPrompt) : null);
+    const { enabled, mode, extraSystemPrompt } = req.body || {};
+    const modeNorm =
+      mode === 'suggest' || mode === 'auto' || mode === 'off'
+        ? mode
+        : enabled === false
+          ? 'off'
+          : undefined;
+    await mlQuestionsAi.saveMlQuestionsAiConfig({
+      enabled: enabled != null ? !!enabled : undefined,
+      mode: modeNorm,
+      extraSystemPrompt: extraSystemPrompt != null ? String(extraSystemPrompt) : undefined
+    });
     res.json({ success: true, message: 'Configuración guardada' });
   } catch (error: any) {
     console.error('saveMLQuestionsAiConfig:', error);
@@ -6723,11 +6751,15 @@ export const saveMLQuestionsAiConfig = async (req: Request, res: Response) => {
   }
 };
 
-/** Procesa preguntas sin responder (manual). Requiere ML + clave IA (Gemini/Groq/OpenAI). */
+function mlQuestionsAiRoleOk(req: Request): boolean {
+  const user = (req as any).user;
+  return !!user && ['ADMIN', 'WAREHOUSE', 'DEPOSITO'].includes(user.role);
+}
+
+/** Procesa preguntas sin responder (manual): sugerencias o auto-respuesta según modo. */
 export const processMLQuestionsAi = async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user;
-    if (!user || !['ADMIN', 'WAREHOUSE', 'DEPOSITO'].includes(user.role)) {
+    if (!mlQuestionsAiRoleOk(req)) {
       return res.status(403).json({ message: 'Solo administradores o depósito pueden ejecutar esto' });
     }
     if (!mlQuestionsAi.llmConfigured()) {
@@ -6741,15 +6773,101 @@ export const processMLQuestionsAi = async (req: Request, res: Response) => {
     const token = await getValidMLToken();
     if (!token) return res.status(503).json({ message: 'Mercado Libre no conectado o token inválido' });
     const cfg = await mlQuestionsAi.getMlQuestionsAiConfigRow();
+    if (cfg.mode === 'off') {
+      return res.status(400).json({ message: 'La IA de preguntas está desactivada. Activá modo sugerencias o automático en Configuración.' });
+    }
     const { processed, results } = await mlQuestionsAi.processUnansweredBatch(token, {
       limit,
-      extraSystemPrompt: cfg.extraSystemPrompt
+      extraSystemPrompt: cfg.extraSystemPrompt,
+      mode: cfg.mode
     });
-    res.json({ processed, results });
+    res.json({ processed, results, mode: cfg.mode });
   } catch (error: any) {
     const detail = error?.response?.data ?? error?.message;
     console.error('processMLQuestionsAi:', detail);
     res.status(500).json({ message: error?.message || 'Error procesando preguntas', detail });
+  }
+};
+
+/** Genera sugerencia IA para una pregunta (sin publicar en ML). */
+export const suggestMLQuestionAi = async (req: Request, res: Response) => {
+  try {
+    if (!mlQuestionsAiRoleOk(req)) {
+      return res.status(403).json({ message: 'Sin permiso' });
+    }
+    if (!mlQuestionsAi.llmConfigured()) {
+      return res.status(503).json({ message: 'Ninguna clave de IA configurada en el servidor' });
+    }
+    const questionId = String((req.body as any)?.questionId ?? (req.params as any)?.questionId ?? '').trim();
+    if (!questionId) return res.status(400).json({ message: 'questionId requerido' });
+    const token = await getValidMLToken();
+    if (!token) return res.status(503).json({ message: 'Mercado Libre no conectado' });
+    const cfg = await mlQuestionsAi.getMlQuestionsAiConfigRow();
+    const forceRegenerate = !!(req.body as any)?.forceRegenerate;
+    const result = await mlQuestionsAi.suggestForQuestion(token.access_token, questionId, {
+      extraSystemPrompt: cfg.extraSystemPrompt,
+      forceRegenerate
+    });
+    if (result.status === 'error') {
+      return res.status(500).json({ message: result.message });
+    }
+    const suggestion = await mlQuestionsAi.getSuggestionByQuestionId(questionId);
+    res.json({ result, suggestion });
+  } catch (error: any) {
+    console.error('suggestMLQuestionAi:', error?.response?.data || error.message);
+    res.status(500).json({ message: error?.message || 'Error generando sugerencia' });
+  }
+};
+
+/** Publica respuesta en ML (texto editado o sugerencia guardada). */
+export const answerMLQuestion = async (req: Request, res: Response) => {
+  try {
+    if (!mlQuestionsAiRoleOk(req)) {
+      return res.status(403).json({ message: 'Sin permiso' });
+    }
+    const questionId = String((req.body as any)?.questionId ?? '').trim();
+    const text = (req.body as any)?.text != null ? String((req.body as any).text) : undefined;
+    if (!questionId) return res.status(400).json({ message: 'questionId requerido' });
+    const token = await getValidMLToken();
+    if (!token) return res.status(503).json({ message: 'Mercado Libre no conectado' });
+    const result = await mlQuestionsAi.approveAndSendSuggestion(token.access_token, questionId, text);
+    if (result.status === 'error') {
+      return res.status(500).json({ message: result.message });
+    }
+    if (result.status === 'skipped') {
+      return res.status(409).json({ message: result.reason });
+    }
+    res.json({ success: true, result });
+  } catch (error: any) {
+    console.error('answerMLQuestion:', error?.response?.data || error.message);
+    res.status(500).json({ message: error?.message || 'Error enviando respuesta' });
+  }
+};
+
+/** Descarta sugerencia IA pendiente. */
+export const rejectMLQuestionSuggestion = async (req: Request, res: Response) => {
+  try {
+    if (!mlQuestionsAiRoleOk(req)) {
+      return res.status(403).json({ message: 'Sin permiso' });
+    }
+    const questionId = String((req.body as any)?.questionId ?? '').trim();
+    if (!questionId) return res.status(400).json({ message: 'questionId requerido' });
+    await mlQuestionsAi.rejectSuggestion(questionId);
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('rejectMLQuestionSuggestion:', error.message);
+    res.status(500).json({ message: error?.message || 'Error descartando sugerencia' });
+  }
+};
+
+/** Métricas de calidad IA (envíos sin editar vs editados). */
+export const getMLQuestionsAiMetrics = async (req: Request, res: Response) => {
+  try {
+    const metrics = await mlQuestionsAi.getMlQuestionsAiMetrics();
+    res.json(metrics);
+  } catch (error: any) {
+    console.error('getMLQuestionsAiMetrics:', error.message);
+    res.status(500).json({ message: error?.message || 'Error obteniendo métricas' });
   }
 };
 

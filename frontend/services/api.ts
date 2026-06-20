@@ -2805,6 +2805,12 @@ export const api = {
       buyerNickname: string | null;
       answerText: string | null;
       answerDate: string | null;
+      aiSuggestion?: {
+        text: string;
+        status: string;
+        provider?: string | null;
+        updatedAt?: string | null;
+      } | null;
     }>;
     total: number;
     offset: number;
@@ -3259,6 +3265,7 @@ export const api = {
   /** Respuestas automáticas a preguntas de ML (Gemini / Groq / OpenAI según .env). */
   getMLQuestionsAiConfig: async (): Promise<{
     enabled: boolean;
+    mode: 'off' | 'suggest' | 'auto';
     extraSystemPrompt: string;
     openAiConfigured: boolean;
     llmProvider: 'gemini' | 'groq' | 'openai' | null;
@@ -3266,14 +3273,47 @@ export const api = {
   }> => {
     return await request('/integrations/mercadolibre/questions-ai', 'GET');
   },
-  saveMLQuestionsAiConfig: async (config: { enabled: boolean; extraSystemPrompt: string }): Promise<{ success: boolean; message?: string }> => {
+  saveMLQuestionsAiConfig: async (config: {
+    enabled?: boolean;
+    mode?: 'off' | 'suggest' | 'auto';
+    extraSystemPrompt: string;
+  }): Promise<{ success: boolean; message?: string }> => {
     return await request('/integrations/mercadolibre/questions-ai', 'POST', config);
   },
   processMLQuestionsAi: async (limit?: number): Promise<{
     processed: number;
+    mode?: string;
     results: Array<{ questionId: string; status: string; reason?: string; preview?: string; message?: string }>;
   }> => {
     return await request('/integrations/mercadolibre/questions-ai/process', 'POST', { limit: limit ?? 10 });
+  },
+  suggestMLQuestionAi: async (questionId: string, forceRegenerate?: boolean): Promise<{
+    result: { questionId: string; status: string; preview?: string; reason?: string; message?: string };
+    suggestion: { questionId: string; suggestionText: string; status: string; llmProvider?: string | null } | null;
+  }> => {
+    return await request('/integrations/mercadolibre/questions-ai/suggest', 'POST', { questionId, forceRegenerate: !!forceRegenerate });
+  },
+  answerMLQuestion: async (questionId: string, text?: string): Promise<{ success: boolean; result?: { preview?: string } }> => {
+    return await request('/integrations/mercadolibre/questions-ai/answer', 'POST', { questionId, text });
+  },
+  rejectMLQuestionSuggestion: async (questionId: string): Promise<{ success: boolean }> => {
+    return await request('/integrations/mercadolibre/questions-ai/reject', 'POST', { questionId });
+  },
+  getMLQuestionsAiMetrics: async (): Promise<{
+    totalGenerated: number;
+    pending: number;
+    sentUnchanged: number;
+    sentEdited: number;
+    rejected: number;
+    autoSent: number;
+    reviewSentTotal: number;
+    unchangedRate: number | null;
+    minReviewSendsForReady: number;
+    readyRateThreshold: number;
+    readyForAuto: boolean;
+    recommendation: string;
+  }> => {
+    return await request('/integrations/mercadolibre/questions-ai/metrics', 'GET');
   },
 
   // Historial de movimientos de stock

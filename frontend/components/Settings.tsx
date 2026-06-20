@@ -327,8 +327,22 @@ const Settings: React.FC<SettingsProps> = ({
   const [mlAutoMessageLoading, setMlAutoMessageLoading] = useState(false);
   const [mlAutoMessageSaved, setMlAutoMessageSaved] = useState(false);
 
-  const [mlQuestionsAiEnabled, setMlQuestionsAiEnabled] = useState(false);
+  const [mlQuestionsAiMode, setMlQuestionsAiMode] = useState<'off' | 'suggest' | 'auto'>('off');
   const [mlQuestionsAiExtraPrompt, setMlQuestionsAiExtraPrompt] = useState('');
+  const [mlQuestionsAiMetrics, setMlQuestionsAiMetrics] = useState<{
+    totalGenerated: number;
+    pending: number;
+    sentUnchanged: number;
+    sentEdited: number;
+    rejected: number;
+    autoSent: number;
+    reviewSentTotal: number;
+    unchangedRate: number | null;
+    minReviewSendsForReady: number;
+    readyRateThreshold: number;
+    readyForAuto: boolean;
+    recommendation: string;
+  } | null>(null);
   const [mlQuestionsAiOpenAiOk, setMlQuestionsAiOpenAiOk] = useState(false);
   const [mlQuestionsAiLlmLabel, setMlQuestionsAiLlmLabel] = useState('');
   const [mlQuestionsAiLoading, setMlQuestionsAiLoading] = useState(false);
@@ -447,10 +461,16 @@ const Settings: React.FC<SettingsProps> = ({
     const fetchMlQuestionsAi = async () => {
       try {
         const cfg = await api.getMLQuestionsAiConfig();
-        setMlQuestionsAiEnabled(cfg.enabled);
+        setMlQuestionsAiMode(cfg.mode || (cfg.enabled ? 'auto' : 'off'));
         setMlQuestionsAiExtraPrompt(cfg.extraSystemPrompt || '');
         setMlQuestionsAiOpenAiOk(!!cfg.openAiConfigured);
         setMlQuestionsAiLlmLabel(cfg.llmLabel || '');
+        try {
+          const metrics = await api.getMLQuestionsAiMetrics();
+          setMlQuestionsAiMetrics(metrics);
+        } catch {
+          setMlQuestionsAiMetrics(null);
+        }
       } catch (e) {
         console.error(e);
       }
@@ -2716,19 +2736,87 @@ const Settings: React.FC<SettingsProps> = ({
                           <Bot size={16} className="text-cyan-400" />
                           <p className="text-white font-bold text-sm">Preguntas de Mercado Libre (IA)</p>
                         </div>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={mlQuestionsAiEnabled}
-                            onChange={(e) => setMlQuestionsAiEnabled(e.target.checked)}
-                            className="sr-only peer"
-                          />
-                          <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-600" />
-                        </label>
                       </div>
-                      <p className="text-slate-500 text-xs mb-2">
-                        La IA usa la publicación de ML y además un <strong>resumen de todo tu inventario LupoHub</strong> (SKU, talle, color, stock, vínculos ML) para poder sugerir otras tallas u otros productos. En el servidor (.env) podés usar una opción <strong>gratis</strong>: <code className="text-slate-400">GEMINI_API_KEY</code> (Google AI Studio) o <code className="text-slate-400">GROQ_API_KEY</code> (Groq); opcionalmente <code className="text-slate-400">OPENAI_API_KEY</code> (de pago). Opcional: <code className="text-slate-400">ML_QUESTIONS_AI_CATALOG_ENABLED=false</code> para desactivar el catálogo. Para respuesta al instante, registrá el webhook de ML con el tema <strong>questions</strong>.
+                      <p className="text-slate-500 text-xs mb-3">
+                        Empezá en <strong>modo sugerencias</strong>: la IA propone respuestas y vos las revisás en la pestaña Preguntas. Cuando estés conforme con la calidad, pasá a <strong>respuesta automática</strong>. La IA usa la publicación de ML y el inventario LupoHub (SKU, talle, color, stock). Claves gratis: <code className="text-slate-400">GEMINI_API_KEY</code> o <code className="text-slate-400">GROQ_API_KEY</code>. Webhook ML con tema <strong>questions</strong> para procesar al instante.
                       </p>
+                      <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Modo de operación</label>
+                      <select
+                        value={mlQuestionsAiMode}
+                        onChange={(e) => setMlQuestionsAiMode(e.target.value as 'off' | 'suggest' | 'auto')}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-white mb-3 focus:ring-2 focus:ring-cyan-500 outline-none"
+                      >
+                        <option value="off">Desactivado</option>
+                        <option value="suggest">Solo sugerencias (revisión humana)</option>
+                        <option value="auto">Respuesta automática</option>
+                      </select>
+                      {mlQuestionsAiMode === 'suggest' && (
+                        <div className="mb-3 p-2 rounded-lg bg-cyan-900/20 border border-cyan-700/40 text-cyan-200 text-xs">
+                          Las nuevas preguntas generarán sugerencias en la pestaña <strong>Preguntas</strong>. Vos aprobás o editás antes de enviar.
+                        </div>
+                      )}
+                      {mlQuestionsAiMode === 'auto' && (
+                        <div className="mb-3 p-2 rounded-lg bg-amber-900/20 border border-amber-700/40 text-amber-200 text-xs">
+                          La IA responderá directamente en Mercado Libre (webhook o botón procesar). Usá este modo cuando ya confíes en las respuestas.
+                        </div>
+                      )}
+                      {mlQuestionsAiMetrics && (
+                        <div className="mb-3 rounded-xl border border-slate-600/80 bg-slate-900/60 p-3 space-y-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-[10px] font-black text-slate-500 uppercase tracking-wide">Calidad de sugerencias</p>
+                            {mlQuestionsAiMetrics.readyForAuto && mlQuestionsAiMode === 'suggest' && (
+                              <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                                Listo para automático
+                              </span>
+                            )}
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-center">
+                            <div className="rounded-lg bg-slate-800/80 px-2 py-2">
+                              <p className="text-lg font-black text-white">{mlQuestionsAiMetrics.sentUnchanged}</p>
+                              <p className="text-[10px] text-emerald-400 uppercase font-bold">Sin editar</p>
+                            </div>
+                            <div className="rounded-lg bg-slate-800/80 px-2 py-2">
+                              <p className="text-lg font-black text-white">{mlQuestionsAiMetrics.sentEdited}</p>
+                              <p className="text-[10px] text-amber-400 uppercase font-bold">Editadas</p>
+                            </div>
+                            <div className="rounded-lg bg-slate-800/80 px-2 py-2">
+                              <p className="text-lg font-black text-white">{mlQuestionsAiMetrics.pending}</p>
+                              <p className="text-[10px] text-cyan-400 uppercase font-bold">Pendientes</p>
+                            </div>
+                            <div className="rounded-lg bg-slate-800/80 px-2 py-2">
+                              <p className="text-lg font-black text-slate-300">{mlQuestionsAiMetrics.rejected}</p>
+                              <p className="text-[10px] text-slate-500 uppercase font-bold">Descartadas</p>
+                            </div>
+                            <div className="rounded-lg bg-slate-800/80 px-2 py-2">
+                              <p className="text-lg font-black text-slate-300">{mlQuestionsAiMetrics.autoSent}</p>
+                              <p className="text-[10px] text-slate-500 uppercase font-bold">Auto enviadas</p>
+                            </div>
+                            <div className="rounded-lg bg-slate-800/80 px-2 py-2">
+                              <p className="text-lg font-black text-white">
+                                {mlQuestionsAiMetrics.unchangedRate != null ? `${mlQuestionsAiMetrics.unchangedRate}%` : '—'}
+                              </p>
+                              <p className="text-[10px] text-slate-400 uppercase font-bold">Acierto</p>
+                            </div>
+                          </div>
+                          {mlQuestionsAiMetrics.reviewSentTotal > 0 && (
+                            <div>
+                              <div className="h-2 rounded-full bg-slate-700 overflow-hidden">
+                                <div
+                                  className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 transition-all"
+                                  style={{ width: `${Math.min(100, mlQuestionsAiMetrics.unchangedRate ?? 0)}%` }}
+                                />
+                              </div>
+                              <p className="text-[10px] text-slate-500 mt-1">
+                                Objetivo: {mlQuestionsAiMetrics.readyRateThreshold}% sin editar con al menos {mlQuestionsAiMetrics.minReviewSendsForReady} envíos revisados
+                                ({mlQuestionsAiMetrics.reviewSentTotal}/{mlQuestionsAiMetrics.minReviewSendsForReady})
+                              </p>
+                            </div>
+                          )}
+                          <p className={`text-xs leading-relaxed ${mlQuestionsAiMetrics.readyForAuto ? 'text-emerald-200' : 'text-slate-400'}`}>
+                            {mlQuestionsAiMetrics.recommendation}
+                          </p>
+                        </div>
+                      )}
                       {mlQuestionsAiOpenAiOk && mlQuestionsAiLlmLabel && (
                         <div className="mb-3 p-2 rounded-lg bg-emerald-900/20 border border-emerald-700/40 text-emerald-200 text-xs">
                           IA lista: {mlQuestionsAiLlmLabel}
@@ -2755,15 +2843,23 @@ const Settings: React.FC<SettingsProps> = ({
                             try {
                               const res = await api.processMLQuestionsAi(10);
                               const ok = res.results?.filter(r => r.status === 'answered').length ?? 0;
+                              const suggested = res.results?.filter(r => r.status === 'suggested').length ?? 0;
                               const err = res.results?.filter(r => r.status === 'error').length ?? 0;
-                              showToast('success', `Procesadas: ${res.processed}. Respondidas: ${ok}. Errores: ${err}.`);
+                              const label = res.mode === 'auto'
+                                ? `Respondidas: ${ok}`
+                                : `Sugerencias: ${suggested}`;
+                              showToast('success', `Procesadas: ${res.processed}. ${label}. Errores: ${err}.`);
+                              try {
+                                const metrics = await api.getMLQuestionsAiMetrics();
+                                setMlQuestionsAiMetrics(metrics);
+                              } catch { /* ignore */ }
                             } catch (e: any) {
                               showToast('error', e?.message || 'No se pudo procesar preguntas');
                             } finally {
                               setMlQuestionsAiProcessLoading(false);
                             }
                           }}
-                          disabled={mlQuestionsAiProcessLoading || !mlQuestionsAiOpenAiOk}
+                          disabled={mlQuestionsAiProcessLoading || !mlQuestionsAiOpenAiOk || mlQuestionsAiMode === 'off'}
                           className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
                         >
                           {mlQuestionsAiProcessLoading ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
@@ -2775,7 +2871,7 @@ const Settings: React.FC<SettingsProps> = ({
                             setMlQuestionsAiLoading(true);
                             try {
                               await api.saveMLQuestionsAiConfig({
-                                enabled: mlQuestionsAiEnabled,
+                                mode: mlQuestionsAiMode,
                                 extraSystemPrompt: mlQuestionsAiExtraPrompt
                               });
                               setMlQuestionsAiSaved(true);

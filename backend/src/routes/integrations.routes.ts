@@ -38,6 +38,10 @@ import {
   getMLQuestionsAiConfig,
   saveMLQuestionsAiConfig,
   processMLQuestionsAi,
+  suggestMLQuestionAi,
+  answerMLQuestion,
+  rejectMLQuestionSuggestion,
+  getMLQuestionsAiMetrics,
   importProductFromMercadoLibre,
   importProductFromTiendaNube,
   createTiendaNubeProduct,
@@ -131,6 +135,10 @@ router.post('/mercadolibre/auto-message', saveMLAutoMessageConfig);
 router.get('/mercadolibre/questions-ai', authMiddleware, getMLQuestionsAiConfig);
 router.post('/mercadolibre/questions-ai', authMiddleware, saveMLQuestionsAiConfig);
 router.post('/mercadolibre/questions-ai/process', authMiddleware, processMLQuestionsAi);
+router.post('/mercadolibre/questions-ai/suggest', authMiddleware, suggestMLQuestionAi);
+router.post('/mercadolibre/questions-ai/answer', authMiddleware, answerMLQuestion);
+router.post('/mercadolibre/questions-ai/reject', authMiddleware, rejectMLQuestionSuggestion);
+router.get('/mercadolibre/questions-ai/metrics', authMiddleware, getMLQuestionsAiMetrics);
 router.post('/mercadolibre/sync', syncProductsFromMercadoLibre);
 router.post('/mercadolibre/sync-stock', syncAllStockToMercadoLibre);
 router.post('/mercadolibre/sync-stock-selected', syncSelectedStockToMercadoLibre);

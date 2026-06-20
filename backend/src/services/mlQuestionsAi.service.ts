@@ -27,38 +27,315 @@ Reglas:
 - No uses markdown ni emojis en exceso (como mucho uno).
 - Máximo ~1200 caracteres. Sin listas largas. Siempre cerrá oraciones: la respuesta debe ser un texto completo y útil, nunca truncada a mitad de idea.`;
 
+/** off = desactivado | suggest = genera sugerencias para revisión | auto = responde solo */
+export type MlQuestionsAiMode = 'off' | 'suggest' | 'auto';
+
+export type MlQuestionsAiSuggestionStatus = 'pending' | 'sent' | 'rejected';
+
+export type MlQuestionsAiSuggestionRow = {
+  questionId: string;
+  itemId: string | null;
+  questionText: string | null;
+  suggestionText: string;
+  status: MlQuestionsAiSuggestionStatus;
+  llmProvider: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+};
+
 export async function ensureMlQuestionsAiConfigTable(): Promise<void> {
   await execute(`
     CREATE TABLE IF NOT EXISTS ml_questions_ai_config (
       id INT PRIMARY KEY DEFAULT 1,
       enabled BOOLEAN DEFAULT 0,
+      mode VARCHAR(16) DEFAULT 'off',
       extra_system_prompt TEXT NULL,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
   `);
+  try {
+    await execute(`ALTER TABLE ml_questions_ai_config ADD COLUMN mode VARCHAR(16) DEFAULT 'off'`);
+  } catch {
+    /* columna ya existe */
+  }
 }
 
-export async function getMlQuestionsAiConfigRow(): Promise<{ enabled: boolean; extraSystemPrompt: string | null }> {
-  await ensureMlQuestionsAiConfigTable();
-  const row = await get(`SELECT enabled, extra_system_prompt AS extraSystemPrompt FROM ml_questions_ai_config WHERE id = 1`);
-  if (!row) {
-    await execute(`INSERT INTO ml_questions_ai_config (id, enabled, extra_system_prompt) VALUES (1, 0, NULL)`);
-    return { enabled: false, extraSystemPrompt: null };
+export async function ensureMlQuestionsAiSuggestionsTable(): Promise<void> {
+  await execute(`
+    CREATE TABLE IF NOT EXISTS ml_questions_ai_suggestions (
+      question_id VARCHAR(64) PRIMARY KEY,
+      item_id VARCHAR(64) NULL,
+      question_text TEXT NULL,
+      suggestion_text TEXT NOT NULL,
+      status VARCHAR(16) DEFAULT 'pending',
+      llm_provider VARCHAR(32) NULL,
+      sent_text TEXT NULL,
+      was_edited TINYINT NULL,
+      sent_source VARCHAR(16) NULL,
+      sent_at DATETIME NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
+  for (const col of [
+    'sent_text TEXT NULL',
+    'was_edited TINYINT NULL',
+    'sent_source VARCHAR(16) NULL',
+    'sent_at DATETIME NULL'
+  ]) {
+    try {
+      await execute(`ALTER TABLE ml_questions_ai_suggestions ADD COLUMN ${col}`);
+    } catch {
+      /* columna ya existe */
+    }
   }
+}
+
+function normalizeMode(raw: unknown, enabledFallback?: boolean): MlQuestionsAiMode {
+  const s = String(raw || '').trim().toLowerCase();
+  if (s === 'suggest' || s === 'auto' || s === 'off') return s;
+  if (enabledFallback === true) return 'auto';
+  return 'off';
+}
+
+export async function getMlQuestionsAiConfigRow(): Promise<{
+  enabled: boolean;
+  mode: MlQuestionsAiMode;
+  extraSystemPrompt: string | null;
+}> {
+  await ensureMlQuestionsAiConfigTable();
+  const row = await get(
+    `SELECT enabled, mode, extra_system_prompt AS extraSystemPrompt FROM ml_questions_ai_config WHERE id = 1`
+  );
+  if (!row) {
+    await execute(`INSERT INTO ml_questions_ai_config (id, enabled, mode, extra_system_prompt) VALUES (1, 0, 'off', NULL)`);
+    return { enabled: false, mode: 'off', extraSystemPrompt: null };
+  }
+  const enabled = row.enabled === 1 || row.enabled === true;
+  const mode = normalizeMode(row.mode, enabled);
   return {
-    enabled: row.enabled === 1 || row.enabled === true,
+    enabled: mode !== 'off',
+    mode,
     extraSystemPrompt: row.extraSystemPrompt ?? null
   };
 }
 
-export async function saveMlQuestionsAiConfig(enabled: boolean, extraSystemPrompt: string | null): Promise<void> {
+export async function saveMlQuestionsAiConfig(params: {
+  enabled?: boolean;
+  mode?: MlQuestionsAiMode;
+  extraSystemPrompt?: string | null;
+}): Promise<void> {
   await ensureMlQuestionsAiConfigTable();
+  const current = await getMlQuestionsAiConfigRow();
+  let mode = params.mode ?? current.mode;
+  if (params.enabled != null && params.mode == null) {
+    mode = params.enabled ? (current.mode === 'off' ? 'auto' : current.mode) : 'off';
+  }
+  if (mode !== 'off' && mode !== 'suggest' && mode !== 'auto') mode = 'off';
+  const enabled = mode !== 'off';
+  const extra = params.extraSystemPrompt !== undefined ? params.extraSystemPrompt?.trim() || null : current.extraSystemPrompt;
   await execute(
-    `INSERT INTO ml_questions_ai_config (id, enabled, extra_system_prompt)
-     VALUES (1, ?, ?)
-     ON DUPLICATE KEY UPDATE enabled = VALUES(enabled), extra_system_prompt = VALUES(extra_system_prompt)`,
-    [enabled ? 1 : 0, extraSystemPrompt?.trim() || null]
+    `INSERT INTO ml_questions_ai_config (id, enabled, mode, extra_system_prompt)
+     VALUES (1, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE enabled = VALUES(enabled), mode = VALUES(mode), extra_system_prompt = VALUES(extra_system_prompt)`,
+    [enabled ? 1 : 0, mode, extra]
   );
+}
+
+function mapSuggestionRow(row: any): MlQuestionsAiSuggestionRow {
+  return {
+    questionId: String(row.questionId ?? row.question_id),
+    itemId: row.itemId ?? row.item_id ?? null,
+    questionText: row.questionText ?? row.question_text ?? null,
+    suggestionText: String(row.suggestionText ?? row.suggestion_text ?? ''),
+    status: (row.status || 'pending') as MlQuestionsAiSuggestionStatus,
+    llmProvider: row.llmProvider ?? row.llm_provider ?? null,
+    createdAt: row.createdAt ?? row.created_at ?? null,
+    updatedAt: row.updatedAt ?? row.updated_at ?? null
+  };
+}
+
+export async function getSuggestionByQuestionId(questionId: string): Promise<MlQuestionsAiSuggestionRow | null> {
+  await ensureMlQuestionsAiSuggestionsTable();
+  const row = await get(
+    `SELECT question_id AS questionId, item_id AS itemId, question_text AS questionText,
+            suggestion_text AS suggestionText, status, llm_provider AS llmProvider,
+            created_at AS createdAt, updated_at AS updatedAt
+     FROM ml_questions_ai_suggestions WHERE question_id = ?`,
+    [questionId]
+  );
+  return row ? mapSuggestionRow(row) : null;
+}
+
+export async function getSuggestionsByQuestionIds(ids: string[]): Promise<Map<string, MlQuestionsAiSuggestionRow>> {
+  await ensureMlQuestionsAiSuggestionsTable();
+  const map = new Map<string, MlQuestionsAiSuggestionRow>();
+  const clean = [...new Set(ids.map((id) => String(id).trim()).filter(Boolean))];
+  if (!clean.length) return map;
+  const placeholders = clean.map(() => '?').join(',');
+  const rows = await query(
+    `SELECT question_id AS questionId, item_id AS itemId, question_text AS questionText,
+            suggestion_text AS suggestionText, status, llm_provider AS llmProvider,
+            created_at AS createdAt, updated_at AS updatedAt
+     FROM ml_questions_ai_suggestions WHERE question_id IN (${placeholders})`,
+    clean
+  );
+  for (const row of rows as any[]) {
+    const s = mapSuggestionRow(row);
+    map.set(s.questionId, s);
+  }
+  return map;
+}
+
+async function upsertSuggestion(params: {
+  questionId: string;
+  itemId?: string | null;
+  questionText?: string | null;
+  suggestionText: string;
+  status?: MlQuestionsAiSuggestionStatus;
+  llmProvider?: string | null;
+}): Promise<void> {
+  await ensureMlQuestionsAiSuggestionsTable();
+  await execute(
+    `INSERT INTO ml_questions_ai_suggestions
+       (question_id, item_id, question_text, suggestion_text, status, llm_provider)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       item_id = VALUES(item_id),
+       question_text = VALUES(question_text),
+       suggestion_text = VALUES(suggestion_text),
+       status = VALUES(status),
+       llm_provider = VALUES(llm_provider)`,
+    [
+      params.questionId,
+      params.itemId ?? null,
+      params.questionText ?? null,
+      params.suggestionText,
+      params.status ?? 'pending',
+      params.llmProvider ?? null
+    ]
+  );
+}
+
+export async function rejectSuggestion(questionId: string): Promise<void> {
+  await ensureMlQuestionsAiSuggestionsTable();
+  await execute(`UPDATE ml_questions_ai_suggestions SET status = 'rejected' WHERE question_id = ?`, [questionId]);
+}
+
+function normalizeTextForCompare(s: string): string {
+  return s.trim().replace(/\s+/g, ' ');
+}
+
+async function recordSuggestionSent(
+  questionId: string,
+  params: { sentText: string; originalSuggestionText?: string | null; sentSource: 'review' | 'auto' }
+): Promise<void> {
+  await ensureMlQuestionsAiSuggestionsTable();
+  let wasEdited: number | null = null;
+  if (params.sentSource === 'review' && params.originalSuggestionText != null) {
+    wasEdited =
+      normalizeTextForCompare(params.originalSuggestionText) === normalizeTextForCompare(params.sentText) ? 0 : 1;
+  }
+  const existing = await get(`SELECT question_id FROM ml_questions_ai_suggestions WHERE question_id = ?`, [questionId]);
+  if (!existing) {
+    await execute(
+      `INSERT INTO ml_questions_ai_suggestions
+         (question_id, suggestion_text, status, sent_text, was_edited, sent_source, sent_at)
+       VALUES (?, ?, 'sent', ?, ?, ?, NOW())`,
+      [
+        questionId,
+        params.originalSuggestionText ?? params.sentText,
+        params.sentText,
+        wasEdited,
+        params.sentSource
+      ]
+    );
+    return;
+  }
+  await execute(
+    `UPDATE ml_questions_ai_suggestions
+     SET status = 'sent', sent_text = ?, was_edited = ?, sent_source = ?, sent_at = NOW()
+     WHERE question_id = ?`,
+    [params.sentText, wasEdited, params.sentSource, questionId]
+  );
+}
+
+export type MlQuestionsAiMetrics = {
+  totalGenerated: number;
+  pending: number;
+  sentUnchanged: number;
+  sentEdited: number;
+  rejected: number;
+  autoSent: number;
+  reviewSentTotal: number;
+  unchangedRate: number | null;
+  minReviewSendsForReady: number;
+  readyRateThreshold: number;
+  readyForAuto: boolean;
+  recommendation: string;
+};
+
+function metricsReadyThresholds(): { minSends: number; rate: number } {
+  const minSends = Math.max(
+    5,
+    parseInt(process.env.ML_QUESTIONS_AI_AUTO_READY_MIN_SENDS || '15', 10) || 15
+  );
+  const ratePct = parseFloat(process.env.ML_QUESTIONS_AI_AUTO_READY_RATE || '85') || 85;
+  const rate = Math.min(100, Math.max(50, ratePct)) / 100;
+  return { minSends, rate };
+}
+
+export async function getMlQuestionsAiMetrics(): Promise<MlQuestionsAiMetrics> {
+  await ensureMlQuestionsAiSuggestionsTable();
+  const row = await get(`
+    SELECT
+      COUNT(*) AS totalGenerated,
+      SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+      SUM(CASE WHEN status = 'sent' AND sent_source = 'review' AND was_edited = 0 THEN 1 ELSE 0 END) AS sentUnchanged,
+      SUM(CASE WHEN status = 'sent' AND sent_source = 'review' AND was_edited = 1 THEN 1 ELSE 0 END) AS sentEdited,
+      SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) AS rejected,
+      SUM(CASE WHEN status = 'sent' AND sent_source = 'auto' THEN 1 ELSE 0 END) AS autoSent
+    FROM ml_questions_ai_suggestions
+  `);
+  const totalGenerated = Number(row?.totalGenerated) || 0;
+  const pending = Number(row?.pending) || 0;
+  const sentUnchanged = Number(row?.sentUnchanged) || 0;
+  const sentEdited = Number(row?.sentEdited) || 0;
+  const rejected = Number(row?.rejected) || 0;
+  const autoSent = Number(row?.autoSent) || 0;
+  const reviewSentTotal = sentUnchanged + sentEdited;
+  const unchangedRate = reviewSentTotal > 0 ? Math.round((sentUnchanged / reviewSentTotal) * 1000) / 10 : null;
+  const { minSends, rate } = metricsReadyThresholds();
+  const readyForAuto = reviewSentTotal >= minSends && unchangedRate != null && unchangedRate / 100 >= rate;
+
+  let recommendation: string;
+  if (reviewSentTotal === 0) {
+    recommendation =
+      'Todavía no hay respuestas enviadas tras revisión. Usá modo sugerencias y aprobá algunas preguntas para medir la calidad.';
+  } else if (reviewSentTotal < minSends) {
+    recommendation = `Llevás ${reviewSentTotal} envío(s) revisado(s). Con ${minSends} o más podremos recomendar el modo automático.`;
+  } else if (readyForAuto) {
+    recommendation = `El ${unchangedRate}% se envió sin editar. Buen momento para probar respuesta automática.`;
+  } else if (unchangedRate != null && unchangedRate >= 70) {
+    recommendation = `El ${unchangedRate}% se envió sin editar. Cerca del objetivo (${Math.round(rate * 100)}%). Revisá las que editaste y ajustá el prompt si hace falta.`;
+  } else {
+    recommendation = `Solo el ${unchangedRate ?? 0}% se envió sin editar. Seguí en modo sugerencias y refiná las instrucciones extra de la IA.`;
+  }
+
+  return {
+    totalGenerated,
+    pending,
+    sentUnchanged,
+    sentEdited,
+    rejected,
+    autoSent,
+    reviewSentTotal,
+    unchangedRate,
+    minReviewSendsForReady: minSends,
+    readyRateThreshold: Math.round(rate * 100),
+    readyForAuto,
+    recommendation
+  };
 }
 
 function hasGeminiKey(): boolean {
@@ -548,22 +825,32 @@ function isQuestionUnanswered(q: any): boolean {
 export type ProcessOneResult =
   | { questionId: string; status: 'skipped'; reason: string }
   | { questionId: string; status: 'answered'; preview: string }
+  | { questionId: string; status: 'suggested'; preview: string }
   | { questionId: string; status: 'error'; message: string };
 
-export async function processOneQuestion(
-  accessToken: string,
-  questionId: string,
-  opts?: { extraSystemPrompt?: string | null }
-): Promise<ProcessOneResult> {
+type QuestionContext = {
+  questionId: string;
+  itemId: string;
+  questionText: string;
+  itemTitle: string;
+  description: string;
+  sizeGuideFromMl: string;
+  catalogSummary: string;
+};
+
+async function loadQuestionContext(accessToken: string, questionId: string): Promise<QuestionContext | ProcessOneResult> {
   const q = await fetchQuestion(accessToken, questionId);
   if (!isQuestionUnanswered(q)) {
     return { questionId, status: 'skipped', reason: 'Ya respondida o cerrada' };
   }
 
-  const itemId = q.item_id;
+  const itemId = String(q.item_id || '').trim();
   const questionText = String(q.text || '').trim();
   if (!questionText) {
     return { questionId, status: 'skipped', reason: 'Pregunta vacía' };
+  }
+  if (!itemId) {
+    return { questionId, status: 'skipped', reason: 'Sin publicación asociada' };
   }
 
   const item = await fetchItem(accessToken, itemId);
@@ -573,19 +860,136 @@ export async function processOneQuestion(
   const sizeGuideFromMl = sizeGridId ? await fetchMlSizeChartForPrompt(accessToken, sizeGridId) : '';
   const catalogSummary = await getCachedCatalogSummary();
 
-  const answerText = await generateLlmAnswer({
+  return {
+    questionId,
+    itemId,
+    questionText,
     itemTitle: title,
     description,
-    questionText,
-    extraSystem: opts?.extraSystemPrompt,
-    catalogSummary,
-    itemListingId: String(itemId),
-    sizeGuideFromMl
-  });
+    sizeGuideFromMl,
+    catalogSummary
+  };
+}
 
+async function generateAnswerFromContext(
+  ctx: QuestionContext,
+  extraSystemPrompt?: string | null
+): Promise<string> {
+  return generateLlmAnswer({
+    itemTitle: ctx.itemTitle,
+    description: ctx.description,
+    questionText: ctx.questionText,
+    extraSystem: extraSystemPrompt,
+    catalogSummary: ctx.catalogSummary,
+    itemListingId: ctx.itemId,
+    sizeGuideFromMl: ctx.sizeGuideFromMl
+  });
+}
+
+export async function publishAnswerToMl(
+  accessToken: string,
+  questionId: string,
+  answerText: string,
+  opts?: { sentSource?: 'review' | 'auto'; originalSuggestionText?: string | null }
+): Promise<void> {
+  const final = truncateAnswer(answerText);
   await mlPost(accessToken, '/answers', {
     question_id: Number(questionId),
-    text: answerText
+    text: final
+  });
+  await recordSuggestionSent(questionId, {
+    sentText: final,
+    originalSuggestionText: opts?.originalSuggestionText,
+    sentSource: opts?.sentSource ?? 'review'
+  });
+}
+
+/** Genera sugerencia IA sin publicar en Mercado Libre. */
+export async function suggestForQuestion(
+  accessToken: string,
+  questionId: string,
+  opts?: { extraSystemPrompt?: string | null; forceRegenerate?: boolean }
+): Promise<ProcessOneResult> {
+  const loaded = await loadQuestionContext(accessToken, questionId);
+  if ('status' in loaded) return loaded;
+  const ctx = loaded;
+
+  if (!opts?.forceRegenerate) {
+    const existing = await getSuggestionByQuestionId(questionId);
+    if (existing?.status === 'pending' && existing.suggestionText.trim()) {
+      return { questionId, status: 'suggested', preview: existing.suggestionText.slice(0, 160) };
+    }
+  }
+
+  const provider = resolveProvider();
+  const answerText = await generateAnswerFromContext(ctx, opts?.extraSystemPrompt);
+  await upsertSuggestion({
+    questionId,
+    itemId: ctx.itemId,
+    questionText: ctx.questionText,
+    suggestionText: answerText,
+    status: 'pending',
+    llmProvider: provider
+  });
+
+  return { questionId, status: 'suggested', preview: answerText.slice(0, 160) };
+}
+
+export async function approveAndSendSuggestion(
+  accessToken: string,
+  questionId: string,
+  text?: string
+): Promise<ProcessOneResult> {
+  const loaded = await loadQuestionContext(accessToken, questionId);
+  if ('status' in loaded) return loaded;
+
+  let answerText = (text ?? '').trim();
+  if (!answerText) {
+    const existing = await getSuggestionByQuestionId(questionId);
+    answerText = existing?.suggestionText?.trim() || '';
+  }
+  if (!answerText) {
+    return { questionId, status: 'error', message: 'No hay texto de respuesta' };
+  }
+
+  const existing = await getSuggestionByQuestionId(questionId);
+  await publishAnswerToMl(accessToken, questionId, answerText, {
+    sentSource: 'review',
+    originalSuggestionText: existing?.suggestionText ?? answerText
+  });
+  return { questionId, status: 'answered', preview: answerText.slice(0, 160) };
+}
+
+export async function processOneQuestion(
+  accessToken: string,
+  questionId: string,
+  opts?: { extraSystemPrompt?: string | null; mode?: MlQuestionsAiMode }
+): Promise<ProcessOneResult> {
+  const mode = opts?.mode ?? 'auto';
+  if (mode === 'off') {
+    return { questionId, status: 'skipped', reason: 'IA desactivada' };
+  }
+  if (mode === 'suggest') {
+    return suggestForQuestion(accessToken, questionId, { extraSystemPrompt: opts?.extraSystemPrompt });
+  }
+
+  const loaded = await loadQuestionContext(accessToken, questionId);
+  if ('status' in loaded) return loaded;
+  const ctx = loaded;
+
+  const answerText = await generateAnswerFromContext(ctx, opts?.extraSystemPrompt);
+  const provider = resolveProvider();
+  await upsertSuggestion({
+    questionId,
+    itemId: ctx.itemId,
+    questionText: ctx.questionText,
+    suggestionText: answerText,
+    status: 'pending',
+    llmProvider: provider
+  });
+  await publishAnswerToMl(accessToken, questionId, answerText, {
+    sentSource: 'auto',
+    originalSuggestionText: answerText
   });
 
   return { questionId, status: 'answered', preview: answerText.slice(0, 160) };
@@ -593,7 +997,7 @@ export async function processOneQuestion(
 
 export async function processUnansweredBatch(
   mlToken: MLToken,
-  opts?: { limit?: number; extraSystemPrompt?: string | null }
+  opts?: { limit?: number; extraSystemPrompt?: string | null; mode?: MlQuestionsAiMode }
 ): Promise<{ processed: number; results: ProcessOneResult[] }> {
   const limit = Math.min(Math.max(opts?.limit ?? 10, 1), 25);
   const search = await searchUnansweredQuestions(mlToken.access_token, mlToken.user_id, limit);
@@ -605,7 +1009,8 @@ export async function processUnansweredBatch(
     if (!id) continue;
     try {
       const r = await processOneQuestion(mlToken.access_token, id, {
-        extraSystemPrompt: opts?.extraSystemPrompt
+        extraSystemPrompt: opts?.extraSystemPrompt,
+        mode: opts?.mode
       });
       results.push(r);
       await new Promise((r) => setTimeout(r, 400));
@@ -618,14 +1023,14 @@ export async function processUnansweredBatch(
   return { processed: results.length, results };
 }
 
-/** Si la configuración y OpenAI están activos, procesa preguntas sin responder (para webhook o cron). */
+/** Si la configuración y el LLM están activos, procesa preguntas sin responder (webhook o cron). */
 export async function runMlQuestionsAiIfEnabled(
   getToken: () => Promise<MLToken | null>,
   opts?: { limit?: number }
 ): Promise<{ ran: boolean; message?: string; processed?: number; results?: ProcessOneResult[] }> {
   const cfg = await getMlQuestionsAiConfigRow();
-  if (!cfg.enabled) {
-    return { ran: false, message: 'Auto-respuesta desactivada' };
+  if (cfg.mode === 'off') {
+    return { ran: false, message: 'IA de preguntas desactivada' };
   }
   if (!llmConfigured()) {
     return { ran: false, message: 'Ninguna clave de IA configurada (GEMINI_API_KEY, GROQ_API_KEY u OPENAI_API_KEY)' };
@@ -636,7 +1041,8 @@ export async function runMlQuestionsAiIfEnabled(
   }
   const { processed, results } = await processUnansweredBatch(token, {
     limit: opts?.limit ?? 5,
-    extraSystemPrompt: cfg.extraSystemPrompt
+    extraSystemPrompt: cfg.extraSystemPrompt,
+    mode: cfg.mode
   });
   return { ran: true, processed, results };
 }

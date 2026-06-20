@@ -1,8 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, Loader2, ChevronLeft, ChevronRight, ExternalLink, Calendar, X } from 'lucide-react';
+import { RefreshCw, Loader2, ChevronLeft, ChevronRight, ExternalLink, Calendar, X, Bot, Send, Sparkles, Trash2 } from 'lucide-react';
 import { api } from '../services/api';
 
 type QStatus = '' | 'ANSWERED' | 'UNANSWERED';
+type AiMode = 'off' | 'suggest' | 'auto';
+
+interface AiSuggestion {
+  text: string;
+  status: string;
+  provider?: string | null;
+  updatedAt?: string | null;
+}
 
 interface MlQuestionRow {
   id: string | number;
@@ -14,6 +22,7 @@ interface MlQuestionRow {
   buyerNickname: string | null;
   answerText: string | null;
   answerDate: string | null;
+  aiSuggestion?: AiSuggestion | null;
 }
 
 const statusLabel: Record<string, string> = {
@@ -22,6 +31,151 @@ const statusLabel: Record<string, string> = {
   BANNED: 'Bloqueada',
   CLOSED_UNANSWERED: 'Cerrada sin resp.',
   UNDER_REVIEW: 'En revisión',
+};
+
+const modeBanner: Record<AiMode, { text: string; className: string } | null> = {
+  off: null,
+  suggest: {
+    text: 'Modo sugerencias: la IA propone respuestas. Revisá, editá y enviá desde cada fila.',
+    className: 'border-cyan-500/40 bg-cyan-500/10 text-cyan-100',
+  },
+  auto: {
+    text: 'Modo automático: las nuevas preguntas se responden solas con IA (webhook o procesar en Configuración).',
+    className: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-100',
+  },
+};
+
+const QuestionAiPanel: React.FC<{
+  question: MlQuestionRow;
+  llmOk: boolean;
+  onUpdated: () => void;
+  onMetricsRefresh?: () => void;
+}> = ({ question, llmOk, onUpdated, onMetricsRefresh }) => {
+  const qid = String(question.id);
+  const [draft, setDraft] = useState(question.aiSuggestion?.text || '');
+  const [busy, setBusy] = useState<'suggest' | 'send' | 'reject' | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraft(question.aiSuggestion?.text || '');
+  }, [question.aiSuggestion?.text, qid]);
+
+  const hasPending = question.aiSuggestion?.status === 'pending' && !!draft.trim();
+  const isUnanswered = question.status === 'UNANSWERED' && !question.answerText;
+
+  if (!isUnanswered) return null;
+
+  const handleSuggest = async (force = false) => {
+    setBusy('suggest');
+    setLocalError(null);
+    try {
+      const res = await api.suggestMLQuestionAi(qid, force);
+      const text = res.suggestion?.suggestionText || res.result.preview || '';
+      setDraft(text);
+      onUpdated();
+    } catch (e: any) {
+      setLocalError(e?.message || 'No se pudo generar sugerencia');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleSend = async () => {
+    const text = draft.trim();
+    if (!text) return;
+    setBusy('send');
+    setLocalError(null);
+    try {
+      await api.answerMLQuestion(qid, text);
+      onUpdated();
+      onMetricsRefresh?.();
+    } catch (e: any) {
+      setLocalError(e?.message || 'No se pudo enviar la respuesta');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleReject = async () => {
+    setBusy('reject');
+    setLocalError(null);
+    try {
+      await api.rejectMLQuestionSuggestion(qid);
+      setDraft('');
+      onUpdated();
+      onMetricsRefresh?.();
+    } catch (e: any) {
+      setLocalError(e?.message || 'No se pudo descartar');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="mt-2 space-y-2">
+      {hasPending && (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase bg-cyan-900/50 text-cyan-200 border border-cyan-700/50">
+          <Bot size={12} /> Sugerencia IA
+        </span>
+      )}
+      {hasPending ? (
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          rows={4}
+          className="w-full bg-slate-900/80 border border-cyan-700/40 rounded-xl px-3 py-2 text-sm text-cyan-50 placeholder-slate-500 focus:ring-2 focus:ring-cyan-500 outline-none resize-y min-h-[80px]"
+          placeholder="Editá la sugerencia antes de enviar…"
+        />
+      ) : (
+        <p className="text-slate-500 text-xs">Sin sugerencia aún.</p>
+      )}
+      {localError && <p className="text-xs text-red-300">{localError}</p>}
+      <div className="flex flex-wrap gap-1.5">
+        {!hasPending && (
+          <button
+            type="button"
+            disabled={!llmOk || busy !== null}
+            onClick={() => handleSuggest(false)}
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-cyan-700/80 hover:bg-cyan-600 text-white disabled:opacity-40"
+          >
+            {busy === 'suggest' ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+            Sugerir con IA
+          </button>
+        )}
+        {hasPending && (
+          <>
+            <button
+              type="button"
+              disabled={!draft.trim() || busy !== null}
+              onClick={handleSend}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-700/90 hover:bg-emerald-600 text-white disabled:opacity-40"
+            >
+              {busy === 'send' ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+              Enviar
+            </button>
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={() => handleSuggest(true)}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-700 hover:bg-slate-600 text-white disabled:opacity-40"
+            >
+              {busy === 'suggest' ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
+              Regenerar
+            </button>
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={handleReject}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-800 border border-slate-600 text-slate-300 hover:text-white disabled:opacity-40"
+            >
+              {busy === 'reject' ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+              Descartar
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
 };
 
 const MercadoLibreQuestions: React.FC = () => {
@@ -33,7 +187,29 @@ const MercadoLibreQuestions: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<QStatus>('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [aiMode, setAiMode] = useState<AiMode>('off');
+  const [llmOk, setLlmOk] = useState(false);
+  const [unchangedRate, setUnchangedRate] = useState<number | null>(null);
+  const [readyForAuto, setReadyForAuto] = useState(false);
   const limit = 15;
+
+  useEffect(() => {
+    api.getMLQuestionsAiConfig().then((cfg) => {
+      setAiMode(cfg.mode || (cfg.enabled ? 'auto' : 'off'));
+      setLlmOk(!!cfg.openAiConfigured);
+    }).catch(() => {});
+    api.getMLQuestionsAiMetrics().then((m) => {
+      setUnchangedRate(m.unchangedRate);
+      setReadyForAuto(m.readyForAuto);
+    }).catch(() => {});
+  }, []);
+
+  const refreshMetrics = useCallback(() => {
+    api.getMLQuestionsAiMetrics().then((m) => {
+      setUnchangedRate(m.unchangedRate);
+      setReadyForAuto(m.readyForAuto);
+    }).catch(() => {});
+  }, []);
 
   const fetchQuestions = useCallback(async () => {
     setLoading(true);
@@ -78,9 +254,26 @@ const MercadoLibreQuestions: React.FC = () => {
 
   const totalPages = Math.max(1, Math.ceil(total / limit));
   const currentPage = Math.floor(offset / limit) + 1;
+  const banner = modeBanner[aiMode];
+  const pendingCount = questions.filter((q) => q.aiSuggestion?.status === 'pending').length;
 
   return (
     <div className="space-y-4">
+      {banner && (
+        <div className={`rounded-xl border px-4 py-3 text-sm flex items-start gap-2 ${banner.className}`}>
+          <Bot size={18} className="shrink-0 mt-0.5" />
+          <div>
+            <span>{banner.text}{pendingCount > 0 ? ` · ${pendingCount} sugerencia(s) pendiente(s) en esta página.` : ''}</span>
+            {aiMode === 'suggest' && unchangedRate != null && (
+              <p className="text-xs mt-1 opacity-90">
+                Acierto IA: <strong>{unchangedRate}%</strong> enviadas sin editar
+                {readyForAuto ? ' · Podés pasar a modo automático en Configuración' : ''}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col gap-3">
         <p className="text-sm text-slate-400">
           Datos en vivo desde Mercado Libre. Orden: <strong className="text-slate-300">más recientes primero</strong>.
@@ -175,7 +368,7 @@ const MercadoLibreQuestions: React.FC = () => {
                   <th className="p-3 font-semibold">Publicación</th>
                   <th className="p-3 font-semibold">Comprador</th>
                   <th className="p-3 font-semibold min-w-[200px]">Pregunta</th>
-                  <th className="p-3 font-semibold min-w-[200px]">Tu respuesta</th>
+                  <th className="p-3 font-semibold min-w-[260px]">Tu respuesta</th>
                 </tr>
               </thead>
               <tbody>
@@ -213,7 +406,12 @@ const MercadoLibreQuestions: React.FC = () => {
                           )}
                         </div>
                       ) : (
-                        <span className="text-slate-500">—</span>
+                        <QuestionAiPanel
+                          question={q}
+                          llmOk={llmOk}
+                          onUpdated={fetchQuestions}
+                          onMetricsRefresh={refreshMetrics}
+                        />
                       )}
                     </td>
                   </tr>
