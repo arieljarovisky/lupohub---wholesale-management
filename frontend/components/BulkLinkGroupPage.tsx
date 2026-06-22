@@ -23,6 +23,7 @@ import {
 import { api } from '../services/api';
 import VariantExtraPublicationsPanel from './VariantExtraPublicationsPanel';
 import { labelTalle, codigoTalleParaSku } from '../utils/tallesTango';
+import { sizesAreBizDuplicatePair, sizesMatchForLink, getSizeCanonicalSet } from '../utils/inventoryUtils';
 import { normalizeMercadoLibreItemId } from '../utils/mercadoLibreItemId';
 import { normalizeTiendaNubeProductId } from '../utils/tiendaNubeUrl';
 
@@ -99,7 +100,10 @@ function matchLocalToRow(
 ): boolean {
   const skuN = norm(local.sku);
   if (skuN && row.sku && norm(row.sku) === skuN) return true;
-  return norm(row.size || '') === norm(local.size) && norm(row.color || '') === norm(local.color);
+  const colorOk = norm(row.color || '') === norm(local.color);
+  if (!colorOk) return false;
+  if (sizesMatchForLink(local.size, row.size || '')) return true;
+  return norm(row.size || '') === norm(local.size);
 }
 
 function mlOptionKey(row: MlVariationRow): string {
@@ -298,7 +302,13 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       if (!next[local.variantId]) next[local.variantId] = { ml: '', tn: '' };
       if (!next[local.variantId].ml?.trim() && mlList.length > 0) {
         let match = skuN ? mlList.find((m) => norm(m.sku) === skuN) : null;
-        if (!match) match = mlList.find((m) => norm(m.size) === sizeN && norm(m.color) === colorN);
+        if (!match) {
+          match = mlList.find(
+            (m) =>
+              norm(m.color) === colorN &&
+              (norm(m.size) === sizeN || sizesMatchForLink(local.size, m.size || ''))
+          );
+        }
         if (!match && mlList.length === 1) match = mlList[0];
         if (match) {
           const key = mlOptionKey(match);
@@ -311,7 +321,13 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       }
       if (!next[local.variantId].tn?.trim() && tnList.length > 0) {
         let match = skuN ? tnList.find((t) => norm(t.sku) === skuN) : null;
-        if (!match) match = tnList.find((t) => norm(t.size) === sizeN && norm(t.color) === colorN);
+        if (!match) {
+          match = tnList.find(
+            (t) =>
+              norm(t.color) === colorN &&
+              (norm(t.size) === sizeN || sizesMatchForLink(local.size, t.size || ''))
+          );
+        }
         if (!match && tnList.length === 1) match = tnList[0];
         if (match) {
           const key = tnOptionKey(match);
@@ -518,7 +534,14 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
     });
   };
 
-  const openUnifyModal = () => {
+  const openUnifyModal = (preset?: { absorbId: string; keeperId: string }) => {
+    if (preset) {
+      setSelectedUnifyIds([preset.absorbId, preset.keeperId]);
+      setUnifyAbsorbId(preset.absorbId);
+      setUnifyKeeperId(preset.keeperId);
+      setUnifyModalOpen(true);
+      return;
+    }
     if (selectedUnifyIds.length !== 2) {
       showToast('info', 'Marcá exactamente dos variantes para unificar.');
       return;
@@ -582,6 +605,34 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
     });
     return dup;
   }, [variants, assignments]);
+
+  const suggestedUnifyPair = useMemo((): { absorbId: string; keeperId: string } | null => {
+    const uTokens = new Set(['U', '170']);
+    const xgTokens = new Set(['XG', '180']);
+    const sizeKind = (size: string): 'u' | 'xg' | 'other' => {
+      const set = getSizeCanonicalSet(size);
+      if ([...set].some((x) => uTokens.has(x))) return 'u';
+      if ([...set].some((x) => xgTokens.has(x))) return 'xg';
+      return 'other';
+    };
+    for (let i = 0; i < variants.length; i++) {
+      for (let j = i + 1; j < variants.length; j++) {
+        const va = variants[i];
+        const vb = variants[j];
+        if (norm(va.color) !== norm(vb.color)) continue;
+        const uXgDup = sizesAreBizDuplicatePair(va.size, vb.size);
+        const sameTn =
+          duplicateTnByVariant.has(va.variantId) && duplicateTnByVariant.has(vb.variantId);
+        if (!uXgDup && !sameTn) continue;
+        const ka = sizeKind(va.size);
+        const kb = sizeKind(vb.size);
+        if (ka === 'u' && kb === 'xg') return { absorbId: va.variantId, keeperId: vb.variantId };
+        if (ka === 'xg' && kb === 'u') return { absorbId: vb.variantId, keeperId: va.variantId };
+        return { absorbId: va.variantId, keeperId: vb.variantId };
+      }
+    }
+    return null;
+  }, [variants, duplicateTnByVariant]);
 
   const appendMlSources = (raw: string) => {
     const ids = parseIdsFromInput(raw, 'ml');
@@ -1221,10 +1272,20 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2 text-[11px]">
+              {suggestedUnifyPair && selectedUnifyIds.length !== 2 && (
+                <button
+                  type="button"
+                  onClick={() => openUnifyModal(suggestedUnifyPair)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold transition-colors"
+                >
+                  <GitMerge size={13} />
+                  Unificar U y XG (mismo artículo)
+                </button>
+              )}
               {selectedUnifyIds.length === 2 && (
                 <button
                   type="button"
-                  onClick={openUnifyModal}
+                  onClick={() => openUnifyModal()}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold transition-colors"
                 >
                   <GitMerge size={13} />
@@ -1242,6 +1303,13 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
               </span>
             </div>
           </div>
+          {suggestedUnifyPair && (
+            <div className="rounded-xl border border-violet-700/50 bg-violet-950/25 px-3 py-2.5 text-xs text-violet-100 leading-relaxed">
+              <strong className="text-violet-200">U y XG son el mismo artículo</strong> en este caso: tenés dos filas
+              locales (170/U y 180/XG) apuntando al mismo listing. Unificá para dejar una sola variante con todo el
+              stock y los vínculos ML/TN.
+            </div>
+          )}
           <div className="flex items-center gap-3">
             <div className="flex-1 h-2 rounded-full bg-slate-800 overflow-hidden">
               <div
@@ -1488,7 +1556,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                           )}
                           {hasDuplicateTn && (
                             <p className="text-[10px] text-rose-400 pl-0.5">
-                              Misma variante TN que otra fila — unificá o corregí el emparejamiento.
+                              Misma variante TN que otra fila — si U y XG son el mismo artículo, unificá las filas.
                             </p>
                           )}
                         </div>
@@ -1586,8 +1654,8 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       {unifyModalOpen && (() => {
         const absorb = variants.find((v) => v.variantId === unifyAbsorbId);
         const keeper = variants.find((v) => v.variantId === unifyKeeperId);
-        const differentSize =
-          absorb && keeper ? norm(absorb.size) !== norm(keeper.size) : false;
+        const differentSize = absorb && keeper ? norm(absorb.size) !== norm(keeper.size) : false;
+        const uXgDuplicate = absorb && keeper ? sizesAreBizDuplicatePair(absorb.size, keeper.size) : false;
         const unifyOptions = variants.filter((v) => selectedUnifyIds.includes(v.variantId));
         return (
           <div className="fixed inset-0 z-[70] bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
@@ -1653,11 +1721,19 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                       ))}
                   </select>
                 </div>
-                {differentSize && (
-                  <div className="rounded-xl border border-amber-700/50 bg-amber-950/30 px-3 py-2.5 text-xs text-amber-200 leading-relaxed">
-                    Talles distintos ({formatSizeForLink(absorb?.size)} vs {formatSizeForLink(keeper?.size)}).
-                    La variante que conservás mantiene su talle; la otra desaparece con su stock sumado.
+                {uXgDuplicate ? (
+                  <div className="rounded-xl border border-violet-700/50 bg-violet-950/30 px-3 py-2.5 text-xs text-violet-100 leading-relaxed">
+                    <strong className="text-violet-200">Mismo artículo:</strong> U (170) y XG (180) son códigos
+                    distintos para la misma prenda. La variante que conservás mantiene su talle; la otra se elimina y su
+                    stock se suma.
                   </div>
+                ) : (
+                  differentSize && (
+                    <div className="rounded-xl border border-amber-700/50 bg-amber-950/30 px-3 py-2.5 text-xs text-amber-200 leading-relaxed">
+                      Talles distintos ({formatSizeForLink(absorb?.size)} vs {formatSizeForLink(keeper?.size)}).
+                      La variante que conservás mantiene su talle; la otra desaparece con su stock sumado.
+                    </div>
+                  )
                 )}
               </div>
               <div className="p-4 border-t border-slate-700 flex flex-col sm:flex-row gap-2 shrink-0">

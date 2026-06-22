@@ -268,6 +268,35 @@ export function getSizeCanonicalSet(sizeStr: string): Set<string> {
   return set;
 }
 
+const U_SIZE_TOKENS = new Set(['U', '170']);
+const XG_SIZE_TOKENS = new Set(['XG', '180']);
+
+/**
+ * U/170 y XG/180 a veces duplican la misma variante local (mismo artículo en TN/ML con distinto código).
+ */
+export function sizesAreBizDuplicatePair(sizeA: string, sizeB: string): boolean {
+  const a = getSizeCanonicalSet(sizeA);
+  const b = getSizeCanonicalSet(sizeB);
+  for (const x of a) {
+    if (b.has(x)) return false;
+  }
+  const aHasU = [...a].some((x) => U_SIZE_TOKENS.has(x));
+  const aHasXG = [...a].some((x) => XG_SIZE_TOKENS.has(x));
+  const bHasU = [...b].some((x) => U_SIZE_TOKENS.has(x));
+  const bHasXG = [...b].some((x) => XG_SIZE_TOKENS.has(x));
+  return (aHasU && bHasXG) || (aHasXG && bHasU);
+}
+
+/** Comparar talle local vs externo (incluye equivalencia U ↔ XG para emparejar). */
+export function sizesMatchForLink(localSize: string, externalSize: string): boolean {
+  const a = getSizeCanonicalSet(localSize);
+  const b = getSizeCanonicalSet(externalSize);
+  for (const x of a) {
+    if (b.has(x)) return true;
+  }
+  return sizesAreBizDuplicatePair(localSize, externalSize);
+}
+
 export function matchesSizeFilter(productSizeCode: string, selectedFilterSize: string): boolean {
   if (selectedFilterSize === 'ALL') return true;
   const productSet = getSizeCanonicalSet(productSizeCode);
