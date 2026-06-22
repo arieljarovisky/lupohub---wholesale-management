@@ -273,9 +273,14 @@ export async function mergeTwoVariants(
 }
 
 /**
- * Une la variante `absorbVariantId` en `keeperVariantId` (mismo producto, mismo talle, mismo color por nombre/código/id).
+ * Une la variante `absorbVariantId` en `keeperVariantId` (mismo producto, mismo color por nombre/código/id).
+ * Por defecto exige mismo talle; con allowDifferentSize se permite unificar talles distintos (la que queda conserva su talle).
  */
-export async function mergeManualVariantPair(keeperVariantId: string, absorbVariantId: string): Promise<void> {
+export async function mergeManualVariantPair(
+  keeperVariantId: string,
+  absorbVariantId: string,
+  options?: { allowDifferentSize?: boolean }
+): Promise<void> {
   if (!keeperVariantId || !absorbVariantId || keeperVariantId === absorbVariantId) {
     throw new Error('Indicá dos variantes distintas.');
   }
@@ -310,7 +315,7 @@ export async function mergeManualVariantPair(keeperVariantId: string, absorbVari
   if (String(k.product_id) !== String(a.product_id)) {
     throw new Error('Las variantes deben ser del mismo artículo (producto).');
   }
-  if (String(k.size_id) !== String(a.size_id)) {
+  if (String(k.size_id) !== String(a.size_id) && !options?.allowDifferentSize) {
     throw new Error('Los talles deben coincidir para unificar variantes.');
   }
   if (String(k.color_id) !== String(a.color_id)) {

@@ -17,6 +17,8 @@ import {
   Layers,
   Plus,
   Trash2,
+  GitMerge,
+  X,
 } from 'lucide-react';
 import { api } from '../services/api';
 import VariantExtraPublicationsPanel from './VariantExtraPublicationsPanel';
@@ -153,8 +155,115 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
   const [packTn, setPackTn] = useState(1);
   const [expandedExtraVariantId, setExpandedExtraVariantId] = useState<string | null>(null);
   const [pubCounts, setPubCounts] = useState<Record<string, number>>({});
+  const [selectedUnifyIds, setSelectedUnifyIds] = useState<string[]>([]);
+  const [unifyModalOpen, setUnifyModalOpen] = useState(false);
+  const [unifyAbsorbId, setUnifyAbsorbId] = useState<string | null>(null);
+  const [unifyKeeperId, setUnifyKeeperId] = useState<string | null>(null);
+  const [unifySaving, setUnifySaving] = useState(false);
 
   const goBack = () => onNavigate('inventory');
+
+  const loadArticle = useCallback(async () => {
+    if (!groupKey) return;
+    setLoading(true);
+    try {
+      const p: any = await api.getProductBySku(groupKey, INVENTORY_PRODUCT_FETCH_OPTS);
+      if (!p) {
+        showToast('error', 'Artículo no encontrado');
+        goBack();
+        return;
+      }
+      setProductId(p.id);
+      setProductName(p.name || groupKey);
+      setPackMl(p.mercado_libre_pack_size ?? 1);
+      setPackTn(p.tienda_nube_pack_size ?? 1);
+      const mlSet = new Set<string>();
+      const tnSet = new Set<string>();
+      const parentMl = normalizeMercadoLibreItemId(p.externalIds?.mercadoLibre || '');
+      const parentTn = normalizeTiendaNubeProductId(p.externalIds?.tiendaNube || '');
+      if (parentMl) mlSet.add(parentMl);
+      if (parentTn && /^\d+$/.test(parentTn)) tnSet.add(parentTn);
+      const list = (p.variants || []).map((v: any) => {
+        const variantId = v.variant_id;
+        const rawSku = (v.variant_sku ?? '').toString().trim();
+        const extSku = (v.external_sku ?? '').toString().trim();
+        const fallbackSku = `${groupKey}-${v.size_code}-${v.color_code}`;
+        const sku =
+          rawSku && rawSku !== String(variantId) ? rawSku : extSku ? extSku : fallbackSku;
+        return {
+          variantId,
+          sku,
+          size: v.size_code,
+          color: v.color_name,
+          externalIds: v.externalIds,
+        };
+      });
+      setVariants(list);
+      const pubResults = await Promise.all(
+        list.map((v: { variantId: string }) =>
+          api.getVariantPublications(v.variantId).catch(() => [] as Array<{ platform: string; external_product_id: string }>)
+        )
+      );
+      pubResults.flat().forEach((pub) => {
+        if (pub.platform === 'mercadolibre' && pub.external_product_id) {
+          mlSet.add(pub.external_product_id);
+        }
+        if (pub.platform === 'tiendanube' && pub.external_product_id) {
+          tnSet.add(pub.external_product_id);
+        }
+      });
+      setMlSources([...mlSet].map((id) => ({ id })));
+      setTnSources([...tnSet].map((id) => ({ id })));
+      const nextAssign: Record<string, VariantAssignment> = {};
+      list.forEach((v: any, idx: number) => {
+        const pubs = pubResults[idx] || [];
+        const mlPub = pubs.find((p: { platform: string }) => p.platform === 'mercadolibre');
+        const tnPub = pubs.find((p: { platform: string }) => p.platform === 'tiendanube');
+        const mlVal =
+          v.externalIds?.mercadoLibreVariant != null &&
+          String(v.externalIds.mercadoLibreVariant).trim() !== ''
+            ? String(v.externalIds.mercadoLibreVariant).trim()
+            : v.externalIds?.mercadoLibreItemId != null &&
+                String(v.externalIds.mercadoLibreItemId).trim() !== ''
+              ? String(v.externalIds.mercadoLibreItemId).trim()
+              : '';
+        const mlItemId =
+          mlVal && /^ML[A-Z]{1,5}\d+$/i.test(mlVal)
+            ? mlVal.toUpperCase()
+            : (mlPub as { external_product_id?: string } | undefined)?.external_product_id ||
+              parentMl ||
+              undefined;
+        const tnVal = v.externalIds?.tiendaNubeVariant
+          ? String(v.externalIds.tiendaNubeVariant)
+          : '';
+        const tnProductId =
+          (tnPub as { external_product_id?: string } | undefined)?.external_product_id ||
+          parentTn ||
+          undefined;
+        nextAssign[v.variantId] = {
+          ml: mlVal,
+          mlItemId,
+          tn: tnVal,
+          tnProductId,
+        };
+      });
+      setAssignments(nextAssign);
+      const skuMap: Record<string, string> = {};
+      list.forEach((v: any) => {
+        skuMap[v.variantId] = String(v.sku || '');
+      });
+      setSkuEdits(skuMap);
+      setSelectedUnifyIds((prev) => prev.filter((id) => list.some((v: { variantId: string }) => v.variantId === id)));
+    } catch {
+      showToast('error', 'Error cargando el artículo');
+    } finally {
+      setLoading(false);
+    }
+  }, [groupKey, onNavigate, showToast]);
+
+  useEffect(() => {
+    void loadArticle();
+  }, [loadArticle]);
 
   const runAutoMatch = (
     localVariants: typeof variants,
@@ -398,101 +507,81 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
     };
   }, [variants]);
 
-  useEffect(() => {
-    if (!groupKey) return;
-    setLoading(true);
-    api
-      .getProductBySku(groupKey, INVENTORY_PRODUCT_FETCH_OPTS)
-      .then(async (p: any) => {
-        if (!p) {
-          showToast('error', 'Artículo no encontrado');
-          goBack();
-          return;
-        }
-        setProductId(p.id);
-        setProductName(p.name || groupKey);
-        setPackMl(p.mercado_libre_pack_size ?? 1);
-        setPackTn(p.tienda_nube_pack_size ?? 1);
-        const mlSet = new Set<string>();
-        const tnSet = new Set<string>();
-        const parentMl = normalizeMercadoLibreItemId(p.externalIds?.mercadoLibre || '');
-        const parentTn = normalizeTiendaNubeProductId(p.externalIds?.tiendaNube || '');
-        if (parentMl) mlSet.add(parentMl);
-        if (parentTn && /^\d+$/.test(parentTn)) tnSet.add(parentTn);
-        const list = (p.variants || []).map((v: any) => {
-          const variantId = v.variant_id;
-          const rawSku = (v.variant_sku ?? '').toString().trim();
-          const extSku = (v.external_sku ?? '').toString().trim();
-          const fallbackSku = `${groupKey}-${v.size_code}-${v.color_code}`;
-          const sku =
-            rawSku && rawSku !== String(variantId) ? rawSku : extSku ? extSku : fallbackSku;
-          return {
-            variantId,
-            sku,
-            size: v.size_code,
-            color: v.color_name,
-            externalIds: v.externalIds,
-          };
-        });
-        setVariants(list);
-        const pubResults = await Promise.all(
-          list.map((v: { variantId: string }) =>
-            api.getVariantPublications(v.variantId).catch(() => [] as Array<{ platform: string; external_product_id: string }>)
-          )
-        );
-        pubResults.flat().forEach((pub) => {
-          if (pub.platform === 'mercadolibre' && pub.external_product_id) {
-            mlSet.add(pub.external_product_id);
-          }
-          if (pub.platform === 'tiendanube' && pub.external_product_id) {
-            tnSet.add(pub.external_product_id);
-          }
-        });
-        setMlSources([...mlSet].map((id) => ({ id })));
-        setTnSources([...tnSet].map((id) => ({ id })));
-        const nextAssign: Record<string, VariantAssignment> = {};
-        list.forEach((v: any, idx: number) => {
-          const pubs = pubResults[idx] || [];
-          const mlPub = pubs.find((p: { platform: string }) => p.platform === 'mercadolibre');
-          const tnPub = pubs.find((p: { platform: string }) => p.platform === 'tiendanube');
-          const mlVal =
-            v.externalIds?.mercadoLibreVariant != null &&
-            String(v.externalIds.mercadoLibreVariant).trim() !== ''
-              ? String(v.externalIds.mercadoLibreVariant).trim()
-              : v.externalIds?.mercadoLibreItemId != null &&
-                  String(v.externalIds.mercadoLibreItemId).trim() !== ''
-                ? String(v.externalIds.mercadoLibreItemId).trim()
-                : '';
-          const mlItemId =
-            mlVal && /^ML[A-Z]{1,5}\d+$/i.test(mlVal)
-              ? mlVal.toUpperCase()
-              : (mlPub as { external_product_id?: string } | undefined)?.external_product_id ||
-                parentMl ||
-                undefined;
-          const tnVal = v.externalIds?.tiendaNubeVariant
-            ? String(v.externalIds.tiendaNubeVariant)
-            : '';
-          const tnProductId =
-            (tnPub as { external_product_id?: string } | undefined)?.external_product_id ||
-            parentTn ||
-            undefined;
-          nextAssign[v.variantId] = {
-            ml: mlVal,
-            mlItemId,
-            tn: tnVal,
-            tnProductId,
-          };
-        });
-        setAssignments(nextAssign);
-        const skuMap: Record<string, string> = {};
-        list.forEach((v: any) => {
-          skuMap[v.variantId] = String(v.sku || '');
-        });
-        setSkuEdits(skuMap);
-      })
-      .catch(() => showToast('error', 'Error cargando el artículo'))
-      .finally(() => setLoading(false));
-  }, [groupKey]);
+  const toggleUnifySelect = (variantId: string) => {
+    setSelectedUnifyIds((prev) => {
+      if (prev.includes(variantId)) return prev.filter((id) => id !== variantId);
+      if (prev.length >= 2) {
+        showToast('info', 'Elegí como máximo dos variantes para unificar.');
+        return prev;
+      }
+      return [...prev, variantId];
+    });
+  };
+
+  const openUnifyModal = () => {
+    if (selectedUnifyIds.length !== 2) {
+      showToast('info', 'Marcá exactamente dos variantes para unificar.');
+      return;
+    }
+    const [a, b] = selectedUnifyIds;
+    setUnifyAbsorbId(a);
+    setUnifyKeeperId(b);
+    setUnifyModalOpen(true);
+  };
+
+  const confirmVariantUnify = async () => {
+    if (!unifyAbsorbId || !unifyKeeperId || unifyAbsorbId === unifyKeeperId) {
+      showToast('error', 'Elegí dos variantes distintas.');
+      return;
+    }
+    const absorb = variants.find((v) => v.variantId === unifyAbsorbId);
+    const keeper = variants.find((v) => v.variantId === unifyKeeperId);
+    if (!absorb || !keeper) return;
+    if (norm(absorb.color) !== norm(keeper.color)) {
+      showToast('error', 'Solo se pueden unificar variantes del mismo color.');
+      return;
+    }
+    const differentSize = norm(absorb.size) !== norm(keeper.size);
+    setUnifySaving(true);
+    try {
+      await api.mergeManualVariantsPair({
+        keeperVariantId: unifyKeeperId,
+        absorbVariantId: unifyAbsorbId,
+        allowDifferentSize: differentSize,
+      });
+      showToast('success', 'Variantes unificadas. Stock y vínculos ML/TN quedaron en la variante que elegiste conservar.');
+      setUnifyModalOpen(false);
+      setUnifyAbsorbId(null);
+      setUnifyKeeperId(null);
+      setSelectedUnifyIds([]);
+      onImportComplete?.();
+      await loadArticle();
+    } catch (e: any) {
+      showToast('error', e?.message || 'Error al unificar variantes');
+    } finally {
+      setUnifySaving(false);
+    }
+  };
+
+  const duplicateTnByVariant = useMemo(() => {
+    const keyToIds = new Map<string, string[]>();
+    variants.forEach((v) => {
+      const a = assignments[v.variantId];
+      const tn = a?.tn?.trim();
+      if (!tn) return;
+      const key = a?.tnProductId
+        ? tnOptionKey({ productId: a.tnProductId, variantId: tn } as TnVariantRow)
+        : tn;
+      const list = keyToIds.get(key) || [];
+      list.push(v.variantId);
+      keyToIds.set(key, list);
+    });
+    const dup = new Set<string>();
+    keyToIds.forEach((ids) => {
+      if (ids.length > 1) ids.forEach((id) => dup.add(id));
+    });
+    return dup;
+  }, [variants, assignments]);
 
   const appendMlSources = (raw: string) => {
     const ids = parseIdsFromInput(raw, 'ml');
@@ -1127,12 +1216,21 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
             <div>
               <h2 className="text-sm font-bold text-white">Paso 2 · Emparejar variantes</h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                Una variación ML o variante TN solo puede asignarse a una fila. Revisá SKU, talle y color antes de guardar.
-                Las publicaciones extra del paso 1 se sincronizan al guardar; en{' '}
-                <strong className="text-indigo-300">Más publ.</strong> podés ver o quitar las ya vinculadas.
+                Una variación ML o variante TN solo puede asignarse a una fila. Si tenés duplicados locales, marcá dos filas y usá{' '}
+                <strong className="text-violet-300">Unificar</strong>. Las publicaciones extra del paso 1 se sincronizan al guardar.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2 text-[11px]">
+              {selectedUnifyIds.length === 2 && (
+                <button
+                  type="button"
+                  onClick={openUnifyModal}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold transition-colors"
+                >
+                  <GitMerge size={13} />
+                  Unificar 2 seleccionadas
+                </button>
+              )}
               <span className="px-2 py-1 rounded-lg bg-amber-950/40 text-amber-300 border border-amber-800/40 font-semibold">
                 ML {linkStats.ml}/{linkStats.total}
               </span>
@@ -1186,6 +1284,9 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
             <table className="w-full min-w-[860px] text-sm">
               <thead className="sticky top-0 z-10 bg-slate-800/95 backdrop-blur-sm">
                 <tr className="border-b border-slate-700/80">
+                  <th className="text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider p-3 w-10" title="Seleccionar para unificar">
+                    ○
+                  </th>
                   <th className="text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider p-3 w-8" />
                   <th className="text-left text-[11px] font-bold text-slate-400 uppercase tracking-wider p-3">
                     Mi variante
@@ -1211,6 +1312,8 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                   const tnLabel = resolveTnLabel(v.variantId);
                   const pubCount = pubCounts[v.variantId] ?? 0;
                   const isExtraOpen = expandedExtraVariantId === v.variantId;
+                  const isUnifySelected = selectedUnifyIds.includes(v.variantId);
+                  const hasDuplicateTn = duplicateTnByVariant.has(v.variantId);
 
                   return (
                     <React.Fragment key={v.variantId}>
@@ -1221,8 +1324,17 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                           : status === 'partial'
                             ? 'bg-amber-950/10'
                             : ''
-                      } ${isExtraOpen ? 'bg-indigo-950/20' : ''}`}
+                      } ${isExtraOpen ? 'bg-indigo-950/20' : ''} ${isUnifySelected ? 'ring-1 ring-inset ring-violet-500/50' : ''}`}
                     >
+                      <td className="p-3 align-top">
+                        <input
+                          type="checkbox"
+                          checked={isUnifySelected}
+                          onChange={() => toggleUnifySelect(v.variantId)}
+                          className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-violet-500 focus:ring-violet-500/50"
+                          title="Seleccionar para unificar"
+                        />
+                      </td>
                       <td className="p-3 align-top">
                         {status === 'complete' ? (
                           <CheckCircle2 size={18} className="text-emerald-400" title="ML y TN vinculados" />
@@ -1374,6 +1486,11 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                               ↳ {tnLabel}
                             </p>
                           )}
+                          {hasDuplicateTn && (
+                            <p className="text-[10px] text-rose-400 pl-0.5">
+                              Misma variante TN que otra fila — unificá o corregí el emparejamiento.
+                            </p>
+                          )}
                         </div>
                       </td>
                       <td className="p-3 align-top">
@@ -1399,7 +1516,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                     </tr>
                     {isExtraOpen && (
                       <tr className="border-b border-slate-700/40">
-                        <td colSpan={5} className="p-0">
+                        <td colSpan={6} className="p-0">
                           <VariantExtraPublicationsPanel
                             variantId={v.variantId}
                             variantSku={skuEdits[v.variantId] ?? v.sku ?? ''}
@@ -1465,6 +1582,107 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
           </button>
         </div>
       </footer>
+
+      {unifyModalOpen && (() => {
+        const absorb = variants.find((v) => v.variantId === unifyAbsorbId);
+        const keeper = variants.find((v) => v.variantId === unifyKeeperId);
+        const differentSize =
+          absorb && keeper ? norm(absorb.size) !== norm(keeper.size) : false;
+        const unifyOptions = variants.filter((v) => selectedUnifyIds.includes(v.variantId));
+        return (
+          <div className="fixed inset-0 z-[70] bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+            <div className="bg-slate-900 border border-slate-700 rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md max-h-[90vh] flex flex-col shadow-2xl">
+              <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between gap-2 shrink-0">
+                <div className="min-w-0">
+                  <h3 className="text-white font-bold text-base flex items-center gap-2">
+                    <GitMerge size={18} className="text-violet-400" />
+                    Unificar variantes
+                  </h3>
+                  <p className="text-[11px] text-slate-400 mt-1 leading-snug">
+                    La variante que se absorbe se elimina; stock y vínculos ML/TN pasan a la que queda.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (unifySaving) return;
+                    setUnifyModalOpen(false);
+                  }}
+                  className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="p-4 space-y-4 overflow-y-auto">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">Absorber (se elimina)</label>
+                  <select
+                    value={unifyAbsorbId ?? ''}
+                    onChange={(e) => {
+                      const id = e.target.value || null;
+                      setUnifyAbsorbId(id);
+                      if (id && id === unifyKeeperId) {
+                        const other = unifyOptions.find((v) => v.variantId !== id);
+                        setUnifyKeeperId(other?.variantId ?? null);
+                      }
+                    }}
+                    disabled={unifySaving}
+                    className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2.5 text-white text-sm outline-none focus:border-violet-500/60"
+                  >
+                    {unifyOptions.map((v) => (
+                      <option key={v.variantId} value={v.variantId}>
+                        {formatOptionLabel(v)} · {v.sku}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1.5">Conservar (queda)</label>
+                  <select
+                    value={unifyKeeperId ?? ''}
+                    onChange={(e) => setUnifyKeeperId(e.target.value || null)}
+                    disabled={unifySaving}
+                    className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2.5 text-white text-sm outline-none focus:border-violet-500/60"
+                  >
+                    {unifyOptions
+                      .filter((v) => v.variantId !== unifyAbsorbId)
+                      .map((v) => (
+                        <option key={v.variantId} value={v.variantId}>
+                          {formatOptionLabel(v)} · {v.sku}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+                {differentSize && (
+                  <div className="rounded-xl border border-amber-700/50 bg-amber-950/30 px-3 py-2.5 text-xs text-amber-200 leading-relaxed">
+                    Talles distintos ({formatSizeForLink(absorb?.size)} vs {formatSizeForLink(keeper?.size)}).
+                    La variante que conservás mantiene su talle; la otra desaparece con su stock sumado.
+                  </div>
+                )}
+              </div>
+              <div className="p-4 border-t border-slate-700 flex flex-col sm:flex-row gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setUnifyModalOpen(false)}
+                  disabled={unifySaving}
+                  className="flex-1 py-2.5 rounded-xl border border-slate-600 text-slate-300 text-sm font-semibold hover:bg-slate-800 disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void confirmVariantUnify()}
+                  disabled={unifySaving || !unifyKeeperId || !unifyAbsorbId || unifyKeeperId === unifyAbsorbId}
+                  className="flex-1 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-bold disabled:opacity-40 flex items-center justify-center gap-2"
+                >
+                  {unifySaving ? <Loader2 size={16} className="animate-spin" /> : <GitMerge size={16} />}
+                  Unificar ahora
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

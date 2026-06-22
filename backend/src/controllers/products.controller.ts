@@ -1861,15 +1861,16 @@ export const mergeManualProducts = async (req: Request, res: Response) => {
   }
 };
 
-/** Une dos variantes del mismo artículo con el mismo talle (size_id). Body: { keeperVariantId, absorbVariantId }. */
+/** Une dos variantes del mismo artículo. Body: { keeperVariantId, absorbVariantId, allowDifferentSize? }. */
 export const mergeManualVariants = async (req: Request, res: Response) => {
   try {
     const keeperVariantId = String(req.body?.keeperVariantId || '').trim();
     const absorbVariantId = String(req.body?.absorbVariantId || '').trim();
+    const allowDifferentSize = req.body?.allowDifferentSize === true;
     if (!keeperVariantId || !absorbVariantId) {
       return res.status(400).json({ message: 'keeperVariantId y absorbVariantId son obligatorios.' });
     }
-    await mergeManualVariantPair(keeperVariantId, absorbVariantId);
+    await mergeManualVariantPair(keeperVariantId, absorbVariantId, { allowDifferentSize });
     res.json({ ok: true });
   } catch (e: any) {
     const msg = e?.message || String(e);
