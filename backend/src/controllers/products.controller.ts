@@ -742,6 +742,7 @@ export const bulkLinkVariants = async (req: Request, res: Response) => {
       mercadoLibreVariantId?: string | number;
       mercadoLibreItemId?: string;
       tiendaNubeVariantId?: string | number;
+      tiendaNubeProductId?: string | number;
       externalSku?: string;
     }>;
   };
@@ -772,17 +773,43 @@ export const bulkLinkVariants = async (req: Request, res: Response) => {
       );
       resolvedProductId = row?.product_id ?? undefined;
     }
+    const tnProductIdsInLinks = new Set(
+      links
+        .map((l: any) =>
+          l.tiendaNubeProductId != null && String(l.tiendaNubeProductId).trim() !== ''
+            ? String(l.tiendaNubeProductId).trim()
+            : null
+        )
+        .filter(Boolean) as string[]
+    );
+    const mlParentsInLinks = new Set(
+      links
+        .map((l: any) =>
+          l.mercadoLibreItemId != null && String(l.mercadoLibreItemId).trim() !== ''
+            ? String(l.mercadoLibreItemId).trim()
+            : null
+        )
+        .filter(Boolean) as string[]
+    );
     if (resolvedProductId) {
-      if (tiendaNubeProductId != null && tiendaNubeProductId !== '') {
-        await execute(
-          `UPDATE products SET tienda_nube_id = ? WHERE id = ?`,
-          [String(tiendaNubeProductId), resolvedProductId]
-        );
+      const resolvedTnProduct =
+        tnProductIdsInLinks.size === 1
+          ? [...tnProductIdsInLinks][0]
+          : null;
+      if (resolvedTnProduct) {
+        await execute(`UPDATE products SET tienda_nube_id = ? WHERE id = ?`, [resolvedTnProduct, resolvedProductId]);
       }
+
       if (allMlOwnPublications) {
-        // Cada variante tiene su MLA: el ID padre no debe usarse para sync (evita pisar stock).
         await execute(`UPDATE products SET mercado_libre_id = NULL WHERE id = ?`, [resolvedProductId]);
-      } else if (mercadoLibreItemId != null && mercadoLibreItemId !== '') {
+      } else if (mlParentsInLinks.size === 1) {
+        await execute(`UPDATE products SET mercado_libre_id = ? WHERE id = ?`, [[...mlParentsInLinks][0], resolvedProductId]);
+      } else if (
+        mlParentsInLinks.size === 0 &&
+        mercadoLibreItemId != null &&
+        mercadoLibreItemId !== '' &&
+        !allMlOwnPublications
+      ) {
         await execute(
           `UPDATE products SET mercado_libre_id = ? WHERE id = ?`,
           [String(mercadoLibreItemId), resolvedProductId]
@@ -800,20 +827,29 @@ export const bulkLinkVariants = async (req: Request, res: Response) => {
         )
       : null;
     const tnProductIdForPub =
-      (tiendaNubeProductId && String(tiendaNubeProductId).trim()) ||
-      (productRow?.tienda_nube_id && String(productRow.tienda_nube_id).trim()) ||
-      null;
+      tnProductIdsInLinks.size === 1
+        ? [...tnProductIdsInLinks][0]
+        : null;
     const mlParentIdForPub =
       allMlOwnPublications
         ? null
-        : (mercadoLibreItemId && String(mercadoLibreItemId).trim()) ||
-          (productRow?.mercado_libre_id && String(productRow.mercado_libre_id).trim()) ||
-          null;
+        : mlParentsInLinks.size === 1
+          ? [...mlParentsInLinks][0]
+          : (mercadoLibreItemId && String(mercadoLibreItemId).trim()) ||
+            (productRow?.mercado_libre_id && String(productRow.mercado_libre_id).trim()) ||
+            null;
     const tnPack = Number(productRow?.tn_pack ?? 1) || 1;
     const mlPack = Number(productRow?.ml_pack ?? 1) || 1;
 
     for (const link of links) {
-      const { variantId, mercadoLibreVariantId, mercadoLibreItemId: linkMlItemId, tiendaNubeVariantId, externalSku } = link;
+      const {
+        variantId,
+        mercadoLibreVariantId,
+        mercadoLibreItemId: linkMlItemId,
+        tiendaNubeVariantId,
+        tiendaNubeProductId: linkTnProductId,
+        externalSku,
+      } = link;
       if (!variantId) continue;
       const mlItemId = (linkMlItemId != null && String(linkMlItemId).trim() !== '') ? String(linkMlItemId).trim() : null;
       const mlVarId =
@@ -822,6 +858,10 @@ export const bulkLinkVariants = async (req: Request, res: Response) => {
           : null;
       const tnVarId =
         tiendaNubeVariantId != null && String(tiendaNubeVariantId).trim() !== '' ? String(tiendaNubeVariantId).trim() : null;
+      const tnProdId =
+        linkTnProductId != null && String(linkTnProductId).trim() !== ''
+          ? String(linkTnProductId).trim()
+          : tnProductIdForPub;
 
       const sets: string[] = [];
       const params: unknown[] = [];
@@ -845,12 +885,12 @@ export const bulkLinkVariants = async (req: Request, res: Response) => {
         await execute(`UPDATE product_variants SET ${sets.join(', ')} WHERE id = ?`, params);
       }
 
-      if (tnVarId && tnProductIdForPub) {
+      if (tnVarId && tnProdId) {
         await execute(
           `INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
            VALUES (?, ?, 'tiendanube', ?, ?, ?)
-           ON DUPLICATE KEY UPDATE pack_size = VALUES(pack_size)`,
-          [uuidv4(), variantId, tnProductIdForPub, tnVarId, tnPack]
+           ON DUPLICATE KEY UPDATE external_product_id = VALUES(external_product_id), pack_size = VALUES(pack_size)`,
+          [uuidv4(), variantId, tnProdId, tnVarId, tnPack]
         );
       }
 

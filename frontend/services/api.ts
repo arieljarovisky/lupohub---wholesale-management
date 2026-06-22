@@ -1342,7 +1342,7 @@ export const api = {
     productId?: string;
     mercadoLibreItemId?: string;
     tiendaNubeProductId?: string;
-    links: Array<{ variantId: string; mercadoLibreVariantId?: string | number; mercadoLibreItemId?: string; tiendaNubeVariantId?: string | number; externalSku?: string }>;
+    links: Array<{ variantId: string; mercadoLibreVariantId?: string | number; mercadoLibreItemId?: string; tiendaNubeVariantId?: string | number; tiendaNubeProductId?: string | number; externalSku?: string }>;
   }): Promise<{ updated: number; synced?: number; productId?: string }> => {
     // Sincroniza stock con ML/TN por cada variante; 15s por defecto suele ser insuficiente.
     return request<{ updated: number; synced?: number; productId?: string }>('/products/variants/bulk-link', 'POST', payload, undefined, 120000);

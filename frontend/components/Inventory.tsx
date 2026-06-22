@@ -22,7 +22,6 @@ import * as XLSX from 'xlsx';
 import MercadoLibreStock from './MercadoLibreStock';
 import TiendaNubeStock from './TiendaNubeStock';
 import PublicationStockBundles from './PublicationStockBundles';
-import LinkVariantModal from './LinkVariantModal';
 import {
   normalizeMercadoLibreItemId,
   extractMercadoLibreVariationIdFromUrl,
@@ -178,8 +177,6 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [selectedColorIds, setSelectedColorIds] = useState<string[]>([]);
   const [initialStock, setInitialStock] = useState('0');
 
-  // Modal vincular publicaciones (variante individual)
-  const [linkingVariant, setLinkingVariant] = useState<Product | null>(null);
 
   /** Fusión manual: varios productos padre → uno (stock y variantes). */
   const [showMergeManualModal, setShowMergeManualModal] = useState(false);
@@ -1835,27 +1832,6 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     });
   };
 
-  const handleOpenLinkModal = (product: Product) => {
-    setLinkingVariant(product);
-  };
-
-  const refreshLinkVariantInventory = useCallback((groupKey?: string) => {
-    setServerListRefreshKey((k) => k + 1);
-    onImportComplete?.();
-    if (!groupKey) return;
-    api.getVariantsBySku(groupKey, INVENTORY_PRODUCT_FETCH_OPTS).then((variants) => {
-      const mapped = mapInventoryVariantsFromApi(groupKey, variants, {
-        name: groupedProducts[groupKey]?.[0]?.name || '',
-        category: groupedProducts[groupKey]?.[0]?.category || 'General',
-        price: groupedProducts[groupKey]?.[0]?.price || 0,
-      });
-      setLoadedVariants((prev) => ({ ...prev, [groupKey]: mapped }));
-      api.getVariantExternalStocks(mapped.map((x) => x.id)).then((res) => {
-        if (res?.stocks) setVariantExternalStocks((prev) => ({ ...prev, ...res.stocks }));
-      }).catch(() => {});
-    }).catch(() => {});
-  }, [groupedProducts, onImportComplete]);
-
   // --- Creation Logic ---
 
   const openCreationModal = (variantData?: {name: string, skuBase: string, category: string, price: number}) => {
@@ -2745,6 +2721,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 <div className="border-t border-slate-700 bg-slate-900/30 animate-fade-in">
                   <div className="p-2 sm:p-4 space-y-2">
                     {isAdminOrWarehouse && !loadingVariantsByGroup[groupKey] && variantsToShow.length > 0 && (
+                      <>
                       <div className="flex flex-col sm:flex-row justify-end gap-2">
                         <button
                           type="button"
@@ -2758,11 +2735,16 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                           type="button"
                           onClick={(e) => { e.stopPropagation(); openBulkLinkGroupPage(groupKey); }}
                           className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold transition-colors min-h-[44px] touch-manipulation"
+                          title="Vincular todas las variantes del artículo con Mercado Libre y Tienda Nube"
                         >
                           <Link size={16} />
-                          Vincular grupo con ML / TN
+                          Vincular y sincronizar con ML / TN
                         </button>
                       </div>
+                      <p className="text-xs text-slate-500 text-right mt-2">
+                        Un solo flujo para todas las variantes: agregá publicaciones ML/TN y emparejá cada talle/color.
+                      </p>
+                      </>
                     )}
                     {loadingVariantsByGroup[groupKey] && (
                       <div className="bg-slate-800 rounded-xl p-4 border border-slate-700 text-slate-400 text-sm flex items-center gap-3">
@@ -2934,13 +2916,6 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                        title={isHidden ? 'Mostrar variante en inventario' : 'Ocultar variante descontinuada'}
                                       >
                                        {isHidden ? <Eye size={16} /> : <EyeOff size={16} />}
-                                      </button>
-                                      <button 
-                                       onClick={() => handleOpenLinkModal(product)}
-                                       className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-indigo-400 border border-slate-700 transition-colors touch-manipulation"
-                                       title="Vincular con Mercado Libre / Tienda Nube"
-                                      >
-                                       <Link size={16} />
                                       </button>
                                       <button
                                        type="button"
@@ -3826,14 +3801,6 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           </div>
         </div>
       )}
-
-
-      <LinkVariantModal
-        variant={linkingVariant}
-        onClose={() => setLinkingVariant(null)}
-        onSaved={({ groupKey }) => refreshLinkVariantInventory(groupKey)}
-        showToast={showToast}
-      />
 
       {/* Modal Asignar a Despacho */}
       {showDespachoModal && selectedProductForDespacho && (

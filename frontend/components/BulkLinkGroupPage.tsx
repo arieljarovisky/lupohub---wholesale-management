@@ -44,16 +44,6 @@ function formatOptionLabel(item: { sku?: string; size?: string; color?: string }
 
 const norm = (s: string) => (s || '').toString().trim().toLowerCase().replace(/\s+/g, ' ');
 
-const bulkLinkSkuMatch = (skuA: string, skuB: string) => {
-  const a = norm(skuA);
-  const b = norm(skuB);
-  if (!a || !b) return false;
-  if (a === b) return true;
-  const aBase = a.replace(/\s+ac\.?$/i, '').replace(/\s*—.*$/, '').trim();
-  const bBase = b.replace(/\s+ac\.?$/i, '').replace(/\s*—.*$/, '').trim();
-  return aBase === bBase || a.startsWith(bBase) || b.startsWith(aBase);
-};
-
 type RowLinkStatus = 'complete' | 'partial' | 'empty';
 
 type PublicationSource = {
@@ -174,31 +164,53 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
   ): Record<string, VariantAssignment> => {
     const prev = current ?? assignments;
     const next: Record<string, VariantAssignment> = { ...prev };
+    const usedMl = new Set<string>();
+    const usedTn = new Set<string>();
+    localVariants.forEach((local) => {
+      const a = next[local.variantId];
+      if (a?.ml?.trim()) {
+        const ml = a.ml.trim();
+        if (/^ML[A-Z]{1,5}\d+$/i.test(ml)) {
+          usedMl.add(ml.toUpperCase());
+        } else if (a.mlItemId) {
+          usedMl.add(mlOptionKey({ itemId: a.mlItemId, variationId: ml } as MlVariationRow));
+        }
+      }
+      if (a?.tn?.trim()) {
+        const tn = a.tn.trim();
+        const pid = a.tnProductId?.trim();
+        usedTn.add(pid ? tnOptionKey({ productId: pid, variantId: tn } as TnVariantRow) : tn);
+      }
+    });
     localVariants.forEach((local) => {
       const skuN = norm(local.sku);
       const sizeN = norm(local.size);
       const colorN = norm(local.color);
       if (!next[local.variantId]) next[local.variantId] = { ml: '', tn: '' };
-      if (!next[local.variantId].ml && mlList.length > 0) {
+      if (!next[local.variantId].ml?.trim() && mlList.length > 0) {
         let match = skuN ? mlList.find((m) => norm(m.sku) === skuN) : null;
         if (!match) match = mlList.find((m) => norm(m.size) === sizeN && norm(m.color) === colorN);
+        if (!match && mlList.length === 1) match = mlList[0];
         if (match) {
-          next[local.variantId].ml = match.variationId;
-          next[local.variantId].mlItemId = match.itemId;
-        } else if (mlList.length === 1) {
-          next[local.variantId].ml = mlList[0].variationId;
-          next[local.variantId].mlItemId = mlList[0].itemId;
+          const key = mlOptionKey(match);
+          if (!usedMl.has(key)) {
+            next[local.variantId].ml = match.variationId;
+            next[local.variantId].mlItemId = match.itemId;
+            usedMl.add(key);
+          }
         }
       }
-      if (!next[local.variantId].tn && tnList.length > 0) {
+      if (!next[local.variantId].tn?.trim() && tnList.length > 0) {
         let match = skuN ? tnList.find((t) => norm(t.sku) === skuN) : null;
         if (!match) match = tnList.find((t) => norm(t.size) === sizeN && norm(t.color) === colorN);
+        if (!match && tnList.length === 1) match = tnList[0];
         if (match) {
-          next[local.variantId].tn = match.variantId;
-          next[local.variantId].tnProductId = match.productId;
-        } else if (tnList.length === 1) {
-          next[local.variantId].tn = tnList[0].variantId;
-          next[local.variantId].tnProductId = tnList[0].productId;
+          const key = tnOptionKey(match);
+          if (!usedTn.has(key)) {
+            next[local.variantId].tn = match.variantId;
+            next[local.variantId].tnProductId = match.productId;
+            usedTn.add(key);
+          }
         }
       }
     });
@@ -318,6 +330,54 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
     setPubCounts((prev) => ({ ...prev, [variantId]: count }));
   }, []);
 
+  const findMlAssignmentConflict = (
+    variantId: string,
+    ml: string,
+    mlItemId?: string
+  ): string | null => {
+    const trimmed = ml.trim();
+    if (!trimmed) return null;
+    const key = /^ML[A-Z]{1,5}\d+$/i.test(trimmed)
+      ? trimmed.toUpperCase()
+      : mlItemId
+        ? mlOptionKey({ itemId: mlItemId, variationId: trimmed } as MlVariationRow)
+        : trimmed;
+    for (const v of variants) {
+      if (v.variantId === variantId) continue;
+      const a = assignments[v.variantId];
+      const otherMl = a?.ml?.trim();
+      if (!otherMl) continue;
+      const otherKey = /^ML[A-Z]{1,5}\d+$/i.test(otherMl)
+        ? otherMl.toUpperCase()
+        : a?.mlItemId
+          ? mlOptionKey({ itemId: a.mlItemId, variationId: otherMl } as MlVariationRow)
+          : otherMl;
+      if (otherKey === key) return v.variantId;
+    }
+    return null;
+  };
+
+  const findTnAssignmentConflict = (
+    variantId: string,
+    tn: string,
+    tnProductId?: string
+  ): string | null => {
+    const trimmed = tn.trim();
+    if (!trimmed) return null;
+    const key = tnProductId ? tnOptionKey({ productId: tnProductId, variantId: trimmed } as TnVariantRow) : trimmed;
+    for (const v of variants) {
+      if (v.variantId === variantId) continue;
+      const a = assignments[v.variantId];
+      const otherTn = a?.tn?.trim();
+      if (!otherTn) continue;
+      const otherKey = a?.tnProductId
+        ? tnOptionKey({ productId: a.tnProductId, variantId: otherTn } as TnVariantRow)
+        : otherTn;
+      if (otherKey === key) return v.variantId;
+    }
+    return null;
+  };
+
   useEffect(() => {
     if (variants.length === 0) return;
     let cancelled = false;
@@ -391,7 +451,10 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
         setMlSources([...mlSet].map((id) => ({ id })));
         setTnSources([...tnSet].map((id) => ({ id })));
         const nextAssign: Record<string, VariantAssignment> = {};
-        list.forEach((v: any) => {
+        list.forEach((v: any, idx: number) => {
+          const pubs = pubResults[idx] || [];
+          const mlPub = pubs.find((p: { platform: string }) => p.platform === 'mercadolibre');
+          const tnPub = pubs.find((p: { platform: string }) => p.platform === 'tiendanube');
           const mlVal =
             v.externalIds?.mercadoLibreVariant != null &&
             String(v.externalIds.mercadoLibreVariant).trim() !== ''
@@ -402,13 +465,22 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                 : '';
           const mlItemId =
             mlVal && /^ML[A-Z]{1,5}\d+$/i.test(mlVal)
-              ? undefined
-              : parentMl || undefined;
+              ? mlVal.toUpperCase()
+              : (mlPub as { external_product_id?: string } | undefined)?.external_product_id ||
+                parentMl ||
+                undefined;
+          const tnVal = v.externalIds?.tiendaNubeVariant
+            ? String(v.externalIds.tiendaNubeVariant)
+            : '';
+          const tnProductId =
+            (tnPub as { external_product_id?: string } | undefined)?.external_product_id ||
+            parentTn ||
+            undefined;
           nextAssign[v.variantId] = {
             ml: mlVal,
             mlItemId,
-            tn: v.externalIds?.tiendaNubeVariant ? String(v.externalIds.tiendaNubeVariant) : '',
-            tnProductId: parentTn || undefined,
+            tn: tnVal,
+            tnProductId,
           };
         });
         setAssignments(nextAssign);
@@ -606,6 +678,39 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
 
   const handleSave = async () => {
     if (!productId) return;
+    const mlSeen = new Map<string, string>();
+    const tnSeen = new Map<string, string>();
+    for (const v of variants) {
+      const a = assignments[v.variantId];
+      const ml = a?.ml?.trim() || '';
+      const tn = a?.tn?.trim() || '';
+      if (ml) {
+        const mlKey = /^ML[A-Z]{1,5}\d+$/i.test(ml)
+          ? ml.toUpperCase()
+          : a?.mlItemId
+            ? mlOptionKey({ itemId: a.mlItemId, variationId: ml } as MlVariationRow)
+            : ml;
+        const other = mlSeen.get(mlKey);
+        if (other) {
+          showToast('error', `La variación ML ya está asignada a otra fila. Cada variación externa solo puede vincularse a una variante local.`);
+          return;
+        }
+        mlSeen.set(mlKey, v.variantId);
+      }
+      if (tn) {
+        if (!a?.tnProductId?.trim()) {
+          showToast('error', `Falta el producto TN para la variante ${formatOptionLabel(v)}.`);
+          return;
+        }
+        const tnKey = tnOptionKey({ productId: a.tnProductId, variantId: tn } as TnVariantRow);
+        const other = tnSeen.get(tnKey);
+        if (other) {
+          showToast('error', `La variante TN ya está asignada a otra fila. Cada variante externa solo puede vincularse a una variante local.`);
+          return;
+        }
+        tnSeen.set(tnKey, v.variantId);
+      }
+    }
     setSaving(true);
     try {
       for (const v of variants) {
@@ -624,6 +729,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
             mercadoLibreVariantId: !isMlItemId && ml ? ml : undefined,
             mercadoLibreItemId: isMlItemId ? ml : a?.mlItemId?.trim() || undefined,
             tiendaNubeVariantId: tn || undefined,
+            tiendaNubeProductId: a?.tnProductId?.trim() || undefined,
           };
         })
         .filter(
@@ -697,9 +803,12 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
             <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-indigo-600/20 border border-indigo-500/30">
               <Link size={18} className="text-indigo-400" />
             </span>
-            Vincular grupo con ML y TN
+            Vincular y sincronizar con ML y TN
           </h1>
-          <p className="text-sm text-slate-400 mt-1 truncate">
+          <p className="text-sm text-slate-400 mt-1">
+            Cada variante local debe tener su propia variación en ML/TN. Si dos filas comparten el mismo ID externo, al guardar una puede desvincular a la otra.
+          </p>
+          <p className="text-sm text-slate-400 mt-0.5 truncate">
             <span className="text-slate-200">{productName}</span>
             <span className="mx-2 text-slate-600">·</span>
             <span className="font-mono text-slate-300">{groupKey}</span>
@@ -997,7 +1106,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
               onClick={() => runAutoMatch(variants, mlVariations, tnVariants)}
               className="text-sm text-indigo-400 hover:text-indigo-300 font-medium px-2 py-1 rounded-lg hover:bg-indigo-950/40 transition-colors"
             >
-              Volver a emparejar automáticamente
+              Volver a emparejar (solo filas vacías)
             </button>
           )}
           {loading && (
@@ -1018,9 +1127,9 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
             <div>
               <h2 className="text-sm font-bold text-white">Paso 2 · Emparejar variantes</h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                Revisá cada fila. Podés editar SKU, elegir de la lista o pegar IDs manualmente. Al guardar se
-                sincroniza stock en todas las publicaciones del paso 1. Usá{' '}
-                <strong className="text-indigo-300">Más publ.</strong> para agregar una publicación puntual.
+                Una variación ML o variante TN solo puede asignarse a una fila. Revisá SKU, talle y color antes de guardar.
+                Las publicaciones extra del paso 1 se sincronizan al guardar; en{' '}
+                <strong className="text-indigo-300">Más publ.</strong> podés ver o quitar las ya vinculadas.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2 text-[11px]">
@@ -1171,6 +1280,15 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                                 const val = e.target.value;
                                 if (!val) return;
                                 const [itemId, variationId] = val.split('::');
+                                const conflict = findMlAssignmentConflict(v.variantId, variationId, itemId);
+                                if (conflict) {
+                                  const other = variants.find((x) => x.variantId === conflict);
+                                  showToast(
+                                    'error',
+                                    `Esa variación ML ya está en otra fila${other ? ` (${formatOptionLabel(other)})` : ''}.`
+                                  );
+                                  return;
+                                }
                                 setAssignments((prev) => ({
                                   ...prev,
                                   [v.variantId]: {
@@ -1218,15 +1336,22 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                                 const tnOpt = tnVariants.find(
                                   (t) => t.variantId === tnValNew && (!productId || t.productId === productId)
                                 );
-                                const mlMatch =
-                                  tnOpt && mlVariations.find((m) => bulkLinkSkuMatch(tnOpt.sku, m.sku));
+                                const resolvedProductId = tnOpt?.productId || productId || undefined;
+                                const conflict = findTnAssignmentConflict(v.variantId, tnValNew, resolvedProductId);
+                                if (conflict) {
+                                  const other = variants.find((x) => x.variantId === conflict);
+                                  showToast(
+                                    'error',
+                                    `Esa variante TN ya está en otra fila${other ? ` (${formatOptionLabel(other)})` : ''}.`
+                                  );
+                                  return;
+                                }
                                 setAssignments((prev) => ({
                                   ...prev,
                                   [v.variantId]: {
-                                    ml: mlMatch ? mlMatch.variationId : prev[v.variantId]?.ml ?? '',
-                                    mlItemId: mlMatch ? mlMatch.itemId : prev[v.variantId]?.mlItemId,
+                                    ...prev[v.variantId],
                                     tn: tnValNew,
-                                    tnProductId: tnOpt?.productId || productId || undefined,
+                                    tnProductId: resolvedProductId,
                                   },
                                 }));
                               }}
