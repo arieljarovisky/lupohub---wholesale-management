@@ -9,6 +9,7 @@ import {
   type ManualFacturaFields,
 } from '../utils/wholesaleInvoiceHtml';
 import { Customer, Order, Payment, Product, Role, User } from '../types';
+import EmitDebitNoteModal from './EmitDebitNoteModal';
 import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2, Percent, RefreshCcw, FileMinus, ExternalLink, Printer, MoreHorizontal, ChevronDown, Download, Upload, Wallet, FilePlus, FileText, Pencil, Trash2 } from 'lucide-react';
 import { useNotification } from '../context/NotificationContext';
 import { formatMoneyAr } from '../utils/moneyFormat';
@@ -116,7 +117,8 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [billingReemitOrderId, setBillingReemitOrderId] = useState<string | null>(null);
   /** Pedido para el que se está emitiendo una NC por el total desde la pantalla de facturación. */
   const [billingEmitNCOrderId, setBillingEmitNCOrderId] = useState<string | null>(null);
-  const [billingEmitNDOrderId, setBillingEmitNDOrderId] = useState<string | null>(null);
+  const [ndOrder, setNdOrder] = useState<Order | null>(null);
+  const [ndModalLoading, setNdModalLoading] = useState<string | null>(null);
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
   const [advancedToolsOpen, setAdvancedToolsOpen] = useState(false);
   const actionsMenuRef = useRef<HTMLDivElement | null>(null);
@@ -167,6 +169,37 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     }
     merged.logoUrl = localRemitente.logoUrl;
     return merged;
+  };
+
+  const openBillingNdModal = async (orderId: string) => {
+    setNdModalLoading(orderId);
+    try {
+      const orders = await api.getOrders({ includeArchived: true, orderId });
+      const order = orders.find((o) => o.id === orderId) as Order | undefined;
+      if (!order) {
+        showToast('error', 'Pedido no encontrado');
+        return;
+      }
+      if (!order.invoice) {
+        showToast('error', 'Este pedido no tiene factura AFIP');
+        return;
+      }
+      let orderForNd = order;
+      try {
+        const latestInv = await api.getOrderInvoice(orderId);
+        if (latestInv) {
+          orderForNd = mergeServerInvoiceIntoOrder(order, latestInv as Record<string, unknown>);
+        }
+      } catch {
+        /* usar datos del listado */
+      }
+      setNdOrder(orderForNd);
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      showToast('error', e?.message || 'No se pudo cargar el pedido');
+    } finally {
+      setNdModalLoading(null);
+    }
   };
 
   const load = async () => {
@@ -1833,41 +1866,15 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                         {canAfipInvoiceActions &&
                           item.tipo === 'FACTURA' &&
                           item.orderId &&
-                          !String(item.id || '').startsWith('mm-fac-') &&
-                          Number(item.agipRetPer || 0) <= 0.005 && (
+                          !String(item.id || '').startsWith('mm-fac-') && (
                             <button
                               type="button"
-                              onClick={() => {
-                                showConfirm({
-                                  title: 'Emitir nota de débito por IIBB',
-                                  message:
-                                    'Se emitirá en AFIP una nota de débito asociada a esta factura, registrando solo la percepción IIBB según el padrón AGIP del mes del pedido. El CAE de la factura original no cambia.',
-                                  confirmLabel: 'Emitir ND IIBB',
-                                  onConfirm: () => {
-                                    setBillingEmitNDOrderId(item.orderId);
-                                    api
-                                      .emitirNotaDebito(item.orderId, { tipo: 'iibb' })
-                                      .then((r) => {
-                                        showToast('success', `ND por IIBB emitida (CAE ${r?.cae ?? '—'}).`);
-                                        void load();
-                                      })
-                                      .catch((err: any) =>
-                                        showToast(
-                                          'error',
-                                          err?.response?.data?.message ||
-                                            err?.message ||
-                                            'No se pudo emitir la nota de débito'
-                                        )
-                                      )
-                                      .finally(() => setBillingEmitNDOrderId(null));
-                                  },
-                                });
-                              }}
-                              disabled={billingEmitNDOrderId === item.orderId}
+                              onClick={() => openBillingNdModal(item.orderId)}
+                              disabled={ndModalLoading === item.orderId}
                               className="inline-flex items-center justify-center p-1.5 rounded-lg bg-slate-800 text-violet-200/95 hover:bg-slate-700 border border-violet-900/40 disabled:opacity-50"
-                              title="ND por percepción IIBB en AFIP"
+                              title="Emitir nota de débito AFIP"
                             >
-                              {billingEmitNDOrderId === item.orderId ? (
+                              {ndModalLoading === item.orderId ? (
                                 <Loader2 size={15} className="animate-spin text-violet-300" />
                               ) : (
                                 <FilePlus size={15} />
@@ -2722,6 +2729,16 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
           </div>
         </div>
       )}
+
+      <EmitDebitNoteModal
+        order={ndOrder}
+        onClose={() => setNdOrder(null)}
+        products={products}
+        customers={customers}
+        remitente={mergedRemitenteForFactura()}
+        defaultTipo="monto"
+        onEmitted={() => void load()}
+      />
     </div>
   );
 };
