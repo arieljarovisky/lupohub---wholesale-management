@@ -687,6 +687,7 @@ export const listBilling = async (req: Request, res: Response) => {
               caeFchVto: null,
               createdAt: null,
               creditNotesCount: 0,
+              debitNotesCount: 0,
               agipAlicuota: 0,
               agipRetPer: 0,
               manual: false,
