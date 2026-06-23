@@ -2,7 +2,7 @@
  * HTML imprimible de factura y nota de crédito para pedidos mayorista (misma vista en Pedidos y Facturación).
  * Totales: neto gravado + IVA 21% + percepción IIBB (Factura A); en Factura B el importe impreso lleva IVA incluido sin discriminar.
  */
-import type { CreditNote, Customer, Order, OrderItem, Product } from '../types';
+import type { CreditNote, Customer, DebitNote, Order, OrderItem, Product } from '../types';
 import { calcTotalesDesdeNetoGravado, isComprobanteClaseB } from './afipComprobante';
 import { ORDER_PRICES_INCLUDE_IVA, IVA_RATE, orderGrossToAfipNeto } from './orderPricing';
 import { formatMoneyAr } from './moneyFormat';
@@ -1243,6 +1243,256 @@ export function buildWholesaleCreditNoteHtml(params: {
           </div>
         </div>
 
+        <div class="no-print">
+          <button onclick="window.print()" style="padding: 10px 18px; font-size: 12px; cursor: pointer; background: #1f2937; color: white; border: none; border-radius: 6px; font-weight: 700;">Descargar PDF / Imprimir</button>
+          <button onclick="window.close()" style="padding: 10px 18px; font-size: 12px; cursor: pointer; background: #9ca3af; color: white; border: none; border-radius: 6px;">Cerrar</button>
+        </div>
+      </div>
+    </body></html>`;
+}
+
+export function buildWholesaleDebitNoteHtml(params: {
+  order: Order;
+  nd: DebitNote;
+  customer?: Customer;
+  products: Product[];
+  remitente: FacturaRemitente;
+  previewAgip?: { retPer: number; alicuota: number } | null;
+}): string {
+  const { order, nd, customer, products, remitente, previewAgip } = params;
+  const itemsOriginal = order.items.map((i) => enrichOrderItem(i, products));
+
+  const formatDateShort = (d: string) => {
+    const x = new Date(d);
+    if (isNaN(x.getTime())) return d;
+    const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+    const day = x.getDate();
+    const month = meses[x.getMonth()];
+    const year = x.getFullYear();
+    return `${String(day).padStart(2, '0')} ${month} ${year}`;
+  };
+  const nroNota = nd.puntoVta != null ? `${String(nd.puntoVta).padStart(5, '0')}-${String(nd.cbteDesde).padStart(8, '0')}` : String(nd.cbteDesde);
+  const fechaNota = nd.createdAt ? formatDateShort(nd.createdAt) : formatDateShort(order.date);
+  const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
+  const totalNota = Number(nd.amountDebited || 0);
+  const netoNd = Math.round(totalNota * 100) / 100;
+  const cbteTipoNd = Number(nd.cbteTipo ?? 0);
+  const netoPedidoFull = orderNetoForNotaCreditoTotal(order);
+  const agipResolved =
+    previewAgip && Number(previewAgip.retPer) > 0.005
+      ? previewAgip
+      : nd.agipRetPer != null && Number(nd.agipRetPer) > 0.005
+        ? { retPer: Number(nd.agipRetPer), alicuota: Number(nd.agipAlicuota || 0) }
+        : iibbProratedFromInvoiceForNc(order.invoice, netoNd, netoPedidoFull);
+  let iibbNd = 0;
+  let alicuotaIibbNd = 0;
+  if (agipResolved && Number(agipResolved.retPer) > 0.005) {
+    iibbNd = Math.round(Number(agipResolved.retPer) * 100) / 100;
+    alicuotaIibbNd = Math.round(Number(agipResolved.alicuota || 0) * 100) / 100;
+  }
+  const totalesNd = calcTotalesDesdeNetoGravado(netoNd, cbteTipoNd, iibbNd);
+  const { iva: ivaNd, total: totalComprobanteNd, discriminaIva: discriminaIvaNd, factorPrecioImpreso: factorNd } = totalesNd;
+  const iibbRowHtml =
+    iibbNd > 0.005
+      ? `<div class="r"><span>Percepciones IIBB${alicuotaIibbNd > 0.005 ? ` (${alicuotaIibbNd.toFixed(2)}%)` : ''}</span><span>$${formatMoneyAr(iibbNd)}</span></div>`
+      : '';
+
+  const scope = nd.scope || 'total';
+  const itemIdx = nd.itemIndex;
+  const itemIndexesMulti = Array.isArray(nd.itemIndexes) ? nd.itemIndexes.filter((x) => Number.isInteger(x) && x >= 0) : [];
+  const amountByItemIndex = nd.amountByItemIndex || {};
+  const quantityByItemIndex = nd.quantityByItemIndex || {};
+  const customDesc = nd.description ? escapeHtmlText(nd.description) : '';
+  let rows: string;
+  if (scope === 'iibb' && netoNd <= 0.005) {
+    rows = `<tr><td class="col-c">1</td><td class="col-code">—</td><td class="col-desc">Percepción IIBB${customDesc ? ` — ${customDesc}` : ''}</td><td class="col-c col-despacho">—</td><td class="col-r">—</td><td class="col-r">$${formatMoneyAr(iibbNd)}</td></tr>`;
+  } else if (scope === 'monto' && netoNd > 0.005 && itemIndexesMulti.length === 0 && itemIdx == null) {
+    rows = `<tr><td class="col-c">1</td><td class="col-code">—</td><td class="col-desc">${customDesc || 'Ajuste / débito'}</td><td class="col-c col-despacho">—</td><td class="col-r">$${formatMoneyAr(netoNd)}</td><td class="col-r">$${formatMoneyAr(netoNd)}</td></tr>`;
+  } else if (scope === 'item' && itemIndexesMulti.length > 0) {
+    rows = itemIndexesMulti
+      .filter((idx) => typeof idx === 'number' && idx >= 0 && !!itemsOriginal[idx])
+      .map((idx) => {
+        const i = itemsOriginal[idx];
+        const price = Number(i.priceAtMoment ?? 0);
+        const netoLinea = Number(amountByItemIndex[idx] ?? 0);
+        const netoSafe = netoLinea > 0 ? netoLinea : Math.round((Number(nd.amountDebited || 0) / Math.max(1, itemIndexesMulti.length)) * 100) / 100;
+        const qtyNdRaw = Number(quantityByItemIndex[idx]);
+        const qtyNd = Number.isFinite(qtyNdRaw) && qtyNdRaw > 0 ? qtyNdRaw : (price > 0 ? Math.round((netoSafe / price) * 1000) / 1000 : Number(i.quantity || 0));
+        return wholesalePrintLineRowHtml(i, qtyNd, products, factorNd, netoSafe);
+      })
+      .join('');
+  } else if (scope === 'item' && typeof itemIdx === 'number' && itemsOriginal[itemIdx]) {
+    const i = itemsOriginal[itemIdx];
+    const price = Number(i.priceAtMoment ?? 0);
+    const qtyNd = price > 0 ? Math.round((totalNota / price) * 1000) / 1000 : i.quantity;
+    rows = wholesalePrintLineRowHtml(i, qtyNd, products, factorNd, netoNd);
+  } else {
+    const itemsForNd = getGroupedItemsForWholesalePrint(order, products);
+    rows = itemsForNd
+      .map((i) => {
+        const qty = Number(i.quantity || 0);
+        if (qty <= 0) return '';
+        return wholesalePrintLineRowHtml(i, qty, products, factorNd);
+      })
+      .join('');
+  }
+
+  const vtoCae = nd.caeFchVto ? formatDateShort(nd.caeFchVto) : '—';
+  const empresaDir = [remitente.address, remitente.city].filter(Boolean).join(', ') || '';
+  const clienteDir = [customer?.address, customer?.city].filter(Boolean).join(', ') || '';
+  const logoUrlNd = remitente.logoUrl && String(remitente.logoUrl).trim() ? String(remitente.logoUrl).trim() : '';
+  const logoPlaceholderNd = ((remitente.businessName || 'Empresa') as string).replace(/</g, '&lt;');
+  const logoBlockNd = logoUrlNd
+    ? `<div style="display:flex;align-items:center;gap:8px;"><img src="${logoUrlNd}" alt="Logo" class="inv-logo" referrerpolicy="no-referrer" onerror="this.style.display='none';" /><span class="inv-logo-placeholder" style="display:none;">${logoPlaceholderNd}</span></div>`
+    : `<span class="inv-logo-placeholder">${logoPlaceholderNd}</span>`;
+  const scopeLabel =
+    scope === 'iibb' ? 'Percepción IIBB' : scope === 'monto' ? 'Débito por monto' : scope === 'item' ? 'Débito por ítem' : 'Débito total del pedido';
+  const cuitEmpresa = (remitente.cuit || '').toString();
+  const ingresosBrutosEmpresa = (remitente.ingresosBrutos || '901-2113373').toString();
+  const inicioActividadEmpresa = (remitente.inicioActividad || '13/06/2005').toString();
+  const razonEmpresa = (remitente.businessName || '—').toString();
+  const razonEmpresaLower = razonEmpresa.toLowerCase();
+  const dirEmpresa = razonEmpresaLower.includes('multimedia') || razonEmpresaLower.includes('multimedias') ? 'Murillo 630, CABA' : empresaDir || '';
+  const cuitCliente = (customer?.cuit || '').toString();
+  const condicionIvaReceptorNd = (customer?.condicionIva || 'Consumidor Final').toString().trim();
+  const transportesClienteNd = (customer?.transportes ?? [])
+    .map((t) => {
+      const name = (t.name ?? '').toString().trim();
+      const address = (t.address ?? '').toString().trim();
+      if (!name) return '';
+      return address ? `${name} — ${address}` : name;
+    })
+    .filter(Boolean);
+  const transporteNombreNd = transportesClienteNd.length ? transportesClienteNd.join(', ') : '';
+  const saleConditionRawNd = (customer?.saleCondition ?? '').toString().trim().toLowerCase();
+  const saleConditionNd = saleConditionRawNd.includes('60') ? '60 días' : '30 días';
+  const ptoVtaNd = String(nd.puntoVta ?? '').padStart(5, '0');
+  const compNroNd = String(nd.cbteDesde ?? '').padStart(8, '0');
+  const letraNd = cbteTipoNd === 2 ? 'A' : cbteTipoNd === 12 ? 'C' : 'B';
+  const codigoNd = String(cbteTipoNd || 7).padStart(3, '0');
+  const periodDate = new Date(order.date);
+  const validPeriodDate = !isNaN(periodDate.getTime()) ? periodDate : new Date();
+  const periodFrom = new Date(validPeriodDate.getFullYear(), validPeriodDate.getMonth(), 1).toLocaleDateString('es-AR');
+  const periodTo = new Date(validPeriodDate.getFullYear(), validPeriodDate.getMonth() + 1, 0).toLocaleDateString('es-AR');
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Nota de Débito ${nroNota}</title><!-- lupohub-print-nd-v1 --><style>
+      @page { size: A4; margin: 12mm 12mm 14mm 12mm; }
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 0; color: #111; background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
+      .sheet { width: 210mm; min-height: 297mm; padding: 10mm; margin: 0 auto; }
+      .topbar { display: grid; grid-template-columns: 1fr 1.25fr; gap: 0; align-items: stretch; margin-bottom: 0; border: 1px solid #111; border-top: 0; }
+      .logo { min-height: 42px; display: flex; align-items: center; }
+      .logo img { max-height: 42px; max-width: 140px; object-fit: contain; }
+      .original { border: 1px solid #111; text-align: center; font-weight: 700; letter-spacing: 0.05em; padding: 6px 0; margin-bottom: 0; }
+      .head-left { border-right: 1px solid #111; padding: 10px 10px 8px; }
+      .head-right { padding: 8px 10px; }
+      .issuer-title { font-size: inherit; font-weight: inherit; margin: 2px 0 0; letter-spacing: 0; }
+      .mini { font-size: 10px; }
+      .fact-row { display: grid; grid-template-columns: 72px 1fr; align-items: stretch; gap: 10px; margin-bottom: 8px; }
+      .letter-box { border: 1px solid #111; text-align: center; display: flex; flex-direction: column; justify-content: center; min-height: 74px; }
+      .letter-box .l { font-size: 44px; line-height: 1; font-weight: 700; }
+      .letter-box .c { font-size: 20px; font-weight: 700; margin-top: -4px; }
+      .fact-title { font-size: 30px; font-weight: 700; letter-spacing: 0.02em; line-height: 1; margin-top: 6px; }
+      .fact-meta { margin-top: 10px; font-size: 13px; }
+      .fact-meta div { margin-bottom: 4px; }
+      .boxrow { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 0; margin-top: 0; }
+      .boxrow .block { min-height: 46px; border-top: 0; }
+      .block { padding: 8px 10px; border: 1px solid #111; min-height: 58px; }
+      .period-row { border: 1px solid #111; border-top: 0; padding: 6px 10px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-weight: 700; }
+      .period-row span { font-weight: 400; }
+      table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+      thead th { border-top: 1px solid #111; border-bottom: 1px solid #111; padding: 6px 6px; text-align: left; }
+      tbody td { padding: 5px 6px; border-bottom: 1px solid #ddd; vertical-align: top; }
+      .col-c { text-align: center; }
+      .col-code, .col-despacho { white-space: nowrap; }
+      .col-desc { white-space: normal; word-break: break-word; overflow-wrap: anywhere; }
+      .col-r { text-align: right; }
+      .summary { display: grid; grid-template-columns: 1fr 220px; justify-content: end; align-items: start; gap: 10px; margin-top: 10px; }
+      .totals { border: 1px solid #111; }
+      .totals .r { display: flex; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid #ddd; }
+      .totals .r:last-child { border-bottom: none; font-weight: 700; }
+      .footer { margin-top: 12px; font-size: 10px; }
+      .bottom-block { margin-top: auto; }
+      .no-print { margin-top: 14px; display: flex; gap: 10px; }
+      @media print { .no-print { display: none !important; } }
+    </style></head><body>
+      <div class="sheet">
+        <div class="original">ORIGINAL</div>
+        <div class="topbar">
+          <div class="head-left">
+            <div class="logo">${logoBlockNd}</div>
+            <div class="issuer-title">${razonEmpresa}</div>
+            ${dirEmpresa ? `<div>${dirEmpresa}</div>` : ''}
+            ${cuitEmpresa ? `<div>C.U.I.T.: ${cuitEmpresa}</div>` : ''}
+          </div>
+          <div class="head-right">
+            <div class="fact-row">
+              <div class="letter-box">
+                <div class="l">${letraNd}</div>
+                <div class="mini">COD. ${codigoNd}</div>
+              </div>
+              <div>
+                <div class="fact-title">NOTA DE DÉBITO</div>
+                <div class="fact-meta">
+                  <div><strong>Punto de Venta:</strong> ${ptoVtaNd} &nbsp;&nbsp; <strong>Comp. Nro:</strong> ${compNroNd}</div>
+                  <div><strong>Fecha de Emisión:</strong> ${fechaNota}</div>
+                  <div><strong>Alcance:</strong> ${scopeLabel}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="period-row">
+          <div>Período Facturado Desde: <span>${periodFrom}</span></div>
+          <div>Hasta: <span>${periodTo}</span></div>
+          <div>Fecha de Vto. para el pago: <span>${fechaNota}</span></div>
+        </div>
+        <div class="boxrow">
+          <div class="block">
+            <div><strong>Sr./es:</strong> ${escapeHtmlText(clienteNombre)}</div>
+            ${clienteDir ? `<div>${escapeHtmlText(clienteDir)}</div>` : ''}
+            ${cuitCliente ? `<div>C.U.I.T.: ${escapeHtmlText(cuitCliente)}</div>` : ''}
+            ${condicionIvaReceptorNd ? `<div><strong>Condición frente al IVA:</strong> ${escapeHtmlText(condicionIvaReceptorNd)}</div>` : ''}
+          </div>
+          <div class="block">
+            ${transporteNombreNd ? `<div><strong>Transporte:</strong> ${escapeHtmlText(transporteNombreNd)}</div>` : ''}
+            <div><strong>Condición de venta:</strong> ${saleConditionNd}</div>
+            <div><strong>Comprobante:</strong> Nota de Débito ${letraNd}</div>
+          </div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th class="col-c" style="width: 52px;">CANT.</th>
+              <th class="col-c" style="width: 110px;">CÓDIGO</th>
+              <th>DESCRIPCIÓN</th>
+              <th class="col-c" style="width: 125px;">Nº DESPACHO</th>
+              <th class="col-r" style="width: 88px;">P. UNITARIO</th>
+              <th class="col-r" style="width: 92px;">IMPORTE</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div class="bottom-block">
+          <div class="summary">
+            <div></div>
+            <div class="totals">
+              ${
+                discriminaIvaNd && netoNd > 0.005
+                  ? `<div class="r"><span>Base imponible</span><span>$${formatMoneyAr(netoNd)}</span></div>
+              <div class="r"><span>IVA 21%</span><span>$${formatMoneyAr(ivaNd)}</span></div>`
+                  : netoNd > 0.005
+                    ? `<div class="r"><span>Subtotal</span><span>$${formatMoneyAr(Math.round((netoNd + ivaNd) * 100) / 100)}</span></div>`
+                    : ''
+              }
+              ${iibbRowHtml}
+              <div class="r"><span>Total ND</span><span>$${formatMoneyAr(totalComprobanteNd)}</span></div>
+            </div>
+          </div>
+          <div class="footer">
+            <div><strong>CAE:</strong> ${nd.cae} &nbsp; <strong>Vto. CAE:</strong> ${vtoCae}</div>
+          </div>
+        </div>
         <div class="no-print">
           <button onclick="window.print()" style="padding: 10px 18px; font-size: 12px; cursor: pointer; background: #1f2937; color: white; border: none; border-radius: 6px; font-weight: 700;">Descargar PDF / Imprimir</button>
           <button onclick="window.close()" style="padding: 10px 18px; font-size: 12px; cursor: pointer; background: #9ca3af; color: white; border: none; border-radius: 6px;">Cerrar</button>

@@ -625,6 +625,7 @@ export const getOrders = async (req: any, res: any) => {
     let creditNotesTotalByOrderId: Record<string, number> = {};
     let creditNotesItemByOrderId: Record<string, number> = {};
     let creditNotesNetoCreditedByOrderId: Record<string, number> = {};
+    let debitNotesCountByOrderId: Record<string, number> = {};
     try {
       const cnRows = await query(
         `SELECT order_id,
@@ -645,6 +646,21 @@ export const getOrders = async (req: any, res: any) => {
       }
     } catch (_) {
       // Tabla credit_notes puede no existir en DB antiguas
+    }
+
+    try {
+      const dnRows = await query(
+        `SELECT order_id, COUNT(*) AS cnt
+         FROM debit_notes
+         WHERE order_id IN (${placeholders})
+         GROUP BY order_id`,
+        orderIds
+      );
+      for (const r of dnRows as any[]) {
+        debitNotesCountByOrderId[r.order_id] = Number(r.cnt) || 0;
+      }
+    } catch (_) {
+      // Tabla debit_notes puede no existir en DB antiguas
     }
 
     let totalCnsByOrderId: Record<string, any[]> = {};
@@ -740,6 +756,7 @@ export const getOrders = async (req: any, res: any) => {
       lastTotalCreditNoteFiscal: totalCnt > 0 ? buildLastTotalCreditNoteFiscalPayload(lastTotalCn) : undefined,
       /** Suma de netos creditados (AFIP amount_credited, sin IVA) — útil p. ej. valor declarado en remito expreso. */
       creditNotesNetoCredited: creditNotesNetoCreditedByOrderId[order.id] ?? 0,
+      debitNotesCount: debitNotesCountByOrderId[order.id] ?? 0,
       paymentStatus: mapPaymentStatus(order),
       includeInSaldo: mapIncludeInSaldo(order),
       noStockImpact: !!order.no_stock_impact,
@@ -2666,6 +2683,387 @@ export const emitirNotaCredito = async (req: any, res: any) => {
   } catch (error: any) {
     console.error('emitirNotaCredito:', error);
     const msg = error?.message || 'Error emitiendo nota de crédito AFIP';
+    const { afipEmitHttpStatusFromMessage } = await import('../services/afip.service');
+    res.status(afipEmitHttpStatusFromMessage(msg)).json({ message: msg });
+  }
+};
+
+/** Lista las notas de débito emitidas para un pedido (agrupadas por comprobante AFIP). */
+export const getOrderDebitNotes = async (req: any, res: any) => {
+  const { id } = req.params;
+  if (!id) return res.status(400).json({ message: 'ID de pedido inválido' });
+  try {
+    const rows = (await query(
+      `SELECT id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta,
+              amount_debited, agip_alicuota, agip_ret_per, scope, item_index, description, created_at
+       FROM debit_notes WHERE order_id = ? ORDER BY created_at DESC, id ASC`,
+      [id]
+    )) as any[];
+
+    const itemRows = (await query(
+      `SELECT quantity, price_at_moment FROM order_items WHERE order_id = ? ORDER BY id ASC`,
+      [id]
+    )) as { quantity: number; price_at_moment: string }[];
+    const itemPriceByIndex = new Map<number, number>();
+    itemRows.forEach((it, idx) => itemPriceByIndex.set(idx, Number(it.price_at_moment) || 0));
+
+    type Grouped = {
+      id: string;
+      orderId: string;
+      invoiceId: string | null;
+      cae: string;
+      caeFchVto?: string;
+      puntoVta: number;
+      cbteTipo: number;
+      cbteDesde: number;
+      cbteHasta: number;
+      amountDebited: number;
+      agipAlicuota?: number;
+      agipRetPer?: number;
+      scope: string;
+      itemIndex?: number;
+      itemIndexes: number[];
+      amountByItemIndex: Record<number, number>;
+      quantityByItemIndex: Record<number, number>;
+      description?: string;
+      createdAt: string | null;
+    };
+
+    const groups = new Map<string, Grouped>();
+    for (const r of rows) {
+      const key = `${r.cae ?? ''}|${r.punto_venta ?? ''}|${r.cbte_tipo ?? ''}|${r.cbte_desde ?? ''}|${r.cbte_hasta ?? ''}`;
+      let g = groups.get(key);
+      if (!g) {
+        g = {
+          id: r.id,
+          orderId: r.order_id,
+          invoiceId: r.invoice_id ?? null,
+          cae: r.cae,
+          caeFchVto: r.cae_fch_vto ?? undefined,
+          puntoVta: r.punto_venta,
+          cbteTipo: r.cbte_tipo,
+          cbteDesde: r.cbte_desde,
+          cbteHasta: r.cbte_hasta,
+          amountDebited: 0,
+          agipAlicuota: r.agip_alicuota != null ? Number(r.agip_alicuota) : undefined,
+          agipRetPer: r.agip_ret_per != null ? Number(r.agip_ret_per) : undefined,
+          scope: r.scope ?? 'total',
+          itemIndex: r.item_index ?? undefined,
+          itemIndexes: [],
+          amountByItemIndex: {},
+          quantityByItemIndex: {},
+          description: r.description ? String(r.description) : undefined,
+          createdAt: r.created_at ?? null,
+        };
+        groups.set(key, g);
+      }
+      const amount = Number(r.amount_debited || 0);
+      g.amountDebited = Math.round((g.amountDebited + amount) * 100) / 100;
+      if ((r.scope ?? 'total') === 'item' || r.item_index != null) {
+        g.scope = 'item';
+        const idx = Number(r.item_index);
+        if (Number.isInteger(idx) && idx >= 0) {
+          if (!g.itemIndexes.includes(idx)) g.itemIndexes.push(idx);
+          g.amountByItemIndex[idx] = Math.round(((g.amountByItemIndex[idx] || 0) + amount) * 100) / 100;
+          const price = itemPriceByIndex.get(idx) || 0;
+          if (price > 0) {
+            const q = amount / price;
+            g.quantityByItemIndex[idx] = Math.round(((g.quantityByItemIndex[idx] || 0) + q) * 1000) / 1000;
+          }
+        }
+      }
+    }
+
+    const out = Array.from(groups.values()).sort((a, b) => {
+      const da = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const db = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return db - da;
+    });
+    res.json(out);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Error listando notas de débito' });
+  }
+};
+
+/** Emite una Nota de Débito AFIP asociada a la factura del pedido. */
+export const emitirNotaDebito = async (req: any, res: any) => {
+  const { id } = req.params;
+  const user = req.user;
+  if (!user || (user.role !== 'ADMIN' && user.role !== 'WAREHOUSE' && user.role !== 'DEPOSITO')) {
+    return res.status(403).json({ message: 'Solo ADMIN o Depósito pueden emitir notas de débito' });
+  }
+  if (!id) return res.status(400).json({ message: 'ID de pedido inválido' });
+  const { tipo, itemIndex, quantity, items, netAmount, description } = req.body || {};
+  if (!tipo || !['iibb', 'monto', 'total', 'item', 'items'].includes(tipo)) {
+    return res.status(400).json({
+      message: 'Body debe incluir tipo: "iibb", "monto", "total", "item" o "items"',
+    });
+  }
+
+  try {
+    const orderRow = await get('SELECT id, customer_id, total, date FROM orders WHERE id = ?', [id]);
+    if (!orderRow) return res.status(404).json({ message: 'Pedido no encontrado' });
+
+    const invRow = await get(
+      'SELECT id, punto_venta, cbte_tipo, cbte_desde, cae, agip_alicuota, agip_ret_per FROM invoices WHERE order_id = ?',
+      [id]
+    );
+    if (!invRow) return res.status(400).json({ message: 'Este pedido no tiene factura; primero emití la factura.' });
+
+    const customerRow = await get(
+      'SELECT id, business_name, cuit, condicion_iva FROM customers WHERE id = ?',
+      [orderRow.customer_id]
+    );
+    if (!customerRow) return res.status(400).json({ message: 'Cliente del pedido no encontrado' });
+
+    const netFromOrder = await getOrderNetFromLineItems(id);
+    const netOrderTotal = netFromOrder > 0 ? netFromOrder : Number(orderRow.total) || 0;
+
+    let amountToDebit = 0;
+    let iibbNd: { baseImp: number; alicuota: number; importe: number } | undefined;
+    let scope = tipo === 'items' ? 'item' : tipo === 'iibb' ? 'iibb' : tipo === 'monto' ? 'monto' : tipo;
+    let itemIndexVal: number | null = null;
+    let itemsToDebit: Array<{ itemIndex: number; quantity: number; amount: number }> = [];
+    let agipAlicuotaStored: number | null = null;
+    let agipRetPerStored: number | null = null;
+    const descStored = description != null && String(description).trim() ? String(description).trim().slice(0, 255) : null;
+
+    if (tipo === 'iibb') {
+      const invAgip = Number(invRow.agip_ret_per || 0);
+      if (invAgip > 0.005) {
+        return res.status(400).json({
+          message:
+            'La factura ya tiene percepción IIBB registrada en AFIP. No hace falta emitir una ND por IIBB.',
+        });
+      }
+      const existingIibbNd = await get(
+        `SELECT id FROM debit_notes WHERE order_id = ? AND scope = 'iibb' LIMIT 1`,
+        [id]
+      );
+      if (existingIibbNd) {
+        return res.status(400).json({ message: 'Ya existe una nota de débito por percepción IIBB para este pedido.' });
+      }
+      const agip = await getAgipRetentionForOrder({
+        orderDate: orderRow.date,
+        customerCuit: customerRow.cuit,
+        netAmount: netOrderTotal,
+      });
+      if (!agip || !(agip.amount > 0.005)) {
+        return res.status(400).json({
+          message: 'No hay percepción IIBB calculable para este pedido (CUIT incompleto o sin alícuota en padrón AGIP).',
+        });
+      }
+      amountToDebit = 0;
+      iibbNd = {
+        baseImp: netOrderTotal,
+        alicuota: agip.alicuota,
+        importe: agip.amount,
+      };
+      agipAlicuotaStored = agip.alicuota;
+      agipRetPerStored = agip.amount;
+    } else if (tipo === 'monto') {
+      const raw = netAmount != null ? Number(netAmount) : NaN;
+      amountToDebit = Math.round((Number.isFinite(raw) ? raw : 0) * 100) / 100;
+      if (!(amountToDebit > 0)) {
+        return res.status(400).json({ message: 'Para tipo "monto" debés enviar netAmount mayor a 0.' });
+      }
+      const iibbFromInv = iibbPercepcionForOrderCreditNote(
+        Number(invRow.agip_alicuota || 0),
+        Number(invRow.agip_ret_per || 0),
+        amountToDebit,
+        netOrderTotal
+      );
+      iibbNd = iibbFromInv;
+      if (iibbFromInv) {
+        agipAlicuotaStored = iibbFromInv.alicuota;
+        agipRetPerStored = iibbFromInv.importe;
+      }
+    } else if (tipo === 'total') {
+      amountToDebit = await getOrderNetForCreditNoteTotal(id);
+      if (amountToDebit <= 0) return res.status(400).json({ message: 'El total del pedido debe ser mayor a 0.' });
+      iibbNd = iibbPercepcionForOrderCreditNote(
+        Number(invRow.agip_alicuota || 0),
+        Number(invRow.agip_ret_per || 0),
+        amountToDebit,
+        netOrderTotal
+      );
+      if (iibbNd) {
+        agipAlicuotaStored = iibbNd.alicuota;
+        agipRetPerStored = iibbNd.importe;
+      }
+    } else if (tipo === 'item') {
+      const itemsRows = await query(
+        `SELECT quantity, price_at_moment FROM order_items WHERE order_id = ? ORDER BY id`,
+        [id]
+      );
+      const orderItems = itemsRows as { quantity: number; price_at_moment: string }[];
+      if (!orderItems.length) return res.status(400).json({ message: 'El pedido no tiene ítems.' });
+      const idx = typeof itemIndex === 'number' ? itemIndex : parseInt(String(itemIndex), 10);
+      if (isNaN(idx) || idx < 0 || idx >= orderItems.length) {
+        return res.status(400).json({ message: `itemIndex debe ser entre 0 y ${orderItems.length - 1}` });
+      }
+      const item = orderItems[idx];
+      const qty = quantity != null ? (typeof quantity === 'number' ? quantity : parseInt(String(quantity), 10)) : item.quantity;
+      if (isNaN(qty) || qty <= 0 || qty > item.quantity) {
+        return res.status(400).json({ message: `quantity debe ser entre 1 y ${item.quantity} para este ítem` });
+      }
+      const price = Number(item.price_at_moment) || 0;
+      amountToDebit = Math.round(qty * price * 100) / 100;
+      if (amountToDebit <= 0) return res.status(400).json({ message: 'El monto a debitar del ítem es 0.' });
+      itemIndexVal = idx;
+      itemsToDebit = [{ itemIndex: idx, quantity: qty, amount: amountToDebit }];
+      iibbNd = iibbPercepcionForOrderCreditNote(
+        Number(invRow.agip_alicuota || 0),
+        Number(invRow.agip_ret_per || 0),
+        amountToDebit,
+        netOrderTotal
+      );
+      if (iibbNd) {
+        agipAlicuotaStored = iibbNd.alicuota;
+        agipRetPerStored = iibbNd.importe;
+      }
+    } else {
+      const itemsRows = await query(
+        `SELECT quantity, price_at_moment FROM order_items WHERE order_id = ? ORDER BY id`,
+        [id]
+      );
+      const orderItems = itemsRows as { quantity: number; price_at_moment: string }[];
+      if (!orderItems.length) return res.status(400).json({ message: 'El pedido no tiene ítems.' });
+      const rawItems = Array.isArray(items) ? items : [];
+      if (rawItems.length === 0) {
+        return res.status(400).json({ message: 'Para tipo "items" debés enviar al menos un artículo con su cantidad.' });
+      }
+      const byIndex = new Map<number, number>();
+      for (const it of rawItems) {
+        const idx = typeof it?.itemIndex === 'number' ? it.itemIndex : parseInt(String(it?.itemIndex), 10);
+        const qty = typeof it?.quantity === 'number' ? it.quantity : parseInt(String(it?.quantity), 10);
+        if (isNaN(idx) || idx < 0 || idx >= orderItems.length) {
+          return res.status(400).json({ message: `itemIndex inválido en selección múltiple: ${String(it?.itemIndex ?? '')}` });
+        }
+        if (isNaN(qty) || qty <= 0) {
+          return res.status(400).json({ message: `quantity inválida para itemIndex ${idx}. Debe ser mayor a 0.` });
+        }
+        byIndex.set(idx, (byIndex.get(idx) || 0) + qty);
+      }
+      for (const [idx, qty] of byIndex.entries()) {
+        const item = orderItems[idx];
+        if (qty > item.quantity) {
+          return res.status(400).json({ message: `quantity debe ser entre 1 y ${item.quantity} para itemIndex ${idx}` });
+        }
+        const price = Number(item.price_at_moment) || 0;
+        const lineAmount = Math.round(qty * price * 100) / 100;
+        if (lineAmount <= 0) {
+          return res.status(400).json({ message: `El monto a debitar del itemIndex ${idx} es 0.` });
+        }
+        itemsToDebit.push({ itemIndex: idx, quantity: qty, amount: lineAmount });
+      }
+      amountToDebit = Math.round(itemsToDebit.reduce((sum, i) => sum + i.amount, 0) * 100) / 100;
+      if (amountToDebit <= 0) {
+        return res.status(400).json({ message: 'El monto total a debitar debe ser mayor a 0.' });
+      }
+      iibbNd = iibbPercepcionForOrderCreditNote(
+        Number(invRow.agip_alicuota || 0),
+        Number(invRow.agip_ret_per || 0),
+        amountToDebit,
+        netOrderTotal
+      );
+      if (iibbNd) {
+        agipAlicuotaStored = iibbNd.alicuota;
+        agipRetPerStored = iibbNd.importe;
+      }
+    }
+
+    const { emitirNotaDebito: emitirNDAfip } = await import('../services/afip.service');
+    const result = await emitirNDAfip(
+      { puntoVta: invRow.punto_venta, cbteTipo: invRow.cbte_tipo, cbteDesde: invRow.cbte_desde },
+      {
+        id: customerRow.id,
+        businessName: customerRow.business_name ?? '',
+        cuit: customerRow.cuit,
+        condicionIva: customerRow.condicion_iva ?? undefined,
+      },
+      amountToDebit,
+      iibbNd
+    );
+
+    const firstDebitNoteId = uuidv4();
+    if (tipo === 'items') {
+      for (let i = 0; i < itemsToDebit.length; i++) {
+        const it = itemsToDebit[i];
+        await execute(
+          `INSERT INTO debit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta,
+            amount_debited, agip_alicuota, agip_ret_per, scope, item_index, description)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            i === 0 ? firstDebitNoteId : uuidv4(),
+            id,
+            invRow.id,
+            result.cae,
+            result.caeFchVto || null,
+            result.puntoVta,
+            result.cbteTipo,
+            result.cbteDesde,
+            result.cbteHasta,
+            it.amount,
+            i === 0 ? agipAlicuotaStored : null,
+            i === 0 ? agipRetPerStored : null,
+            'item',
+            it.itemIndex,
+            descStored,
+          ]
+        );
+      }
+    } else {
+      await execute(
+        `INSERT INTO debit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta,
+          amount_debited, agip_alicuota, agip_ret_per, scope, item_index, description)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          firstDebitNoteId,
+          id,
+          invRow.id,
+          result.cae,
+          result.caeFchVto || null,
+          result.puntoVta,
+          result.cbteTipo,
+          result.cbteDesde,
+          result.cbteHasta,
+          amountToDebit,
+          agipAlicuotaStored,
+          agipRetPerStored,
+          scope,
+          itemIndexVal,
+          descStored,
+        ]
+      );
+    }
+
+    if (tipo === 'iibb' && agipAlicuotaStored != null && agipRetPerStored != null) {
+      await execute(`UPDATE invoices SET agip_alicuota = ?, agip_ret_per = ? WHERE order_id = ?`, [
+        agipAlicuotaStored,
+        agipRetPerStored,
+        id,
+      ]);
+    }
+
+    res.status(201).json({
+      id: firstDebitNoteId,
+      orderId: id,
+      invoiceId: invRow.id,
+      cae: result.cae,
+      caeFchVto: result.caeFchVto,
+      puntoVta: result.puntoVta,
+      cbteTipo: result.cbteTipo,
+      cbteDesde: result.cbteDesde,
+      cbteHasta: result.cbteHasta,
+      amountDebited: amountToDebit,
+      agipRetPer: agipRetPerStored ?? undefined,
+      scope,
+    });
+  } catch (error: any) {
+    console.error('emitirNotaDebito:', error);
+    const msg = error?.message || 'Error emitiendo nota de débito AFIP';
     const { afipEmitHttpStatusFromMessage } = await import('../services/afip.service');
     res.status(afipEmitHttpStatusFromMessage(msg)).json({ message: msg });
   }

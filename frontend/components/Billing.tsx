@@ -3,6 +3,7 @@ import { api } from '../services/api';
 import { getRemitente } from '../services/apiIntegration';
 import {
   buildWholesaleCreditNoteHtml,
+  buildWholesaleDebitNoteHtml,
   buildWholesaleFacturaHtml,
   mergeServerInvoiceIntoOrder,
   type ManualFacturaFields,
@@ -42,7 +43,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [hasta, setHasta] = useState<string>('');
   const [customerId, setCustomerId] = useState<string>('ALL');
   const [province, setProvince] = useState<string>('ALL');
-  const [tipo, setTipo] = useState<'ALL' | 'FACTURA' | 'NC'>('ALL');
+  const [tipo, setTipo] = useState<'ALL' | 'FACTURA' | 'NC' | 'ND'>('ALL');
 
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loadingPayments, setLoadingPayments] = useState(false);
@@ -115,6 +116,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [billingReemitOrderId, setBillingReemitOrderId] = useState<string | null>(null);
   /** Pedido para el que se está emitiendo una NC por el total desde la pantalla de facturación. */
   const [billingEmitNCOrderId, setBillingEmitNCOrderId] = useState<string | null>(null);
+  const [billingEmitNDOrderId, setBillingEmitNDOrderId] = useState<string | null>(null);
   const [actionsMenuOpen, setActionsMenuOpen] = useState(false);
   const [advancedToolsOpen, setAdvancedToolsOpen] = useState(false);
   const actionsMenuRef = useRef<HTMLDivElement | null>(null);
@@ -690,12 +692,21 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     return isNaN(x.getTime()) ? String(d) : x.toLocaleDateString('es-AR');
   };
 
+  const billingTipoBadgeClass = (t: string) => {
+    if (t === 'NC') return 'bg-amber-900/40 text-amber-300 border border-amber-700/60';
+    if (t === 'ND') return 'bg-violet-900/40 text-violet-300 border border-violet-700/60';
+    return 'bg-emerald-900/40 text-emerald-300 border border-emerald-700/60';
+  };
+
   const formatTipo = (item: any) => {
     if (item.sinDetalle) {
-      return item.tipo === 'NC' ? 'NC (manual)' : 'Factura (manual)';
+      return item.tipo === 'NC' ? 'NC (manual)' : item.tipo === 'ND' ? 'ND (manual)' : 'Factura (manual)';
     }
     if (item.tipo === 'NC') {
       return item.cbteTipo === 3 ? 'NC A' : item.cbteTipo === 8 ? 'NC B' : 'NC';
+    }
+    if (item.tipo === 'ND') {
+      return item.cbteTipo === 2 ? 'ND A' : item.cbteTipo === 7 ? 'ND B' : 'ND';
     }
     return item.cbteTipo === 1 ? 'Factura A' : item.cbteTipo === 6 ? 'Factura B' : 'Factura';
   };
@@ -832,6 +843,58 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
         });
         if (!html) {
           showToast('error', 'No se pudo generar la vista previa de la nota de crédito');
+          return;
+        }
+
+        const w = window.open('', '_blank');
+        if (w) {
+          w.document.write(html);
+          w.document.close();
+        } else {
+          showToast('error', 'No se pudo abrir la ventana de vista previa (bloqueador de popups?)');
+        }
+
+        return;
+      }
+
+      if (item.tipo === 'ND' || item.cbteTipo === 2 || item.cbteTipo === 7) {
+        const notes = await api.getOrderDebitNotes(order.id);
+        const numeroNd = item.numeroDesde ?? item.cbteDesde;
+        const pvNd = item.puntoVta ?? item.punto_venta;
+        const nd =
+          (item.id && notes.find((n) => n.id === item.id)) ||
+          (item.cae && notes.find((n) => String(n.cae) === String(item.cae))) ||
+          (numeroNd != null &&
+            pvNd != null &&
+            notes.find(
+              (n) =>
+                String(n.cbteDesde) === String(numeroNd) &&
+                String(n.puntoVta) === String(pvNd)
+            ));
+        if (!nd) {
+          showToast('error', 'No se encontró la nota de débito correspondiente');
+          return;
+        }
+
+        const customerNd = customers.find((c) => c.id === order.customerId);
+        let orderForPdf = order;
+        try {
+          const latestInv = await api.getOrderInvoice(order.id);
+          if (latestInv) {
+            orderForPdf = mergeServerInvoiceIntoOrder(order, latestInv as Record<string, unknown>);
+          }
+        } catch {
+          /* usar factura en memoria */
+        }
+        const html = buildWholesaleDebitNoteHtml({
+          order: orderForPdf,
+          nd,
+          customer: customerNd,
+          products,
+          remitente: mergedRemitenteForFactura() as any,
+        });
+        if (!html) {
+          showToast('error', 'No se pudo generar la vista previa de la nota de débito');
           return;
         }
 
@@ -1110,8 +1173,8 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             </h2>
             <p className="text-slate-400 text-sm leading-relaxed max-w-2xl">
               {isSeller
-                ? 'Consultá facturas, notas de crédito y recibos de tus clientes.'
-                : 'Facturas, NC y recibos. Usá filtros abajo; exportaciones e importaciones en Acciones.'}
+                ? 'Consultá facturas, notas de crédito, notas de débito y recibos de tus clientes.'
+                : 'Facturas, NC, ND y recibos. Usá filtros abajo; exportaciones e importaciones en Acciones.'}
             </p>
           </div>
 
@@ -1132,7 +1195,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
-                Facturas / NC
+                Facturas / NC / ND
               </button>
               <button
                 type="button"
@@ -1438,6 +1501,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             <option value="ALL">Todos</option>
             <option value="FACTURA">Facturas</option>
             <option value="NC">Notas de crédito</option>
+            <option value="ND">Notas de débito</option>
           </select>
         </div>
         {!isSeller && (
@@ -1471,7 +1535,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             return (
               <div key={`m-${item.tipo}-${item.id}`} className="p-4 space-y-2 bg-slate-900/40">
                 <div className="flex items-start justify-between gap-2">
-                  <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${item.tipo === 'NC' ? 'bg-amber-900/40 text-amber-300 border border-amber-700/60' : 'bg-emerald-900/40 text-emerald-300 border border-emerald-700/60'}`}>
+                  <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${billingTipoBadgeClass(item.tipo)}`}>
                     {formatTipo(item)}
                     {item.manual && <span className="ml-1 opacity-80">· manual</span>}
                   </span>
@@ -1566,7 +1630,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                   <tr key={`${item.tipo}-${item.id}`} className="border-t border-slate-800/70 hover:bg-slate-800/60 group">
                     <td className="px-3 py-2 align-middle whitespace-nowrap">{formatDate(item.fecha)}</td>
                     <td className="px-3 py-2 align-middle">
-                      <span className={`inline-flex items-center whitespace-nowrap leading-none px-2.5 py-1 rounded-full text-[11px] font-bold ${item.tipo === 'NC' ? 'bg-amber-900/40 text-amber-300 border border-amber-700/60' : 'bg-emerald-900/40 text-emerald-300 border border-emerald-700/60'}`}>
+                      <span className={`inline-flex items-center whitespace-nowrap leading-none px-2.5 py-1 rounded-full text-[11px] font-bold ${billingTipoBadgeClass(item.tipo)}`}>
                         {formatTipo(item)}
                         {item.manual && (
                           <span className="ml-1.5 text-[9px] font-semibold text-violet-300/90">manual</span>
@@ -1589,6 +1653,13 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                         {item.tipo === 'FACTURA' && Number(item.agipRetPer || 0) > 0.005 && (
                           <span className="text-[10px] font-bold text-amber-300/90">
                             incl. IIBB ${formatMoneyAr(Number(item.agipRetPer || 0))}
+                          </span>
+                        )}
+                        {item.tipo === 'ND' && Number(item.agipRetPer || 0) > 0.005 && (
+                          <span className="text-[10px] font-bold text-violet-300/90">
+                            {Number(item.importe || 0) <= Number(item.agipRetPer || 0) + 0.01
+                              ? `solo IIBB ${formatMoneyAr(Number(item.agipRetPer || 0))}`
+                              : `incl. IIBB ${formatMoneyAr(Number(item.agipRetPer || 0))}`}
                           </span>
                         )}
                       </div>
@@ -1759,6 +1830,50 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                               </button>
                             );
                           })()}
+                        {canAfipInvoiceActions &&
+                          item.tipo === 'FACTURA' &&
+                          item.orderId &&
+                          !String(item.id || '').startsWith('mm-fac-') &&
+                          Number(item.agipRetPer || 0) <= 0.005 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                showConfirm({
+                                  title: 'Emitir nota de débito por IIBB',
+                                  message:
+                                    'Se emitirá en AFIP una nota de débito asociada a esta factura, registrando solo la percepción IIBB según el padrón AGIP del mes del pedido. El CAE de la factura original no cambia.',
+                                  confirmLabel: 'Emitir ND IIBB',
+                                  onConfirm: () => {
+                                    setBillingEmitNDOrderId(item.orderId);
+                                    api
+                                      .emitirNotaDebito(item.orderId, { tipo: 'iibb' })
+                                      .then((r) => {
+                                        showToast('success', `ND por IIBB emitida (CAE ${r?.cae ?? '—'}).`);
+                                        void load();
+                                      })
+                                      .catch((err: any) =>
+                                        showToast(
+                                          'error',
+                                          err?.response?.data?.message ||
+                                            err?.message ||
+                                            'No se pudo emitir la nota de débito'
+                                        )
+                                      )
+                                      .finally(() => setBillingEmitNDOrderId(null));
+                                  },
+                                });
+                              }}
+                              disabled={billingEmitNDOrderId === item.orderId}
+                              className="inline-flex items-center justify-center p-1.5 rounded-lg bg-slate-800 text-violet-200/95 hover:bg-slate-700 border border-violet-900/40 disabled:opacity-50"
+                              title="ND por percepción IIBB en AFIP"
+                            >
+                              {billingEmitNDOrderId === item.orderId ? (
+                                <Loader2 size={15} className="animate-spin text-violet-300" />
+                              ) : (
+                                <FilePlus size={15} />
+                              )}
+                            </button>
+                          )}
                         {canAfipInvoiceActions &&
                           item.tipo === 'FACTURA' &&
                           item.orderId &&

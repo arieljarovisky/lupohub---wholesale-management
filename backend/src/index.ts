@@ -41,6 +41,7 @@ import { addTransportesTables } from './database/add_transportes_tables';
 import { addInvoicesTable } from './database/add_invoices_table';
 import { addCreditNotesTable } from './database/add_credit_notes_table';
 import { addCreditNotesVoidedInvoiceSnapshot } from './database/add_credit_notes_voided_invoice_snapshot';
+import { addDebitNotesTable } from './database/add_debit_notes_table';
 import { addOrdersArchived } from './database/add_orders_archived';
 import { addPriceLists } from './database/add_price_lists';
 import { addCatalogsTable } from './database/add_catalogs_table';
@@ -208,6 +209,7 @@ async function initDatabase() {
       await addInvoicesTable();
       await addCreditNotesTable();
       await addCreditNotesVoidedInvoiceSnapshot();
+      await addDebitNotesTable();
       await addOrdersArchived();
       await addPriceLists();
       await addCatalogsTable();

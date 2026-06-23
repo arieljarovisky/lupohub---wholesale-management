@@ -1655,6 +1655,57 @@ export const api = {
     return await request<any>(`/orders/${orderId}/emitir-nota-credito`, 'POST', data, undefined, AFIP_EMIT_TIMEOUT_MS);
   },
 
+  getOrderDebitNotes: async (orderId: string): Promise<import('../types').DebitNote[]> => {
+    const rows = await request<any[]>(`/orders/${orderId}/debit-notes`, 'GET');
+    return (rows || []).map((r) => ({
+      id: String(r.id),
+      orderId: String(r.orderId ?? r.order_id ?? orderId),
+      invoiceId: String(r.invoiceId ?? r.invoice_id ?? ''),
+      cae: String(r.cae ?? ''),
+      caeFchVto: r.caeFchVto ?? r.cae_fch_vto ?? undefined,
+      puntoVta: Number(r.puntoVta ?? r.punto_venta ?? 0),
+      cbteTipo: Number(r.cbteTipo ?? r.cbte_tipo ?? 0),
+      cbteDesde: Number(r.cbteDesde ?? r.cbte_desde ?? 0),
+      cbteHasta: Number(r.cbteHasta ?? r.cbte_hasta ?? r.cbteDesde ?? r.cbte_desde ?? 0),
+      amountDebited: Number(r.amountDebited ?? r.amount_debited ?? 0),
+      agipAlicuota: r.agipAlicuota != null ? Number(r.agipAlicuota) : r.agip_alicuota != null ? Number(r.agip_alicuota) : undefined,
+      agipRetPer: r.agipRetPer != null ? Number(r.agipRetPer) : r.agip_ret_per != null ? Number(r.agip_ret_per) : undefined,
+      scope: r.scope ?? undefined,
+      itemIndex: r.itemIndex ?? r.item_index ?? undefined,
+      itemIndexes: Array.isArray(r.itemIndexes) ? r.itemIndexes : undefined,
+      amountByItemIndex: r.amountByItemIndex ?? undefined,
+      quantityByItemIndex: r.quantityByItemIndex ?? undefined,
+      description: r.description ?? undefined,
+      createdAt: r.createdAt ?? r.created_at ?? undefined,
+    })) as import('../types').DebitNote[];
+  },
+
+  emitirNotaDebito: async (
+    orderId: string,
+    data: {
+      tipo: 'iibb' | 'monto' | 'total' | 'item' | 'items';
+      netAmount?: number;
+      description?: string;
+      itemIndex?: number;
+      quantity?: number;
+      items?: Array<{ itemIndex: number; quantity: number }>;
+    }
+  ): Promise<{
+    id: string;
+    orderId: string;
+    cae: string;
+    caeFchVto?: string;
+    puntoVta: number;
+    cbteTipo: number;
+    cbteDesde: number;
+    cbteHasta: number;
+    amountDebited: number;
+    agipRetPer?: number;
+    scope?: string;
+  }> => {
+    return await request<any>(`/orders/${orderId}/emitir-nota-debito`, 'POST', data, undefined, AFIP_EMIT_TIMEOUT_MS);
+  },
+
   /** Lista los ítems del pedido que quedaron sin número de despacho asignado. */
   getOrderItemsMissingDespacho: async (orderId: string): Promise<Array<{
     orderItemId: string;
@@ -3476,7 +3527,7 @@ export const api = {
 
   // ============ FACTURACIÓN (Facturas + Notas de crédito) ============
 
-  getBilling: async (params?: { desde?: string; hasta?: string; customerId?: string; province?: string; tipo?: 'FACTURA' | 'NC' }): Promise<any[]> => {
+  getBilling: async (params?: { desde?: string; hasta?: string; customerId?: string; province?: string; tipo?: 'FACTURA' | 'NC' | 'ND' }): Promise<any[]> => {
     const queryParams = new URLSearchParams();
     if (params?.desde) queryParams.append('desde', params.desde);
     if (params?.hasta) queryParams.append('hasta', params.hasta);
@@ -3643,7 +3694,7 @@ export const api = {
     );
   },
 
-  exportBilling: async (params?: { desde?: string; hasta?: string; customerId?: string; province?: string; tipo?: 'FACTURA' | 'NC' }): Promise<void> => {
+  exportBilling: async (params?: { desde?: string; hasta?: string; customerId?: string; province?: string; tipo?: 'FACTURA' | 'NC' | 'ND' }): Promise<void> => {
     const queryParams = new URLSearchParams();
     if (params?.desde) queryParams.append('desde', params.desde);
     if (params?.hasta) queryParams.append('hasta', params.hasta);
@@ -3671,7 +3722,7 @@ export const api = {
     hasta?: string;
     customerId?: string;
     province?: string;
-    tipo?: 'FACTURA' | 'NC';
+    tipo?: 'FACTURA' | 'NC' | 'ND';
   }): Promise<void> => {
     const queryParams = new URLSearchParams();
     if (params?.desde) queryParams.append('desde', params.desde);

@@ -14,7 +14,7 @@ import {
   type MultimediaMovementRow,
 } from '../utils/multimediaHistorialExcel';
 import { INCLUDE_TANGO_IMPORT_IN_SYSTEM } from '../sql/carteraImportedSql';
-import { invoiceLedgerImporte, ncLedgerImporte } from '../config/orderPricing';
+import { invoiceLedgerImporte, ncLedgerImporte, ndLedgerImporte } from '../config/orderPricing';
 import { movementOnOrAfterOpeningDate, normalizeYmdDate } from '../sql/customerOpeningBalance';
 import {
   backfillPaymentOrdersFromLegacy,
@@ -556,6 +556,30 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
        ORDER BY cn.created_at ASC, cn.id ASC`,
       [id]
     )) as any[];
+    let debitNoteRows: any[] = [];
+    try {
+      debitNoteRows = (await query(
+        `SELECT
+           dn.id,
+           dn.order_id,
+           dn.cbte_tipo,
+           dn.punto_venta,
+           dn.cbte_desde,
+           dn.created_at,
+           dn.amount_debited,
+           dn.agip_ret_per,
+           dn.scope,
+           dn.description,
+           o.date AS order_date
+         FROM debit_notes dn
+         JOIN orders o ON o.id = dn.order_id
+         WHERE o.customer_id = ?
+         ORDER BY dn.created_at ASC, dn.id ASC`,
+        [id]
+      )) as any[];
+    } catch {
+      debitNoteRows = [];
+    }
     let manualComprobanteRows: any[] = [];
     try {
       manualComprobanteRows = (await query(
@@ -746,6 +770,33 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
           source: 'system' as const
         };
       });
+    const debitNoteAsEntries = debitNoteRows
+      .filter((dn) => ledgerMovementVisibleAfterOpening(openingBalanceDate, dn.created_at))
+      .map((dn, idx) => {
+        const importe = ndLedgerImporte(Number(dn.amount_debited || 0), Number(dn.agip_ret_per || 0));
+        const numero = formatAfipComprobanteNumero(Number(dn.punto_venta || 0), Number(dn.cbte_desde || 0));
+        const scope = String(dn.scope || '');
+        const detalleExtra =
+          scope === 'iibb'
+            ? ' · Percepción IIBB'
+            : dn.description
+              ? ` · ${String(dn.description).trim()}`
+              : '';
+        return {
+          lineOrder: maxLineOrder + 60000 + idx,
+          lineDate: dn.created_at,
+          tipo: 'ND',
+          numero,
+          edc: null,
+          vto: null,
+          importe: importe > 0 ? importe : null,
+          saldo: null,
+          detalle: `Pedido ${dn.order_id || ''} · ND AFIP LupoHub${detalleExtra}`,
+          paginaPdf: null,
+          orderId: dn.order_id ? String(dn.order_id) : null,
+          source: 'system' as const,
+        };
+      });
     const manualComprobanteAsEntries = manualComprobanteRows.filter((m) => movementOnOrAfterOpening(m.fecha || m.created_at)).map((m, idx) => {
       const importe =
         m.tipo === 'FACTURA'
@@ -834,6 +885,7 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
       ...orderSaldoAsEntries,
       ...voidedInvoiceAsEntries,
       ...creditNoteAsEntries,
+      ...debitNoteAsEntries,
       ...invoiceAsEntries,
       ...manualComprobanteAsEntries,
       ...paymentAsEntries
