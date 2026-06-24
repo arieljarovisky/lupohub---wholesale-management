@@ -4270,16 +4270,10 @@ export const getTiendaNubeOrders = async (req: Request, res: Response) => {
 
     let orders = ordersRes.data.map((order: any) => {
       const rawPaymentStatus = (order.payment_status ?? '').toString().trim().toLowerCase();
-      const paymentDetails = Array.isArray(order.payment_details) ? order.payment_details : [];
-      const detailStates = paymentDetails
-        .map((d: any) => (d?.status ?? d?.state ?? '').toString().trim().toLowerCase())
-        .filter(Boolean);
-      const looksRefunded = rawPaymentStatus === 'refunded' || detailStates.some((s: string) => s.includes('refund'));
-      const looksVoided = rawPaymentStatus === 'voided' || rawPaymentStatus === 'cancelled' || detailStates.some((s: string) => s.includes('void') || s.includes('cancel'));
-      const looksPaid = rawPaymentStatus === 'paid'
-        || !!order.paid_at
-        || detailStates.some((s: string) => s === 'paid' || s === 'approved' || s === 'accredited' || s === 'captured');
-      const normalizedPaymentStatus = looksRefunded ? 'refunded' : looksVoided ? 'voided' : looksPaid ? 'paid' : 'pending';
+      const normalizedPaymentStatus = normalizeTnPaymentStatus(order);
+      const originalTotal = parseTnMoney(order.total) ?? 0;
+      const billableTotal = getTnOrderBillableTotal(order);
+      const hasPartialRefund = tnOrderHasPartialRefund(order);
 
       // Extraer nombre del cliente de diferentes fuentes
       let customerName = 'Sin nombre';
@@ -4325,11 +4319,14 @@ export const getTiendaNubeOrders = async (req: Request, res: Response) => {
       status: order.status,
       paymentStatus: normalizedPaymentStatus,
       paymentStatusRaw: rawPaymentStatus || null,
-      isPaid: normalizedPaymentStatus === 'paid',
+      isPaid: tnPaymentStatusIsBillable(normalizedPaymentStatus),
+      hasPartialRefund,
+      originalTotal,
+      billableTotal,
       shippingStatus: order.shipping_status,
       shippingMethod,
       hasExpressShipping,
-      total: order.total,
+      total: String(billableTotal > 0 ? billableTotal : originalTotal),
       currency: order.currency,
       customer: {
         name: customerName,
@@ -4408,18 +4405,73 @@ export const getTiendaNubeOrders = async (req: Request, res: Response) => {
   }
 };
 
-function normalizeTnPaymentStatus(order: any): 'paid' | 'pending' | 'refunded' | 'voided' {
+function parseTnMoney(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  const n = Number(String(value).replace(',', '.'));
+  if (!Number.isFinite(n)) return null;
+  return Math.round(n * 100) / 100;
+}
+
+/** Monto neto a facturar: lo que el cliente pagó efectivamente (después de reembolsos parciales). */
+function getTnOrderBillableTotal(order: any): number {
+  const orderTotal = parseTnMoney(order?.total) ?? 0;
+  const paidByCustomer = parseTnMoney(
+    order?.total_paid_by_customer
+      ?? order?.total_paid_by_customer_including_fees
+      ?? order?.total_paid
+  );
+  if (paidByCustomer != null && paidByCustomer > 0) {
+    return paidByCustomer <= orderTotal + 0.01 ? paidByCustomer : orderTotal;
+  }
+  return orderTotal;
+}
+
+function tnOrderHasPartialRefund(order: any): boolean {
+  const raw = (order?.payment_status ?? '').toString().trim().toLowerCase();
+  if (raw === 'partially_refunded') return true;
+  const orderTotal = parseTnMoney(order?.total) ?? 0;
+  const billable = getTnOrderBillableTotal(order);
+  return orderTotal > 0.005 && billable + 0.01 < orderTotal;
+}
+
+function extractTnCustomerCuit(order: any): string | undefined {
+  const rawDoc = String(
+    order?.contact_identification
+      ?? order?.billing_address?.doc_number
+      ?? order?.customer?.identification
+      ?? order?.customer?.doc_number
+      ?? ''
+  ).replace(/\D/g, '');
+  return rawDoc.length >= 10 ? rawDoc : undefined;
+}
+
+function normalizeTnPaymentStatus(order: any): 'paid' | 'partially_refunded' | 'pending' | 'refunded' | 'voided' {
   const rawPaymentStatus = (order?.payment_status ?? '').toString().trim().toLowerCase();
   const paymentDetails = Array.isArray(order?.payment_details) ? order.payment_details : [];
   const detailStates = paymentDetails
     .map((d: any) => (d?.status ?? d?.state ?? '').toString().trim().toLowerCase())
     .filter(Boolean);
-  const looksRefunded = rawPaymentStatus === 'refunded' || detailStates.some((s: string) => s.includes('refund'));
-  const looksVoided = rawPaymentStatus === 'voided' || rawPaymentStatus === 'cancelled' || detailStates.some((s: string) => s.includes('void') || s.includes('cancel'));
-  const looksPaid = rawPaymentStatus === 'paid'
+  const looksPartiallyRefunded =
+    rawPaymentStatus === 'partially_refunded' || detailStates.some((s: string) => s === 'partially_refunded');
+  const looksFullyRefunded =
+    rawPaymentStatus === 'refunded' || detailStates.some((s: string) => s === 'refunded');
+  const looksVoided =
+    rawPaymentStatus === 'voided'
+    || rawPaymentStatus === 'cancelled'
+    || detailStates.some((s: string) => s.includes('void') || s === 'cancelled' || s === 'canceled');
+  const looksPaid =
+    rawPaymentStatus === 'paid'
+    || rawPaymentStatus === 'partially_paid'
     || !!order?.paid_at
     || detailStates.some((s: string) => s === 'paid' || s === 'approved' || s === 'accredited' || s === 'captured');
-  return looksRefunded ? 'refunded' : looksVoided ? 'voided' : looksPaid ? 'paid' : 'pending';
+  if (looksFullyRefunded) return 'refunded';
+  if (looksVoided) return 'voided';
+  if (looksPartiallyRefunded) return 'partially_refunded';
+  return looksPaid ? 'paid' : 'pending';
+}
+
+function tnPaymentStatusIsBillable(status: ReturnType<typeof normalizeTnPaymentStatus>): boolean {
+  return status === 'paid' || status === 'partially_refunded';
 }
 
 /** Emite facturas AFIP masivas para órdenes de Tienda Nube (solo pagadas). */
@@ -4449,16 +4501,6 @@ export const invoiceTiendaNubeOrdersBulk = async (req: Request, res: Response) =
 
     const { emitirFactura: emitirAfip } = await import('../services/afip.service');
     const results: any[] = [];
-    const payableOrders: Array<{
-      orderId: string;
-      orderNumber: string;
-      total: number;
-      date: string;
-      customerId: string;
-      customerName: string;
-      customerCuit?: string;
-      condicionIva: string;
-    }> = [];
 
     for (const orderId of orderIds) {
       const orderIdStr = String(orderId);
@@ -4496,14 +4538,20 @@ export const invoiceTiendaNubeOrdersBulk = async (req: Request, res: Response) =
 
         const order = orderRes.data;
         const paymentStatus = normalizeTnPaymentStatus(order);
-        if (paymentStatus !== 'paid') {
+        if (!tnPaymentStatusIsBillable(paymentStatus)) {
           results.push({ orderId: orderIdStr, status: 'skipped_unpaid', message: `La orden no está pagada (estado: ${paymentStatus})` });
           continue;
         }
 
-        const total = Number(order?.total ?? 0);
-        if (!Number.isFinite(total) || total <= 0) {
-          results.push({ orderId: orderIdStr, status: 'error', message: 'La orden tiene total inválido para facturar' });
+        const billableTotal = getTnOrderBillableTotal(order);
+        if (!Number.isFinite(billableTotal) || billableTotal <= 0) {
+          results.push({
+            orderId: orderIdStr,
+            status: 'error',
+            message: paymentStatus === 'partially_refunded'
+              ? 'El importe neto a facturar es cero tras el reembolso parcial'
+              : 'La orden tiene total inválido para facturar'
+          });
           continue;
         }
 
@@ -4513,55 +4561,32 @@ export const invoiceTiendaNubeOrdersBulk = async (req: Request, res: Response) =
           || order?.contact_name
           || order?.billing_name
           || 'Consumidor Final';
-        const rawDoc = String(order?.billing_address?.doc_number ?? order?.customer?.doc_number ?? '').replace(/\D/g, '');
-        const maybeCuit = rawDoc.length >= 10 ? rawDoc : undefined;
+        const maybeCuit = extractTnCustomerCuit(order);
         const condicionIvaRaw = (
-          order?.billing_address?.fiscal_regime
+          order?.billing_fiscal_regime
+          || order?.billing_address?.fiscal_regime
           || order?.customer?.fiscal_regime
           || order?.customer?.iva_condition
           || 'Consumidor Final'
         ).toString();
+        const customerId = `TN-${order?.customer?.id || order.id}`;
 
-        payableOrders.push({
-          orderId: String(order.id),
-          orderNumber: String(order.number ?? order.id),
-          total,
-          date: String(order?.created_at || new Date().toISOString().slice(0, 10)),
-          customerId: `TN-${order?.customer?.id || order.id}`,
-          customerName,
-          customerCuit: maybeCuit,
-          condicionIva: condicionIvaRaw || 'Consumidor Final'
-        });
-      } catch (e: any) {
-        results.push({
-          orderId: orderIdStr,
-          status: 'error',
-          message: e?.message || 'Error emitiendo factura'
-        });
-      }
-    }
+        const afipResult = await emitirAfip(
+          {
+            id: `TN-${order.id}`,
+            date: String(order?.created_at || new Date().toISOString().slice(0, 10)),
+            total: billableTotal,
+            customerId
+          },
+          {
+            id: customerId,
+            businessName: customerName,
+            cuit: maybeCuit,
+            condicionIva: condicionIvaRaw || 'Consumidor Final'
+          },
+          forceCbteTipo
+        );
 
-    if (payableOrders.length > 0) {
-      const totalLote = payableOrders.reduce((acc, o) => acc + o.total, 0);
-      const base = payableOrders[0];
-      const sameCustomer = payableOrders.every((o) => o.customerId === base.customerId);
-      const afipResult = await emitirAfip(
-        {
-          id: `TN-BULK-${Date.now()}`,
-          date: base.date,
-          total: totalLote,
-          customerId: sameCustomer ? base.customerId : 'TN-BULK-CF'
-        },
-        {
-          id: sameCustomer ? base.customerId : 'TN-BULK-CF',
-          businessName: sameCustomer ? base.customerName : 'Consumidor Final',
-          cuit: sameCustomer ? base.customerCuit : undefined,
-          condicionIva: sameCustomer ? base.condicionIva : 'Consumidor Final'
-        },
-        forceCbteTipo
-      );
-
-      for (const o of payableOrders) {
         const invoiceId = uuidv4();
         await execute(
           `INSERT INTO external_invoices
@@ -4569,12 +4594,12 @@ export const invoiceTiendaNubeOrdersBulk = async (req: Request, res: Response) =
            VALUES (?, 'TIENDANUBE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             invoiceId,
-            o.orderId,
-            o.orderNumber,
-            o.customerName,
-            o.customerCuit || null,
-            o.condicionIva || null,
-            o.total,
+            String(order.id),
+            String(order.number ?? order.id),
+            customerName,
+            maybeCuit || null,
+            condicionIvaRaw || null,
+            billableTotal,
             afipResult.cae,
             afipResult.caeFchVto || null,
             afipResult.puntoVta,
@@ -4584,13 +4609,21 @@ export const invoiceTiendaNubeOrdersBulk = async (req: Request, res: Response) =
           ]
         );
         results.push({
-          orderId: o.orderId,
+          orderId: orderIdStr,
           status: 'invoiced',
           invoiceId,
           cae: afipResult.cae,
           cbteTipo: afipResult.cbteTipo,
           cbteDesde: afipResult.cbteDesde,
-          cbteHasta: afipResult.cbteHasta
+          cbteHasta: afipResult.cbteHasta,
+          billableTotal,
+          hasPartialRefund: tnOrderHasPartialRefund(order)
+        });
+      } catch (e: any) {
+        results.push({
+          orderId: orderIdStr,
+          status: 'error',
+          message: e?.message || 'Error emitiendo factura'
         });
       }
     }

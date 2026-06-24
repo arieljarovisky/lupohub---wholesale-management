@@ -10,6 +10,9 @@ interface TiendaNubeOrder {
   paymentStatus: string;
   paymentStatusRaw?: string | null;
   isPaid?: boolean;
+  hasPartialRefund?: boolean;
+  originalTotal?: number;
+  billableTotal?: number;
   shippingStatus: string;
   shippingMethod?: string;
   hasExpressShipping?: boolean;
@@ -114,6 +117,7 @@ const TiendaNubeOrders: React.FC = () => {
 
   const paymentStatusConfig: Record<string, { label: string; color: string; bg: string }> = {
     paid: { label: 'PAGADO', color: 'text-green-400', bg: 'bg-green-500/10' },
+    partially_refunded: { label: 'Reemb. parcial', color: 'text-amber-400', bg: 'bg-amber-500/10' },
     pending: { label: 'Pendiente', color: 'text-yellow-400', bg: 'bg-yellow-500/10' },
     refunded: { label: 'Reembolsado', color: 'text-red-400', bg: 'bg-red-500/10' },
     voided: { label: 'Anulado', color: 'text-slate-400', bg: 'bg-slate-500/10' },
@@ -659,8 +663,11 @@ const TiendaNubeOrders: React.FC = () => {
         <div className="space-y-3">
           {filteredOrders.map((order) => {
             const status = statusConfig[order.status] || statusConfig.open;
-            const normalizedPayment = (order.isPaid === true ? 'paid' : order.paymentStatus) || 'pending';
+            const normalizedPayment = (order.isPaid === true ? (order.paymentStatus === 'partially_refunded' ? 'partially_refunded' : 'paid') : order.paymentStatus) || 'pending';
             const payment = paymentStatusConfig[normalizedPayment] || paymentStatusConfig.pending;
+            const billableAmount = order.billableTotal ?? parseFloat(order.total || '0');
+            const originalAmount = order.originalTotal ?? billableAmount;
+            const showRefundHint = order.hasPartialRefund || normalizedPayment === 'partially_refunded';
             const dateInfo = formatDate(order.createdAt);
             const isExpanded = expandedOrder === order.id;
 
@@ -709,6 +716,11 @@ const TiendaNubeOrders: React.FC = () => {
                           <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold ${order.invoiced ? 'bg-emerald-700/20 text-emerald-300' : 'bg-slate-700/40 text-slate-300'}`}>
                             {order.invoiced ? 'FACTURADA' : 'SIN FACTURA'}
                           </span>
+                          {showRefundHint && (
+                            <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-amber-700/20 text-amber-300" title="Se factura solo lo que el cliente pagó (después del reembolso parcial)">
+                              A FACTURAR: ${formatCurrency(String(billableAmount))}
+                            </span>
+                          )}
                           {order.paymentStatusRaw && order.paymentStatusRaw !== normalizedPayment && (
                             <span className="px-2 py-1 rounded-lg text-[10px] font-bold bg-slate-700/40 text-slate-300">
                               TN: {order.paymentStatusRaw}
@@ -793,6 +805,15 @@ const TiendaNubeOrders: React.FC = () => {
 
                     {/* Products */}
                     <div className="mt-4">
+                      {showRefundHint && (
+                        <div className="mb-3 rounded-xl border border-amber-600/30 bg-amber-900/20 px-4 py-3 text-sm text-amber-100">
+                          Esta orden tiene un <strong>reembolso parcial</strong>. Al facturar (Factura B u otro tipo) se usa el importe neto cobrado:
+                          {' '}<strong>${formatCurrency(String(billableAmount))}</strong>
+                          {originalAmount > billableAmount + 0.01 && (
+                            <span className="text-amber-300/80"> (total original ${formatCurrency(String(originalAmount))})</span>
+                          )}
+                        </div>
+                      )}
                       <div className="flex items-center gap-2 text-cyan-400 text-xs font-bold mb-3">
                         <Package size={14} />
                         <span>PRODUCTOS</span>
