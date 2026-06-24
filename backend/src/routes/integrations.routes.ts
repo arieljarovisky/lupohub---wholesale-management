@@ -24,6 +24,8 @@ import {
   getMlTnSyncIssues,
   importStockFromMercadoLibre,
   getTiendaNubeOrders,
+  assignTiendaNubeExpressTracking,
+  updateTiendaNubeExpressTrackingStatus,
   getTiendaNubeStock,
   getTiendaNubeStockTotals,
   getTiendaNubeProductVariants,
@@ -53,6 +55,7 @@ import {
   invoiceTiendaNubeOrdersBulk,
   invoiceMercadoLibreOrdersBulk,
   getExternalInvoicesHistory,
+  getExternalInvoicePrintData,
   emitirNotaCreditoExternalInvoice,
   getMercadoLibreProductAdsAdvertisers,
   getMercadoLibreProductAdsCampaigns,
@@ -161,6 +164,8 @@ router.post('/mercadolibre/invoice-bulk', authMiddleware, invoiceMercadoLibreOrd
 router.get('/tiendanube/auth', getTiendaNubeAuthUrl);
 router.get('/tiendanube/callback', handleTiendaNubeCallback);
 router.get('/tiendanube/orders', getTiendaNubeOrders);
+router.post('/tiendanube/orders/:orderId/express-tracking/assign', authMiddleware, assignTiendaNubeExpressTracking);
+router.patch('/tiendanube/orders/:orderId/express-tracking/status', authMiddleware, updateTiendaNubeExpressTrackingStatus);
 router.get('/tiendanube/stock', getTiendaNubeStock);
 router.get('/tiendanube/stock/totals', getTiendaNubeStockTotals);
 router.get('/tiendanube/sales-report-export', authMiddleware, exportTiendaNubeSalesReportXlsx);
@@ -188,6 +193,7 @@ router.post('/tiendanube/sync-orders-from-date', authMiddleware, syncTiendaNubeO
 router.get('/tiendanube/sync-orders-from-date', authMiddleware, syncTiendaNubeOrdersFromDate);
 router.post('/tiendanube/invoice-bulk', authMiddleware, invoiceTiendaNubeOrdersBulk);
 router.get('/invoices/external', authMiddleware, getExternalInvoicesHistory);
+router.get('/invoices/external/:id/print-data', authMiddleware, getExternalInvoicePrintData);
 router.post('/invoices/external/:id/credit-note', authMiddleware, emitirNotaCreditoExternalInvoice);
 
 router.delete('/:platform/disconnect', disconnectIntegration);

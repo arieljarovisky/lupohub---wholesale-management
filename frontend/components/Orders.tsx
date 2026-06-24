@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, ChevronRight, ChevronDown, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, AlertTriangle, XCircle, FileSpreadsheet, Receipt, FileMinus, Archive, ArchiveRestore, Wallet, ArrowDownToLine, ArrowUpToLine, Loader2, Ship, Percent, RefreshCcw, ArrowRight, Eye, Copy, ChevronUp, SlidersHorizontal } from 'lucide-react';
-import { Order, OrderStatus, Role, Product, Customer, OrderItem, User, OrderInvoice, Transporte, CreditNote } from '../types';
+import { Search, ChevronRight, ChevronDown, CheckCircle, Clock, Truck, FileText, Bot, Plus, X, Trash2, Save, PackageCheck, Lock, Filter, Package, Edit, AlertCircle, AlertTriangle, XCircle, FileSpreadsheet, Receipt, FileMinus, FilePlus, Archive, ArchiveRestore, Wallet, ArrowDownToLine, ArrowUpToLine, Loader2, Ship, Percent, RefreshCcw, ArrowRight, Eye, Copy, ChevronUp, SlidersHorizontal } from 'lucide-react';
+import { Order, OrderStatus, Role, Product, Customer, OrderItem, User, OrderInvoice, Transporte, CreditNote, DebitNote } from '../types';
 import { useNotification } from '../context/NotificationContext';
 import { getRemitente } from '../services/apiIntegration';
 import { api } from '../services/api';
@@ -12,6 +12,7 @@ import {
   descriptionForPrintLine,
   buildWholesaleFacturaHtml,
   buildWholesaleCreditNoteHtml,
+  buildWholesaleDebitNoteHtml,
   normalizeSkuForPrint,
   mergeServerInvoiceIntoOrder,
   orderNetoFromItemsForAfip as orderNetoFromItems,
@@ -33,6 +34,7 @@ import {
 } from '../utils/ordersListFilters';
 import { downloadOneOrderExcel, downloadOrdersExcel } from '../utils/orderExportExcel';
 import { applyPriceListToOrder } from '../utils/priceListPricing';
+import EmitDebitNoteModal from './EmitDebitNoteModal';
 
 /** Acción en tarjeta de pedido: ícono + texto corto (siempre visible). */
 function OrderCardActionButton(props: {
@@ -112,6 +114,7 @@ interface OrdersProps {
   onDeleteOrder?: (orderId: string) => void;
   onFacturaEmitida?: (orderId: string, invoice: OrderInvoice) => void;
   onCreditNoteEmitida?: (orderId: string) => void;
+  onDebitNoteEmitida?: (orderId: string) => void;
   orderArchivedFilter?: 'no' | 'yes' | 'only';
   setOrderArchivedFilter?: (v: 'no' | 'yes' | 'only') => void;
   refreshOrders?: () => void;
@@ -350,7 +353,7 @@ function syntheticCreditNotePreview(
 const Orders: React.FC<OrdersProps> = React.memo(({ 
   orders, products, customers, transportes = [], users, role, 
   currentUserId, onUpdateStatus, onCreateOrder, 
-  onNavigate, onStartPicking, onEditOrder, onDuplicateOrder, onDeleteOrder, onFacturaEmitida, onCreditNoteEmitida,
+  onNavigate, onStartPicking, onEditOrder, onDuplicateOrder, onDeleteOrder, onFacturaEmitida, onCreditNoteEmitida, onDebitNoteEmitida,
   orderArchivedFilter = 'no', setOrderArchivedFilter, refreshOrders
 }) => {
   const { showConfirm, showToast } = useNotification();
@@ -406,6 +409,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [ncItemsQuantities, setNcItemsQuantities] = useState<Record<number, number>>({});
   const [ncRestoreStock, setNcRestoreStock] = useState(true);
   const [emitiendoNC, setEmitiendoNC] = useState(false);
+  const [ndOrder, setNdOrder] = useState<Order | null>(null);
   const [archivingOrderId, setArchivingOrderId] = useState<string | null>(null);
   const [verificandoAfipOrderId, setVerificandoAfipOrderId] = useState<string | null>(null);
   const [recalculatingAgipOrderId, setRecalculatingAgipOrderId] = useState<string | null>(null);
@@ -1400,6 +1404,22 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     });
   };
 
+  const buildDebitNoteHtml = (
+    order: Order,
+    nd: DebitNote,
+    previewAgip?: { retPer: number; alicuota: number }
+  ) => {
+    const customer = customers.find((c) => c.id === order.customerId);
+    return buildWholesaleDebitNoteHtml({
+      order,
+      nd,
+      customer,
+      products,
+      remitente: mergedRemitenteForFactura() as any,
+      previewAgip,
+    });
+  };
+
   const openFactura = (order: Order, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!order.invoice) return;
@@ -1508,6 +1528,53 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       }
     } catch (err: any) {
       showToast('error', err?.message || 'Error obteniendo notas de crédito');
+    }
+  };
+
+  const openNotaDebito = async (order: Order, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      const notes = await api.getOrderDebitNotes(order.id);
+      if (!notes || notes.length === 0) {
+        showToast('info', 'No hay notas de débito para este pedido');
+        return;
+      }
+      const sorted = [...notes].sort((a, b) => {
+        const da = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const db = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return db - da;
+      });
+      const nd = sorted[0];
+      if (!nd) {
+        showToast('info', 'No hay notas de débito para este pedido');
+        return;
+      }
+      let orderForPdf = order;
+      try {
+        const latestInv = await api.getOrderInvoice(order.id);
+        if (latestInv) {
+          orderForPdf = mergeServerInvoiceIntoOrder(order, latestInv as Record<string, unknown>);
+        }
+      } catch {
+        /* usar factura en memoria */
+      }
+      const netoPed = orderNetoForNotaCreditoTotal(orderForPdf);
+      const agip =
+        nd.agipRetPer != null && Number(nd.agipRetPer) > 0.005
+          ? { retPer: Number(nd.agipRetPer), alicuota: Number(nd.agipAlicuota || 0) }
+          : iibbProratedFromInvoiceForNc(orderForPdf.invoice, Number(nd.amountDebited || 0), netoPed);
+      const html = buildDebitNoteHtml(orderForPdf, nd, agip ?? undefined);
+      if (!html) {
+        showToast('error', 'No se pudo generar la nota de débito');
+        return;
+      }
+      const w = window.open('', '_blank');
+      if (w) {
+        w.document.write(html);
+        w.document.close();
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || 'Error obteniendo notas de débito');
     }
   };
 
@@ -2340,6 +2407,14 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                       label="Ver NC"
                     />
                   )}
+                  {Number(order.debitNotesCount || 0) > 0 && (
+                    <OrderCardActionButton
+                      onClick={(e) => openNotaDebito(order, e)}
+                      title="Ver notas de débito y descargar PDF"
+                      icon={<FilePlus size={16} />}
+                      label="Ver ND"
+                    />
+                  )}
                   {order.invoice && afipConfigured && (
                     <OrderCardActionButton
                       onClick={(e) => {
@@ -2387,6 +2462,17 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                       title="Emitir nota de crédito AFIP (total o por artículo)"
                       icon={<FileMinus size={16} />}
                       label="Emitir NC"
+                    />
+                  )}
+                  {order.invoice && afipConfigured && canEmitirFactura && (
+                    <OrderCardActionButton
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setNdOrder(order);
+                      }}
+                      title="Emitir nota de débito AFIP (IIBB, monto o artículos)"
+                      icon={<FilePlus size={16} />}
+                      label="Emitir ND"
                     />
                   )}
                   <OrderCardActionButton
@@ -3537,6 +3623,20 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         </div>
         );
       })()}
+
+      <EmitDebitNoteModal
+        order={ndOrder}
+        onClose={() => setNdOrder(null)}
+        products={products}
+        customers={customers}
+        remitente={mergedRemitenteForFactura()}
+        customerLabel={ndOrder ? ndOrder.customerBusinessName || getCustomerName(ndOrder) : undefined}
+        defaultTipo="iibb"
+        onEmitted={(orderId) => {
+          onDebitNoteEmitida?.(orderId);
+          refreshOrders?.();
+        }}
+      />
     </div>
   );
 });

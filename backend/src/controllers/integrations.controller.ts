@@ -12,6 +12,13 @@ import {
 import { normalizeColorNameToStandard, shouldUpdateColorValue } from '../utils/colorNameStandard';
 import { skuToCanonicalString } from '../utils/skuString';
 import { normalizeSizeToStandard } from '../utils/talleStandard';
+import {
+  buildManualTrackingEvents,
+  expressTrackingStatusLabel,
+  isExpressTrackingStatus,
+  publicStatusFromManualStatus,
+  type ExpressTrackingStatus,
+} from '../services/tiendanubeExpressTracking.service';
 
 const ML_AUTH_URL = 'https://auth.mercadolibre.com.ar/authorization';
 const ML_TOKEN_URL = 'https://api.mercadolibre.com/oauth/token';
@@ -4270,16 +4277,10 @@ export const getTiendaNubeOrders = async (req: Request, res: Response) => {
 
     let orders = ordersRes.data.map((order: any) => {
       const rawPaymentStatus = (order.payment_status ?? '').toString().trim().toLowerCase();
-      const paymentDetails = Array.isArray(order.payment_details) ? order.payment_details : [];
-      const detailStates = paymentDetails
-        .map((d: any) => (d?.status ?? d?.state ?? '').toString().trim().toLowerCase())
-        .filter(Boolean);
-      const looksRefunded = rawPaymentStatus === 'refunded' || detailStates.some((s: string) => s.includes('refund'));
-      const looksVoided = rawPaymentStatus === 'voided' || rawPaymentStatus === 'cancelled' || detailStates.some((s: string) => s.includes('void') || s.includes('cancel'));
-      const looksPaid = rawPaymentStatus === 'paid'
-        || !!order.paid_at
-        || detailStates.some((s: string) => s === 'paid' || s === 'approved' || s === 'accredited' || s === 'captured');
-      const normalizedPaymentStatus = looksRefunded ? 'refunded' : looksVoided ? 'voided' : looksPaid ? 'paid' : 'pending';
+      const normalizedPaymentStatus = normalizeTnPaymentStatus(order);
+      const originalTotal = parseTnMoney(order.total) ?? 0;
+      const billableTotal = getTnOrderBillableTotal(order);
+      const hasPartialRefund = tnOrderHasPartialRefund(order);
 
       // Extraer nombre del cliente de diferentes fuentes
       let customerName = 'Sin nombre';
@@ -4325,11 +4326,14 @@ export const getTiendaNubeOrders = async (req: Request, res: Response) => {
       status: order.status,
       paymentStatus: normalizedPaymentStatus,
       paymentStatusRaw: rawPaymentStatus || null,
-      isPaid: normalizedPaymentStatus === 'paid',
+      isPaid: tnPaymentStatusIsBillable(normalizedPaymentStatus),
+      hasPartialRefund,
+      originalTotal,
+      billableTotal,
       shippingStatus: order.shipping_status,
       shippingMethod,
       hasExpressShipping,
-      total: order.total,
+      total: String(billableTotal > 0 ? billableTotal : originalTotal),
       currency: order.currency,
       customer: {
         name: customerName,
@@ -4396,6 +4400,34 @@ export const getTiendaNubeOrders = async (req: Request, res: Response) => {
       });
     }
 
+    // Códigos de seguimiento express ya asignados.
+    const orderIdsForTracking = Array.from(new Set((orders as any[]).map((o: any) => String(o.id)).filter(Boolean)));
+    if (orderIdsForTracking.length > 0) {
+      try {
+        const trPlaceholders = orderIdsForTracking.map(() => '?').join(', ');
+        const trackingRows = await query(
+          `SELECT external_order_id, tracking_code, manual_status, manual_status_updated_at, created_at
+           FROM tiendanube_express_tracking
+           WHERE external_order_id IN (${trPlaceholders})`,
+          orderIdsForTracking
+        ) as any[];
+        const trackingByOrderId = new Map<string, any>();
+        for (const row of trackingRows) trackingByOrderId.set(String(row.external_order_id), row);
+        orders = (orders as any[]).map((o: any) => {
+          const tr = trackingByOrderId.get(String(o.id));
+          return {
+            ...o,
+            trackingCode: tr?.tracking_code || null,
+            trackingAssignedAt: tr?.created_at || null,
+            trackingStatus: tr?.manual_status || null,
+            trackingStatusUpdatedAt: tr?.manual_status_updated_at || null,
+          };
+        });
+      } catch (trackingErr: any) {
+        console.warn('[getTiendaNubeOrders] No se pudieron cargar códigos express:', trackingErr?.message || trackingErr);
+      }
+    }
+
     res.json({
       orders,
       page: pageNum,
@@ -4408,18 +4440,215 @@ export const getTiendaNubeOrders = async (req: Request, res: Response) => {
   }
 };
 
-function normalizeTnPaymentStatus(order: any): 'paid' | 'pending' | 'refunded' | 'voided' {
+const TN_EXPRESS_TRACKING_PREFIX = 'LHE';
+
+async function ensureTnExpressTrackingSequence(): Promise<void> {
+  await execute(
+    `INSERT IGNORE INTO tiendanube_express_tracking_sequence (id, next_value) VALUES (1, 100001)`
+  );
+}
+
+function formatTnExpressTrackingCode(seq: number): string {
+  return `${TN_EXPRESS_TRACKING_PREFIX}${String(seq).padStart(8, '0')}`;
+}
+
+/**
+ * Asigna (o devuelve si ya existía) un código de seguimiento único para un envío express de Tienda Nube.
+ * Idempotente: reimprimir etiqueta/recibo conserva el mismo código.
+ */
+export const assignTiendaNubeExpressTracking = async (req: Request, res: Response) => {
+  const orderId = String(req.params.orderId || '').trim();
+  const orderNumber = String((req.body as any)?.orderNumber || '').trim() || null;
+  if (!orderId) return res.status(400).json({ message: 'ID de orden inválido' });
+
+  try {
+    const existing = await get(
+      `SELECT external_order_id, order_number, tracking_code, manual_status, manual_status_updated_at, created_at
+       FROM tiendanube_express_tracking WHERE external_order_id = ?`,
+      [orderId]
+    );
+    if (existing?.tracking_code) {
+      return res.json({
+        orderId,
+        orderNumber: existing.order_number || orderNumber,
+        trackingCode: existing.tracking_code,
+        trackingStatus: existing.manual_status || null,
+        trackingStatusUpdatedAt: existing.manual_status_updated_at || null,
+        assigned: false,
+        createdAt: existing.created_at
+      });
+    }
+
+    await ensureTnExpressTrackingSequence();
+    const inc = await execute(
+      `UPDATE tiendanube_express_tracking_sequence SET next_value = LAST_INSERT_ID(next_value) + 1 WHERE id = 1`
+    );
+    const seq = Number((inc as any)?.insertId || 0);
+    if (!seq) {
+      return res.status(500).json({ message: 'No se pudo obtener el próximo código de seguimiento express.' });
+    }
+    const trackingCode = formatTnExpressTrackingCode(seq);
+
+    try {
+      await execute(
+        `INSERT INTO tiendanube_express_tracking (external_order_id, order_number, tracking_code, manual_status, manual_status_updated_at)
+         VALUES (?, ?, ?, 'preparing', NOW())`,
+        [orderId, orderNumber, trackingCode]
+      );
+      return res.json({
+        orderId,
+        orderNumber,
+        trackingCode,
+        trackingStatus: 'preparing',
+        assigned: true
+      });
+    } catch (insertErr: any) {
+      if (insertErr?.code === 'ER_DUP_ENTRY') {
+        const raced = await get(
+          `SELECT external_order_id, order_number, tracking_code, manual_status, manual_status_updated_at, created_at
+           FROM tiendanube_express_tracking WHERE external_order_id = ?`,
+          [orderId]
+        );
+        if (raced?.tracking_code) {
+          return res.json({
+            orderId,
+            orderNumber: raced.order_number || orderNumber,
+            trackingCode: raced.tracking_code,
+            trackingStatus: raced.manual_status || null,
+            trackingStatusUpdatedAt: raced.manual_status_updated_at || null,
+            assigned: false,
+            createdAt: raced.created_at
+          });
+        }
+      }
+      throw insertErr;
+    }
+  } catch (error: any) {
+    console.error('assignTiendaNubeExpressTracking:', error);
+    return res.status(500).json({ message: 'Error asignando código de seguimiento express' });
+  }
+};
+
+/**
+ * Actualiza el estado manual de seguimiento express (visible en la página pública de tracking).
+ * PATCH /api/integrations/tiendanube/orders/:orderId/express-tracking/status
+ */
+export const updateTiendaNubeExpressTrackingStatus = async (req: Request, res: Response) => {
+  const orderId = String(req.params.orderId || '').trim();
+  const statusRaw = (req.body as any)?.status;
+  if (!orderId) return res.status(400).json({ message: 'ID de orden inválido' });
+  if (!isExpressTrackingStatus(statusRaw)) {
+    return res.status(400).json({ message: 'Estado de seguimiento inválido' });
+  }
+  const status = statusRaw as ExpressTrackingStatus;
+
+  try {
+    const existing = await get(
+      `SELECT external_order_id, order_number, tracking_code, manual_status
+       FROM tiendanube_express_tracking WHERE external_order_id = ?`,
+      [orderId]
+    );
+    if (!existing?.tracking_code) {
+      return res.status(404).json({
+        message: 'Este pedido aún no tiene código de seguimiento. Generá la etiqueta o el recibo express primero.',
+      });
+    }
+
+    await execute(
+      `UPDATE tiendanube_express_tracking
+       SET manual_status = ?, manual_status_updated_at = NOW()
+       WHERE external_order_id = ?`,
+      [status, orderId]
+    );
+
+    const updated = await get(
+      `SELECT external_order_id, order_number, tracking_code, manual_status, manual_status_updated_at, created_at
+       FROM tiendanube_express_tracking WHERE external_order_id = ?`,
+      [orderId]
+    );
+
+    return res.json({
+      orderId,
+      orderNumber: updated?.order_number || null,
+      trackingCode: updated?.tracking_code,
+      trackingStatus: updated?.manual_status,
+      trackingStatusLabel: expressTrackingStatusLabel(status),
+      trackingStatusUpdatedAt: updated?.manual_status_updated_at || null,
+      createdAt: updated?.created_at || null,
+    });
+  } catch (error: any) {
+    console.error('updateTiendaNubeExpressTrackingStatus:', error);
+    return res.status(500).json({ message: 'Error actualizando estado de seguimiento' });
+  }
+};
+
+function parseTnMoney(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  const n = Number(String(value).replace(',', '.'));
+  if (!Number.isFinite(n)) return null;
+  return Math.round(n * 100) / 100;
+}
+
+/** Monto neto a facturar: lo que el cliente pagó efectivamente (después de reembolsos parciales). */
+function getTnOrderBillableTotal(order: any): number {
+  const orderTotal = parseTnMoney(order?.total) ?? 0;
+  const paidByCustomer = parseTnMoney(
+    order?.total_paid_by_customer
+      ?? order?.total_paid_by_customer_including_fees
+      ?? order?.total_paid
+  );
+  if (paidByCustomer != null && paidByCustomer > 0) {
+    return paidByCustomer <= orderTotal + 0.01 ? paidByCustomer : orderTotal;
+  }
+  return orderTotal;
+}
+
+function tnOrderHasPartialRefund(order: any): boolean {
+  const raw = (order?.payment_status ?? '').toString().trim().toLowerCase();
+  if (raw === 'partially_refunded') return true;
+  const orderTotal = parseTnMoney(order?.total) ?? 0;
+  const billable = getTnOrderBillableTotal(order);
+  return orderTotal > 0.005 && billable + 0.01 < orderTotal;
+}
+
+function extractTnCustomerCuit(order: any): string | undefined {
+  const rawDoc = String(
+    order?.contact_identification
+      ?? order?.billing_address?.doc_number
+      ?? order?.customer?.identification
+      ?? order?.customer?.doc_number
+      ?? ''
+  ).replace(/\D/g, '');
+  return rawDoc.length >= 10 ? rawDoc : undefined;
+}
+
+function normalizeTnPaymentStatus(order: any): 'paid' | 'partially_refunded' | 'pending' | 'refunded' | 'voided' {
   const rawPaymentStatus = (order?.payment_status ?? '').toString().trim().toLowerCase();
   const paymentDetails = Array.isArray(order?.payment_details) ? order.payment_details : [];
   const detailStates = paymentDetails
     .map((d: any) => (d?.status ?? d?.state ?? '').toString().trim().toLowerCase())
     .filter(Boolean);
-  const looksRefunded = rawPaymentStatus === 'refunded' || detailStates.some((s: string) => s.includes('refund'));
-  const looksVoided = rawPaymentStatus === 'voided' || rawPaymentStatus === 'cancelled' || detailStates.some((s: string) => s.includes('void') || s.includes('cancel'));
-  const looksPaid = rawPaymentStatus === 'paid'
+  const looksPartiallyRefunded =
+    rawPaymentStatus === 'partially_refunded' || detailStates.some((s: string) => s === 'partially_refunded');
+  const looksFullyRefunded =
+    rawPaymentStatus === 'refunded' || detailStates.some((s: string) => s === 'refunded');
+  const looksVoided =
+    rawPaymentStatus === 'voided'
+    || rawPaymentStatus === 'cancelled'
+    || detailStates.some((s: string) => s.includes('void') || s === 'cancelled' || s === 'canceled');
+  const looksPaid =
+    rawPaymentStatus === 'paid'
+    || rawPaymentStatus === 'partially_paid'
     || !!order?.paid_at
     || detailStates.some((s: string) => s === 'paid' || s === 'approved' || s === 'accredited' || s === 'captured');
-  return looksRefunded ? 'refunded' : looksVoided ? 'voided' : looksPaid ? 'paid' : 'pending';
+  if (looksFullyRefunded) return 'refunded';
+  if (looksVoided) return 'voided';
+  if (looksPartiallyRefunded) return 'partially_refunded';
+  return looksPaid ? 'paid' : 'pending';
+}
+
+function tnPaymentStatusIsBillable(status: ReturnType<typeof normalizeTnPaymentStatus>): boolean {
+  return status === 'paid' || status === 'partially_refunded';
 }
 
 /** Emite facturas AFIP masivas para órdenes de Tienda Nube (solo pagadas). */
@@ -4449,16 +4678,6 @@ export const invoiceTiendaNubeOrdersBulk = async (req: Request, res: Response) =
 
     const { emitirFactura: emitirAfip } = await import('../services/afip.service');
     const results: any[] = [];
-    const payableOrders: Array<{
-      orderId: string;
-      orderNumber: string;
-      total: number;
-      date: string;
-      customerId: string;
-      customerName: string;
-      customerCuit?: string;
-      condicionIva: string;
-    }> = [];
 
     for (const orderId of orderIds) {
       const orderIdStr = String(orderId);
@@ -4496,14 +4715,20 @@ export const invoiceTiendaNubeOrdersBulk = async (req: Request, res: Response) =
 
         const order = orderRes.data;
         const paymentStatus = normalizeTnPaymentStatus(order);
-        if (paymentStatus !== 'paid') {
+        if (!tnPaymentStatusIsBillable(paymentStatus)) {
           results.push({ orderId: orderIdStr, status: 'skipped_unpaid', message: `La orden no está pagada (estado: ${paymentStatus})` });
           continue;
         }
 
-        const total = Number(order?.total ?? 0);
-        if (!Number.isFinite(total) || total <= 0) {
-          results.push({ orderId: orderIdStr, status: 'error', message: 'La orden tiene total inválido para facturar' });
+        const billableTotal = getTnOrderBillableTotal(order);
+        if (!Number.isFinite(billableTotal) || billableTotal <= 0) {
+          results.push({
+            orderId: orderIdStr,
+            status: 'error',
+            message: paymentStatus === 'partially_refunded'
+              ? 'El importe neto a facturar es cero tras el reembolso parcial'
+              : 'La orden tiene total inválido para facturar'
+          });
           continue;
         }
 
@@ -4513,55 +4738,32 @@ export const invoiceTiendaNubeOrdersBulk = async (req: Request, res: Response) =
           || order?.contact_name
           || order?.billing_name
           || 'Consumidor Final';
-        const rawDoc = String(order?.billing_address?.doc_number ?? order?.customer?.doc_number ?? '').replace(/\D/g, '');
-        const maybeCuit = rawDoc.length >= 10 ? rawDoc : undefined;
+        const maybeCuit = extractTnCustomerCuit(order);
         const condicionIvaRaw = (
-          order?.billing_address?.fiscal_regime
+          order?.billing_fiscal_regime
+          || order?.billing_address?.fiscal_regime
           || order?.customer?.fiscal_regime
           || order?.customer?.iva_condition
           || 'Consumidor Final'
         ).toString();
+        const customerId = `TN-${order?.customer?.id || order.id}`;
 
-        payableOrders.push({
-          orderId: String(order.id),
-          orderNumber: String(order.number ?? order.id),
-          total,
-          date: String(order?.created_at || new Date().toISOString().slice(0, 10)),
-          customerId: `TN-${order?.customer?.id || order.id}`,
-          customerName,
-          customerCuit: maybeCuit,
-          condicionIva: condicionIvaRaw || 'Consumidor Final'
-        });
-      } catch (e: any) {
-        results.push({
-          orderId: orderIdStr,
-          status: 'error',
-          message: e?.message || 'Error emitiendo factura'
-        });
-      }
-    }
+        const afipResult = await emitirAfip(
+          {
+            id: `TN-${order.id}`,
+            date: String(order?.created_at || new Date().toISOString().slice(0, 10)),
+            total: billableTotal,
+            customerId
+          },
+          {
+            id: customerId,
+            businessName: customerName,
+            cuit: maybeCuit,
+            condicionIva: condicionIvaRaw || 'Consumidor Final'
+          },
+          forceCbteTipo
+        );
 
-    if (payableOrders.length > 0) {
-      const totalLote = payableOrders.reduce((acc, o) => acc + o.total, 0);
-      const base = payableOrders[0];
-      const sameCustomer = payableOrders.every((o) => o.customerId === base.customerId);
-      const afipResult = await emitirAfip(
-        {
-          id: `TN-BULK-${Date.now()}`,
-          date: base.date,
-          total: totalLote,
-          customerId: sameCustomer ? base.customerId : 'TN-BULK-CF'
-        },
-        {
-          id: sameCustomer ? base.customerId : 'TN-BULK-CF',
-          businessName: sameCustomer ? base.customerName : 'Consumidor Final',
-          cuit: sameCustomer ? base.customerCuit : undefined,
-          condicionIva: sameCustomer ? base.condicionIva : 'Consumidor Final'
-        },
-        forceCbteTipo
-      );
-
-      for (const o of payableOrders) {
         const invoiceId = uuidv4();
         await execute(
           `INSERT INTO external_invoices
@@ -4569,12 +4771,12 @@ export const invoiceTiendaNubeOrdersBulk = async (req: Request, res: Response) =
            VALUES (?, 'TIENDANUBE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             invoiceId,
-            o.orderId,
-            o.orderNumber,
-            o.customerName,
-            o.customerCuit || null,
-            o.condicionIva || null,
-            o.total,
+            String(order.id),
+            String(order.number ?? order.id),
+            customerName,
+            maybeCuit || null,
+            condicionIvaRaw || null,
+            billableTotal,
             afipResult.cae,
             afipResult.caeFchVto || null,
             afipResult.puntoVta,
@@ -4584,13 +4786,21 @@ export const invoiceTiendaNubeOrdersBulk = async (req: Request, res: Response) =
           ]
         );
         results.push({
-          orderId: o.orderId,
+          orderId: orderIdStr,
           status: 'invoiced',
           invoiceId,
           cae: afipResult.cae,
           cbteTipo: afipResult.cbteTipo,
           cbteDesde: afipResult.cbteDesde,
-          cbteHasta: afipResult.cbteHasta
+          cbteHasta: afipResult.cbteHasta,
+          billableTotal,
+          hasPartialRefund: tnOrderHasPartialRefund(order)
+        });
+      } catch (e: any) {
+        results.push({
+          orderId: orderIdStr,
+          status: 'error',
+          message: e?.message || 'Error emitiendo factura'
         });
       }
     }
@@ -4862,6 +5072,184 @@ export const getExternalInvoicesHistory = async (req: Request, res: Response) =>
   } catch (error: any) {
     console.error('getExternalInvoicesHistory:', error);
     res.status(500).json({ message: 'Error obteniendo historial de facturación externa' });
+  }
+};
+
+function scaleExternalLineItemsToTotal(
+  items: Array<{ name: string; sku?: string; quantity: number; unitPrice: number; numeroDespacho?: string }>,
+  targetTotal: number
+): Array<{ name: string; sku?: string; quantity: number; unitPrice: number; numeroDespacho?: string }> {
+  if (!items.length || !(targetTotal > 0)) return items;
+  const sum = items.reduce((acc, it) => acc + Math.round(it.quantity * it.unitPrice * 100) / 100, 0);
+  if (sum <= 0 || Math.abs(sum - targetTotal) <= 0.02) return items;
+  const factor = targetTotal / sum;
+  return items.map((it) => ({
+    ...it,
+    unitPrice: Math.round(it.unitPrice * factor * 100) / 100,
+  }));
+}
+
+async function lookupNumeroDespachoForExternalProduct(args: {
+  sku?: string;
+  variantId?: string | number;
+}): Promise<string | undefined> {
+  const sku = String(args.sku || '').trim();
+  const variantId = args.variantId != null ? String(args.variantId).trim() : '';
+  if (!sku && !variantId) return undefined;
+
+  const params: string[] = [];
+  const orParts: string[] = [];
+  if (variantId) {
+    orParts.push('pv.tienda_nube_variant_id = ?');
+    params.push(variantId);
+  }
+  if (sku) {
+    orParts.push('pv.sku = ?', 'pv.external_sku = ?', 'p.sku = ?', "REPLACE(pv.sku, '-', '') = REPLACE(?, '-', '')");
+    params.push(sku, sku, sku, sku);
+  }
+  if (!orParts.length) return undefined;
+
+  const row = (await get(
+    `SELECT COALESCE(d.numero_despacho) AS numero_despacho
+     FROM product_variants pv
+     JOIN product_colors pc ON pc.id = pv.product_color_id
+     JOIN products p ON p.id = pc.product_id
+     LEFT JOIN despachos d ON d.id = p.ultimo_despacho_id
+     WHERE ${orParts.join(' OR ')}
+     LIMIT 1`,
+    params
+  )) as { numero_despacho?: string } | undefined;
+
+  const n = String(row?.numero_despacho || '').trim();
+  return n || undefined;
+}
+
+async function enrichExternalProductsWithDespacho(
+  products: Array<{ name: string; sku?: string; quantity: number; unitPrice: number; variantId?: string }>
+): Promise<Array<{ name: string; sku?: string; quantity: number; unitPrice: number; numeroDespacho?: string }>> {
+  const out: Array<{ name: string; sku?: string; quantity: number; unitPrice: number; numeroDespacho?: string }> = [];
+  for (const p of products) {
+    const numeroDespacho = await lookupNumeroDespachoForExternalProduct({
+      sku: p.sku,
+      variantId: p.variantId,
+    });
+    out.push({
+      name: p.name,
+      sku: p.sku,
+      quantity: p.quantity,
+      unitPrice: p.unitPrice,
+      numeroDespacho,
+    });
+  }
+  return out;
+}
+
+/** Datos para imprimir / descargar PDF de una factura externa (TN / ML). */
+export const getExternalInvoicePrintData = async (req: Request, res: Response) => {
+  try {
+    const authUser = (req as any).user;
+    if (!authUser || !['ADMIN', 'WAREHOUSE', 'DEPOSITO'].includes(authUser.role)) {
+      return res.status(403).json({ message: 'Sin permisos para ver facturas externas' });
+    }
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ message: 'ID de factura externa requerido' });
+
+    const inv = (await get(
+      `SELECT id, source, external_order_id, order_number, customer_name, customer_cuit, customer_condicion_iva,
+              total, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, created_at
+       FROM external_invoices WHERE id = ?`,
+      [id]
+    )) as any;
+    if (!inv) return res.status(404).json({ message: 'Factura externa no encontrada' });
+
+    let products: Array<{ name: string; sku?: string; quantity: number; unitPrice: number; variantId?: string }> = [];
+    let customerAddress = '';
+    let customerCity = '';
+
+    if (inv.source === 'TIENDANUBE') {
+      const integration = await get(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
+      const storeId = integration?.store_id || integration?.user_id;
+      if (integration?.access_token && storeId) {
+        const orderRes = await axios.get(
+          `https://api.tiendanube.com/v1/${storeId}/orders/${encodeURIComponent(String(inv.external_order_id))}`,
+          {
+            headers: {
+              Authentication: `bearer ${integration.access_token}`,
+              'User-Agent': TN_USER_AGENT,
+            },
+            validateStatus: () => true,
+          }
+        );
+        if (orderRes.status === 200 && orderRes.data) {
+          const order = orderRes.data;
+          products = (order.products || []).map((p: any) => ({
+            name: String(p.name || 'Producto').trim(),
+            sku: String(p.sku || '').trim() || undefined,
+            variantId: p.variant_id != null ? String(p.variant_id) : undefined,
+            quantity: Math.max(0, Number(p.quantity) || 0),
+            unitPrice: Math.max(0, Number(p.price) || 0),
+          })).filter((p: { quantity: number }) => p.quantity > 0);
+          const ship = order.shipping_address || {};
+          customerAddress = [ship.address, ship.number].filter(Boolean).join(' ').trim();
+          customerCity = [ship.city, ship.province].filter(Boolean).join(', ').trim();
+        }
+      }
+    } else if (inv.source === 'MERCADOLIBRE') {
+      const mlToken = await getValidMLToken();
+      if (mlToken) {
+        const orderRes = await axios.get(
+          `https://api.mercadolibre.com/orders/${encodeURIComponent(String(inv.external_order_id))}`,
+          { headers: { Authorization: `Bearer ${mlToken}` }, validateStatus: () => true }
+        );
+        if (orderRes.status === 200 && orderRes.data) {
+          const order = orderRes.data;
+          products = (order.order_items || []).map((item: any) => ({
+            name: String(item.item?.title || 'Producto').trim(),
+            sku: String(item.item?.seller_sku || item.item?.seller_custom_field || '').trim() || undefined,
+            quantity: Math.max(0, Number(item.quantity) || 0),
+            unitPrice: Math.max(0, Number(item.unit_price) || 0),
+          })).filter((p: { quantity: number }) => p.quantity > 0);
+        }
+      }
+    }
+
+    const invoiceTotal = Number(inv.total || 0);
+    products = scaleExternalLineItemsToTotal(products, invoiceTotal);
+    products = await enrichExternalProductsWithDespacho(products);
+    if (!products.length && invoiceTotal > 0) {
+      const canal = inv.source === 'TIENDANUBE' ? 'Tienda Nube' : 'Mercado Libre';
+      products = [{
+        name: `Venta ${canal} #${inv.order_number || inv.external_order_id}`,
+        quantity: 1,
+        unitPrice: invoiceTotal,
+      }];
+    }
+
+    res.json({
+      invoice: {
+        id: inv.id,
+        source: inv.source,
+        externalOrderId: inv.external_order_id,
+        orderNumber: inv.order_number ?? undefined,
+        customerName: inv.customer_name ?? undefined,
+        customerCuit: inv.customer_cuit ?? undefined,
+        customerCondicionIva: inv.customer_condicion_iva ?? undefined,
+        customerAddress: customerAddress || undefined,
+        customerCity: customerCity || undefined,
+        total: invoiceTotal,
+        cae: inv.cae,
+        caeFchVto: inv.cae_fch_vto ?? undefined,
+        puntoVta: Number(inv.punto_venta),
+        cbteTipo: Number(inv.cbte_tipo),
+        cbteDesde: Number(inv.cbte_desde),
+        cbteHasta: Number(inv.cbte_hasta ?? inv.cbte_desde),
+        createdAt: inv.created_at ?? undefined,
+      },
+      products,
+    });
+  } catch (error: any) {
+    console.error('getExternalInvoicePrintData:', error);
+    res.status(500).json({ message: 'Error obteniendo datos para imprimir la factura' });
   }
 };
 

@@ -28,14 +28,18 @@ function isTnOrderPaid(order: Record<string, unknown>): boolean {
     .map((d: Record<string, unknown>) => String(d?.status ?? d?.state ?? '').trim().toLowerCase())
     .filter(Boolean);
   const looksRefunded =
-    rawPaymentStatus === 'refunded' || detailStates.some((s) => s.includes('refund'));
+    rawPaymentStatus === 'refunded' || detailStates.some((s) => s === 'refunded');
+  const looksPartiallyRefunded =
+    rawPaymentStatus === 'partially_refunded' || detailStates.some((s) => s === 'partially_refunded');
   const looksVoided =
     rawPaymentStatus === 'voided' ||
     rawPaymentStatus === 'cancelled' ||
-    detailStates.some((s) => s.includes('void') || s.includes('cancel'));
+    detailStates.some((s) => s.includes('void') || s === 'cancelled' || s === 'canceled');
   if (looksRefunded || looksVoided) return false;
   return (
     rawPaymentStatus === 'paid' ||
+    rawPaymentStatus === 'partially_paid' ||
+    looksPartiallyRefunded ||
     !!order.paid_at ||
     detailStates.some((s) => s === 'paid' || s === 'approved' || s === 'accredited' || s === 'captured')
   );

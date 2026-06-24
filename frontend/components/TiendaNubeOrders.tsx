@@ -1,7 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Package, User, MapPin, Truck, ChevronLeft, ChevronRight, Loader2, ShoppingBag, Calendar, Search, X, Clock, CheckCircle, XCircle, ChevronDown, FileText } from 'lucide-react';
+import { RefreshCw, Package, User, MapPin, Truck, ChevronLeft, ChevronRight, Loader2, ShoppingBag, Calendar, Search, X, Clock, CheckCircle, XCircle, ChevronDown, FileText, Download, Tag } from 'lucide-react';
 import { api } from '../services/api';
 import { getRemitente } from '../services/apiIntegration';
+import { openExternalInvoicePdf } from '../utils/externalInvoicePdf';
+import { buildTiendaNubeExpressLabelHtml, buildTiendaNubeExpressLabelInnerHtml, EXPRESS_LABEL_CSS } from '../utils/tiendaNubeExpressLabelHtml';
+
+const EXPRESS_TRACKING_STATUS_OPTIONS = [
+  { value: 'pending', label: 'Pendiente' },
+  { value: 'preparing', label: 'En preparación' },
+  { value: 'shipped', label: 'En camino' },
+  { value: 'delivered', label: 'Entregado' },
+  { value: 'cancelled', label: 'Cancelado' },
+] as const;
+
+type ExpressTrackingStatus = typeof EXPRESS_TRACKING_STATUS_OPTIONS[number]['value'];
+
+const expressTrackingStatusLabel = (status?: string | null): string =>
+  EXPRESS_TRACKING_STATUS_OPTIONS.find((o) => o.value === status)?.label || status || '—';
 
 interface TiendaNubeOrder {
   id: number;
@@ -10,9 +25,16 @@ interface TiendaNubeOrder {
   paymentStatus: string;
   paymentStatusRaw?: string | null;
   isPaid?: boolean;
+  hasPartialRefund?: boolean;
+  originalTotal?: number;
+  billableTotal?: number;
   shippingStatus: string;
   shippingMethod?: string;
   hasExpressShipping?: boolean;
+  trackingCode?: string | null;
+  trackingAssignedAt?: string | null;
+  trackingStatus?: ExpressTrackingStatus | string | null;
+  trackingStatusUpdatedAt?: string | null;
   total: string;
   currency: string;
   customer: {
@@ -80,6 +102,10 @@ const TiendaNubeOrders: React.FC = () => {
   } | null>(null);
   const [selectingAllFiltered, setSelectingAllFiltered] = useState(false);
   const [bulkCbteTipo, setBulkCbteTipo] = useState<'auto' | 'A' | 'B'>('auto');
+  const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null);
+  const [assigningTrackingOrderId, setAssigningTrackingOrderId] = useState<number | null>(null);
+  const [updatingTrackingStatusOrderId, setUpdatingTrackingStatusOrderId] = useState<number | null>(null);
+  const [trackingStatusDrafts, setTrackingStatusDrafts] = useState<Record<number, ExpressTrackingStatus>>({});
   const perPage = 15;
 
   const fetchOrders = async () => {
@@ -114,6 +140,7 @@ const TiendaNubeOrders: React.FC = () => {
 
   const paymentStatusConfig: Record<string, { label: string; color: string; bg: string }> = {
     paid: { label: 'Pagado', color: 'text-green-400', bg: 'bg-green-500/10 border-green-500/30' },
+    partially_refunded: { label: 'Reemb. parcial', color: 'text-amber-400', bg: 'bg-amber-500/10 border-amber-500/30' },
     pending: { label: 'Pendiente', color: 'text-yellow-400', bg: 'bg-yellow-500/10 border-yellow-500/30' },
     refunded: { label: 'Reembolsado', color: 'text-red-400', bg: 'bg-red-500/10 border-red-500/30' },
     voided: { label: 'Anulado', color: 'text-slate-400', bg: 'bg-slate-500/10 border-slate-500/30' },
@@ -145,6 +172,7 @@ const TiendaNubeOrders: React.FC = () => {
   const shouldShowShippingMethod = (order: TiendaNubeOrder, isExpress: boolean): boolean => {
     const method = (order.shippingMethod || '').trim();
     if (!method) return false;
+    if (order.trackingCode && method === order.trackingCode) return false;
     if (/^[A-Z]{2,}\d/.test(method)) return true;
     if (isExpress && /\bexpress\b/i.test(method)) return false;
     return method.length > 3;
@@ -221,7 +249,65 @@ const TiendaNubeOrders: React.FC = () => {
 
   const clearSelection = () => setSelectedOrderIds([]);
 
-  const buildTiendaNubeReceiptHtml = (order: TiendaNubeOrder): string => {
+  const hasExpressShipping = (order: TiendaNubeOrder): boolean => {
+    if (order.hasExpressShipping === true) return true;
+    const blob = `${order.shippingMethod || ''} ${order.shippingStatus || ''}`.toLowerCase();
+    return /\bexpress\b|\bexpr[eé]s\b|\bflash\b|\bsame\s*day\b|\benv[ií]o\s+en\s+el\s+d[ií]a\b|\br[aá]pido\b|\br[aá]pida\b/.test(blob);
+  };
+
+  const ensureExpressTrackingCode = async (order: TiendaNubeOrder): Promise<string> => {
+    if (order.trackingCode) return order.trackingCode;
+    const res = await api.assignTiendaNubeExpressTracking(order.id, order.number);
+    const code = res.trackingCode;
+    setOrders(prev => prev.map(o => o.id === order.id ? {
+      ...o,
+      trackingCode: code,
+      trackingAssignedAt: res.createdAt || new Date().toISOString(),
+      trackingStatus: (res.trackingStatus as ExpressTrackingStatus) || 'preparing',
+    } : o));
+    return code;
+  };
+
+  const getTrackingStatusDraft = (order: TiendaNubeOrder): ExpressTrackingStatus =>
+    trackingStatusDrafts[order.id] || (order.trackingStatus as ExpressTrackingStatus) || 'preparing';
+
+  const handleUpdateTrackingStatus = async (order: TiendaNubeOrder) => {
+    const status = getTrackingStatusDraft(order);
+    setUpdatingTrackingStatusOrderId(order.id);
+    try {
+      if (!order.trackingCode) {
+        await ensureExpressTrackingCode(order);
+      }
+      const res = await api.updateTiendaNubeExpressTrackingStatus(order.id, status);
+      setOrders(prev => prev.map(o => o.id === order.id ? {
+        ...o,
+        trackingCode: res.trackingCode || o.trackingCode,
+        trackingStatus: res.trackingStatus as ExpressTrackingStatus,
+        trackingStatusUpdatedAt: res.trackingStatusUpdatedAt || new Date().toISOString(),
+      } : o));
+      setTrackingStatusDrafts(prev => {
+        const next = { ...prev };
+        delete next[order.id];
+        return next;
+      });
+    } catch (error: any) {
+      window.alert(error?.message || 'No se pudo actualizar el estado de seguimiento');
+    } finally {
+      setUpdatingTrackingStatusOrderId(null);
+    }
+  };
+
+  const openPrintWindow = (html: string, blockedMessage: string) => {
+    const w = window.open('', '_blank');
+    if (!w) {
+      window.alert(blockedMessage);
+      return;
+    }
+    w.document.write(html);
+    w.document.close();
+  };
+
+  const buildTiendaNubeReceiptHtml = (order: TiendaNubeOrder, trackingCode?: string | null): string => {
     const remitente = getRemitente();
     const empresa = (remitente.businessName || 'Multimedias SA').toString();
     const empresaCuit = (remitente.cuit || '').toString();
@@ -262,6 +348,14 @@ const TiendaNubeOrders: React.FC = () => {
       </tr>`;
     }).join('');
 
+    const isExpress = hasExpressShipping(order);
+    const trackingBlock = trackingCode
+      ? `<div class="card" style="margin-top:10px;border-color:#0e7490;">
+        <div><strong>Envío express</strong> — Código de seguimiento:</div>
+        <div style="font-size:18px;font-weight:900;font-family:monospace;letter-spacing:0.1em;margin-top:4px;">${trackingCode}</div>
+      </div>`
+      : '';
+
     return `<!DOCTYPE html>
 <html>
 <head>
@@ -283,6 +377,7 @@ const TiendaNubeOrders: React.FC = () => {
     .sig { border-top: 1px solid #333; padding-top: 6px; text-align: center; min-height: 56px; }
     .print-actions { margin-top: 18px; }
     @media print { .print-actions { display: none; } }
+    ${EXPRESS_LABEL_CSS}
   </style>
 </head>
 <body>
@@ -301,8 +396,10 @@ const TiendaNubeOrders: React.FC = () => {
         <div><strong>ID:</strong> ${order.id}</div>
         <div><strong>Fecha pedido:</strong> ${createdAtStr}</div>
         <div><strong>Total unidades:</strong> ${totalUnits}</div>
+        ${isExpress ? '<div><strong>Tipo envío:</strong> Express</div>' : ''}
       </div>
     </div>
+    ${trackingBlock}
     <div class="row">
       <div class="card">
         <div><strong>Cliente:</strong> ${customerName}</div>
@@ -340,27 +437,67 @@ const TiendaNubeOrders: React.FC = () => {
       <button onclick="window.print()" style="padding:10px 14px;background:#1f2937;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;">Descargar PDF / Imprimir</button>
       <button onclick="window.close()" style="padding:10px 14px;margin-left:8px;background:#94a3b8;color:#fff;border:none;border-radius:6px;cursor:pointer;">Cerrar</button>
     </div>
+    ${isExpress && trackingCode ? `
+    <div class="express-label-page">
+      <h2 style="margin:0 0 8px;font-size:16px;">Etiqueta de envío express</h2>
+      ${buildTiendaNubeExpressLabelInnerHtml(order, trackingCode, remitente)}
+    </div>` : ''}
   </div>
 </body>
 </html>`;
   };
 
-  const hasExpressShipping = (order: TiendaNubeOrder): boolean => {
-    if (order.hasExpressShipping === true) return true;
-    const blob = `${order.shippingMethod || ''} ${order.shippingStatus || ''}`.toLowerCase();
-    return /\bexpress\b|\bexpr[eé]s\b|\bflash\b|\bsame\s*day\b|\benv[ií]o\s+en\s+el\s+d[ií]a\b|\br[aá]pido\b|\br[aá]pida\b/.test(blob);
+  const openReceiptForSignature = async (order: TiendaNubeOrder) => {
+    try {
+      let trackingCode: string | null = order.trackingCode || null;
+      if (hasExpressShipping(order)) {
+        setAssigningTrackingOrderId(order.id);
+        trackingCode = await ensureExpressTrackingCode(order);
+      }
+      const html = buildTiendaNubeReceiptHtml(order, trackingCode);
+      openPrintWindow(html, 'El navegador bloqueó la ventana del recibo. Permití popups para este sitio e intentá de nuevo.');
+    } catch (error: any) {
+      window.alert(error?.message || 'No se pudo generar el recibo');
+    } finally {
+      setAssigningTrackingOrderId(null);
+    }
   };
 
-  const openReceiptForSignature = (order: TiendaNubeOrder) => {
-    const html = buildTiendaNubeReceiptHtml(order);
-    const w = window.open('', '_blank');
-    if (!w) {
-      window.alert('El navegador bloqueó la ventana del recibo. Permití popups para este sitio e intentá de nuevo.');
+  const openExpressLabel = async (order: TiendaNubeOrder, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (!hasExpressShipping(order)) {
+      window.alert('Este pedido no tiene envío express.');
       return;
     }
-    w.document.write(html);
-    w.document.close();
+    setAssigningTrackingOrderId(order.id);
+    try {
+      const trackingCode = await ensureExpressTrackingCode(order);
+      const html = buildTiendaNubeExpressLabelHtml(order, trackingCode, getRemitente());
+      openPrintWindow(html, 'El navegador bloqueó la ventana de la etiqueta. Permití popups para este sitio e intentá de nuevo.');
+    } catch (error: any) {
+      window.alert(error?.message || 'No se pudo generar la etiqueta express');
+    } finally {
+      setAssigningTrackingOrderId(null);
+    }
   };
+
+  const handleDownloadInvoice = async (order: TiendaNubeOrder, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const invoiceId = order.invoice?.id;
+    if (!invoiceId) {
+      window.alert('Este pedido aún no tiene factura emitida en LupoHub.');
+      return;
+    }
+    setDownloadingInvoiceId(invoiceId);
+    try {
+      await openExternalInvoicePdf(invoiceId);
+    } catch (error: any) {
+      window.alert(error?.message || 'No se pudo abrir la factura');
+    } finally {
+      setDownloadingInvoiceId(null);
+    }
+  };
+
   const selectAllFilteredPaid = async () => {
     setSelectingAllFiltered(true);
     try {
@@ -690,9 +827,12 @@ const TiendaNubeOrders: React.FC = () => {
         <div className="space-y-4">
           {filteredOrders.map((order) => {
             const status = statusConfig[order.status] || statusConfig.open;
-            const normalizedPayment = (order.isPaid === true ? 'paid' : order.paymentStatus) || 'pending';
+            const normalizedPayment = (order.isPaid === true ? (order.paymentStatus === 'partially_refunded' ? 'partially_refunded' : 'paid') : order.paymentStatus) || 'pending';
             const payment = paymentStatusConfig[normalizedPayment] || paymentStatusConfig.pending;
             const shipping = order.shippingStatus ? resolveShippingStatus(order.shippingStatus) : null;
+            const billableAmount = order.billableTotal ?? parseFloat(order.total || '0');
+            const originalAmount = order.originalTotal ?? billableAmount;
+            const showRefundHint = order.hasPartialRefund || normalizedPayment === 'partially_refunded';
             const dateInfo = formatDate(order.createdAt);
             const isExpanded = expandedOrder === order.id;
             const totalUnits = totalUnitsForOrder(order);
@@ -771,7 +911,20 @@ const TiendaNubeOrders: React.FC = () => {
                             Express
                           </span>
                         )}
-                        {shipping && order.status !== 'cancelled' && (
+                        {order.trackingCode && (
+                          <span
+                            className={`${badgeBase} bg-sky-500/10 text-sky-300 border-sky-500/30 font-mono text-[10px]`}
+                            title="Código de seguimiento"
+                          >
+                            {order.trackingCode}
+                          </span>
+                        )}
+                        {order.trackingCode && order.trackingStatus && (
+                          <span className={`${badgeBase} bg-violet-700/20 text-violet-200 border-violet-600/30`}>
+                            {expressTrackingStatusLabel(order.trackingStatus)}
+                          </span>
+                        )}
+                        {shipping && order.status !== 'cancelled' && !order.trackingStatus && (
                           <span className={`${badgeBase} ${shipping.bg} ${shipping.color}`}>
                             {shipping.label}
                           </span>
@@ -782,6 +935,14 @@ const TiendaNubeOrders: React.FC = () => {
                             title="Método de envío"
                           >
                             {order.shippingMethod}
+                          </span>
+                        )}
+                        {showRefundHint && (
+                          <span
+                            className={`${badgeBase} bg-amber-700/20 text-amber-300 border-amber-600/30`}
+                            title="Se factura solo lo que el cliente pagó (después del reembolso parcial)"
+                          >
+                            A facturar: ${formatCurrency(String(billableAmount))}
                           </span>
                         )}
                         {order.paymentStatusRaw && order.paymentStatusRaw !== normalizedPayment && (
@@ -797,13 +958,50 @@ const TiendaNubeOrders: React.FC = () => {
                       >
                         <button
                           type="button"
-                          onClick={() => openReceiptForSignature(order)}
-                          className="px-3 py-1.5 rounded-lg bg-cyan-700/25 border border-cyan-600/35 text-cyan-100 text-xs font-bold hover:bg-cyan-700/45 flex items-center gap-1.5"
-                          title="Generar recibo PDF para firma"
+                          onClick={() => void openReceiptForSignature(order)}
+                          disabled={assigningTrackingOrderId === order.id}
+                          className="px-3 py-1.5 rounded-lg bg-cyan-700/25 border border-cyan-600/35 text-cyan-100 text-xs font-bold hover:bg-cyan-700/45 flex items-center gap-1.5 disabled:opacity-50"
+                          title={isExpress ? 'Generar recibo con etiqueta express y código de seguimiento' : 'Generar recibo PDF para firma'}
                         >
-                          <FileText size={13} />
+                          {assigningTrackingOrderId === order.id ? (
+                            <Loader2 size={13} className="animate-spin" />
+                          ) : (
+                            <FileText size={13} />
+                          )}
                           Recibo PDF
                         </button>
+                        {isExpress && (
+                          <button
+                            type="button"
+                            onClick={(e) => void openExpressLabel(order, e)}
+                            disabled={assigningTrackingOrderId === order.id}
+                            className="px-3 py-1.5 rounded-lg bg-fuchsia-700/25 border border-fuchsia-600/35 text-fuchsia-100 text-xs font-bold hover:bg-fuchsia-700/45 flex items-center gap-1.5 disabled:opacity-50"
+                            title="Generar etiqueta de envío express con código de seguimiento"
+                          >
+                            {assigningTrackingOrderId === order.id ? (
+                              <Loader2 size={13} className="animate-spin" />
+                            ) : (
+                              <Tag size={13} />
+                            )}
+                            Etiqueta Express
+                          </button>
+                        )}
+                        {order.invoiced && order.invoice?.id && (
+                          <button
+                            type="button"
+                            onClick={(e) => handleDownloadInvoice(order, e)}
+                            disabled={downloadingInvoiceId === order.invoice.id}
+                            className="px-3 py-1.5 rounded-lg bg-emerald-700/25 border border-emerald-600/35 text-emerald-100 text-xs font-bold hover:bg-emerald-700/45 flex items-center gap-1.5 disabled:opacity-50"
+                            title="Descargar factura AFIP (PDF)"
+                          >
+                            {downloadingInvoiceId === order.invoice.id ? (
+                              <Loader2 size={13} className="animate-spin" />
+                            ) : (
+                              <Download size={13} />
+                            )}
+                            Factura PDF
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -838,6 +1036,72 @@ const TiendaNubeOrders: React.FC = () => {
                             {order.shippingAddress.city}, {order.shippingAddress.province}
                           </p>
                           <p className="text-slate-500 text-sm">CP: {order.shippingAddress.zipcode}</p>
+                          {order.shippingMethod && (
+                            <p className="text-fuchsia-300 text-sm mt-1 font-bold">{order.shippingMethod}</p>
+                          )}
+                          {order.trackingCode && (
+                            <p className="text-sky-300 text-sm mt-1 font-mono">Seguimiento: {order.trackingCode}</p>
+                          )}
+                          {order.trackingStatus && (
+                            <p className="text-violet-300 text-sm mt-1 font-bold">
+                              Estado público: {expressTrackingStatusLabel(order.trackingStatus)}
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Seguimiento express manual */}
+                      {hasExpressShipping(order) && (
+                        <div className="bg-slate-900/30 rounded-xl p-4 lg:col-span-3">
+                          <div className="flex items-center gap-2 text-fuchsia-400 text-xs font-bold mb-3">
+                            <Truck size={14} />
+                            <span>SEGUIMIENTO EXPRESS (PÁGINA PÚBLICA)</span>
+                          </div>
+                          {!order.trackingCode ? (
+                            <p className="text-slate-400 text-sm">
+                              Generá la etiqueta o el recibo express para crear el código de seguimiento y poder actualizar el estado.
+                            </p>
+                          ) : (
+                            <div className="flex flex-wrap items-end gap-3">
+                              <div className="min-w-[220px]">
+                                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">
+                                  Estado del pedido
+                                </label>
+                                <select
+                                  value={getTrackingStatusDraft(order)}
+                                  onChange={(e) => setTrackingStatusDrafts(prev => ({
+                                    ...prev,
+                                    [order.id]: e.target.value as ExpressTrackingStatus,
+                                  }))}
+                                  disabled={updatingTrackingStatusOrderId === order.id}
+                                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white"
+                                >
+                                  {EXPRESS_TRACKING_STATUS_OPTIONS.map((opt) => (
+                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => void handleUpdateTrackingStatus(order)}
+                                disabled={
+                                  updatingTrackingStatusOrderId === order.id ||
+                                  getTrackingStatusDraft(order) === order.trackingStatus
+                                }
+                                className="px-4 py-2 rounded-xl bg-violet-700 hover:bg-violet-600 text-white text-sm font-black disabled:opacity-50 flex items-center gap-2"
+                              >
+                                {updatingTrackingStatusOrderId === order.id ? (
+                                  <Loader2 size={14} className="animate-spin" />
+                                ) : null}
+                                Guardar estado
+                              </button>
+                              {order.trackingStatusUpdatedAt && (
+                                <p className="text-xs text-slate-500">
+                                  Última actualización: {new Date(order.trackingStatusUpdatedAt).toLocaleString('es-AR')}
+                                </p>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -854,6 +1118,15 @@ const TiendaNubeOrders: React.FC = () => {
 
                     {/* Products */}
                     <div className="mt-4">
+                      {showRefundHint && (
+                        <div className="mb-3 rounded-xl border border-amber-600/30 bg-amber-900/20 px-4 py-3 text-sm text-amber-100">
+                          Esta orden tiene un <strong>reembolso parcial</strong>. Al facturar (Factura B u otro tipo) se usa el importe neto cobrado:
+                          {' '}<strong>${formatCurrency(String(billableAmount))}</strong>
+                          {originalAmount > billableAmount + 0.01 && (
+                            <span className="text-amber-300/80"> (total original ${formatCurrency(String(originalAmount))})</span>
+                          )}
+                        </div>
+                      )}
                       <div className="flex items-center gap-2 text-cyan-400 text-xs font-bold mb-3">
                         <Package size={14} />
                         <span>PRODUCTOS</span>

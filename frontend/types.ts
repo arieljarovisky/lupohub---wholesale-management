@@ -221,6 +221,8 @@ export interface Order {
   creditNotesItemCount?: number;
   /** Suma de montos netos creditados por NC del pedido (sin IVA), todas las filas `credit_notes` del pedido. */
   creditNotesNetoCredited?: number;
+  /** Cantidad de notas de débito AFIP del pedido. */
+  debitNotesCount?: number;
   /**
    * NC por el total que **sigue** anulando el CAE actual del pedido (0 tras NC + nueva factura / reemisión con IIBB).
    * Si el backend no lo envía, el front asume el comportamiento antiguo (`creditNotesTotalCount`).
@@ -281,6 +283,29 @@ export interface CreditNote {
   voidedInvoice?: { cae: string; puntoVta?: number; cbteTipo?: number; cbteDesde: number };
   /** True si esta NC total quedó seguida de una nueva factura en el mismo pedido (reemisión con IIBB). */
   supersededByReinvoice?: boolean;
+}
+
+/** Nota de débito AFIP asociada a un pedido (lista desde API). */
+export interface DebitNote {
+  id: string;
+  orderId: string;
+  invoiceId: string;
+  cae: string;
+  caeFchVto?: string;
+  puntoVta: number;
+  cbteTipo: number;
+  cbteDesde: number;
+  cbteHasta: number;
+  amountDebited: number;
+  agipAlicuota?: number;
+  agipRetPer?: number;
+  scope?: 'total' | 'item' | 'iibb' | 'monto';
+  itemIndex?: number;
+  itemIndexes?: number[];
+  amountByItemIndex?: Record<number, number>;
+  quantityByItemIndex?: Record<number, number>;
+  description?: string;
+  createdAt?: string;
 }
 
 export interface Visit {

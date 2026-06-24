@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Package, User, Truck, ChevronLeft, ChevronRight, Loader2, Zap, Calendar, Search, X, Clock, CheckCircle, XCircle, ChevronDown, ExternalLink, ShoppingCart, MessageCircle } from 'lucide-react';
+import { RefreshCw, Package, User, Truck, ChevronLeft, ChevronRight, Loader2, Zap, Calendar, Search, X, Clock, CheckCircle, XCircle, ChevronDown, ExternalLink, ShoppingCart, MessageCircle, Download } from 'lucide-react';
 import { api } from '../services/api';
+import { openExternalInvoicePdf } from '../utils/externalInvoicePdf';
 import MercadoLibreQuestions from './MercadoLibreQuestions';
 
 interface MercadoLibreOrder {
@@ -71,6 +72,7 @@ const MercadoLibreOrders: React.FC<MercadoLibreOrdersProps> = ({ defaultSection 
   } | null>(null);
   const [selectingAllFiltered, setSelectingAllFiltered] = useState(false);
   const [bulkCbteTipo, setBulkCbteTipo] = useState<'auto' | 'A' | 'B'>('auto');
+  const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null);
   const [mlSection, setMlSection] = useState<MlSection>(defaultSection);
   const limit = 15;
 
@@ -267,6 +269,23 @@ const MercadoLibreOrders: React.FC<MercadoLibreOrdersProps> = ({ defaultSection 
       window.alert(error?.message || 'No se pudieron seleccionar todas las ventas pagadas');
     } finally {
       setSelectingAllFiltered(false);
+    }
+  };
+
+  const handleDownloadInvoice = async (order: MercadoLibreOrder, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const invoiceId = order.invoice?.id;
+    if (!invoiceId) {
+      window.alert('Esta venta aún no tiene factura emitida en LupoHub.');
+      return;
+    }
+    setDownloadingInvoiceId(invoiceId);
+    try {
+      await openExternalInvoicePdf(invoiceId);
+    } catch (error: any) {
+      window.alert(error?.message || 'No se pudo abrir la factura');
+    } finally {
+      setDownloadingInvoiceId(null);
     }
   };
 
@@ -654,6 +673,22 @@ const MercadoLibreOrders: React.FC<MercadoLibreOrdersProps> = ({ defaultSection 
 
                     {/* Right: Cantidad de productos (sin monto) */}
                     <div className="flex items-center gap-4">
+                      {order.invoiced && order.invoice?.id && (
+                        <button
+                          type="button"
+                          onClick={(e) => handleDownloadInvoice(order, e)}
+                          disabled={downloadingInvoiceId === order.invoice!.id}
+                          className="px-3 py-2 rounded-xl bg-emerald-700/30 border border-emerald-600/40 text-emerald-100 text-xs font-black hover:bg-emerald-700/50 disabled:opacity-50 flex items-center gap-2"
+                          title="Descargar factura AFIP (PDF)"
+                        >
+                          {downloadingInvoiceId === order.invoice.id ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <Download size={14} />
+                          )}
+                          Factura PDF
+                        </button>
+                      )}
                       <div className="text-right">
                         <p className="text-sm font-bold text-white">
                           {totalUnitsForOrder(order)} unidad{totalUnitsForOrder(order) !== 1 ? 'es' : ''}

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Users, Search, Plus, MapPin, Mail, Phone, Building2, Save, X, ShoppingBag, Calendar, DollarSign, TrendingUp, Clock, ArrowRight, ArrowLeft, Package, PackageCheck, Star, ChevronRight, Pencil, Trash2, FileSpreadsheet, Loader2, Download, Receipt, FileText, LayoutList, Wallet, ArrowUpDown, Filter, AlertTriangle, ChevronDown, SlidersHorizontal, ExternalLink } from 'lucide-react';
 import { Customer, Role, Order, OrderItem, OrderStatus, Product, Transporte, User, CustomerDeliveryAddress } from '../types';
 import { Truck } from 'lucide-react';
-import { parseCustomersExcel, parseCustomersCuitUpdateExcel } from '../utils/customersUtils';
+import { parseCustomersExcel, parseCustomersCuitUpdateExcel, parseCustomersBulkUpdateExcel } from '../utils/customersUtils';
 import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
 import { getWholesaleStockImpactMeta } from '../utils/orderStockImpact';
@@ -64,8 +64,11 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [searchTerm, setSearchTerm] = useState('');
   const [importingExcel, setImportingExcel] = useState(false);
   const [updatingCuit, setUpdatingCuit] = useState(false);
+  const [bulkUpdateImporting, setBulkUpdateImporting] = useState(false);
+  const [exportingBulkUpdate, setExportingBulkUpdate] = useState(false);
   const importExcelInputRef = useRef<HTMLInputElement>(null);
   const cuitUpdateInputRef = useRef<HTMLInputElement>(null);
+  const bulkUpdateInputRef = useRef<HTMLInputElement>(null);
 
   // Estado para acceso de cliente (usuario propio)
   const [accessEmail, setAccessEmail] = useState('');
@@ -995,7 +998,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     multimediaImporting ||
     assigningSellersResumen ||
     updatingCuit ||
-    importingExcel;
+    importingExcel ||
+    bulkUpdateImporting ||
+    exportingBulkUpdate;
 
   const closeCustomerTools = () => setCustomerToolsOpen(false);
 
@@ -2584,6 +2589,46 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     setUpdatingCuit(false);
   };
 
+  const handleBulkUpdateExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setBulkUpdateImporting(true);
+    try {
+      const rows = await parseCustomersBulkUpdateExcel(file);
+      if (rows.length === 0) {
+        showToast(
+          'warning',
+          'No se encontraron filas válidas. El Excel debe tener identificador (CUIT, código, email o razón social) y al menos un campo a actualizar (IVA, lista de precios o saldo inicio).'
+        );
+        setBulkUpdateImporting(false);
+        return;
+      }
+      const res = await api.bulkUpdateCustomerFields(rows);
+      if (res.updated > 0) {
+        showToast('success', `Se actualizaron ${res.updated} cliente(s).`);
+        onRefreshData?.();
+        loadCarteraTotals();
+      }
+      if (res.notFound > 0) {
+        showToast('info', `${res.notFound} fila(s) no coincidieron con ningún cliente.`);
+      }
+      if (res.skipped > 0) {
+        showToast('info', `${res.skipped} fila(s) omitidas (sin campos para actualizar).`);
+      }
+      if (res.errors?.length) {
+        const msg = res.errors.slice(0, 3).map(er => `Fila ${er.row}: ${er.message}`).join('; ');
+        showToast('warning', `${res.errors.length} error(es): ${msg}${res.errors.length > 3 ? '…' : ''}`);
+      }
+      if (res.updated === 0 && res.notFound === 0 && res.skipped === 0 && !res.errors?.length) {
+        showToast('info', 'No se actualizó ningún cliente.');
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || 'Error al importar actualización masiva.');
+    }
+    setBulkUpdateImporting(false);
+  };
+
   const handleMultimediaHistorialImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -2667,6 +2712,13 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             className="hidden"
             onChange={handleCuitUpdateExcel}
           />
+          <input
+            ref={bulkUpdateInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={handleBulkUpdateExcel}
+          />
           {canViewSaldos && (
             <input
               ref={multimediaHistorialInputRef}
@@ -2736,6 +2788,27 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 >
                   {exportingCustomersWithLocation ? <Loader2 size={16} className="animate-spin shrink-0" /> : <Download size={16} className="text-emerald-400 shrink-0" />}
                   <span className="leading-snug">Exportar clientes con ubicación</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={async () => {
+                    closeCustomerTools();
+                    setExportingBulkUpdate(true);
+                    try {
+                      await api.exportCustomersBulkUpdate();
+                      showToast('success', 'Excel de actualización masiva descargado (IVA, lista de precios y saldo inicio).');
+                    } catch (err: any) {
+                      showToast('error', err?.message || 'Error al exportar plantilla de actualización masiva.');
+                    }
+                    setExportingBulkUpdate(false);
+                  }}
+                  disabled={exportingBulkUpdate}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-sky-100 hover:bg-sky-500/10 disabled:opacity-50"
+                  title="Exportar clientes con condición IVA, lista de precios y saldo inicial para editar y reimportar"
+                >
+                  {exportingBulkUpdate ? <Loader2 size={16} className="animate-spin shrink-0" /> : <Download size={16} className="text-sky-400 shrink-0" />}
+                  <span className="leading-snug">Exportar IVA / lista / saldo inicio</span>
                 </button>
                 {canViewSaldos && (
                   <>
@@ -2844,6 +2917,20 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 >
                   {updatingCuit ? <Loader2 size={16} className="animate-spin shrink-0" /> : <FileSpreadsheet size={16} className="text-violet-400 shrink-0" />}
                   <span className="leading-snug">Actualizar CUIT en lote</span>
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    closeCustomerTools();
+                    bulkUpdateInputRef.current?.click();
+                  }}
+                  disabled={bulkUpdateImporting}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-slate-200 hover:bg-slate-700/80 disabled:opacity-50"
+                  title="Importar Excel con condición IVA, lista de precios y/o saldo inicio (exportá primero la plantilla)"
+                >
+                  {bulkUpdateImporting ? <Loader2 size={16} className="animate-spin shrink-0" /> : <FileSpreadsheet size={16} className="text-orange-400 shrink-0" />}
+                  <span className="leading-snug">Importar IVA / lista / saldo inicio</span>
                 </button>
                 {role === Role.ADMIN && (
                   <>

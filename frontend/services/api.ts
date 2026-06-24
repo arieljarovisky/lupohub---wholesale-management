@@ -1655,6 +1655,57 @@ export const api = {
     return await request<any>(`/orders/${orderId}/emitir-nota-credito`, 'POST', data, undefined, AFIP_EMIT_TIMEOUT_MS);
   },
 
+  getOrderDebitNotes: async (orderId: string): Promise<import('../types').DebitNote[]> => {
+    const rows = await request<any[]>(`/orders/${orderId}/debit-notes`, 'GET');
+    return (rows || []).map((r) => ({
+      id: String(r.id),
+      orderId: String(r.orderId ?? r.order_id ?? orderId),
+      invoiceId: String(r.invoiceId ?? r.invoice_id ?? ''),
+      cae: String(r.cae ?? ''),
+      caeFchVto: r.caeFchVto ?? r.cae_fch_vto ?? undefined,
+      puntoVta: Number(r.puntoVta ?? r.punto_venta ?? 0),
+      cbteTipo: Number(r.cbteTipo ?? r.cbte_tipo ?? 0),
+      cbteDesde: Number(r.cbteDesde ?? r.cbte_desde ?? 0),
+      cbteHasta: Number(r.cbteHasta ?? r.cbte_hasta ?? r.cbteDesde ?? r.cbte_desde ?? 0),
+      amountDebited: Number(r.amountDebited ?? r.amount_debited ?? 0),
+      agipAlicuota: r.agipAlicuota != null ? Number(r.agipAlicuota) : r.agip_alicuota != null ? Number(r.agip_alicuota) : undefined,
+      agipRetPer: r.agipRetPer != null ? Number(r.agipRetPer) : r.agip_ret_per != null ? Number(r.agip_ret_per) : undefined,
+      scope: r.scope ?? undefined,
+      itemIndex: r.itemIndex ?? r.item_index ?? undefined,
+      itemIndexes: Array.isArray(r.itemIndexes) ? r.itemIndexes : undefined,
+      amountByItemIndex: r.amountByItemIndex ?? undefined,
+      quantityByItemIndex: r.quantityByItemIndex ?? undefined,
+      description: r.description ?? undefined,
+      createdAt: r.createdAt ?? r.created_at ?? undefined,
+    })) as import('../types').DebitNote[];
+  },
+
+  emitirNotaDebito: async (
+    orderId: string,
+    data: {
+      tipo: 'iibb' | 'monto' | 'total' | 'item' | 'items';
+      netAmount?: number;
+      description?: string;
+      itemIndex?: number;
+      quantity?: number;
+      items?: Array<{ itemIndex: number; quantity: number }>;
+    }
+  ): Promise<{
+    id: string;
+    orderId: string;
+    cae: string;
+    caeFchVto?: string;
+    puntoVta: number;
+    cbteTipo: number;
+    cbteDesde: number;
+    cbteHasta: number;
+    amountDebited: number;
+    agipRetPer?: number;
+    scope?: string;
+  }> => {
+    return await request<any>(`/orders/${orderId}/emitir-nota-debito`, 'POST', data, undefined, AFIP_EMIT_TIMEOUT_MS);
+  },
+
   /** Lista los ítems del pedido que quedaron sin número de despacho asignado. */
   getOrderItemsMissingDespacho: async (orderId: string): Promise<Array<{
     orderItemId: string;
@@ -1719,6 +1770,19 @@ export const api = {
     const a = document.createElement('a');
     a.href = url;
     a.download = `clientes_individuales_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
+  /** Exporta plantilla para actualización masiva (IVA, lista de precios, saldo inicio). */
+  exportCustomersBulkUpdate: async (): Promise<void> => {
+    const blob = await getBlob('/customers/export-actualizacion-masiva');
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `clientes_actualizacion_masiva_${new Date().toISOString().slice(0, 10)}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -2119,6 +2183,22 @@ export const api = {
   /** Actualizar solo el CUIT de clientes existentes (identificados por razón social o email). */
   bulkUpdateCuit: async (updates: Array<{ businessName?: string; email?: string; cuit: string }>): Promise<{ updated: number; notFound: number; errors: { row: number; message: string }[] }> => {
     return request<any>('/customers/bulk-update-cuit', 'POST', { updates });
+  },
+
+  /** Actualizar condición IVA, lista de precios y saldo inicial en lote. */
+  bulkUpdateCustomerFields: async (
+    updates: Array<{
+      businessName?: string;
+      email?: string;
+      cuit?: string;
+      legacyCode?: string;
+      condicionIva?: string;
+      priceList?: string;
+      openingBalance?: number | string | null;
+      openingBalanceDate?: string | null;
+    }>
+  ): Promise<{ updated: number; notFound: number; skipped: number; errors: { row: number; message: string }[] }> => {
+    return request<any>('/customers/bulk-update-fields', 'POST', { updates });
   },
 
   updateCustomer: async (id: string, data: Partial<Customer> & { transporteIds?: string[] }): Promise<Customer> => {
@@ -2774,6 +2854,70 @@ export const api = {
     }, 'invoiceTiendaNubeOrdersBulk');
   },
 
+  /** Asigna o devuelve el código de seguimiento express de una orden TN (idempotente). */
+  assignTiendaNubeExpressTracking: async (
+    orderId: string | number,
+    orderNumber?: string | number
+  ): Promise<{
+    orderId: string;
+    orderNumber?: string | null;
+    trackingCode: string;
+    trackingStatus?: string | null;
+    trackingStatusUpdatedAt?: string | null;
+    assigned: boolean;
+    createdAt?: string;
+  }> => {
+    return await request(
+      `/integrations/tiendanube/orders/${encodeURIComponent(String(orderId))}/express-tracking/assign`,
+      'POST',
+      { orderNumber: orderNumber != null ? String(orderNumber) : undefined }
+    );
+  },
+
+  updateTiendaNubeExpressTrackingStatus: async (
+    orderId: string | number,
+    status: 'pending' | 'preparing' | 'shipped' | 'delivered' | 'cancelled'
+  ): Promise<{
+    orderId: string;
+    orderNumber?: string | null;
+    trackingCode: string;
+    trackingStatus: string;
+    trackingStatusLabel: string;
+    trackingStatusUpdatedAt?: string | null;
+  }> => {
+    return await request(
+      `/integrations/tiendanube/orders/${encodeURIComponent(String(orderId))}/express-tracking/status`,
+      'PATCH',
+      { status }
+    );
+  },
+
+  /** Consulta pública del estado de un envío express por código LHE########. */
+  getPublicTracking: async (trackingCode: string): Promise<{
+    trackingCode: string;
+    orderNumber: string;
+    source: string;
+    status: string;
+    statusLabel: string;
+    statusSource?: 'manual' | 'tiendanube';
+    shippingStatus: string | null;
+    shippingStatusLabel: string | null;
+    orderStatus: string | null;
+    orderStatusLabel: string | null;
+    shippingMethod: string;
+    destinationCity: string | null;
+    createdAt: string | null;
+    paidAt: string | null;
+    shippedAt: string | null;
+    updatedAt: string | null;
+    trackingAssignedAt: string | null;
+    trackingStatusUpdatedAt?: string | null;
+    events: Array<{ key: string; label: string; at: string | null; done: boolean }>;
+  }> => {
+    const code = encodeURIComponent(String(trackingCode || '').trim().toUpperCase());
+    return await request(`/public/tracking/${code}`, 'GET');
+  },
+
   // Órdenes de Mercado Libre
   getMercadoLibreOrders: async (params?: { offset?: number; limit?: number; status?: string; date_from?: string; date_to?: string; only_pending_shipment_and_cancelled?: boolean }): Promise<{ orders: any[]; total: number }> => {
     return handleRequest(async () => {
@@ -2877,6 +3021,31 @@ export const api = {
       const queryString = queryParams.toString();
       return await request(`/integrations/invoices/external${queryString ? '?' + queryString : ''}`, 'GET');
     }, { total: 0, offset: 0, limit: params?.limit || 50, totals: { all: 0, tn: 0, ml: 0 }, invoices: [] }, 'getExternalInvoicesHistory');
+  },
+
+  getExternalInvoicePrintData: async (externalInvoiceId: string): Promise<{
+    invoice: {
+      id: string;
+      source: string;
+      externalOrderId: string;
+      orderNumber?: string;
+      customerName?: string;
+      customerCuit?: string;
+      customerCondicionIva?: string;
+      customerAddress?: string;
+      customerCity?: string;
+      total: number;
+      cae: string;
+      caeFchVto?: string;
+      puntoVta: number;
+      cbteTipo: number;
+      cbteDesde: number;
+      cbteHasta?: number;
+      createdAt?: string;
+    };
+    products: Array<{ name: string; sku?: string; quantity: number; unitPrice: number }>;
+  }> => {
+    return await request(`/integrations/invoices/external/${encodeURIComponent(externalInvoiceId)}/print-data`, 'GET');
   },
 
   emitirNotaCreditoExternalInvoice: async (externalInvoiceId: string): Promise<{
@@ -3476,7 +3645,7 @@ export const api = {
 
   // ============ FACTURACIÓN (Facturas + Notas de crédito) ============
 
-  getBilling: async (params?: { desde?: string; hasta?: string; customerId?: string; province?: string; tipo?: 'FACTURA' | 'NC' }): Promise<any[]> => {
+  getBilling: async (params?: { desde?: string; hasta?: string; customerId?: string; province?: string; tipo?: 'FACTURA' | 'NC' | 'ND' }): Promise<any[]> => {
     const queryParams = new URLSearchParams();
     if (params?.desde) queryParams.append('desde', params.desde);
     if (params?.hasta) queryParams.append('hasta', params.hasta);
@@ -3643,7 +3812,7 @@ export const api = {
     );
   },
 
-  exportBilling: async (params?: { desde?: string; hasta?: string; customerId?: string; province?: string; tipo?: 'FACTURA' | 'NC' }): Promise<void> => {
+  exportBilling: async (params?: { desde?: string; hasta?: string; customerId?: string; province?: string; tipo?: 'FACTURA' | 'NC' | 'ND' }): Promise<void> => {
     const queryParams = new URLSearchParams();
     if (params?.desde) queryParams.append('desde', params.desde);
     if (params?.hasta) queryParams.append('hasta', params.hasta);
@@ -3671,7 +3840,7 @@ export const api = {
     hasta?: string;
     customerId?: string;
     province?: string;
-    tipo?: 'FACTURA' | 'NC';
+    tipo?: 'FACTURA' | 'NC' | 'ND';
   }): Promise<void> => {
     const queryParams = new URLSearchParams();
     if (params?.desde) queryParams.append('desde', params.desde);

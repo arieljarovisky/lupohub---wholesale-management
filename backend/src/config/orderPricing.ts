@@ -57,3 +57,10 @@ export function invoiceLedgerImporte(orderTotal: number, agipRetPer = 0): number
 export function ncLedgerImporte(amountCreditedNeto: number): number {
   return Math.round((Number(amountCreditedNeto) || 0) * IVA_MULTIPLIER * 100) / 100;
 }
+
+/** ND: amount_debited es neto AFIP; agip_ret_per es percepción informada en AFIP. */
+export function ndLedgerImporte(amountDebitedNeto: number, agipRetPer = 0): number {
+  const neto = Math.round((Number(amountDebitedNeto) || 0) * 100) / 100;
+  const agip = Math.round((Number(agipRetPer) || 0) * 100) / 100;
+  return Math.round((neto * IVA_MULTIPLIER + agip) * 100) / 100;
+}

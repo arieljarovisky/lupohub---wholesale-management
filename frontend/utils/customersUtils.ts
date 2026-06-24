@@ -175,3 +175,143 @@ export async function parseCustomersCuitUpdateExcel(file: File): Promise<Custome
   }
   return items;
 }
+
+/** Fila para actualización masiva: condición IVA, lista de precios y saldo inicial. */
+export type CustomerBulkUpdateRow = {
+  businessName?: string;
+  email?: string;
+  cuit?: string;
+  legacyCode?: string;
+  condicionIva?: string;
+  priceList?: string;
+  openingBalance?: number | string | null;
+  openingBalanceDate?: string | null;
+};
+
+function parseExcelNumber(v: string | number | undefined): number | string | null | undefined {
+  if (v == null || v === '') return undefined;
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  const s = String(v).trim();
+  if (!s) return undefined;
+  return s;
+}
+
+function parseExcelDate(v: string | number | undefined): string | null | undefined {
+  if (v == null || v === '') return undefined;
+  if (typeof v === 'number' && Number.isFinite(v)) {
+    const epoch = new Date(Date.UTC(1899, 11, 30));
+    const d = new Date(epoch.getTime() + v * 86400000);
+    if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  }
+  const s = String(v).trim();
+  if (!s) return undefined;
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
+  return s;
+}
+
+/**
+ * Parsea Excel para actualización masiva de clientes existentes.
+ * Identificador: CUIT, código legacy, email o razón social (al menos uno por fila).
+ * Solo se envían campos con valor en el Excel (celdas vacías = no modificar).
+ */
+export async function parseCustomersBulkUpdateExcel(file: File): Promise<CustomerBulkUpdateRow[]> {
+  const data = new Uint8Array(await file.arrayBuffer());
+  const workbook = XLSX.read(data, { type: 'array' });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) return [];
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '' }) as (string | number)[][];
+  if (rows.length === 0) return [];
+
+  const businessNameKw = ['razón social', 'razon social', 'empresa', 'cliente', 'businessname', 'business name', 'denominación', 'denominacion', 'fantasía', 'fantasia'];
+  const cuitKw = ['número', 'numero', 'cuit', 'cuil', 'cif', 'número de documento', 'numero de documento', 'documento', 'tax id', 'identificación fiscal'];
+  const emailKw = ['e-mail', 'email', 'mail', 'correo', 'e mail', 'correo electrónico'];
+  const legacyKw = ['código legacy', 'codigo legacy', 'código', 'codigo', 'legajo', 'n° cliente', 'nro cliente'];
+  const ivaKw = ['condición de iva', 'condicion de iva', 'condición iva', 'condicion iva', 'cond. iva', 'iva'];
+  const priceListKw = ['lista de precios', 'lista precios', 'price list', 'listado', 'tarifa'];
+  const openingBalanceKw = ['saldo inicio', 'saldo inicial', 'saldo de inicio', 'saldo arranque', 'opening balance'];
+  const openingDateKw = ['fecha saldo inicio', 'fecha saldo inicial', 'fecha inicio', 'fecha arranque', 'opening balance date'];
+
+  let headerRowIndex = 0;
+  for (let r = 0; r < Math.min(12, rows.length); r++) {
+    const rowCells = rows[r].map(c => String(c ?? '').trim().toLowerCase());
+    const hasId = rowCells.some(c => businessNameKw.some(k => c.includes(k)))
+      || rowCells.some(c => cuitKw.some(k => c.includes(k)))
+      || rowCells.some(c => emailKw.some(k => c.includes(k)))
+      || rowCells.some(c => legacyKw.some(k => c.includes(k)));
+    const hasUpdate = rowCells.some(c => ivaKw.some(k => c.includes(k)))
+      || rowCells.some(c => priceListKw.some(k => c.includes(k)))
+      || rowCells.some(c => openingBalanceKw.some(k => c.includes(k)));
+    if (hasId && hasUpdate) {
+      headerRowIndex = r;
+      break;
+    }
+  }
+
+  const first = rows[headerRowIndex].map(c => String(c ?? '').trim());
+  const firstLower = first.map(h => h.toLowerCase());
+  const findCol = (keywords: string[]): number => firstLower.findIndex(h => keywords.some(k => (h || '').includes(k)));
+
+  const businessNameCol = findCol(businessNameKw);
+  const emailCol = findCol(emailKw);
+  const cuitCol = findCol(cuitKw);
+  const legacyCol = findCol(legacyKw);
+  const ivaCol = findCol(ivaKw);
+  const priceListCol = findCol(priceListKw);
+  const openingBalanceCol = findCol(openingBalanceKw);
+  const openingDateCol = findCol(openingDateKw);
+
+  const trim = (v: string | number | undefined): string =>
+    v == null ? '' : typeof v === 'number' ? String(v) : String(v).trim();
+
+  const items: CustomerBulkUpdateRow[] = [];
+  const start = headerRowIndex + 1;
+
+  for (let i = start; i < rows.length; i++) {
+    const row = rows[i];
+    const businessName = businessNameCol >= 0 ? trim(row[businessNameCol]) : '';
+    const email = emailCol >= 0 ? trim(row[emailCol]) : '';
+    const cuitRaw = cuitCol >= 0 ? trim(row[cuitCol]) : '';
+    const cuit = cuitRaw.replace(/\D/g, '').slice(0, 11) || undefined;
+    const legacyCode = legacyCol >= 0 ? trim(row[legacyCol]) : '';
+
+    if (!businessName && !email && !cuit && !legacyCode) continue;
+
+    const item: CustomerBulkUpdateRow = {
+      ...(businessName ? { businessName } : {}),
+      ...(email ? { email } : {}),
+      ...(cuit ? { cuit } : {}),
+      ...(legacyCode ? { legacyCode } : {}),
+    };
+
+    if (ivaCol >= 0) {
+      const v = trim(row[ivaCol]);
+      if (v) item.condicionIva = v;
+    }
+    if (priceListCol >= 0) {
+      const v = trim(row[priceListCol]);
+      if (v) item.priceList = v;
+    }
+    if (openingBalanceCol >= 0) {
+      const parsed = parseExcelNumber(row[openingBalanceCol]);
+      if (parsed !== undefined) item.openingBalance = parsed;
+    }
+    if (openingDateCol >= 0) {
+      const parsed = parseExcelDate(row[openingDateCol]);
+      if (parsed !== undefined) item.openingBalanceDate = parsed;
+    }
+
+    const hasUpdateField =
+      item.condicionIva !== undefined
+      || item.priceList !== undefined
+      || item.openingBalance !== undefined
+      || item.openingBalanceDate !== undefined;
+    if (!hasUpdateField) continue;
+
+    items.push(item);
+  }
+
+  return items;
+}

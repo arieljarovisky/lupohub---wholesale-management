@@ -7,6 +7,91 @@ import { sqlInvoiceAmountFromOrderTotal } from '../config/orderPricing';
 
 const SQL_INVOICE_IMPORTE_EXPR = sqlInvoiceAmountFromOrderTotal();
 
+/** Importe con IVA + IIBB para listados de ND (agrupadas por comprobante AFIP). */
+const SQL_ND_IMPORTE_EXPR = 'ROUND(SUM(dn.amount_debited) * 1.21 + MAX(COALESCE(dn.agip_ret_per, 0)), 2)';
+
+/** Rama UNION: notas de débito AFIP (misma forma que NC, con columnas del listado principal). */
+const SQL_BILLING_ND_UNION_LIST = `
+        UNION ALL
+
+        SELECT
+          MIN(dn.id) AS id,
+          'ND' AS tipo,
+          dn.cbte_tipo,
+          dn.punto_venta,
+          dn.cbte_desde AS numero_desde,
+          dn.cbte_hasta AS numero_hasta,
+          dn.order_id AS order_id,
+          COALESCE(DATE(MIN(dn.created_at)), MAX(o.date)) AS fecha,
+          ${SQL_ND_IMPORTE_EXPR} AS importe,
+          c.id AS customer_id,
+          c.business_name AS customer_business_name,
+          c.name AS customer_name,
+          dn.cae,
+          dn.cae_fch_vto AS cae_fch_vto,
+          MIN(dn.created_at) AS created_at,
+          MAX(COALESCE(dn.agip_alicuota, 0)) AS agip_alicuota,
+          MAX(COALESCE(dn.agip_ret_per, 0)) AS agip_ret_per,
+          (SELECT COUNT(*) FROM credit_notes cn_cnt WHERE cn_cnt.order_id = dn.order_id) AS credit_notes_count,
+          (SELECT COUNT(*) FROM debit_notes dn_cnt WHERE dn_cnt.order_id = dn.order_id) AS debit_notes_count,
+          0 AS es_manual,
+          0 AS sin_detalle,
+          0 AS has_pdf
+        FROM debit_notes dn
+        JOIN orders o ON o.id = dn.order_id
+        JOIN customers c ON c.id = o.customer_id
+        GROUP BY dn.cae, dn.punto_venta, dn.cbte_tipo, dn.cbte_desde, dn.cbte_hasta,
+                 dn.cae_fch_vto, dn.order_id, c.id, c.business_name, c.name`;
+
+/** Rama UNION ND para export CSV / impresión (sin columnas extra de UI). */
+const SQL_BILLING_ND_UNION_SLIM = `
+        UNION ALL
+
+        SELECT
+          MIN(dn.id) AS id,
+          'ND' AS tipo,
+          dn.cbte_tipo,
+          dn.punto_venta,
+          dn.cbte_desde AS numero_desde,
+          dn.cbte_hasta AS numero_hasta,
+          dn.order_id AS order_id,
+          COALESCE(DATE(MIN(dn.created_at)), MAX(o.date)) AS fecha,
+          ${SQL_ND_IMPORTE_EXPR} AS importe,
+          c.id AS customer_id,
+          c.business_name AS customer_business_name,
+          c.cuit AS customer_cuit,
+          dn.cae,
+          dn.cae_fch_vto AS cae_fch_vto,
+          MIN(dn.created_at) AS created_at
+        FROM debit_notes dn
+        JOIN orders o ON o.id = dn.order_id
+        JOIN customers c ON c.id = o.customer_id
+        GROUP BY dn.cae, dn.punto_venta, dn.cbte_tipo, dn.cbte_desde, dn.cbte_hasta,
+                 dn.cae_fch_vto, dn.order_id, c.id, c.business_name, c.name, c.cuit`;
+
+const SQL_BILLING_ND_UNION_PRINT = `
+        UNION ALL
+
+        SELECT
+          MIN(dn.id) AS id,
+          'ND' AS tipo,
+          dn.cbte_tipo,
+          dn.punto_venta,
+          dn.cbte_desde AS numero_desde,
+          dn.cbte_hasta AS numero_hasta,
+          COALESCE(DATE(MIN(dn.created_at)), MAX(o.date)) AS fecha,
+          ${SQL_ND_IMPORTE_EXPR} AS importe,
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, '') AS cliente,
+          c.cuit AS cuit,
+          dn.cae,
+          MIN(dn.created_at) AS created_at
+        FROM debit_notes dn
+        JOIN orders o ON o.id = dn.order_id
+        JOIN customers c ON c.id = o.customer_id
+        GROUP BY dn.cae, dn.punto_venta, dn.cbte_tipo, dn.cbte_desde, dn.cbte_hasta,
+                 dn.order_id, c.id, c.business_name, c.name, c.cuit`;
+
 function parseMoney(value: any): number {
   if (value == null) return 0;
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
@@ -365,7 +450,7 @@ export const listBilling = async (req: Request, res: Response) => {
       hasta?: string;
       customerId?: string;
       province?: string;
-      tipo?: 'FACTURA' | 'NC';
+      tipo?: 'FACTURA' | 'NC' | 'ND';
     };
 
     const whereParts: string[] = [];
@@ -387,7 +472,7 @@ export const listBilling = async (req: Request, res: Response) => {
       whereParts.push('b.customer_id IN (SELECT id FROM customers WHERE LOWER(COALESCE(city, \'\')) LIKE ?)');
       params.push(`%${String(province).trim().toLowerCase()}%`);
     }
-    if (tipo === 'FACTURA' || tipo === 'NC') {
+    if (tipo === 'FACTURA' || tipo === 'NC' || tipo === 'ND') {
       whereParts.push('b.tipo = ?');
       params.push(tipo);
     }
@@ -422,6 +507,7 @@ export const listBilling = async (req: Request, res: Response) => {
           i.agip_alicuota,
           i.agip_ret_per,
           (SELECT COUNT(*) FROM credit_notes cn_cnt WHERE cn_cnt.order_id = o.id) AS credit_notes_count,
+          (SELECT COUNT(*) FROM debit_notes dn_cnt WHERE dn_cnt.order_id = o.id) AS debit_notes_count,
           0 AS es_manual,
           0 AS sin_detalle,
           0 AS has_pdf
@@ -453,6 +539,7 @@ export const listBilling = async (req: Request, res: Response) => {
           0 AS agip_alicuota,
           0 AS agip_ret_per,
           (SELECT COUNT(*) FROM credit_notes cn_tot WHERE cn_tot.order_id = cn.order_id) AS credit_notes_count,
+          (SELECT COUNT(*) FROM debit_notes dn_tot WHERE dn_tot.order_id = cn.order_id) AS debit_notes_count,
           0 AS es_manual,
           0 AS sin_detalle,
           0 AS has_pdf
@@ -462,6 +549,8 @@ export const listBilling = async (req: Request, res: Response) => {
         WHERE COALESCE(cn.superseded_by_reinvoice, 0) = 0
         GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
                  cn.cae_fch_vto, cn.order_id, c.id, c.business_name, c.name
+
+        ${SQL_BILLING_ND_UNION_LIST}
 
         UNION ALL
 
@@ -487,6 +576,7 @@ export const listBilling = async (req: Request, res: Response) => {
           0 AS agip_alicuota,
           CASE WHEN m.tipo = 'FACTURA' THEN COALESCE(m.agip_ret_per, 0) ELSE 0 END AS agip_ret_per,
           0 AS credit_notes_count,
+          0 AS debit_notes_count,
           1 AS es_manual,
           COALESCE(m.sin_detalle, 0) AS sin_detalle,
           CASE WHEN m.pdf_path IS NOT NULL AND TRIM(m.pdf_path) != '' THEN 1 ELSE 0 END AS has_pdf
@@ -515,6 +605,7 @@ export const listBilling = async (req: Request, res: Response) => {
       caeFchVto: r.cae_fch_vto ?? null,
       createdAt: r.created_at,
       creditNotesCount: Number(r.credit_notes_count) || 0,
+      debitNotesCount: Number(r.debit_notes_count) || 0,
       agipAlicuota: Number(r.agip_alicuota) || 0,
       agipRetPer: Number(r.agip_ret_per) || 0,
       manual: !!Number(r.es_manual),
@@ -524,7 +615,7 @@ export const listBilling = async (req: Request, res: Response) => {
 
     // Integrar facturas importadas desde Tango/Multimedias en la misma vista de facturación.
     // Solo aplica cuando el filtro de tipo incluye facturas.
-    if (tipo !== 'NC') {
+    if (tipo !== 'NC' && tipo !== 'ND') {
       const importedWhere: string[] = [`UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'FAC%'`];
       const importedParams: any[] = [];
       if (customerId) { importedWhere.push('e.customer_id = ?'); importedParams.push(customerId); }
@@ -596,6 +687,7 @@ export const listBilling = async (req: Request, res: Response) => {
               caeFchVto: null,
               createdAt: null,
               creditNotesCount: 0,
+              debitNotesCount: 0,
               agipAlicuota: 0,
               agipRetPer: 0,
               manual: false,
@@ -703,8 +795,8 @@ export const deleteLocalAfipComprobante = async (req: Request, res: Response) =>
     const id = String(req.params?.id || '').trim();
     const tipo = String(req.query?.tipo || '').trim().toUpperCase();
     if (!id) return res.status(400).json({ message: 'Falta id' });
-    if (tipo !== 'FACTURA' && tipo !== 'NC') {
-      return res.status(400).json({ message: 'Indicá tipo=FACTURA o tipo=NC' });
+    if (tipo !== 'FACTURA' && tipo !== 'NC' && tipo !== 'ND') {
+      return res.status(400).json({ message: 'Indicá tipo=FACTURA, tipo=NC o tipo=ND' });
     }
 
     if (tipo === 'FACTURA') {
@@ -734,6 +826,7 @@ export const deleteLocalAfipComprobante = async (req: Request, res: Response) =>
       return res.json({ ok: true, id, tipo: 'FACTURA', orderId: inv.order_id });
     }
 
+    if (tipo === 'NC') {
     const cn = (await get(
       `SELECT cn.id, cn.order_id, cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, o.customer_id, c.seller_id
        FROM credit_notes cn
@@ -766,6 +859,38 @@ export const deleteLocalAfipComprobante = async (req: Request, res: Response) =>
 
     await syncOrderPaymentStatus(cn.order_id);
     return res.json({ ok: true, id, tipo: 'NC', orderId: cn.order_id });
+    }
+
+    const dn = (await get(
+      `SELECT dn.id, dn.order_id, dn.cae, dn.punto_venta, dn.cbte_tipo, dn.cbte_desde, o.customer_id, c.seller_id
+       FROM debit_notes dn
+       JOIN orders o ON o.id = dn.order_id
+       JOIN customers c ON c.id = o.customer_id
+       WHERE dn.id = ?
+       LIMIT 1`,
+      [id]
+    )) as {
+      id: string;
+      order_id: string;
+      cae?: string;
+      punto_venta?: number;
+      cbte_tipo?: number;
+      cbte_desde?: number;
+      customer_id: string;
+      seller_id?: string;
+    } | undefined;
+    if (!dn) return res.status(404).json({ message: 'Nota de débito no encontrada' });
+
+    if (user.role === 'SELLER' && dn.seller_id !== user.id) {
+      return res.status(403).json({ message: 'Solo podés modificar comprobantes de tus clientes' });
+    }
+
+    await execute(
+      `DELETE FROM debit_notes
+       WHERE cae = ? AND punto_venta = ? AND cbte_tipo = ? AND cbte_desde = ?`,
+      [dn.cae, dn.punto_venta, dn.cbte_tipo, dn.cbte_desde]
+    );
+    return res.json({ ok: true, id, tipo: 'ND', orderId: dn.order_id });
   } catch (e: any) {
     console.error('deleteLocalAfipComprobante:', e);
     return res.status(500).json({ message: 'Error eliminando comprobante', detail: e?.message });
@@ -781,7 +906,7 @@ export const exportBilling = async (req: Request, res: Response) => {
       hasta?: string;
       customerId?: string;
       province?: string;
-      tipo?: 'FACTURA' | 'NC';
+      tipo?: 'FACTURA' | 'NC' | 'ND';
     };
 
     const whereParts: string[] = [];
@@ -803,7 +928,7 @@ export const exportBilling = async (req: Request, res: Response) => {
       whereParts.push('b.customer_id IN (SELECT id FROM customers WHERE LOWER(COALESCE(city, \'\')) LIKE ?)');
       params.push(`%${String(province).trim().toLowerCase()}%`);
     }
-    if (tipo === 'FACTURA' || tipo === 'NC') {
+    if (tipo === 'FACTURA' || tipo === 'NC' || tipo === 'ND') {
       whereParts.push('b.tipo = ?');
       params.push(tipo);
     }
@@ -865,6 +990,7 @@ export const exportBilling = async (req: Request, res: Response) => {
         WHERE COALESCE(cn.superseded_by_reinvoice, 0) = 0
         GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
                  cn.cae_fch_vto, cn.order_id, c.id, c.business_name, c.name, c.cuit
+        ${SQL_BILLING_ND_UNION_SLIM}
       ) AS b
       ${whereSql}
       ORDER BY b.fecha DESC, b.created_at DESC
@@ -909,7 +1035,7 @@ export const exportBilling = async (req: Request, res: Response) => {
     }
 
     // Exportar también facturas importadas cuando el filtro de tipo no sea NC.
-    if (tipo !== 'NC') {
+    if (tipo !== 'NC' && tipo !== 'ND') {
       const authUser = (req as any).user;
       const importedWhere: string[] = [`UPPER(TRIM(COALESCE(e.tipo, ''))) LIKE 'FAC%'`];
       const importedParams: any[] = [];
@@ -1003,7 +1129,7 @@ export const printBilling = async (req: Request, res: Response) => {
       hasta?: string;
       customerId?: string;
       province?: string;
-      tipo?: 'FACTURA' | 'NC';
+      tipo?: 'FACTURA' | 'NC' | 'ND';
     };
 
     const whereParts: string[] = [];
@@ -1026,7 +1152,7 @@ export const printBilling = async (req: Request, res: Response) => {
       );
       params.push(`%${String(province).trim().toLowerCase()}%`);
     }
-    if (tipo === 'FACTURA' || tipo === 'NC') {
+    if (tipo === 'FACTURA' || tipo === 'NC' || tipo === 'ND') {
       whereParts.push('b.tipo = ?');
       params.push(tipo);
     }
@@ -1082,6 +1208,7 @@ export const printBilling = async (req: Request, res: Response) => {
         WHERE COALESCE(cn.superseded_by_reinvoice, 0) = 0
         GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
                  cn.order_id, c.id, c.business_name, c.name, c.cuit
+        ${SQL_BILLING_ND_UNION_PRINT}
       ) AS b
       ${whereSql}
       ORDER BY b.fecha ASC, b.created_at ASC
@@ -1091,16 +1218,22 @@ export const printBilling = async (req: Request, res: Response) => {
 
     let totalFacturas = 0;
     let totalNC = 0;
+    let totalND = 0;
     let countFacturas = 0;
     let countNC = 0;
+    let countND = 0;
 
     const tableRows = (rows || [])
       .map((r) => {
         const importe = Number(r.importe) || 0;
         const esNC = String(r.tipo) === 'NC';
+        const esND = String(r.tipo) === 'ND';
         if (esNC) {
           totalNC += importe;
           countNC += 1;
+        } else if (esND) {
+          totalND += importe;
+          countND += 1;
         } else {
           totalFacturas += importe;
           countFacturas += 1;
@@ -1112,9 +1245,11 @@ export const printBilling = async (req: Request, res: Response) => {
         const importeStr = fmtMoneyArs(esNC ? -importe : importe);
         const tipoChip = esNC
           ? '<span class="chip chip-nc">NC</span>'
-          : '<span class="chip chip-fac">FACTURA</span>';
+          : esND
+            ? '<span class="chip chip-nd">ND</span>'
+            : '<span class="chip chip-fac">FACTURA</span>';
         return `
-          <tr class="${esNC ? 'row-nc' : ''}">
+          <tr class="${esNC ? 'row-nc' : esND ? 'row-nd' : ''}">
             <td class="col-fecha">${escapeHtml(formatDateEsShort(r.fecha))}</td>
             <td>${tipoChip}</td>
             <td class="mono">${escapeHtml(comprobante)}</td>
@@ -1136,8 +1271,9 @@ export const printBilling = async (req: Request, res: Response) => {
       return 'Período: todos los comprobantes';
     })();
 
-    const tipoFiltroTexto = tipo === 'FACTURA' ? 'Solo facturas' : tipo === 'NC' ? 'Solo notas de crédito' : null;
-    const totalNeto = totalFacturas - totalNC;
+    const tipoFiltroTexto =
+      tipo === 'FACTURA' ? 'Solo facturas' : tipo === 'NC' ? 'Solo notas de crédito' : tipo === 'ND' ? 'Solo notas de débito' : null;
+    const totalNeto = totalFacturas + totalND - totalNC;
     const emitidoEn = formatDateEsLong(new Date().toISOString().slice(0, 10));
 
     const html = `<!DOCTYPE html>
@@ -1173,6 +1309,7 @@ export const printBilling = async (req: Request, res: Response) => {
   tbody td { padding: 5px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
   tbody tr:nth-child(even) { background: #f7fafc; }
   tbody tr.row-nc { background: #fffaf0; }
+  tbody tr.row-nd { background: #f5f3ff; }
   .mono { font-family: "SFMono-Regular", Menlo, Consolas, monospace; font-size: 11px; }
   .small { font-size: 10px; color: #4a5568; }
   .num { text-align: right; white-space: nowrap; }
@@ -1180,6 +1317,7 @@ export const printBilling = async (req: Request, res: Response) => {
   .chip { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.02em; }
   .chip-fac { background: #c6f6d5; color: #22543d; }
   .chip-nc { background: #fed7d7; color: #742a2a; }
+  .chip-nd { background: #e9d8fd; color: #44337a; }
   .totales { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 12px; }
   .total-card { border: 1px solid #cbd5e0; border-radius: 8px; padding: 10px 14px; flex: 1; min-width: 180px; background: #f7fafc; }
   .total-card .label { font-size: 10px; text-transform: uppercase; color: #4a5568; font-weight: 700; }
@@ -1238,6 +1376,10 @@ export const printBilling = async (req: Request, res: Response) => {
     <div class="total-card">
       <div class="label">Notas de crédito (${countNC})</div>
       <div class="value">- ${escapeHtml(fmtMoneyArs(totalNC))}</div>
+    </div>
+    <div class="total-card">
+      <div class="label">Notas de débito (${countND})</div>
+      <div class="value">+ ${escapeHtml(fmtMoneyArs(totalND))}</div>
     </div>
     <div class="total-card neto">
       <div class="label">Neto facturado</div>
@@ -1321,12 +1463,12 @@ function toExcelSerialDate(value: any): number {
   return Math.floor(utc / 86400000) + 25569;
 }
 
-/** Letra del comprobante AFIP a partir de `cbte_tipo`. 1/3 = A, 6/8 = B, 11/13 = C. */
+/** Letra del comprobante AFIP a partir de `cbte_tipo`. 1/2/3 = A, 6/7/8 = B, 11/12/13 = C. */
 function letraFromCbteTipo(t: any): string {
   const n = Number(t);
-  if (n === 1 || n === 3) return 'A';
-  if (n === 6 || n === 8) return 'B';
-  if (n === 11 || n === 13) return 'C';
+  if (n === 1 || n === 2 || n === 3) return 'A';
+  if (n === 6 || n === 7 || n === 8) return 'B';
+  if (n === 11 || n === 12 || n === 13) return 'C';
   if (n === 51) return 'M';
   return 'A';
 }
@@ -2106,10 +2248,36 @@ export const exportBillingByCustomersFile = async (req: Request, res: Response) 
           AND COALESCE(cn.superseded_by_reinvoice, 0) = 0
         GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
                  cn.cae_fch_vto, cn.order_id, c.id, c.business_name, c.name, c.cuit
+
+        UNION ALL
+
+        SELECT
+          'ND' AS tipo,
+          COALESCE(DATE(MIN(dn.created_at)), MAX(o.date)) AS fecha,
+          c.business_name AS cliente,
+          c.name AS cliente_contacto,
+          c.cuit,
+          dn.cbte_tipo,
+          dn.punto_venta,
+          dn.cbte_desde,
+          dn.cbte_hasta,
+          ${SQL_ND_IMPORTE_EXPR} AS importe,
+          dn.order_id AS order_id,
+          dn.cae,
+          dn.cae_fch_vto,
+          c.id AS customer_id
+        FROM debit_notes dn
+        JOIN orders o ON o.id = dn.order_id
+        JOIN customers c ON c.id = o.customer_id
+        WHERE o.date >= ? AND o.date <= ?
+          AND o.customer_id IN (${ids.map(() => '?').join(',')})
+          ${sellerSql}
+        GROUP BY dn.cae, dn.punto_venta, dn.cbte_tipo, dn.cbte_desde, dn.cbte_hasta,
+                 dn.cae_fch_vto, dn.order_id, c.id, c.business_name, c.name, c.cuit
       ) x
       ORDER BY x.fecha ASC, x.cliente ASC, x.punto_venta ASC, x.cbte_desde ASC
       `,
-      [...params, ...params]
+      [...params, ...params, ...params]
     ) as any[];
 
     const mmParams: any[] = [...ids, fromDate, toDate];

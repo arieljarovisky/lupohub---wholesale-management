@@ -13,6 +13,8 @@ import {
   emitirFactura,
   getOrderCreditNotes,
   emitirNotaCredito,
+  getOrderDebitNotes,
+  emitirNotaDebito,
   patchOrderPaymentStatus,
   patchOrderIncludeInSaldo,
   applyMayoristaStockDeduction,
@@ -46,6 +48,8 @@ router.post('/:id/invoice/reemitir-con-agip', authMiddleware, reemitirFacturaCon
 router.get('/:id/credit-notes', getOrderCreditNotes);
 router.post('/:id/emitir-factura', authMiddleware, emitirFactura);
 router.post('/:id/emitir-nota-credito', authMiddleware, emitirNotaCredito);
+router.get('/:id/debit-notes', getOrderDebitNotes);
+router.post('/:id/emitir-nota-debito', authMiddleware, emitirNotaDebito);
 router.get('/:id/items-missing-despacho', getOrderItemsMissingDespacho);
 router.put('/:id/assign-despachos', authMiddleware, assignDespachosToOrderItems);
 router.post('/:id/remito-number/assign', assignRemitoNumber);
