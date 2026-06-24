@@ -4,7 +4,7 @@
  */
 import type { CreditNote, Customer, DebitNote, Order, OrderItem, Product } from '../types';
 import { calcTotalesDesdeNetoGravado, isComprobanteClaseB } from './afipComprobante';
-import { ORDER_PRICES_INCLUDE_IVA, IVA_RATE, orderGrossToAfipNeto } from './orderPricing';
+import { ORDER_PRICES_INCLUDE_IVA, IVA_RATE, IVA_MULTIPLIER, orderGrossToAfipNeto } from './orderPricing';
 import { formatMoneyAr } from './moneyFormat';
 import { codigoTalleParaSku, nombreTalleDesdeCodigo } from './tallesTango';
 
@@ -1501,11 +1501,31 @@ export function buildWholesaleDebitNoteHtml(params: {
     </body></html>`;
 }
 
+/** Código impreso en factura externa (TN/ML) a partir del SKU del canal. */
+export function printCodeFromExternalSku(skuRaw?: string): string {
+  const sku = String(skuRaw ?? '').trim();
+  if (!sku) return '—';
+  const complete = tryCompletePrintCodeFromSku(sku);
+  if (complete) return complete;
+  const fromParts = talleColorFromHyphenatedSku(sku);
+  if (fromParts) {
+    const built = printCodeArticleSizeColor(
+      articleCodeForPrintGroup(sku),
+      fromParts.talle,
+      fromParts.color
+    );
+    if (built) return built;
+  }
+  const normalized = normalizeSkuForPrint(sku);
+  return normalized || sku.replace(/-/g, '');
+}
+
 export type ExternalChannelLineItem = {
   name: string;
   sku?: string;
   quantity: number;
   unitPrice: number;
+  numeroDespacho?: string;
 };
 
 export type ExternalChannelInvoicePrint = {
@@ -1541,8 +1561,6 @@ export function buildExternalChannelFacturaHtml(params: {
     const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
     return `${String(x.getDate()).padStart(2, '0')} ${meses[x.getMonth()]} ${x.getFullYear()}`;
   };
-  const formatMoney = (n: number) =>
-    n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const cbteTipoNum = Number(invoice.cbteTipo);
   const tipoFactura = cbteTipoNum === 1 ? 'A' : cbteTipoNum === 11 ? 'C' : 'B';
@@ -1552,32 +1570,45 @@ export function buildExternalChannelFacturaHtml(params: {
   const orderRef = invoice.orderNumber || invoice.externalOrderId;
 
   const discriminaIva = !isComprobanteClaseB(cbteTipoNum);
-  const rows = products
-    .map((p) => {
-      const qty = Math.max(0, Number(p.quantity) || 0);
-      const unit = Math.round(Number(p.unitPrice) * 100) / 100;
-      const importe = Math.round(qty * unit * 100) / 100;
-      const sku = escapeHtmlText(String(p.sku || '—'));
-      const name = escapeHtmlText(String(p.name || 'Producto'));
-      return `<tr>
-        <td class="col-c">${qty}</td>
-        <td class="col-code">${sku}</td>
-        <td class="col-desc">${name}</td>
-        <td class="col-c">—</td>
-        <td class="col-r">${formatMoney(unit)}</td>
-        <td class="col-r">${formatMoney(importe)}</td>
-      </tr>`;
-    })
-    .join('');
 
   const sumLines = products.reduce(
     (s, p) => s + Math.round(Math.max(0, Number(p.quantity) || 0) * Number(p.unitPrice || 0) * 100) / 100,
     0
   );
   const grossTotal = Math.round((invoice.total > 0 ? invoice.total : sumLines) * 100) / 100;
-  const netoGravado = discriminaIva ? orderGrossToAfipNeto(grossTotal) : grossTotal;
+  // Precios TN/ML incluyen IVA; AFIP factura desde neto gravado.
+  const netoGravado = Math.round((grossTotal / IVA_MULTIPLIER) * 100) / 100;
   const totales = calcTotalesDesdeNetoGravado(netoGravado, cbteTipoNum, 0);
   const { neto: netoImpreso, iva: iva21, total } = totales;
+  const subtotalBruto = discriminaIva ? netoGravado : Math.round((netoGravado + totales.iva) * 100) / 100;
+  // TN/ML envían precios con IVA incluido: en B se muestran tal cual; en A se divide por 1.21.
+  const factorPrecioLinea = discriminaIva ? 1 / IVA_MULTIPLIER : 1;
+
+  const rows = products
+    .map((p) => {
+      const qty = Math.max(0, Number(p.quantity) || 0);
+      const unitBase = Math.round(Number(p.unitPrice) * 100) / 100;
+      const unit = Math.round(unitBase * factorPrecioLinea * 100) / 100;
+      const importe = Math.round(qty * unit * 100) / 100;
+      const code = escapeHtmlText(printCodeFromExternalSku(p.sku));
+      const name = escapeHtmlText(String(p.name || 'Producto'));
+      const despacho =
+        p.numeroDespacho != null && String(p.numeroDespacho).trim()
+          ? escapeHtmlText(String(p.numeroDespacho).trim())
+          : '—';
+      const qtyStr = Number.isInteger(qty)
+        ? qty.toLocaleString('es-AR')
+        : qty.toLocaleString('es-AR', { maximumFractionDigits: 3 });
+      return `<tr>
+        <td class="col-c">${qtyStr}</td>
+        <td class="col-c col-code">${code}</td>
+        <td class="col-desc">${name}</td>
+        <td class="col-c col-despacho">${despacho}</td>
+        <td class="col-r">$${formatMoneyAr(unit)}</td>
+        <td class="col-r">$${formatMoneyAr(importe)}</td>
+      </tr>`;
+    })
+    .join('');
 
   const vtoCae = invoice.caeFchVto ? formatDateShort(invoice.caeFchVto) : '—';
   const logoUrlFactura = remitente.logoUrl && String(remitente.logoUrl).trim() ? String(remitente.logoUrl).trim() : '';
@@ -1738,12 +1769,14 @@ export function buildExternalChannelFacturaHtml(params: {
           <div class="totals">
             ${
               discriminaIva
-                ? `<div class="r"><span>Subtotal</span><span>${formatMoney(netoImpreso)}</span></div>
-                   <div class="r"><span>IVA 21%</span><span>${formatMoney(iva21)}</span></div>
-                   <div class="r"><span>Total</span><span>${formatMoney(total)}</span></div>`
-                : `<div class="r"><span>Subtotal</span><span>${formatMoney(grossTotal)}</span></div>
-                   <div class="r"><span>Total</span><span>${formatMoney(total)}</span></div>`
+                ? `<div class="r"><span>Subtotal Bruto</span><span>$${formatMoneyAr(subtotalBruto)}</span></div>
+                   <div class="r"><span>Subtotal Neto</span><span>$${formatMoneyAr(netoImpreso)}</span></div>
+                   <div class="r"><span>IVA 21%</span><span>$${formatMoneyAr(iva21)}</span></div>`
+                : `<div class="r"><span>Subtotal</span><span>$${formatMoneyAr(subtotalBruto)}</span></div>
+                   <div class="r"><span>Subtotal Neto</span><span>$${formatMoneyAr(netoImpreso)}</span></div>
+                   <div class="r"><span>IVA 21%</span><span>$${formatMoneyAr(iva21)}</span></div>`
             }
+            <div class="r"><span>Total</span><span>$${formatMoneyAr(total)}</span></div>
           </div>
         </div>
         <div class="footer">

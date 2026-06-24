@@ -4899,9 +4899,9 @@ export const getExternalInvoicesHistory = async (req: Request, res: Response) =>
 };
 
 function scaleExternalLineItemsToTotal(
-  items: Array<{ name: string; sku?: string; quantity: number; unitPrice: number }>,
+  items: Array<{ name: string; sku?: string; quantity: number; unitPrice: number; numeroDespacho?: string }>,
   targetTotal: number
-): Array<{ name: string; sku?: string; quantity: number; unitPrice: number }> {
+): Array<{ name: string; sku?: string; quantity: number; unitPrice: number; numeroDespacho?: string }> {
   if (!items.length || !(targetTotal > 0)) return items;
   const sum = items.reduce((acc, it) => acc + Math.round(it.quantity * it.unitPrice * 100) / 100, 0);
   if (sum <= 0 || Math.abs(sum - targetTotal) <= 0.02) return items;
@@ -4910,6 +4910,61 @@ function scaleExternalLineItemsToTotal(
     ...it,
     unitPrice: Math.round(it.unitPrice * factor * 100) / 100,
   }));
+}
+
+async function lookupNumeroDespachoForExternalProduct(args: {
+  sku?: string;
+  variantId?: string | number;
+}): Promise<string | undefined> {
+  const sku = String(args.sku || '').trim();
+  const variantId = args.variantId != null ? String(args.variantId).trim() : '';
+  if (!sku && !variantId) return undefined;
+
+  const params: string[] = [];
+  const orParts: string[] = [];
+  if (variantId) {
+    orParts.push('pv.tienda_nube_variant_id = ?');
+    params.push(variantId);
+  }
+  if (sku) {
+    orParts.push('pv.sku = ?', 'pv.external_sku = ?', 'p.sku = ?', "REPLACE(pv.sku, '-', '') = REPLACE(?, '-', '')");
+    params.push(sku, sku, sku, sku);
+  }
+  if (!orParts.length) return undefined;
+
+  const row = (await get(
+    `SELECT COALESCE(d.numero_despacho) AS numero_despacho
+     FROM product_variants pv
+     JOIN product_colors pc ON pc.id = pv.product_color_id
+     JOIN products p ON p.id = pc.product_id
+     LEFT JOIN despachos d ON d.id = p.ultimo_despacho_id
+     WHERE ${orParts.join(' OR ')}
+     LIMIT 1`,
+    params
+  )) as { numero_despacho?: string } | undefined;
+
+  const n = String(row?.numero_despacho || '').trim();
+  return n || undefined;
+}
+
+async function enrichExternalProductsWithDespacho(
+  products: Array<{ name: string; sku?: string; quantity: number; unitPrice: number; variantId?: string }>
+): Promise<Array<{ name: string; sku?: string; quantity: number; unitPrice: number; numeroDespacho?: string }>> {
+  const out: Array<{ name: string; sku?: string; quantity: number; unitPrice: number; numeroDespacho?: string }> = [];
+  for (const p of products) {
+    const numeroDespacho = await lookupNumeroDespachoForExternalProduct({
+      sku: p.sku,
+      variantId: p.variantId,
+    });
+    out.push({
+      name: p.name,
+      sku: p.sku,
+      quantity: p.quantity,
+      unitPrice: p.unitPrice,
+      numeroDespacho,
+    });
+  }
+  return out;
 }
 
 /** Datos para imprimir / descargar PDF de una factura externa (TN / ML). */
@@ -4930,7 +4985,7 @@ export const getExternalInvoicePrintData = async (req: Request, res: Response) =
     )) as any;
     if (!inv) return res.status(404).json({ message: 'Factura externa no encontrada' });
 
-    let products: Array<{ name: string; sku?: string; quantity: number; unitPrice: number }> = [];
+    let products: Array<{ name: string; sku?: string; quantity: number; unitPrice: number; variantId?: string }> = [];
     let customerAddress = '';
     let customerCity = '';
 
@@ -4953,6 +5008,7 @@ export const getExternalInvoicePrintData = async (req: Request, res: Response) =
           products = (order.products || []).map((p: any) => ({
             name: String(p.name || 'Producto').trim(),
             sku: String(p.sku || '').trim() || undefined,
+            variantId: p.variant_id != null ? String(p.variant_id) : undefined,
             quantity: Math.max(0, Number(p.quantity) || 0),
             unitPrice: Math.max(0, Number(p.price) || 0),
           })).filter((p: { quantity: number }) => p.quantity > 0);
@@ -4982,6 +5038,7 @@ export const getExternalInvoicePrintData = async (req: Request, res: Response) =
 
     const invoiceTotal = Number(inv.total || 0);
     products = scaleExternalLineItemsToTotal(products, invoiceTotal);
+    products = await enrichExternalProductsWithDespacho(products);
     if (!products.length && invoiceTotal > 0) {
       const canal = inv.source === 'TIENDANUBE' ? 'Tienda Nube' : 'Mercado Libre';
       products = [{
