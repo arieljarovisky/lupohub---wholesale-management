@@ -91,6 +91,8 @@ const PORT = process.env.PORT || 3001;
 // CORS: con credentials (cookies) no se puede usar '*'; hay que devolver el origen concreto
 const allowedOrigins: string[] = [
   'https://lupohub-wholesale-management.vercel.app',
+  'https://multilupo.com.ar',
+  'https://www.multilupo.com.ar',
   'http://localhost:5173',
   'http://localhost:3000',
   'http://127.0.0.1:5173',
@@ -98,19 +100,35 @@ const allowedOrigins: string[] = [
 ];
 const frontendUrl = process.env.FRONTEND_URL?.replace(/\/$/, '');
 if (frontendUrl && !allowedOrigins.includes(frontendUrl)) allowedOrigins.push(frontendUrl);
+const publicCorsOrigins = (process.env.PUBLIC_CORS_ORIGINS || '')
+  .split(',')
+  .map((s) => s.trim().replace(/\/$/, ''))
+  .filter(Boolean);
+for (const origin of publicCorsOrigins) {
+  if (!allowedOrigins.includes(origin)) allowedOrigins.push(origin);
+}
 
 export function isAllowedOrigin(origin?: string): boolean {
   if (!origin) return true;
   if (allowedOrigins.includes(origin)) return true;
   // Permitir previews de Vercel del proyecto (ej: lupohub-wholesale-management-git-...vercel.app)
   if (/^https:\/\/lupohub-wholesale-management(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(origin)) return true;
+  // Tienda / sitio público Multi Lupo
+  if (/^https:\/\/(www\.)?multilupo\.com\.ar$/i.test(origin)) return true;
   return false;
 }
 
 /** Headers CORS explícitos (también en errores JSON; el 502 del proxy de Railway no pasa por acá). */
 export function applyCorsHeaders(req: express.Request, res: express.Response): void {
   const origin = req.headers.origin;
-  if (typeof origin === 'string' && isAllowedOrigin(origin)) {
+  if (typeof origin !== 'string') return;
+  // API pública de seguimiento: reflejar cualquier origen (sin credenciales).
+  if (req.path.startsWith('/api/public')) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    return;
+  }
+  if (isAllowedOrigin(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Vary', 'Origin');
@@ -126,7 +144,19 @@ const corsOpts: cors.CorsOptions = {
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 };
+
+/** CORS abierto para endpoints públicos de solo lectura (p. ej. seguimiento en multilupo.com.ar). */
+const publicApiCorsOpts: cors.CorsOptions = {
+  origin: true,
+  credentials: false,
+  methods: ['GET', 'OPTIONS'],
+  allowedHeaders: ['Content-Type'],
+};
+
 app.set('trust proxy', 1);
+app.use('/api/public', cors(publicApiCorsOpts) as RequestHandler);
+app.options('/api/public/*', cors(publicApiCorsOpts) as RequestHandler);
+app.use('/api/public', publicTrackingRoutes);
 app.use(cors(corsOpts) as RequestHandler);
 app.options('*', cors(corsOpts) as RequestHandler);
 app.use((req, res, next) => {
@@ -167,9 +197,8 @@ app.use('/api/payments', paymentsRoutes);
 app.use('/api/user-tasks', userTasksRoutes);
 app.use('/api/company-finance', companyFinanceRoutes);
 app.use('/api/marketing', marketingLeadsRoutes);
-app.use('/api/public', publicTrackingRoutes);
 
-// Manejador global de errores: devuelve JSON con el mensaje para que el front pueda mostrarlo
+// Manejador global de errores
 app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   applyCorsHeaders(req, res);
   const message = err?.message || String(err) || 'Error interno del servidor';
