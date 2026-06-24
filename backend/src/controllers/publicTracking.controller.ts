@@ -1,6 +1,13 @@
 import { Request, Response } from 'express';
 import axios from 'axios';
 import { get } from '../database/db';
+import {
+  buildManualTrackingEvents,
+  expressTrackingStatusLabel,
+  isExpressTrackingStatus,
+  publicStatusFromManualStatus,
+  type ExpressTrackingStatus,
+} from '../services/tiendanubeExpressTracking.service';
 
 const TN_USER_AGENT = process.env.TIENDA_NUBE_USER_AGENT || 'LupoHub (support@lupo.ar)';
 const TRACKING_CODE_RE = /^LHE\d{8}$/i;
@@ -69,24 +76,18 @@ function publicStatusFromOrder(order: any): { status: string; statusLabel: strin
   return { status: 'pending', statusLabel: 'Pendiente' };
 }
 
-function buildTrackingEvents(order: any, trackingAssignedAt: string | null): TrackingEvent[] {
+function buildTrackingEventsFromTn(order: any, trackingAssignedAt: string | null): TrackingEvent[] {
   const shippingStatus = String(order.shipping_status || '').toLowerCase();
   const orderStatus = String(order.status || '').toLowerCase();
   const isCancelled = orderStatus === 'cancelled';
 
   const events: TrackingEvent[] = [];
-
   const push = (key: string, label: string, at: string | null, done: boolean) => {
     events.push({ key, label, at, done });
   };
 
   push('created', 'Pedido registrado', order.created_at || null, true);
-  push(
-    'tracking',
-    'Código de seguimiento generado',
-    trackingAssignedAt,
-    !!trackingAssignedAt
-  );
+  push('tracking', 'Código de seguimiento generado', trackingAssignedAt, !!trackingAssignedAt);
 
   const isPaid =
     !!order.paid_at || String(order.payment_status || '').toLowerCase() === 'paid';
@@ -181,7 +182,7 @@ export const getPublicTrackingByCode = async (req: Request, res: Response) => {
 
   try {
     const row = await get(
-      `SELECT external_order_id, order_number, tracking_code, created_at
+      `SELECT external_order_id, order_number, tracking_code, manual_status, manual_status_updated_at, created_at
        FROM tiendanube_express_tracking
        WHERE UPPER(tracking_code) = ?`,
       [trackingCode]
@@ -191,11 +192,32 @@ export const getPublicTrackingByCode = async (req: Request, res: Response) => {
     }
 
     const order = await fetchTiendaNubeOrder(String(row.external_order_id));
-    const shippingStatus = String(order.shipping_status || '').toLowerCase();
-    const { status, statusLabel } = publicStatusFromOrder(order);
     const trackingAssignedAt = row.created_at
       ? new Date(row.created_at).toISOString()
       : null;
+    const manualStatusUpdatedAt = row.manual_status_updated_at
+      ? new Date(row.manual_status_updated_at).toISOString()
+      : null;
+
+    const manualStatus = isExpressTrackingStatus(row.manual_status) ? row.manual_status : null;
+    const useManual = manualStatus != null;
+
+    const { status, statusLabel } = useManual
+      ? publicStatusFromManualStatus(manualStatus)
+      : publicStatusFromOrder(order);
+
+    const shippingStatus = useManual
+      ? manualStatus
+      : String(order.shipping_status || '').toLowerCase();
+
+    const events = useManual
+      ? buildManualTrackingEvents(manualStatus, {
+          trackingAssignedAt,
+          manualStatusUpdatedAt,
+          orderCreatedAt: order.created_at || null,
+          orderPaidAt: order.paid_at || null,
+        })
+      : buildTrackingEventsFromTn(order, trackingAssignedAt);
 
     return res.json({
       trackingCode: String(row.tracking_code || trackingCode).toUpperCase(),
@@ -203,8 +225,12 @@ export const getPublicTrackingByCode = async (req: Request, res: Response) => {
       source: 'TIENDANUBE',
       status,
       statusLabel,
+      statusSource: useManual ? 'manual' : 'tiendanube',
       shippingStatus: shippingStatus || null,
-      shippingStatusLabel: TN_SHIPPING_STATUS_LABELS[shippingStatus] || (shippingStatus ? shippingStatus : null),
+      shippingStatusLabel: useManual
+        ? expressTrackingStatusLabel(manualStatus)
+        : TN_SHIPPING_STATUS_LABELS[String(order.shipping_status || '').toLowerCase()] ||
+          (order.shipping_status ? String(order.shipping_status) : null),
       orderStatus: String(order.status || '') || null,
       orderStatusLabel: TN_ORDER_STATUS_LABELS[String(order.status || '').toLowerCase()] || null,
       shippingMethod: tnShippingMethodFromOrder(order),
@@ -212,9 +238,10 @@ export const getPublicTrackingByCode = async (req: Request, res: Response) => {
       createdAt: order.created_at || null,
       paidAt: order.paid_at || null,
       shippedAt: order.shipped_at || null,
-      updatedAt: order.updated_at || null,
+      updatedAt: useManual ? manualStatusUpdatedAt : order.updated_at || null,
       trackingAssignedAt,
-      events: buildTrackingEvents(order, trackingAssignedAt),
+      trackingStatusUpdatedAt: manualStatusUpdatedAt,
+      events,
     });
   } catch (error: any) {
     const status = typeof error?.status === 'number' ? error.status : 500;

@@ -45,12 +45,38 @@ export async function addTiendaNubeExpressTracking(): Promise<void> {
           external_order_id VARCHAR(80) NOT NULL PRIMARY KEY,
           order_number VARCHAR(40) NULL,
           tracking_code VARCHAR(40) NOT NULL,
+          manual_status VARCHAR(24) NULL,
+          manual_status_updated_at DATETIME NULL,
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
           UNIQUE KEY uniq_tn_express_tracking_code (tracking_code),
           INDEX idx_tn_express_tracking_created (created_at)
         )
       `);
       console.log('[DB] Tabla tiendanube_express_tracking creada');
+    } else {
+      const cols = [
+        {
+          name: 'manual_status',
+          sql: `ALTER TABLE tiendanube_express_tracking ADD COLUMN manual_status VARCHAR(24) NULL AFTER tracking_code`,
+        },
+        {
+          name: 'manual_status_updated_at',
+          sql: `ALTER TABLE tiendanube_express_tracking ADD COLUMN manual_status_updated_at DATETIME NULL AFTER manual_status`,
+        },
+      ];
+      for (const c of cols) {
+        const col = await get(
+          `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+           WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tiendanube_express_tracking' AND COLUMN_NAME = ?`,
+          [c.name]
+        );
+        if (!col) await execute(c.sql);
+      }
+      await execute(
+        `UPDATE tiendanube_express_tracking
+         SET manual_status = 'preparing', manual_status_updated_at = COALESCE(manual_status_updated_at, created_at, NOW())
+         WHERE manual_status IS NULL OR manual_status = ''`
+      );
     }
   } catch (e: any) {
     console.error('[DB] Error creando tablas tiendanube_express_tracking:', e?.message);

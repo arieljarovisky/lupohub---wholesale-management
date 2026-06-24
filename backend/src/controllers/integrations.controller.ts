@@ -12,6 +12,13 @@ import {
 import { normalizeColorNameToStandard, shouldUpdateColorValue } from '../utils/colorNameStandard';
 import { skuToCanonicalString } from '../utils/skuString';
 import { normalizeSizeToStandard } from '../utils/talleStandard';
+import {
+  buildManualTrackingEvents,
+  expressTrackingStatusLabel,
+  isExpressTrackingStatus,
+  publicStatusFromManualStatus,
+  type ExpressTrackingStatus,
+} from '../services/tiendanubeExpressTracking.service';
 
 const ML_AUTH_URL = 'https://auth.mercadolibre.com.ar/authorization';
 const ML_TOKEN_URL = 'https://api.mercadolibre.com/oauth/token';
@@ -4399,7 +4406,7 @@ export const getTiendaNubeOrders = async (req: Request, res: Response) => {
       try {
         const trPlaceholders = orderIdsForTracking.map(() => '?').join(', ');
         const trackingRows = await query(
-          `SELECT external_order_id, tracking_code, created_at
+          `SELECT external_order_id, tracking_code, manual_status, manual_status_updated_at, created_at
            FROM tiendanube_express_tracking
            WHERE external_order_id IN (${trPlaceholders})`,
           orderIdsForTracking
@@ -4411,7 +4418,9 @@ export const getTiendaNubeOrders = async (req: Request, res: Response) => {
           return {
             ...o,
             trackingCode: tr?.tracking_code || null,
-            trackingAssignedAt: tr?.created_at || null
+            trackingAssignedAt: tr?.created_at || null,
+            trackingStatus: tr?.manual_status || null,
+            trackingStatusUpdatedAt: tr?.manual_status_updated_at || null,
           };
         });
       } catch (trackingErr: any) {
@@ -4454,7 +4463,7 @@ export const assignTiendaNubeExpressTracking = async (req: Request, res: Respons
 
   try {
     const existing = await get(
-      `SELECT external_order_id, order_number, tracking_code, created_at
+      `SELECT external_order_id, order_number, tracking_code, manual_status, manual_status_updated_at, created_at
        FROM tiendanube_express_tracking WHERE external_order_id = ?`,
       [orderId]
     );
@@ -4463,6 +4472,8 @@ export const assignTiendaNubeExpressTracking = async (req: Request, res: Respons
         orderId,
         orderNumber: existing.order_number || orderNumber,
         trackingCode: existing.tracking_code,
+        trackingStatus: existing.manual_status || null,
+        trackingStatusUpdatedAt: existing.manual_status_updated_at || null,
         assigned: false,
         createdAt: existing.created_at
       });
@@ -4480,20 +4491,21 @@ export const assignTiendaNubeExpressTracking = async (req: Request, res: Respons
 
     try {
       await execute(
-        `INSERT INTO tiendanube_express_tracking (external_order_id, order_number, tracking_code)
-         VALUES (?, ?, ?)`,
+        `INSERT INTO tiendanube_express_tracking (external_order_id, order_number, tracking_code, manual_status, manual_status_updated_at)
+         VALUES (?, ?, ?, 'preparing', NOW())`,
         [orderId, orderNumber, trackingCode]
       );
       return res.json({
         orderId,
         orderNumber,
         trackingCode,
+        trackingStatus: 'preparing',
         assigned: true
       });
     } catch (insertErr: any) {
       if (insertErr?.code === 'ER_DUP_ENTRY') {
         const raced = await get(
-          `SELECT external_order_id, order_number, tracking_code, created_at
+          `SELECT external_order_id, order_number, tracking_code, manual_status, manual_status_updated_at, created_at
            FROM tiendanube_express_tracking WHERE external_order_id = ?`,
           [orderId]
         );
@@ -4502,6 +4514,8 @@ export const assignTiendaNubeExpressTracking = async (req: Request, res: Respons
             orderId,
             orderNumber: raced.order_number || orderNumber,
             trackingCode: raced.tracking_code,
+            trackingStatus: raced.manual_status || null,
+            trackingStatusUpdatedAt: raced.manual_status_updated_at || null,
             assigned: false,
             createdAt: raced.created_at
           });
@@ -4512,6 +4526,59 @@ export const assignTiendaNubeExpressTracking = async (req: Request, res: Respons
   } catch (error: any) {
     console.error('assignTiendaNubeExpressTracking:', error);
     return res.status(500).json({ message: 'Error asignando código de seguimiento express' });
+  }
+};
+
+/**
+ * Actualiza el estado manual de seguimiento express (visible en la página pública de tracking).
+ * PATCH /api/integrations/tiendanube/orders/:orderId/express-tracking/status
+ */
+export const updateTiendaNubeExpressTrackingStatus = async (req: Request, res: Response) => {
+  const orderId = String(req.params.orderId || '').trim();
+  const statusRaw = (req.body as any)?.status;
+  if (!orderId) return res.status(400).json({ message: 'ID de orden inválido' });
+  if (!isExpressTrackingStatus(statusRaw)) {
+    return res.status(400).json({ message: 'Estado de seguimiento inválido' });
+  }
+  const status = statusRaw as ExpressTrackingStatus;
+
+  try {
+    const existing = await get(
+      `SELECT external_order_id, order_number, tracking_code, manual_status
+       FROM tiendanube_express_tracking WHERE external_order_id = ?`,
+      [orderId]
+    );
+    if (!existing?.tracking_code) {
+      return res.status(404).json({
+        message: 'Este pedido aún no tiene código de seguimiento. Generá la etiqueta o el recibo express primero.',
+      });
+    }
+
+    await execute(
+      `UPDATE tiendanube_express_tracking
+       SET manual_status = ?, manual_status_updated_at = NOW()
+       WHERE external_order_id = ?`,
+      [status, orderId]
+    );
+
+    const updated = await get(
+      `SELECT external_order_id, order_number, tracking_code, manual_status, manual_status_updated_at, created_at
+       FROM tiendanube_express_tracking WHERE external_order_id = ?`,
+      [orderId]
+    );
+
+    return res.json({
+      orderId,
+      orderNumber: updated?.order_number || null,
+      trackingCode: updated?.tracking_code,
+      trackingStatus: updated?.manual_status,
+      trackingStatusLabel: expressTrackingStatusLabel(status),
+      trackingStatusUpdatedAt: updated?.manual_status_updated_at || null,
+      createdAt: updated?.created_at || null,
+    });
+  } catch (error: any) {
+    console.error('updateTiendaNubeExpressTrackingStatus:', error);
+    return res.status(500).json({ message: 'Error actualizando estado de seguimiento' });
   }
 };
 

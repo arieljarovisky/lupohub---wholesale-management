@@ -5,6 +5,19 @@ import { getRemitente } from '../services/apiIntegration';
 import { openExternalInvoicePdf } from '../utils/externalInvoicePdf';
 import { buildTiendaNubeExpressLabelHtml, buildTiendaNubeExpressLabelInnerHtml, EXPRESS_LABEL_CSS } from '../utils/tiendaNubeExpressLabelHtml';
 
+const EXPRESS_TRACKING_STATUS_OPTIONS = [
+  { value: 'pending', label: 'Pendiente' },
+  { value: 'preparing', label: 'En preparación' },
+  { value: 'shipped', label: 'En camino' },
+  { value: 'delivered', label: 'Entregado' },
+  { value: 'cancelled', label: 'Cancelado' },
+] as const;
+
+type ExpressTrackingStatus = typeof EXPRESS_TRACKING_STATUS_OPTIONS[number]['value'];
+
+const expressTrackingStatusLabel = (status?: string | null): string =>
+  EXPRESS_TRACKING_STATUS_OPTIONS.find((o) => o.value === status)?.label || status || '—';
+
 interface TiendaNubeOrder {
   id: number;
   number: number;
@@ -20,6 +33,8 @@ interface TiendaNubeOrder {
   hasExpressShipping?: boolean;
   trackingCode?: string | null;
   trackingAssignedAt?: string | null;
+  trackingStatus?: ExpressTrackingStatus | string | null;
+  trackingStatusUpdatedAt?: string | null;
   total: string;
   currency: string;
   customer: {
@@ -89,6 +104,8 @@ const TiendaNubeOrders: React.FC = () => {
   const [bulkCbteTipo, setBulkCbteTipo] = useState<'auto' | 'A' | 'B'>('auto');
   const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null);
   const [assigningTrackingOrderId, setAssigningTrackingOrderId] = useState<number | null>(null);
+  const [updatingTrackingStatusOrderId, setUpdatingTrackingStatusOrderId] = useState<number | null>(null);
+  const [trackingStatusDrafts, setTrackingStatusDrafts] = useState<Record<number, ExpressTrackingStatus>>({});
   const perPage = 15;
 
   const fetchOrders = async () => {
@@ -210,8 +227,42 @@ const TiendaNubeOrders: React.FC = () => {
     if (order.trackingCode) return order.trackingCode;
     const res = await api.assignTiendaNubeExpressTracking(order.id, order.number);
     const code = res.trackingCode;
-    setOrders(prev => prev.map(o => o.id === order.id ? { ...o, trackingCode: code, trackingAssignedAt: res.createdAt || new Date().toISOString() } : o));
+    setOrders(prev => prev.map(o => o.id === order.id ? {
+      ...o,
+      trackingCode: code,
+      trackingAssignedAt: res.createdAt || new Date().toISOString(),
+      trackingStatus: (res.trackingStatus as ExpressTrackingStatus) || 'preparing',
+    } : o));
     return code;
+  };
+
+  const getTrackingStatusDraft = (order: TiendaNubeOrder): ExpressTrackingStatus =>
+    trackingStatusDrafts[order.id] || (order.trackingStatus as ExpressTrackingStatus) || 'preparing';
+
+  const handleUpdateTrackingStatus = async (order: TiendaNubeOrder) => {
+    const status = getTrackingStatusDraft(order);
+    setUpdatingTrackingStatusOrderId(order.id);
+    try {
+      if (!order.trackingCode) {
+        await ensureExpressTrackingCode(order);
+      }
+      const res = await api.updateTiendaNubeExpressTrackingStatus(order.id, status);
+      setOrders(prev => prev.map(o => o.id === order.id ? {
+        ...o,
+        trackingCode: res.trackingCode || o.trackingCode,
+        trackingStatus: res.trackingStatus as ExpressTrackingStatus,
+        trackingStatusUpdatedAt: res.trackingStatusUpdatedAt || new Date().toISOString(),
+      } : o));
+      setTrackingStatusDrafts(prev => {
+        const next = { ...prev };
+        delete next[order.id];
+        return next;
+      });
+    } catch (error: any) {
+      window.alert(error?.message || 'No se pudo actualizar el estado de seguimiento');
+    } finally {
+      setUpdatingTrackingStatusOrderId(null);
+    }
   };
 
   const openPrintWindow = (html: string, blockedMessage: string) => {
@@ -807,6 +858,11 @@ const TiendaNubeOrders: React.FC = () => {
                               {order.trackingCode}
                             </span>
                           )}
+                          {order.trackingCode && order.trackingStatus && (
+                            <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-violet-700/20 text-violet-200 border border-violet-600/30">
+                              {expressTrackingStatusLabel(order.trackingStatus)}
+                            </span>
+                          )}
                           {showRefundHint && (
                             <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-amber-700/20 text-amber-300" title="Se factura solo lo que el cliente pagó (después del reembolso parcial)">
                               A FACTURAR: ${formatCurrency(String(billableAmount))}
@@ -922,6 +978,66 @@ const TiendaNubeOrders: React.FC = () => {
                           )}
                           {order.trackingCode && (
                             <p className="text-sky-300 text-sm mt-1 font-mono">Seguimiento: {order.trackingCode}</p>
+                          )}
+                          {order.trackingStatus && (
+                            <p className="text-violet-300 text-sm mt-1 font-bold">
+                              Estado público: {expressTrackingStatusLabel(order.trackingStatus)}
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Seguimiento express manual */}
+                      {hasExpressShipping(order) && (
+                        <div className="bg-slate-900/30 rounded-xl p-4 lg:col-span-3">
+                          <div className="flex items-center gap-2 text-fuchsia-400 text-xs font-bold mb-3">
+                            <Truck size={14} />
+                            <span>SEGUIMIENTO EXPRESS (PÁGINA PÚBLICA)</span>
+                          </div>
+                          {!order.trackingCode ? (
+                            <p className="text-slate-400 text-sm">
+                              Generá la etiqueta o el recibo express para crear el código de seguimiento y poder actualizar el estado.
+                            </p>
+                          ) : (
+                            <div className="flex flex-wrap items-end gap-3">
+                              <div className="min-w-[220px]">
+                                <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">
+                                  Estado del pedido
+                                </label>
+                                <select
+                                  value={getTrackingStatusDraft(order)}
+                                  onChange={(e) => setTrackingStatusDrafts(prev => ({
+                                    ...prev,
+                                    [order.id]: e.target.value as ExpressTrackingStatus,
+                                  }))}
+                                  disabled={updatingTrackingStatusOrderId === order.id}
+                                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white"
+                                >
+                                  {EXPRESS_TRACKING_STATUS_OPTIONS.map((opt) => (
+                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => void handleUpdateTrackingStatus(order)}
+                                disabled={
+                                  updatingTrackingStatusOrderId === order.id ||
+                                  getTrackingStatusDraft(order) === order.trackingStatus
+                                }
+                                className="px-4 py-2 rounded-xl bg-violet-700 hover:bg-violet-600 text-white text-sm font-black disabled:opacity-50 flex items-center gap-2"
+                              >
+                                {updatingTrackingStatusOrderId === order.id ? (
+                                  <Loader2 size={14} className="animate-spin" />
+                                ) : null}
+                                Guardar estado
+                              </button>
+                              {order.trackingStatusUpdatedAt && (
+                                <p className="text-xs text-slate-500">
+                                  Última actualización: {new Date(order.trackingStatusUpdatedAt).toLocaleString('es-AR')}
+                                </p>
+                              )}
+                            </div>
                           )}
                         </div>
                       )}
