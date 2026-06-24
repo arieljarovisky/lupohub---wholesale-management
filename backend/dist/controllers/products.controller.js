@@ -158,7 +158,7 @@ const getProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
     }
     catch (error) {
         console.error(error);
-        res.status(500).json({ message: "Error fetching products" });
+        res.status(500).json({ message: (error === null || error === void 0 ? void 0 : error.message) || 'Error fetching products' });
     }
 });
 exports.getProducts = getProducts;
@@ -580,6 +580,7 @@ const updateVariantExternalIds = (req, res) => __awaiter(void 0, void 0, void 0,
         const mlPack = (_b = productRow === null || productRow === void 0 ? void 0 : productRow.ml_pack) !== null && _b !== void 0 ? _b : 1;
         const mlPubItemId = mlItemOnVariant
             || (mlVarOnVariant && (productRow === null || productRow === void 0 ? void 0 : productRow.mercado_libre_id) ? String(productRow.mercado_libre_id).trim() : null);
+        // Solo borrar publicaciones de una plataforma si se desvincula explícitamente (no al actualizar el vínculo principal).
         if (hasTnVar && (!tnProductId || !tnVariantId)) {
             yield (0, db_1.execute)(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'tiendanube'`, [variantId]);
         }
@@ -589,14 +590,13 @@ const updateVariantExternalIds = (req, res) => __awaiter(void 0, void 0, void 0,
                 yield (0, db_1.execute)(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'mercadolibre'`, [variantId]);
             }
         }
+        // Upsert del vínculo principal sin borrar otras publicaciones del mismo canal.
         if (tnProductId && tnVariantId) {
-            yield (0, db_1.execute)(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'tiendanube'`, [variantId]);
             yield (0, db_1.execute)(`INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
          VALUES (?, ?, 'tiendanube', ?, ?, ?)
          ON DUPLICATE KEY UPDATE pack_size = VALUES(pack_size)`, [(0, uuid_1.v4)(), variantId, tnProductId, tnVariantId, tnPack]);
         }
         if (mlPubItemId) {
-            yield (0, db_1.execute)(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'mercadolibre'`, [variantId]);
             yield (0, db_1.execute)(`INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
          VALUES (?, ?, 'mercadolibre', ?, ?, ?)
          ON DUPLICATE KEY UPDATE external_product_id = VALUES(external_product_id), external_variant_id = VALUES(external_variant_id), pack_size = VALUES(pack_size)`, [(0, uuid_1.v4)(), variantId, mlPubItemId, mlVarOnVariant || '', mlPack]);
@@ -711,15 +711,33 @@ const bulkLinkVariants = (req, res) => __awaiter(void 0, void 0, void 0, functio
          WHERE pv.id = ? LIMIT 1`, [links[0].variantId]);
             resolvedProductId = (_a = row === null || row === void 0 ? void 0 : row.product_id) !== null && _a !== void 0 ? _a : undefined;
         }
+        const tnProductIdsInLinks = new Set(links
+            .map((l) => l.tiendaNubeProductId != null && String(l.tiendaNubeProductId).trim() !== ''
+            ? String(l.tiendaNubeProductId).trim()
+            : null)
+            .filter(Boolean));
+        const mlParentsInLinks = new Set(links
+            .map((l) => l.mercadoLibreItemId != null && String(l.mercadoLibreItemId).trim() !== ''
+            ? String(l.mercadoLibreItemId).trim()
+            : null)
+            .filter(Boolean));
         if (resolvedProductId) {
-            if (tiendaNubeProductId != null && tiendaNubeProductId !== '') {
-                yield (0, db_1.execute)(`UPDATE products SET tienda_nube_id = ? WHERE id = ?`, [String(tiendaNubeProductId), resolvedProductId]);
+            const resolvedTnProduct = tnProductIdsInLinks.size === 1
+                ? [...tnProductIdsInLinks][0]
+                : null;
+            if (resolvedTnProduct) {
+                yield (0, db_1.execute)(`UPDATE products SET tienda_nube_id = ? WHERE id = ?`, [resolvedTnProduct, resolvedProductId]);
             }
             if (allMlOwnPublications) {
-                // Cada variante tiene su MLA: el ID padre no debe usarse para sync (evita pisar stock).
                 yield (0, db_1.execute)(`UPDATE products SET mercado_libre_id = NULL WHERE id = ?`, [resolvedProductId]);
             }
-            else if (mercadoLibreItemId != null && mercadoLibreItemId !== '') {
+            else if (mlParentsInLinks.size === 1) {
+                yield (0, db_1.execute)(`UPDATE products SET mercado_libre_id = ? WHERE id = ?`, [[...mlParentsInLinks][0], resolvedProductId]);
+            }
+            else if (mlParentsInLinks.size === 0 &&
+                mercadoLibreItemId != null &&
+                mercadoLibreItemId !== '' &&
+                !allMlOwnPublications) {
                 yield (0, db_1.execute)(`UPDATE products SET mercado_libre_id = ? WHERE id = ?`, [String(mercadoLibreItemId), resolvedProductId]);
             }
         }
@@ -729,18 +747,20 @@ const bulkLinkVariants = (req, res) => __awaiter(void 0, void 0, void 0, functio
                   COALESCE(NULLIF(mercado_libre_pack_size, 0), 1) AS ml_pack
            FROM products WHERE id = ? LIMIT 1`, [resolvedProductId])
             : null;
-        const tnProductIdForPub = (tiendaNubeProductId && String(tiendaNubeProductId).trim()) ||
-            ((productRow === null || productRow === void 0 ? void 0 : productRow.tienda_nube_id) && String(productRow.tienda_nube_id).trim()) ||
-            null;
+        const tnProductIdForPub = tnProductIdsInLinks.size === 1
+            ? [...tnProductIdsInLinks][0]
+            : null;
         const mlParentIdForPub = allMlOwnPublications
             ? null
-            : (mercadoLibreItemId && String(mercadoLibreItemId).trim()) ||
-                ((productRow === null || productRow === void 0 ? void 0 : productRow.mercado_libre_id) && String(productRow.mercado_libre_id).trim()) ||
-                null;
+            : mlParentsInLinks.size === 1
+                ? [...mlParentsInLinks][0]
+                : (mercadoLibreItemId && String(mercadoLibreItemId).trim()) ||
+                    ((productRow === null || productRow === void 0 ? void 0 : productRow.mercado_libre_id) && String(productRow.mercado_libre_id).trim()) ||
+                    null;
         const tnPack = Number((_b = productRow === null || productRow === void 0 ? void 0 : productRow.tn_pack) !== null && _b !== void 0 ? _b : 1) || 1;
         const mlPack = Number((_c = productRow === null || productRow === void 0 ? void 0 : productRow.ml_pack) !== null && _c !== void 0 ? _c : 1) || 1;
         for (const link of links) {
-            const { variantId, mercadoLibreVariantId, mercadoLibreItemId: linkMlItemId, tiendaNubeVariantId, externalSku } = link;
+            const { variantId, mercadoLibreVariantId, mercadoLibreItemId: linkMlItemId, tiendaNubeVariantId, tiendaNubeProductId: linkTnProductId, externalSku, } = link;
             if (!variantId)
                 continue;
             const mlItemId = (linkMlItemId != null && String(linkMlItemId).trim() !== '') ? String(linkMlItemId).trim() : null;
@@ -748,6 +768,9 @@ const bulkLinkVariants = (req, res) => __awaiter(void 0, void 0, void 0, functio
                 ? String(mercadoLibreVariantId).trim()
                 : null;
             const tnVarId = tiendaNubeVariantId != null && String(tiendaNubeVariantId).trim() !== '' ? String(tiendaNubeVariantId).trim() : null;
+            const tnProdId = linkTnProductId != null && String(linkTnProductId).trim() !== ''
+                ? String(linkTnProductId).trim()
+                : tnProductIdForPub;
             const sets = [];
             const params = [];
             if (tnVarId != null) {
@@ -770,14 +793,12 @@ const bulkLinkVariants = (req, res) => __awaiter(void 0, void 0, void 0, functio
                 params.push(variantId);
                 yield (0, db_1.execute)(`UPDATE product_variants SET ${sets.join(', ')} WHERE id = ?`, params);
             }
-            if (tnVarId && tnProductIdForPub) {
-                yield (0, db_1.execute)(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'tiendanube'`, [variantId]);
+            if (tnVarId && tnProdId) {
                 yield (0, db_1.execute)(`INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
            VALUES (?, ?, 'tiendanube', ?, ?, ?)
-           ON DUPLICATE KEY UPDATE pack_size = VALUES(pack_size)`, [(0, uuid_1.v4)(), variantId, tnProductIdForPub, tnVarId, tnPack]);
+           ON DUPLICATE KEY UPDATE external_product_id = VALUES(external_product_id), pack_size = VALUES(pack_size)`, [(0, uuid_1.v4)(), variantId, tnProdId, tnVarId, tnPack]);
             }
             if (mlItemId || mlVarId) {
-                yield (0, db_1.execute)(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'mercadolibre'`, [variantId]);
                 const pubItemId = mlItemId || mlParentIdForPub;
                 if (pubItemId) {
                     yield (0, db_1.execute)(`INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
@@ -1646,16 +1667,17 @@ const mergeManualProducts = (req, res) => __awaiter(void 0, void 0, void 0, func
     }
 });
 exports.mergeManualProducts = mergeManualProducts;
-/** Une dos variantes del mismo artículo con el mismo talle (size_id). Body: { keeperVariantId, absorbVariantId }. */
+/** Une dos variantes del mismo artículo. Body: { keeperVariantId, absorbVariantId, allowDifferentSize? }. */
 const mergeManualVariants = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b;
+    var _a, _b, _c;
     try {
         const keeperVariantId = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.keeperVariantId) || '').trim();
         const absorbVariantId = String(((_b = req.body) === null || _b === void 0 ? void 0 : _b.absorbVariantId) || '').trim();
+        const allowDifferentSize = ((_c = req.body) === null || _c === void 0 ? void 0 : _c.allowDifferentSize) === true;
         if (!keeperVariantId || !absorbVariantId) {
             return res.status(400).json({ message: 'keeperVariantId y absorbVariantId son obligatorios.' });
         }
-        yield (0, mergeDuplicateProductsBySku_1.mergeManualVariantPair)(keeperVariantId, absorbVariantId);
+        yield (0, mergeDuplicateProductsBySku_1.mergeManualVariantPair)(keeperVariantId, absorbVariantId, { allowDifferentSize });
         res.json({ ok: true });
     }
     catch (e) {
@@ -1695,7 +1717,12 @@ const exportInventory = (req, res) => __awaiter(void 0, void 0, void 0, function
         p.name AS product_name,
         p.category,
         p.base_price,
+        p.tienda_nube_id,
+        p.mercado_libre_id,
         pv.sku AS variant_sku,
+        pv.tienda_nube_variant_id,
+        pv.mercado_libre_variant_id,
+        pv.mercado_libre_item_id,
         s.size_code,
         s.name AS size_name,
         c.code AS color_code,
@@ -1714,7 +1741,7 @@ const exportInventory = (req, res) => __awaiter(void 0, void 0, void 0, function
     }
     catch (error) {
         console.error('Export inventory:', error);
-        res.status(500).json({ message: 'Error exportando inventario', error: error === null || error === void 0 ? void 0 : error.message });
+        res.status(500).json({ message: (error === null || error === void 0 ? void 0 : error.message) || 'Error exportando inventario' });
     }
 });
 exports.exportInventory = exportInventory;
@@ -1738,6 +1765,7 @@ const getVariantPublications = (req, res) => __awaiter(void 0, void 0, void 0, f
 exports.getVariantPublications = getVariantPublications;
 /** Agregar una publicación a una variante */
 const addVariantPublication = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     const { variantId } = req.params;
     const { platform, externalProductId, externalVariantId, packSize } = req.body;
     if (!variantId || !platform || !externalProductId) {
@@ -1755,6 +1783,14 @@ const addVariantPublication = (req, res) => __awaiter(void 0, void 0, void 0, fu
         const id = (0, uuid_1.v4)();
         yield (0, db_1.execute)(`INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size) VALUES (?, ?, ?, ?, ?, ?)`, [id, variantId, platform, String(externalProductId).trim(), extVariantId, pack]);
         const row = yield (0, db_1.get)('SELECT id, variant_id, platform, external_product_id, external_variant_id, pack_size, created_at FROM variant_publications WHERE id = ?', [id]);
+        try {
+            const stockRow = yield (0, db_1.get)(`SELECT stock FROM stocks WHERE variant_id = ?`, [variantId]);
+            const currentStock = Number((_a = stockRow === null || stockRow === void 0 ? void 0 : stockRow.stock) !== null && _a !== void 0 ? _a : 0);
+            yield (0, stock_controller_1.syncStockToExternalPlatforms)(variantId, currentStock);
+        }
+        catch (syncErr) {
+            console.warn('[addVariantPublication] Error enviando stock:', (syncErr === null || syncErr === void 0 ? void 0 : syncErr.message) || syncErr);
+        }
         res.status(201).json(row);
     }
     catch (error) {

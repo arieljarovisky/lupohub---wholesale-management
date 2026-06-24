@@ -56,6 +56,7 @@ const add_transportes_tables_1 = require("./database/add_transportes_tables");
 const add_invoices_table_1 = require("./database/add_invoices_table");
 const add_credit_notes_table_1 = require("./database/add_credit_notes_table");
 const add_credit_notes_voided_invoice_snapshot_1 = require("./database/add_credit_notes_voided_invoice_snapshot");
+const add_debit_notes_table_1 = require("./database/add_debit_notes_table");
 const add_orders_archived_1 = require("./database/add_orders_archived");
 const add_price_lists_1 = require("./database/add_price_lists");
 const add_catalogs_table_1 = require("./database/add_catalogs_table");
@@ -81,9 +82,12 @@ const add_user_tasks_table_1 = require("./database/add_user_tasks_table");
 const add_company_finance_table_1 = require("./database/add_company_finance_table");
 const add_company_finance_fixed_expenses_table_1 = require("./database/add_company_finance_fixed_expenses_table");
 const add_marketing_leads_table_1 = require("./database/add_marketing_leads_table");
+const add_marketing_leads_webhook_1 = require("./database/add_marketing_leads_webhook");
 const marketingLeads_routes_1 = __importDefault(require("./routes/marketingLeads.routes"));
+const publicTracking_routes_1 = __importDefault(require("./routes/publicTracking.routes"));
 const companyFinance_routes_1 = __importDefault(require("./routes/companyFinance.routes"));
 const add_remito_sequence_1 = require("./database/add_remito_sequence");
+const add_tiendanube_express_tracking_1 = require("./database/add_tiendanube_express_tracking");
 const add_customer_delivery_addresses_1 = require("./database/add_customer_delivery_addresses");
 const add_customer_seller_commission_1 = require("./database/add_customer_seller_commission");
 const add_customer_opening_balance_1 = require("./database/add_customer_opening_balance");
@@ -99,6 +103,8 @@ const PORT = process.env.PORT || 3001;
 // CORS: con credentials (cookies) no se puede usar '*'; hay que devolver el origen concreto
 const allowedOrigins = [
     'https://lupohub-wholesale-management.vercel.app',
+    'https://multilupo.com.ar',
+    'https://www.multilupo.com.ar',
     'http://localhost:5173',
     'http://localhost:3000',
     'http://127.0.0.1:5173',
@@ -107,6 +113,14 @@ const allowedOrigins = [
 const frontendUrl = (_a = process.env.FRONTEND_URL) === null || _a === void 0 ? void 0 : _a.replace(/\/$/, '');
 if (frontendUrl && !allowedOrigins.includes(frontendUrl))
     allowedOrigins.push(frontendUrl);
+const publicCorsOrigins = (process.env.PUBLIC_CORS_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim().replace(/\/$/, ''))
+    .filter(Boolean);
+for (const origin of publicCorsOrigins) {
+    if (!allowedOrigins.includes(origin))
+        allowedOrigins.push(origin);
+}
 function isAllowedOrigin(origin) {
     if (!origin)
         return true;
@@ -115,12 +129,23 @@ function isAllowedOrigin(origin) {
     // Permitir previews de Vercel del proyecto (ej: lupohub-wholesale-management-git-...vercel.app)
     if (/^https:\/\/lupohub-wholesale-management(?:-[a-z0-9-]+)?\.vercel\.app$/i.test(origin))
         return true;
+    // Tienda / sitio público Multi Lupo
+    if (/^https:\/\/(www\.)?multilupo\.com\.ar$/i.test(origin))
+        return true;
     return false;
 }
 /** Headers CORS explícitos (también en errores JSON; el 502 del proxy de Railway no pasa por acá). */
 function applyCorsHeaders(req, res) {
     const origin = req.headers.origin;
-    if (typeof origin === 'string' && isAllowedOrigin(origin)) {
+    if (typeof origin !== 'string')
+        return;
+    // API pública de seguimiento: reflejar cualquier origen (sin credenciales).
+    if (req.path.startsWith('/api/public')) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Vary', 'Origin');
+        return;
+    }
+    if (isAllowedOrigin(origin)) {
         res.setHeader('Access-Control-Allow-Origin', origin);
         res.setHeader('Access-Control-Allow-Credentials', 'true');
         res.setHeader('Vary', 'Origin');
@@ -136,14 +161,29 @@ const corsOpts = {
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
 };
+/** CORS abierto para endpoints públicos de solo lectura (p. ej. seguimiento en multilupo.com.ar). */
+const publicApiCorsOpts = {
+    origin: true,
+    credentials: false,
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type'],
+};
 app.set('trust proxy', 1);
+app.use('/api/public', (0, cors_1.default)(publicApiCorsOpts));
+app.options('/api/public/*', (0, cors_1.default)(publicApiCorsOpts));
+app.use('/api/public', publicTracking_routes_1.default);
 app.use((0, cors_1.default)(corsOpts));
 app.options('*', (0, cors_1.default)(corsOpts));
 app.use((req, res, next) => {
     applyCorsHeaders(req, res);
     next();
 });
-app.use(express_1.default.json());
+app.use(express_1.default.json({
+    verify: (req, _res, buf) => {
+        if (buf === null || buf === void 0 ? void 0 : buf.length)
+            req.rawBody = buf;
+    }
+}));
 app.use((req, res, next) => {
     console.log('[backend]', req.method, req.path);
     next();
@@ -170,7 +210,7 @@ app.use('/api/payments', payments_routes_1.default);
 app.use('/api/user-tasks', userTasks_routes_1.default);
 app.use('/api/company-finance', companyFinance_routes_1.default);
 app.use('/api/marketing', marketingLeads_routes_1.default);
-// Manejador global de errores: devuelve JSON con el mensaje para que el front pueda mostrarlo
+// Manejador global de errores
 app.use((err, req, res, _next) => {
     applyCorsHeaders(req, res);
     const message = (err === null || err === void 0 ? void 0 : err.message) || String(err) || 'Error interno del servidor';
@@ -213,6 +253,7 @@ function initDatabase() {
                 yield (0, add_invoices_table_1.addInvoicesTable)();
                 yield (0, add_credit_notes_table_1.addCreditNotesTable)();
                 yield (0, add_credit_notes_voided_invoice_snapshot_1.addCreditNotesVoidedInvoiceSnapshot)();
+                yield (0, add_debit_notes_table_1.addDebitNotesTable)();
                 yield (0, add_orders_archived_1.addOrdersArchived)();
                 yield (0, add_price_lists_1.addPriceLists)();
                 yield (0, add_catalogs_table_1.addCatalogsTable)();
@@ -238,7 +279,9 @@ function initDatabase() {
                 yield (0, add_company_finance_table_1.addCompanyFinanceTable)();
                 yield (0, add_company_finance_fixed_expenses_table_1.addCompanyFinanceFixedExpensesTable)();
                 yield (0, add_marketing_leads_table_1.addMarketingLeadsTable)();
+                yield (0, add_marketing_leads_webhook_1.addMarketingLeadsWebhookSupport)();
                 yield (0, add_remito_sequence_1.addRemitoSequence)();
+                yield (0, add_tiendanube_express_tracking_1.addTiendaNubeExpressTracking)();
                 yield (0, add_customer_delivery_addresses_1.addCustomerDeliveryAddresses)();
                 yield (0, add_customer_seller_commission_1.addCustomerSellerCommission)();
                 yield (0, add_customer_opening_balance_1.addCustomerOpeningBalance)();

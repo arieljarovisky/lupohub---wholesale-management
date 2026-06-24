@@ -211,13 +211,14 @@ function loadBundleItems(bundleId) {
       bi.sort_order,
       pv.sku,
       p.name AS product_name,
-      pc.name AS color_name,
+      c.name AS color_name,
       COALESCE(sz.size_code, sz.name, '') AS size_code,
       COALESCE(s.stock, 0) AS stock
     FROM publication_stock_bundle_items bi
     JOIN product_variants pv ON pv.id = bi.variant_id
     JOIN product_colors pc ON pc.id = pv.product_color_id
     JOIN products p ON p.id = pc.product_id
+    LEFT JOIN colors c ON c.id = pc.color_id
     LEFT JOIN sizes sz ON sz.id = pv.size_id
     LEFT JOIN stocks s ON s.variant_id = bi.variant_id
     WHERE bi.bundle_id = ?

@@ -49,6 +49,10 @@ router.post('/mercadolibre/auto-message', integrations_controller_1.saveMLAutoMe
 router.get('/mercadolibre/questions-ai', auth_1.authMiddleware, integrations_controller_1.getMLQuestionsAiConfig);
 router.post('/mercadolibre/questions-ai', auth_1.authMiddleware, integrations_controller_1.saveMLQuestionsAiConfig);
 router.post('/mercadolibre/questions-ai/process', auth_1.authMiddleware, integrations_controller_1.processMLQuestionsAi);
+router.post('/mercadolibre/questions-ai/suggest', auth_1.authMiddleware, integrations_controller_1.suggestMLQuestionAi);
+router.post('/mercadolibre/questions-ai/answer', auth_1.authMiddleware, integrations_controller_1.answerMLQuestion);
+router.post('/mercadolibre/questions-ai/reject', auth_1.authMiddleware, integrations_controller_1.rejectMLQuestionSuggestion);
+router.get('/mercadolibre/questions-ai/metrics', auth_1.authMiddleware, integrations_controller_1.getMLQuestionsAiMetrics);
 router.post('/mercadolibre/sync', integrations_controller_1.syncProductsFromMercadoLibre);
 router.post('/mercadolibre/sync-stock', integrations_controller_1.syncAllStockToMercadoLibre);
 router.post('/mercadolibre/sync-stock-selected', integrations_controller_1.syncSelectedStockToMercadoLibre);
@@ -57,6 +61,7 @@ router.post('/mercadolibre/import-stock', integrations_controller_1.importStockF
 router.post('/mercadolibre/import-product', integrations_controller_1.importProductFromMercadoLibre);
 router.post('/mercadolibre/export-to-tiendanube', auth_1.authMiddleware, mlToTiendaNubeExport_controller_1.exportMercadoLibreToTiendaNube);
 router.post('/mercadolibre/sync-ml-to-tn', (req, res) => (0, integrations_controller_1.runAutoSyncMLtoTN)().then(r => res.json(Object.assign({ message: 'ML → TN ejecutado' }, r))).catch(e => res.status(500).json({ message: e.message })));
+router.get('/mercadolibre/sync-issues', auth_1.authMiddleware, integrations_controller_1.getMlTnSyncIssues);
 router.post('/mercadolibre/webhook', integrations_controller_1.handleMercadoLibreWebhook);
 /** Descontar stock de ventas ML desde una fecha (ej. fromDate=2026-03-09). Idempotente. */
 router.post('/mercadolibre/sync-orders-from-date', auth_1.authMiddleware, integrations_controller_1.syncMercadoLibreOrdersFromDate);
@@ -69,6 +74,8 @@ router.post('/mercadolibre/invoice-bulk', auth_1.authMiddleware, integrations_co
 router.get('/tiendanube/auth', integrations_controller_1.getTiendaNubeAuthUrl);
 router.get('/tiendanube/callback', integrations_controller_1.handleTiendaNubeCallback);
 router.get('/tiendanube/orders', integrations_controller_1.getTiendaNubeOrders);
+router.post('/tiendanube/orders/:orderId/express-tracking/assign', auth_1.authMiddleware, integrations_controller_1.assignTiendaNubeExpressTracking);
+router.patch('/tiendanube/orders/:orderId/express-tracking/status', auth_1.authMiddleware, integrations_controller_1.updateTiendaNubeExpressTrackingStatus);
 router.get('/tiendanube/stock', integrations_controller_1.getTiendaNubeStock);
 router.get('/tiendanube/stock/totals', integrations_controller_1.getTiendaNubeStockTotals);
 router.get('/tiendanube/sales-report-export', auth_1.authMiddleware, tiendanubeSalesReport_controller_1.exportTiendaNubeSalesReportXlsx);
@@ -96,6 +103,7 @@ router.post('/tiendanube/sync-orders-from-date', auth_1.authMiddleware, integrat
 router.get('/tiendanube/sync-orders-from-date', auth_1.authMiddleware, integrations_controller_1.syncTiendaNubeOrdersFromDate);
 router.post('/tiendanube/invoice-bulk', auth_1.authMiddleware, integrations_controller_1.invoiceTiendaNubeOrdersBulk);
 router.get('/invoices/external', auth_1.authMiddleware, integrations_controller_1.getExternalInvoicesHistory);
+router.get('/invoices/external/:id/print-data', auth_1.authMiddleware, integrations_controller_1.getExternalInvoicePrintData);
 router.post('/invoices/external/:id/credit-note', auth_1.authMiddleware, integrations_controller_1.emitirNotaCreditoExternalInvoice);
 router.delete('/:platform/disconnect', integrations_controller_1.disconnectIntegration);
 /** Meta Ads y Google Ads — configuración (admin) y campañas (admin + marketing). */

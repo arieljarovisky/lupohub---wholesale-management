@@ -251,9 +251,10 @@ function mergeTwoVariants(fromVariantId, toVariantId, keeperProductId) {
     });
 }
 /**
- * Une la variante `absorbVariantId` en `keeperVariantId` (mismo producto, mismo talle, mismo color por nombre/código/id).
+ * Une la variante `absorbVariantId` en `keeperVariantId` (mismo producto, mismo color por nombre/código/id).
+ * Por defecto exige mismo talle; con allowDifferentSize se permite unificar talles distintos (la que queda conserva su talle).
  */
-function mergeManualVariantPair(keeperVariantId, absorbVariantId) {
+function mergeManualVariantPair(keeperVariantId, absorbVariantId, options) {
     return __awaiter(this, void 0, void 0, function* () {
         var _a, _b, _c, _d;
         if (!keeperVariantId || !absorbVariantId || keeperVariantId === absorbVariantId) {
@@ -274,7 +275,7 @@ function mergeManualVariantPair(keeperVariantId, absorbVariantId) {
         if (String(k.product_id) !== String(a.product_id)) {
             throw new Error('Las variantes deben ser del mismo artículo (producto).');
         }
-        if (String(k.size_id) !== String(a.size_id)) {
+        if (String(k.size_id) !== String(a.size_id) && !(options === null || options === void 0 ? void 0 : options.allowDifferentSize)) {
             throw new Error('Los talles deben coincidir para unificar variantes.');
         }
         if (String(k.color_id) !== String(a.color_id)) {

@@ -497,6 +497,28 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
        JOIN orders o ON o.id = cn.order_id
        WHERE o.customer_id = ?
        ORDER BY cn.created_at ASC, cn.id ASC`, [id]));
+        let debitNoteRows = [];
+        try {
+            debitNoteRows = (yield (0, db_1.query)(`SELECT
+           dn.id,
+           dn.order_id,
+           dn.cbte_tipo,
+           dn.punto_venta,
+           dn.cbte_desde,
+           dn.created_at,
+           dn.amount_debited,
+           dn.agip_ret_per,
+           dn.scope,
+           dn.description,
+           o.date AS order_date
+         FROM debit_notes dn
+         JOIN orders o ON o.id = dn.order_id
+         WHERE o.customer_id = ?
+         ORDER BY dn.created_at ASC, dn.id ASC`, [id]));
+        }
+        catch (_f) {
+            debitNoteRows = [];
+        }
         let manualComprobanteRows = [];
         try {
             manualComprobanteRows = (yield (0, db_1.query)(`SELECT id, tipo, fecha, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, importe_neto, agip_ret_per, notes, ref_order_id, sin_detalle, pdf_path, created_at
@@ -504,7 +526,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
          WHERE customer_id = ?
          ORDER BY fecha ASC, created_at ASC`, [id]));
         }
-        catch (_f) {
+        catch (_g) {
             manualComprobanteRows = (yield (0, db_1.query)(`SELECT id, tipo, fecha, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, importe_neto, agip_ret_per, notes, ref_order_id, created_at
          FROM customer_manual_comprobantes
          WHERE customer_id = ?
@@ -661,6 +683,32 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 source: 'system'
             };
         });
+        const debitNoteAsEntries = debitNoteRows
+            .filter((dn) => ledgerMovementVisibleAfterOpening(openingBalanceDate, dn.created_at))
+            .map((dn, idx) => {
+            const importe = (0, orderPricing_1.ndLedgerImporte)(Number(dn.amount_debited || 0), Number(dn.agip_ret_per || 0));
+            const numero = formatAfipComprobanteNumero(Number(dn.punto_venta || 0), Number(dn.cbte_desde || 0));
+            const scope = String(dn.scope || '');
+            const detalleExtra = scope === 'iibb'
+                ? ' · Percepción IIBB'
+                : dn.description
+                    ? ` · ${String(dn.description).trim()}`
+                    : '';
+            return {
+                lineOrder: maxLineOrder + 60000 + idx,
+                lineDate: dn.created_at,
+                tipo: 'ND',
+                numero,
+                edc: null,
+                vto: null,
+                importe: importe > 0 ? importe : null,
+                saldo: null,
+                detalle: `Pedido ${dn.order_id || ''} · ND AFIP LupoHub${detalleExtra}`,
+                paginaPdf: null,
+                orderId: dn.order_id ? String(dn.order_id) : null,
+                source: 'system',
+            };
+        });
         const manualComprobanteAsEntries = manualComprobanteRows.filter((m) => movementOnOrAfterOpening(m.fecha || m.created_at)).map((m, idx) => {
             const importe = m.tipo === 'FACTURA'
                 ? Math.round((Number(m.importe_neto || 0) + Number(m.agip_ret_per || 0)) * 100) / 100
@@ -744,6 +792,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
             ...orderSaldoAsEntries,
             ...voidedInvoiceAsEntries,
             ...creditNoteAsEntries,
+            ...debitNoteAsEntries,
             ...invoiceAsEntries,
             ...manualComprobanteAsEntries,
             ...paymentAsEntries

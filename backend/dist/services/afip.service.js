@@ -58,6 +58,7 @@ exports.isAfipProduction = isAfipProduction;
 exports.getAfipIssuerData = getAfipIssuerData;
 exports.emitirFactura = emitirFactura;
 exports.emitirNotaCredito = emitirNotaCredito;
+exports.emitirNotaDebito = emitirNotaDebito;
 exports.getCondicionIvaByCuit = getCondicionIvaByCuit;
 exports.consultarComprobanteAfip = consultarComprobanteAfip;
 const fs = __importStar(require("fs"));
@@ -70,6 +71,9 @@ const TIPO_CBTE_B = 6;
 /** Nota de Crédito A = 3, Nota de Crédito B = 8 */
 const TIPO_NC_A = 3;
 const TIPO_NC_B = 8;
+/** Nota de Débito A = 2, Nota de Débito B = 7 */
+const TIPO_ND_A = 2;
+const TIPO_ND_B = 7;
 /** DocTipo: 80 = CUIT, 99 = Consumidor final */
 const DOC_TIPO_CUIT = 80;
 const DOC_TIPO_CF = 99;
@@ -583,6 +587,164 @@ function emitirNotaCredito(facturaOriginal, customer, amountToCredit, iibbPercep
             cbteTipo: tipoCbte,
             cbteDesde: numeroNC,
             cbteHasta: numeroNC
+        };
+    });
+}
+function resolveCondicionIvaForNotaAsociada(tipoCbte, tieneCuit, condicionIvaDesc) {
+    const isClaseA = tipoCbte === TIPO_NC_A || tipoCbte === TIPO_ND_A;
+    if (isClaseA) {
+        if (!tieneCuit) {
+            throw new Error('Para comprobante clase A el cliente debe tener CUIT cargado.');
+        }
+        return IVA_RESPONSABLE_INSCRIPTO;
+    }
+    if (!tieneCuit)
+        return CONSUMIDOR_FINAL;
+    if (condicionIvaDesc.includes('exento'))
+        return 4;
+    if (condicionIvaDesc.includes('no categorizado'))
+        return 7;
+    if (condicionIvaDesc.includes('consumidor final'))
+        return CONSUMIDOR_FINAL;
+    if (condicionIvaDesc.includes('no alcanzado'))
+        return 15;
+    return CONSUMIDOR_FINAL;
+}
+/**
+ * Emite una Nota de Débito en AFIP asociada a una factura existente.
+ * @param facturaOriginal - Factura a la que se asocia la ND
+ * @param customer - Cliente (mismo que la factura)
+ * @param amountToDebit - Monto neto a debitar (sin IVA). Puede ser 0 si solo se informa percepción IIBB.
+ * @param iibbPercepcion - Percepción IIBB a informar en AFIP (ImpTrib + Tributos Id 99).
+ */
+function emitirNotaDebito(facturaOriginal, customer, amountToDebit, iibbPercepcion) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d;
+        const config = getConfig();
+        const { cuit, puntoVta } = config;
+        const cuitCliente = customer.cuit ? String(customer.cuit).replace(/\D/g, '') : '';
+        const tieneCuit = cuitCliente.length >= 10;
+        const tipoFacturaOriginal = facturaOriginal.cbteTipo;
+        let tipoCbte;
+        if (tipoFacturaOriginal === TIPO_CBTE_A) {
+            tipoCbte = TIPO_ND_A;
+        }
+        else if (tipoFacturaOriginal === TIPO_CBTE_B) {
+            tipoCbte = TIPO_ND_B;
+        }
+        else {
+            tipoCbte = TIPO_ND_B;
+        }
+        const docTipo = tieneCuit ? DOC_TIPO_CUIT : DOC_TIPO_CF;
+        const docNro = tieneCuit ? parseInt(cuitCliente, 10) : 0;
+        const condicionIvaDesc = ((_a = customer.condicionIva) !== null && _a !== void 0 ? _a : '').toLowerCase();
+        const condicionIva = resolveCondicionIvaForNotaAsociada(tipoCbte, tieneCuit, condicionIvaDesc);
+        const impNetoRaw = Number(amountToDebit);
+        const impNeto = Math.round((Number.isFinite(impNetoRaw) ? impNetoRaw : 0) * 100) / 100;
+        if (impNeto < 0)
+            throw new Error('El monto neto a debitar no puede ser negativo.');
+        if (impNeto > AFIP_MAX_IMP_NETO) {
+            throw new Error(`El monto neto de la nota de débito (${impNeto.toFixed(2)}) supera el máximo permitido por AFIP (${AFIP_MAX_IMP_NETO.toFixed(2)}).`);
+        }
+        const impIva = impNeto > 0 ? Math.round(impNeto * 0.21 * 100) / 100 : 0;
+        const perc = iibbPercepcion;
+        const rawTrib = perc != null && perc !== undefined ? Number(perc.importe) : 0;
+        const impTributo = Number.isFinite(rawTrib) && rawTrib > 0.005 ? Math.round(rawTrib * 100) / 100 : 0;
+        const rawBase = perc != null ? Number(perc.baseImp) : 0;
+        const baseIibb = Number.isFinite(rawBase) && rawBase > 0
+            ? Math.round(rawBase * 100) / 100
+            : impNeto > 0
+                ? impNeto
+                : 0;
+        const rawAlic = perc != null ? Number(perc.alicuota) : 0;
+        const alicuotaIibb = impTributo > 0 && Number.isFinite(rawAlic) ? Math.round(rawAlic * 100) / 100 : 0;
+        const total = Math.round((impNeto + impIva + impTributo) * 100) / 100;
+        if (!(total > 0.005)) {
+            throw new Error('El monto total de la nota de débito debe ser mayor a 0 (neto + IVA y/o percepción IIBB).');
+        }
+        const dateStr = (0, argentinaDate_1.todayYmdArgentina)();
+        const fecha = dateStr.replace(/-/g, '');
+        const cbteFch = parseInt(fecha, 10);
+        let Afip;
+        try {
+            Afip = (yield Promise.resolve().then(() => __importStar(require('@afipsdk/afip.js')))).default;
+        }
+        catch (_e) {
+            throw new Error('Paquete AFIP no instalado. Ejecutá: npm install @afipsdk/afip.js');
+        }
+        const afipOptions = {
+            CUIT: cuit,
+            production: config.production
+        };
+        if (config.accessToken)
+            afipOptions.access_token = config.accessToken;
+        if (config.cert && config.key) {
+            afipOptions.cert = config.cert;
+            afipOptions.key = config.key;
+        }
+        const afip = new Afip(afipOptions);
+        const ambiente = config.production ? 'producción' : 'homologación';
+        console.log(`[AFIP] Emitiendo nota de débito en ambiente: ${ambiente}. Pto.Vta ${puntoVta}, Tipo ${tipoCbte}`);
+        const lastVoucher = Number(yield withAfipRetry('getLastVoucher ND', () => afip.ElectronicBilling.getLastVoucher(puntoVta, tipoCbte)));
+        const numeroND = lastVoucher + 1;
+        const data = {
+            CantReg: 1,
+            PtoVta: puntoVta,
+            CbteTipo: tipoCbte,
+            Concepto: CONCEPTO_PRODUCTOS,
+            DocTipo: docTipo,
+            DocNro: docNro,
+            CbteDesde: numeroND,
+            CbteHasta: numeroND,
+            CbteFch: cbteFch,
+            FchServDesde: null,
+            FchServHasta: null,
+            FchVtoPago: null,
+            ImpTotal: total,
+            ImpTotConc: 0,
+            ImpNeto: impNeto,
+            ImpOpEx: 0,
+            ImpIVA: impIva,
+            ImpTrib: impTributo,
+            MonId: 'PES',
+            MonCotiz: 1,
+            CondicionIVAReceptorId: condicionIva,
+            CbtesAsoc: [
+                {
+                    Tipo: String(facturaOriginal.cbteTipo).padStart(2, '0'),
+                    PtoVta: facturaOriginal.puntoVta,
+                    Nro: facturaOriginal.cbteDesde
+                }
+            ]
+        };
+        if (impNeto > 0) {
+            data.Iva = [{ Id: ID_IVA_21, BaseImp: impNeto, Importe: impIva }];
+        }
+        if (impTributo > 0) {
+            data.Tributos = [
+                {
+                    Id: TRIBUTO_OTROS_IIBB,
+                    Desc: 'Ingresos Brutos',
+                    BaseImp: baseIibb > 0 ? baseIibb : impNeto,
+                    Alic: alicuotaIibb,
+                    Importe: impTributo
+                }
+            ];
+            console.log(`[AFIP] Nota de débito con percepción IIBB: ImpNeto=${impNeto} ImpIVA=${impIva} ImpTrib=${impTributo} ImpTotal=${total} BaseIIBB=${baseIibb} Alic=${alicuotaIibb}%`);
+        }
+        const res = (yield withAfipRetry('createVoucher ND', () => afip.ElectronicBilling.createVoucher(data)));
+        const cae = (_b = res === null || res === void 0 ? void 0 : res.CAE) !== null && _b !== void 0 ? _b : res === null || res === void 0 ? void 0 : res.cae;
+        const caeFchVto = (_d = (_c = res === null || res === void 0 ? void 0 : res.CAEFchVto) !== null && _c !== void 0 ? _c : res === null || res === void 0 ? void 0 : res.CAE_FchVto) !== null && _d !== void 0 ? _d : '';
+        if (!cae) {
+            throw new Error('AFIP no devolvió CAE para la Nota de Débito.');
+        }
+        return {
+            cae: String(cae),
+            caeFchVto: String(caeFchVto),
+            puntoVta,
+            cbteTipo: tipoCbte,
+            cbteDesde: numeroND,
+            cbteHasta: numeroND
         };
     });
 }

@@ -45,14 +45,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getMercadoLibreProductAdsAdvertisers = exports.processMLQuestionsAi = exports.saveMLQuestionsAiConfig = exports.getMLQuestionsAiConfig = exports.saveMLAutoMessageConfig = exports.getMLAutoMessageConfig = exports.importProductFromTiendaNube = exports.importProductFromMercadoLibre = exports.duplicateTiendaNubeProduct = exports.createTiendaNubeProduct = exports.getTiendaNubeProductVariants = exports.getMercadoLibreItemVariations = exports.getMercadoLibreStock = exports.getMercadoLibreStockTotals = exports.getMercadoLibreOrders = exports.getMercadoLibreQuestions = exports.emitirNotaCreditoExternalInvoice = exports.getExternalInvoicesHistory = exports.invoiceMercadoLibreOrdersBulk = exports.invoiceTiendaNubeOrdersBulk = exports.getTiendaNubeOrders = exports.getTiendaNubeStockTotals = exports.getTiendaNubeStock = exports.importStockFromMercadoLibre = exports.syncAllStockFromMercadoLibre = exports.getVariantExternalStocks = exports.syncSelectedStockToMercadoLibre = exports.syncAllStockToMercadoLibre = exports.syncSelectedStockToTiendaNube = exports.syncAllStockToTiendaNube = exports.handleMercadoLibreWebhook = exports.testMercadoLibreOrder = exports.syncMercadoLibreOrdersFromDate = exports.syncTiendaNubeOrdersFromDate = exports.testTiendaNubeOrder = exports.handleTiendaNubeWebhook = exports.syncProductsFromMercadoLibre = exports.debugMercadoLibreItem = exports.testMercadoLibreConnection = exports.disconnectIntegration = exports.syncSkusToTiendaNube = exports.normalizeColorsInTiendaNube = exports.normalizeSizesInTiendaNube = exports.syncProductsFromTiendaNube = exports.updateMercadoLibreStock = exports.handleTiendaNubeCallback = exports.getTiendaNubeAuthUrl = exports.handleMercadoLibreCallback = exports.getMercadoLibreAuthUrl = exports.getIntegrationStatus = void 0;
-exports.getMercadoLibreDisplayAdsCampaigns = exports.getMercadoLibreDisplayAdsAdvertisers = exports.getMercadoLibreBrandAdsCampaigns = exports.getMercadoLibreBrandAdsAdvertisers = exports.getMercadoLibreProductAdsAds = exports.getMercadoLibreProductAdsCampaigns = void 0;
+exports.saveMLAutoMessageConfig = exports.getMLAutoMessageConfig = exports.importProductFromTiendaNube = exports.importProductFromMercadoLibre = exports.duplicateTiendaNubeProduct = exports.createTiendaNubeProduct = exports.getTiendaNubeProductVariants = exports.getMercadoLibreItemVariations = exports.getMercadoLibreStock = exports.getMercadoLibreStockTotals = exports.getMercadoLibreOrders = exports.getMercadoLibreQuestions = exports.emitirNotaCreditoExternalInvoice = exports.getExternalInvoicePrintData = exports.getExternalInvoicesHistory = exports.invoiceMercadoLibreOrdersBulk = exports.invoiceTiendaNubeOrdersBulk = exports.updateTiendaNubeExpressTrackingStatus = exports.assignTiendaNubeExpressTracking = exports.getTiendaNubeOrders = exports.getTiendaNubeStockTotals = exports.getTiendaNubeStock = exports.importStockFromMercadoLibre = exports.syncAllStockFromMercadoLibre = exports.getVariantExternalStocks = exports.syncSelectedStockToMercadoLibre = exports.syncAllStockToMercadoLibre = exports.syncSelectedStockToTiendaNube = exports.syncAllStockToTiendaNube = exports.getMlTnSyncIssues = exports.handleMercadoLibreWebhook = exports.testMercadoLibreOrder = exports.syncMercadoLibreOrdersFromDate = exports.syncTiendaNubeOrdersFromDate = exports.testTiendaNubeOrder = exports.handleTiendaNubeWebhook = exports.syncProductsFromMercadoLibre = exports.debugMercadoLibreItem = exports.testMercadoLibreConnection = exports.disconnectIntegration = exports.syncSkusToTiendaNube = exports.normalizeColorsInTiendaNube = exports.normalizeSizesInTiendaNube = exports.syncProductsFromTiendaNube = exports.updateMercadoLibreStock = exports.handleTiendaNubeCallback = exports.getTiendaNubeAuthUrl = exports.handleMercadoLibreCallback = exports.getMercadoLibreAuthUrl = exports.getIntegrationStatus = void 0;
+exports.getMercadoLibreDisplayAdsCampaigns = exports.getMercadoLibreDisplayAdsAdvertisers = exports.getMercadoLibreBrandAdsCampaigns = exports.getMercadoLibreBrandAdsAdvertisers = exports.getMercadoLibreProductAdsAds = exports.getMercadoLibreProductAdsCampaigns = exports.getMercadoLibreProductAdsAdvertisers = exports.getMLQuestionsAiMetrics = exports.rejectMLQuestionSuggestion = exports.answerMLQuestion = exports.suggestMLQuestionAi = exports.processMLQuestionsAi = exports.saveMLQuestionsAiConfig = exports.getMLQuestionsAiConfig = void 0;
 exports.normalizeMercadoLibreItemId = normalizeMercadoLibreItemId;
 exports.mercadoLibreItemIdCandidates = mercadoLibreItemIdCandidates;
 exports.resolveMercadoLibreCatalogProductItems = resolveMercadoLibreCatalogProductItems;
 exports.resolveMercadoLibreUserProductItems = resolveMercadoLibreUserProductItems;
 exports.getValidMLToken = getValidMLToken;
 exports.runAutoSyncMLtoTN = runAutoSyncMLtoTN;
+exports.diagnoseMlTnSyncIssues = diagnoseMlTnSyncIssues;
 exports.mlBaseTitle = mlBaseTitle;
 exports.mlStripTrailingPublicationIndex = mlStripTrailingPublicationIndex;
 exports.mlColorSizeFromTitle = mlColorSizeFromTitle;
@@ -66,6 +67,7 @@ const tiendanubeVariantMerge_service_1 = require("../services/tiendanubeVariantM
 const colorNameStandard_1 = require("../utils/colorNameStandard");
 const skuString_1 = require("../utils/skuString");
 const talleStandard_1 = require("../utils/talleStandard");
+const tiendanubeExpressTracking_service_1 = require("../services/tiendanubeExpressTracking.service");
 const ML_AUTH_URL = 'https://auth.mercadolibre.com.ar/authorization';
 const ML_TOKEN_URL = 'https://api.mercadolibre.com/oauth/token';
 const TN_AUTH_URL = 'https://www.tiendanube.com/apps/authorize';
@@ -2234,7 +2236,7 @@ const handleMercadoLibreWebhook = (req, res) => __awaiter(void 0, void 0, void 0
                 console.warn('[ML Webhook] No se pudo extraer orderId desde resource:', resourceRaw);
             }
         }
-        /** Preguntas: responder con IA si está habilitado (no bloquea la respuesta 200 al webhook). */
+        /** Preguntas: IA según modo (sugerencia o auto-respuesta). */
         if (topic === 'questions') {
             const qm = resourceRaw.match(/questions\/(\d+)/);
             const questionId = qm === null || qm === void 0 ? void 0 : qm[1];
@@ -2244,15 +2246,16 @@ const handleMercadoLibreWebhook = (req, res) => __awaiter(void 0, void 0, void 0
                         var _a;
                         try {
                             const cfg = yield mlQuestionsAi.getMlQuestionsAiConfigRow();
-                            if (!cfg.enabled || !mlQuestionsAi.openAiConfigured())
+                            if (cfg.mode === 'off' || !mlQuestionsAi.openAiConfigured())
                                 return;
                             const t = yield getValidMLToken();
                             if (!t)
                                 return;
-                            yield mlQuestionsAi.processOneQuestion(t.access_token, questionId, {
-                                extraSystemPrompt: cfg.extraSystemPrompt
+                            const r = yield mlQuestionsAi.processOneQuestion(t.access_token, questionId, {
+                                extraSystemPrompt: cfg.extraSystemPrompt,
+                                mode: cfg.mode
                             });
-                            console.log(`[ML Questions AI] Procesada pregunta ${questionId}`);
+                            console.log(`[ML Questions AI] Pregunta ${questionId}: ${r.status}`);
                         }
                         catch (e) {
                             console.error('[ML Questions AI] Error:', ((_a = e === null || e === void 0 ? void 0 : e.response) === null || _a === void 0 ? void 0 : _a.data) || (e === null || e === void 0 ? void 0 : e.message) || e);
@@ -2711,6 +2714,231 @@ function runAutoSyncMLtoTN() {
         return { updated, errors };
     });
 }
+function hasCompleteMlLink(r) {
+    const itemId = r.ml_item_id != null && String(r.ml_item_id).trim() !== '';
+    const parent = r.ml_id != null && String(r.ml_id).trim() !== '' && r.ml_variant_id != null && String(r.ml_variant_id).trim() !== '';
+    return itemId || parent;
+}
+function hasCompleteTnLink(r) {
+    return r.tn_id != null && String(r.tn_id).trim() !== '' && r.tn_variant_id != null && String(r.tn_variant_id).trim() !== '';
+}
+function hasPartialChannelLink(r) {
+    return !!((r.ml_id && String(r.ml_id).trim()) ||
+        (r.ml_variant_id && String(r.ml_variant_id).trim()) ||
+        (r.ml_item_id && String(r.ml_item_id).trim()) ||
+        (r.tn_id && String(r.tn_id).trim()) ||
+        (r.tn_variant_id && String(r.tn_variant_id).trim()));
+}
+/** Diagnóstico de sincronización ML→TN (sin modificar stock). Misma lógica que runAutoSyncMLtoTN. */
+function diagnoseMlTnSyncIssues() {
+    return __awaiter(this, void 0, void 0, function* () {
+        const issues = [];
+        const pushIssue = (r, syncMode, issueType, issueMessage) => {
+            var _a;
+            issues.push({
+                variant_id: String(r.variant_id),
+                variant_sku: String(r.variant_sku || ''),
+                product_sku: String(r.product_sku || ''),
+                product_name: String(r.product_name || ''),
+                color_name: String(r.color_name || ''),
+                size_code: String(r.size_code || ''),
+                stock_lupohub: Number((_a = r.stock_lupohub) !== null && _a !== void 0 ? _a : 0),
+                sync_mode: syncMode,
+                ml_id: r.ml_id != null ? String(r.ml_id) : '',
+                ml_variant_id: r.ml_variant_id != null ? String(r.ml_variant_id) : '',
+                ml_item_id: r.ml_item_id != null ? String(r.ml_item_id) : '',
+                tn_product_id: r.tn_id != null ? String(r.tn_id) : '',
+                tn_variant_id: r.tn_variant_id != null ? String(r.tn_variant_id) : '',
+                issue_type: issueType,
+                issue_message: issueMessage,
+            });
+        };
+        const rows = yield (0, db_1.query)(`
+    SELECT pv.id AS variant_id, pv.sku AS variant_sku,
+           p.sku AS product_sku, p.name AS product_name,
+           c.name AS color_name, sz.size_code AS size_code,
+           COALESCE(st.stock, 0) AS stock_lupohub,
+           p.mercado_libre_id AS ml_id,
+           pv.mercado_libre_variant_id AS ml_variant_id,
+           pv.mercado_libre_item_id AS ml_item_id,
+           p.tienda_nube_id AS tn_id,
+           pv.tienda_nube_variant_id AS tn_variant_id
+    FROM product_variants pv
+    JOIN product_colors pc ON pc.id = pv.product_color_id
+    JOIN products p ON p.id = pc.product_id
+    LEFT JOIN colors c ON c.id = pc.color_id
+    LEFT JOIN sizes sz ON sz.id = pv.size_id
+    LEFT JOIN stocks st ON st.variant_id = pv.id
+    WHERE (
+      (p.mercado_libre_id IS NOT NULL AND TRIM(p.mercado_libre_id) != '')
+      OR (pv.mercado_libre_variant_id IS NOT NULL AND TRIM(pv.mercado_libre_variant_id) != '')
+      OR (pv.mercado_libre_item_id IS NOT NULL AND TRIM(pv.mercado_libre_item_id) != '')
+      OR (p.tienda_nube_id IS NOT NULL AND TRIM(CAST(p.tienda_nube_id AS CHAR)) != '')
+      OR (pv.tienda_nube_variant_id IS NOT NULL AND TRIM(CAST(pv.tienda_nube_variant_id AS CHAR)) != '')
+    )
+    ORDER BY p.sku, pv.sku
+  `);
+        if (!(rows === null || rows === void 0 ? void 0 : rows.length))
+            return issues;
+        const mlToken = yield getValidMLToken();
+        const tnIntegration = yield (0, db_1.get)(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
+        const tnHeaders = (tnIntegration === null || tnIntegration === void 0 ? void 0 : tnIntegration.access_token)
+            ? { Authentication: `bearer ${tnIntegration.access_token}`, 'User-Agent': TN_USER_AGENT }
+            : null;
+        const tnStoreId = (tnIntegration === null || tnIntegration === void 0 ? void 0 : tnIntegration.store_id) ? String(tnIntegration.store_id) : '';
+        const mlItemCache = new Map();
+        const fetchMlItem = (id) => __awaiter(this, void 0, void 0, function* () {
+            var _a;
+            if (!id || !(mlToken === null || mlToken === void 0 ? void 0 : mlToken.access_token))
+                return null;
+            if (mlItemCache.has(id))
+                return (_a = mlItemCache.get(id)) !== null && _a !== void 0 ? _a : null;
+            try {
+                const data = yield axios_1.default.get(`https://api.mercadolibre.com/items/${id}?include_attributes=all`, {
+                    headers: { Authorization: `Bearer ${mlToken.access_token}` },
+                }).then((res) => res.data);
+                mlItemCache.set(id, data);
+                return data;
+            }
+            catch (_b) {
+                mlItemCache.set(id, null);
+                return null;
+            }
+        });
+        const tnProductCache = new Map();
+        const fetchTnProduct = (productId) => __awaiter(this, void 0, void 0, function* () {
+            var _a;
+            if (!productId || !tnHeaders || !tnStoreId)
+                return null;
+            if (tnProductCache.has(productId))
+                return (_a = tnProductCache.get(productId)) !== null && _a !== void 0 ? _a : null;
+            try {
+                const data = yield axios_1.default.get(`https://api.tiendanube.com/v1/${tnStoreId}/products/${productId}`, { headers: tnHeaders }).then((res) => res.data);
+                tnProductCache.set(productId, data);
+                if (TN_RATE_LIMIT_DELAY_MS > 0)
+                    yield sleep(TN_RATE_LIMIT_DELAY_MS);
+                return data;
+            }
+            catch (_b) {
+                tnProductCache.set(productId, null);
+                if (TN_RATE_LIMIT_DELAY_MS > 0)
+                    yield sleep(TN_RATE_LIMIT_DELAY_MS);
+                return null;
+            }
+        });
+        const tnVariantExists = (productId, variantId) => __awaiter(this, void 0, void 0, function* () {
+            if (!tnHeaders || !tnStoreId)
+                return null;
+            const product = yield fetchTnProduct(productId);
+            if (!product)
+                return false;
+            const variants = product.variants || [];
+            return variants.some((v) => String(v.id) === String(variantId));
+        });
+        const pendingMlParent = [];
+        const pendingMlOwn = [];
+        for (const row of rows) {
+            const mlComplete = hasCompleteMlLink(row);
+            const tnComplete = hasCompleteTnLink(row);
+            if (!hasPartialChannelLink(row))
+                continue;
+            const syncMode = row.ml_item_id
+                ? 'publicacion_propia'
+                : row.ml_id && row.ml_variant_id
+                    ? 'publicacion_padre'
+                    : 'vinculo_incompleto';
+            if (!mlComplete && !tnComplete) {
+                pushIssue(row, syncMode, 'SIN_VINCULOS', 'Faltan vínculos completos con Mercado Libre y Tienda Nube.');
+                continue;
+            }
+            if (!mlComplete && tnComplete) {
+                const missing = [];
+                if (!row.ml_item_id && !row.ml_id)
+                    missing.push('publicación ML');
+                if (!row.ml_item_id && !row.ml_variant_id)
+                    missing.push('variación ML');
+                if (row.ml_item_id == null && !row.ml_id && !row.ml_variant_id)
+                    missing.push('ítem ML propio');
+                pushIssue(row, syncMode, 'SIN_ML', `Tiene Tienda Nube pero falta vínculo ML (${missing.join(', ') || 'incompleto'}).`);
+                continue;
+            }
+            if (mlComplete && !tnComplete) {
+                const missing = [];
+                if (!row.tn_id)
+                    missing.push('producto TN');
+                if (!row.tn_variant_id)
+                    missing.push('variante TN');
+                pushIssue(row, syncMode, 'SIN_TN', `Tiene Mercado Libre pero falta vínculo TN (${missing.join(', ') || 'incompleto'}).`);
+                continue;
+            }
+            if (row.ml_item_id)
+                pendingMlOwn.push(row);
+            else if (row.ml_id && row.ml_variant_id)
+                pendingMlParent.push(row);
+        }
+        const mlParentIds = Array.from(new Set(pendingMlParent.map((r) => String(r.ml_id))));
+        for (let i = 0; i < mlParentIds.length; i += 10) {
+            yield Promise.all(mlParentIds.slice(i, i + 10).map((id) => fetchMlItem(id)));
+        }
+        for (const r of pendingMlParent) {
+            const item = yield fetchMlItem(String(r.ml_id));
+            const syncMode = 'publicacion_padre';
+            if (!item) {
+                pushIssue(r, syncMode, 'ML_NO_ENCONTRADO', `No se pudo obtener la publicación ML ${r.ml_id}. Puede estar pausada, finalizada o eliminada.`);
+                continue;
+            }
+            const variations = item.variations || [];
+            const v = variations.find((x) => String(x.id) === String(r.ml_variant_id));
+            if (!v && variations.length > 0) {
+                pushIssue(r, syncMode, 'ML_VARIACION_NO_ENCONTRADA', `La variación ML ${r.ml_variant_id} no existe en la publicación ${r.ml_id}. Se evita enviar stock incorrecto a TN.`);
+                continue;
+            }
+            const tnOk = yield tnVariantExists(String(r.tn_id), String(r.tn_variant_id));
+            if (tnOk === false) {
+                pushIssue(r, syncMode, 'TN_NO_ENCONTRADO', `Producto/variante TN ${r.tn_id}/${r.tn_variant_id} no encontrado (404). Revisá o limpiá el vínculo en LupoHub.`);
+            }
+            else if (tnOk === null) {
+                pushIssue(r, syncMode, 'TN_NO_VERIFICADO', 'No hay integración activa con Tienda Nube para verificar el vínculo.');
+            }
+        }
+        const mlOwnIds = Array.from(new Set(pendingMlOwn.map((r) => String(r.ml_item_id))));
+        for (let i = 0; i < mlOwnIds.length; i += 10) {
+            yield Promise.all(mlOwnIds.slice(i, i + 10).map((id) => fetchMlItem(id)));
+        }
+        for (const r of pendingMlOwn) {
+            const item = yield fetchMlItem(String(r.ml_item_id));
+            const syncMode = 'publicacion_propia';
+            if (!item) {
+                pushIssue(r, syncMode, 'ML_NO_ENCONTRADO', `No se pudo obtener el ítem ML ${r.ml_item_id} (SKU ${r.variant_sku}). Puede estar pausado, finalizado o eliminado.`);
+                continue;
+            }
+            const variations = item.variations || [];
+            if (variations.length > 1) {
+                pushIssue(r, syncMode, 'ML_MULTI_VARIACIONES', `El ítem ML ${r.ml_item_id} tiene ${variations.length} variaciones; no se puede inferir una única para sincronizar stock a TN.`);
+                continue;
+            }
+            const tnOk = yield tnVariantExists(String(r.tn_id), String(r.tn_variant_id));
+            if (tnOk === false) {
+                pushIssue(r, syncMode, 'TN_NO_ENCONTRADO', `Producto/variante TN ${r.tn_id}/${r.tn_variant_id} no encontrado (404). Revisá o limpiá el vínculo en LupoHub.`);
+            }
+            else if (tnOk === null) {
+                pushIssue(r, syncMode, 'TN_NO_VERIFICADO', 'No hay integración activa con Tienda Nube para verificar el vínculo.');
+            }
+        }
+        return issues;
+    });
+}
+const getMlTnSyncIssues = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const rows = yield diagnoseMlTnSyncIssues();
+        res.json({ rows, count: rows.length });
+    }
+    catch (error) {
+        console.error('[ML→TN Sync Issues]', error);
+        res.status(500).json({ message: (error === null || error === void 0 ? void 0 : error.message) || 'Error al diagnosticar sincronización ML→TN' });
+    }
+});
+exports.getMlTnSyncIssues = getMlTnSyncIssues;
 // Sincronizar todo el stock local a Tienda Nube
 const syncAllStockToTiendaNube = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b;
@@ -3630,18 +3858,12 @@ const getTiendaNubeOrders = (req, res) => __awaiter(void 0, void 0, void 0, func
             }
         });
         let orders = ordersRes.data.map((order) => {
-            var _a, _b, _c, _d;
+            var _a, _b, _c, _d, _e;
             const rawPaymentStatus = ((_a = order.payment_status) !== null && _a !== void 0 ? _a : '').toString().trim().toLowerCase();
-            const paymentDetails = Array.isArray(order.payment_details) ? order.payment_details : [];
-            const detailStates = paymentDetails
-                .map((d) => { var _a, _b; return ((_b = (_a = d === null || d === void 0 ? void 0 : d.status) !== null && _a !== void 0 ? _a : d === null || d === void 0 ? void 0 : d.state) !== null && _b !== void 0 ? _b : '').toString().trim().toLowerCase(); })
-                .filter(Boolean);
-            const looksRefunded = rawPaymentStatus === 'refunded' || detailStates.some((s) => s.includes('refund'));
-            const looksVoided = rawPaymentStatus === 'voided' || rawPaymentStatus === 'cancelled' || detailStates.some((s) => s.includes('void') || s.includes('cancel'));
-            const looksPaid = rawPaymentStatus === 'paid'
-                || !!order.paid_at
-                || detailStates.some((s) => s === 'paid' || s === 'approved' || s === 'accredited' || s === 'captured');
-            const normalizedPaymentStatus = looksRefunded ? 'refunded' : looksVoided ? 'voided' : looksPaid ? 'paid' : 'pending';
+            const normalizedPaymentStatus = normalizeTnPaymentStatus(order);
+            const originalTotal = (_b = parseTnMoney(order.total)) !== null && _b !== void 0 ? _b : 0;
+            const billableTotal = getTnOrderBillableTotal(order);
+            const hasPartialRefund = tnOrderHasPartialRefund(order);
             // Extraer nombre del cliente de diferentes fuentes
             let customerName = 'Sin nombre';
             if (order.customer) {
@@ -3659,7 +3881,7 @@ const getTiendaNubeOrders = (req, res) => __awaiter(void 0, void 0, void 0, func
             if (customerName === 'Sin nombre' && order.billing_name) {
                 customerName = order.billing_name;
             }
-            if (customerName === 'Sin nombre' && ((_b = order.shipping_address) === null || _b === void 0 ? void 0 : _b.name)) {
+            if (customerName === 'Sin nombre' && ((_c = order.shipping_address) === null || _c === void 0 ? void 0 : _c.name)) {
                 customerName = order.shipping_address.name;
             }
             const shippingCandidates = [
@@ -3685,16 +3907,19 @@ const getTiendaNubeOrders = (req, res) => __awaiter(void 0, void 0, void 0, func
                 status: order.status,
                 paymentStatus: normalizedPaymentStatus,
                 paymentStatusRaw: rawPaymentStatus || null,
-                isPaid: normalizedPaymentStatus === 'paid',
+                isPaid: tnPaymentStatusIsBillable(normalizedPaymentStatus),
+                hasPartialRefund,
+                originalTotal,
+                billableTotal,
                 shippingStatus: order.shipping_status,
                 shippingMethod,
                 hasExpressShipping,
-                total: order.total,
+                total: String(billableTotal > 0 ? billableTotal : originalTotal),
                 currency: order.currency,
                 customer: {
                     name: customerName,
-                    email: ((_c = order.customer) === null || _c === void 0 ? void 0 : _c.email) || order.contact_email || '',
-                    phone: ((_d = order.customer) === null || _d === void 0 ? void 0 : _d.phone) || order.contact_phone || ''
+                    email: ((_d = order.customer) === null || _d === void 0 ? void 0 : _d.email) || order.contact_email || '',
+                    phone: ((_e = order.customer) === null || _e === void 0 ? void 0 : _e.phone) || order.contact_phone || ''
                 },
                 products: (order.products || []).map((p) => ({
                     id: p.product_id,
@@ -3746,6 +3971,26 @@ const getTiendaNubeOrders = (req, res) => __awaiter(void 0, void 0, void 0, func
                     } : undefined });
             });
         }
+        // Códigos de seguimiento express ya asignados.
+        const orderIdsForTracking = Array.from(new Set(orders.map((o) => String(o.id)).filter(Boolean)));
+        if (orderIdsForTracking.length > 0) {
+            try {
+                const trPlaceholders = orderIdsForTracking.map(() => '?').join(', ');
+                const trackingRows = yield (0, db_1.query)(`SELECT external_order_id, tracking_code, manual_status, manual_status_updated_at, created_at
+           FROM tiendanube_express_tracking
+           WHERE external_order_id IN (${trPlaceholders})`, orderIdsForTracking);
+                const trackingByOrderId = new Map();
+                for (const row of trackingRows)
+                    trackingByOrderId.set(String(row.external_order_id), row);
+                orders = orders.map((o) => {
+                    const tr = trackingByOrderId.get(String(o.id));
+                    return Object.assign(Object.assign({}, o), { trackingCode: (tr === null || tr === void 0 ? void 0 : tr.tracking_code) || null, trackingAssignedAt: (tr === null || tr === void 0 ? void 0 : tr.created_at) || null, trackingStatus: (tr === null || tr === void 0 ? void 0 : tr.manual_status) || null, trackingStatusUpdatedAt: (tr === null || tr === void 0 ? void 0 : tr.manual_status_updated_at) || null });
+                });
+            }
+            catch (trackingErr) {
+                console.warn('[getTiendaNubeOrders] No se pudieron cargar códigos express:', (trackingErr === null || trackingErr === void 0 ? void 0 : trackingErr.message) || trackingErr);
+            }
+        }
         res.json({
             orders,
             page: pageNum,
@@ -3759,6 +4004,157 @@ const getTiendaNubeOrders = (req, res) => __awaiter(void 0, void 0, void 0, func
     }
 });
 exports.getTiendaNubeOrders = getTiendaNubeOrders;
+const TN_EXPRESS_TRACKING_PREFIX = 'LHE';
+function ensureTnExpressTrackingSequence() {
+    return __awaiter(this, void 0, void 0, function* () {
+        yield (0, db_1.execute)(`INSERT IGNORE INTO tiendanube_express_tracking_sequence (id, next_value) VALUES (1, 100001)`);
+    });
+}
+function formatTnExpressTrackingCode(seq) {
+    return `${TN_EXPRESS_TRACKING_PREFIX}${String(seq).padStart(8, '0')}`;
+}
+/**
+ * Asigna (o devuelve si ya existía) un código de seguimiento único para un envío express de Tienda Nube.
+ * Idempotente: reimprimir etiqueta/recibo conserva el mismo código.
+ */
+const assignTiendaNubeExpressTracking = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    const orderId = String(req.params.orderId || '').trim();
+    const orderNumber = String(((_a = req.body) === null || _a === void 0 ? void 0 : _a.orderNumber) || '').trim() || null;
+    if (!orderId)
+        return res.status(400).json({ message: 'ID de orden inválido' });
+    try {
+        const existing = yield (0, db_1.get)(`SELECT external_order_id, order_number, tracking_code, manual_status, manual_status_updated_at, created_at
+       FROM tiendanube_express_tracking WHERE external_order_id = ?`, [orderId]);
+        if (existing === null || existing === void 0 ? void 0 : existing.tracking_code) {
+            return res.json({
+                orderId,
+                orderNumber: existing.order_number || orderNumber,
+                trackingCode: existing.tracking_code,
+                trackingStatus: existing.manual_status || null,
+                trackingStatusUpdatedAt: existing.manual_status_updated_at || null,
+                assigned: false,
+                createdAt: existing.created_at
+            });
+        }
+        yield ensureTnExpressTrackingSequence();
+        const inc = yield (0, db_1.execute)(`UPDATE tiendanube_express_tracking_sequence SET next_value = LAST_INSERT_ID(next_value) + 1 WHERE id = 1`);
+        const seq = Number((inc === null || inc === void 0 ? void 0 : inc.insertId) || 0);
+        if (!seq) {
+            return res.status(500).json({ message: 'No se pudo obtener el próximo código de seguimiento express.' });
+        }
+        const trackingCode = formatTnExpressTrackingCode(seq);
+        try {
+            yield (0, db_1.execute)(`INSERT INTO tiendanube_express_tracking (external_order_id, order_number, tracking_code, manual_status, manual_status_updated_at)
+         VALUES (?, ?, ?, 'preparing', NOW())`, [orderId, orderNumber, trackingCode]);
+            return res.json({
+                orderId,
+                orderNumber,
+                trackingCode,
+                trackingStatus: 'preparing',
+                assigned: true
+            });
+        }
+        catch (insertErr) {
+            if ((insertErr === null || insertErr === void 0 ? void 0 : insertErr.code) === 'ER_DUP_ENTRY') {
+                const raced = yield (0, db_1.get)(`SELECT external_order_id, order_number, tracking_code, manual_status, manual_status_updated_at, created_at
+           FROM tiendanube_express_tracking WHERE external_order_id = ?`, [orderId]);
+                if (raced === null || raced === void 0 ? void 0 : raced.tracking_code) {
+                    return res.json({
+                        orderId,
+                        orderNumber: raced.order_number || orderNumber,
+                        trackingCode: raced.tracking_code,
+                        trackingStatus: raced.manual_status || null,
+                        trackingStatusUpdatedAt: raced.manual_status_updated_at || null,
+                        assigned: false,
+                        createdAt: raced.created_at
+                    });
+                }
+            }
+            throw insertErr;
+        }
+    }
+    catch (error) {
+        console.error('assignTiendaNubeExpressTracking:', error);
+        return res.status(500).json({ message: 'Error asignando código de seguimiento express' });
+    }
+});
+exports.assignTiendaNubeExpressTracking = assignTiendaNubeExpressTracking;
+/**
+ * Actualiza el estado manual de seguimiento express (visible en la página pública de tracking).
+ * PATCH /api/integrations/tiendanube/orders/:orderId/express-tracking/status
+ */
+const updateTiendaNubeExpressTrackingStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    const orderId = String(req.params.orderId || '').trim();
+    const statusRaw = (_a = req.body) === null || _a === void 0 ? void 0 : _a.status;
+    if (!orderId)
+        return res.status(400).json({ message: 'ID de orden inválido' });
+    if (!(0, tiendanubeExpressTracking_service_1.isExpressTrackingStatus)(statusRaw)) {
+        return res.status(400).json({ message: 'Estado de seguimiento inválido' });
+    }
+    const status = statusRaw;
+    try {
+        const existing = yield (0, db_1.get)(`SELECT external_order_id, order_number, tracking_code, manual_status
+       FROM tiendanube_express_tracking WHERE external_order_id = ?`, [orderId]);
+        if (!(existing === null || existing === void 0 ? void 0 : existing.tracking_code)) {
+            return res.status(404).json({
+                message: 'Este pedido aún no tiene código de seguimiento. Generá la etiqueta o el recibo express primero.',
+            });
+        }
+        yield (0, db_1.execute)(`UPDATE tiendanube_express_tracking
+       SET manual_status = ?, manual_status_updated_at = NOW()
+       WHERE external_order_id = ?`, [status, orderId]);
+        const updated = yield (0, db_1.get)(`SELECT external_order_id, order_number, tracking_code, manual_status, manual_status_updated_at, created_at
+       FROM tiendanube_express_tracking WHERE external_order_id = ?`, [orderId]);
+        return res.json({
+            orderId,
+            orderNumber: (updated === null || updated === void 0 ? void 0 : updated.order_number) || null,
+            trackingCode: updated === null || updated === void 0 ? void 0 : updated.tracking_code,
+            trackingStatus: updated === null || updated === void 0 ? void 0 : updated.manual_status,
+            trackingStatusLabel: (0, tiendanubeExpressTracking_service_1.expressTrackingStatusLabel)(status),
+            trackingStatusUpdatedAt: (updated === null || updated === void 0 ? void 0 : updated.manual_status_updated_at) || null,
+            createdAt: (updated === null || updated === void 0 ? void 0 : updated.created_at) || null,
+        });
+    }
+    catch (error) {
+        console.error('updateTiendaNubeExpressTrackingStatus:', error);
+        return res.status(500).json({ message: 'Error actualizando estado de seguimiento' });
+    }
+});
+exports.updateTiendaNubeExpressTrackingStatus = updateTiendaNubeExpressTrackingStatus;
+function parseTnMoney(value) {
+    if (value == null || value === '')
+        return null;
+    const n = Number(String(value).replace(',', '.'));
+    if (!Number.isFinite(n))
+        return null;
+    return Math.round(n * 100) / 100;
+}
+/** Monto neto a facturar: lo que el cliente pagó efectivamente (después de reembolsos parciales). */
+function getTnOrderBillableTotal(order) {
+    var _a, _b, _c;
+    const orderTotal = (_a = parseTnMoney(order === null || order === void 0 ? void 0 : order.total)) !== null && _a !== void 0 ? _a : 0;
+    const paidByCustomer = parseTnMoney((_c = (_b = order === null || order === void 0 ? void 0 : order.total_paid_by_customer) !== null && _b !== void 0 ? _b : order === null || order === void 0 ? void 0 : order.total_paid_by_customer_including_fees) !== null && _c !== void 0 ? _c : order === null || order === void 0 ? void 0 : order.total_paid);
+    if (paidByCustomer != null && paidByCustomer > 0) {
+        return paidByCustomer <= orderTotal + 0.01 ? paidByCustomer : orderTotal;
+    }
+    return orderTotal;
+}
+function tnOrderHasPartialRefund(order) {
+    var _a, _b;
+    const raw = ((_a = order === null || order === void 0 ? void 0 : order.payment_status) !== null && _a !== void 0 ? _a : '').toString().trim().toLowerCase();
+    if (raw === 'partially_refunded')
+        return true;
+    const orderTotal = (_b = parseTnMoney(order === null || order === void 0 ? void 0 : order.total)) !== null && _b !== void 0 ? _b : 0;
+    const billable = getTnOrderBillableTotal(order);
+    return orderTotal > 0.005 && billable + 0.01 < orderTotal;
+}
+function extractTnCustomerCuit(order) {
+    var _a, _b, _c, _d, _e, _f, _g;
+    const rawDoc = String((_g = (_e = (_c = (_a = order === null || order === void 0 ? void 0 : order.contact_identification) !== null && _a !== void 0 ? _a : (_b = order === null || order === void 0 ? void 0 : order.billing_address) === null || _b === void 0 ? void 0 : _b.doc_number) !== null && _c !== void 0 ? _c : (_d = order === null || order === void 0 ? void 0 : order.customer) === null || _d === void 0 ? void 0 : _d.identification) !== null && _e !== void 0 ? _e : (_f = order === null || order === void 0 ? void 0 : order.customer) === null || _f === void 0 ? void 0 : _f.doc_number) !== null && _g !== void 0 ? _g : '').replace(/\D/g, '');
+    return rawDoc.length >= 10 ? rawDoc : undefined;
+}
 function normalizeTnPaymentStatus(order) {
     var _a;
     const rawPaymentStatus = ((_a = order === null || order === void 0 ? void 0 : order.payment_status) !== null && _a !== void 0 ? _a : '').toString().trim().toLowerCase();
@@ -3766,16 +4162,29 @@ function normalizeTnPaymentStatus(order) {
     const detailStates = paymentDetails
         .map((d) => { var _a, _b; return ((_b = (_a = d === null || d === void 0 ? void 0 : d.status) !== null && _a !== void 0 ? _a : d === null || d === void 0 ? void 0 : d.state) !== null && _b !== void 0 ? _b : '').toString().trim().toLowerCase(); })
         .filter(Boolean);
-    const looksRefunded = rawPaymentStatus === 'refunded' || detailStates.some((s) => s.includes('refund'));
-    const looksVoided = rawPaymentStatus === 'voided' || rawPaymentStatus === 'cancelled' || detailStates.some((s) => s.includes('void') || s.includes('cancel'));
+    const looksPartiallyRefunded = rawPaymentStatus === 'partially_refunded' || detailStates.some((s) => s === 'partially_refunded');
+    const looksFullyRefunded = rawPaymentStatus === 'refunded' || detailStates.some((s) => s === 'refunded');
+    const looksVoided = rawPaymentStatus === 'voided'
+        || rawPaymentStatus === 'cancelled'
+        || detailStates.some((s) => s.includes('void') || s === 'cancelled' || s === 'canceled');
     const looksPaid = rawPaymentStatus === 'paid'
+        || rawPaymentStatus === 'partially_paid'
         || !!(order === null || order === void 0 ? void 0 : order.paid_at)
         || detailStates.some((s) => s === 'paid' || s === 'approved' || s === 'accredited' || s === 'captured');
-    return looksRefunded ? 'refunded' : looksVoided ? 'voided' : looksPaid ? 'paid' : 'pending';
+    if (looksFullyRefunded)
+        return 'refunded';
+    if (looksVoided)
+        return 'voided';
+    if (looksPartiallyRefunded)
+        return 'partially_refunded';
+    return looksPaid ? 'paid' : 'pending';
+}
+function tnPaymentStatusIsBillable(status) {
+    return status === 'paid' || status === 'partially_refunded';
 }
 /** Emite facturas AFIP masivas para órdenes de Tienda Nube (solo pagadas). */
 const invoiceTiendaNubeOrdersBulk = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
     try {
         const authUser = req.user;
         if (!authUser || !['ADMIN', 'WAREHOUSE', 'DEPOSITO'].includes(authUser.role)) {
@@ -3799,7 +4208,6 @@ const invoiceTiendaNubeOrdersBulk = (req, res) => __awaiter(void 0, void 0, void
         }
         const { emitirFactura: emitirAfip } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
         const results = [];
-        const payableOrders = [];
         for (const orderId of orderIds) {
             const orderIdStr = String(orderId);
             try {
@@ -3831,72 +4239,55 @@ const invoiceTiendaNubeOrdersBulk = (req, res) => __awaiter(void 0, void 0, void
                 }
                 const order = orderRes.data;
                 const paymentStatus = normalizeTnPaymentStatus(order);
-                if (paymentStatus !== 'paid') {
+                if (!tnPaymentStatusIsBillable(paymentStatus)) {
                     results.push({ orderId: orderIdStr, status: 'skipped_unpaid', message: `La orden no está pagada (estado: ${paymentStatus})` });
                     continue;
                 }
-                const total = Number((_c = order === null || order === void 0 ? void 0 : order.total) !== null && _c !== void 0 ? _c : 0);
-                if (!Number.isFinite(total) || total <= 0) {
-                    results.push({ orderId: orderIdStr, status: 'error', message: 'La orden tiene total inválido para facturar' });
+                const billableTotal = getTnOrderBillableTotal(order);
+                if (!Number.isFinite(billableTotal) || billableTotal <= 0) {
+                    results.push({
+                        orderId: orderIdStr,
+                        status: 'error',
+                        message: paymentStatus === 'partially_refunded'
+                            ? 'El importe neto a facturar es cero tras el reembolso parcial'
+                            : 'La orden tiene total inválido para facturar'
+                    });
                     continue;
                 }
-                const customerName = ((_d = order === null || order === void 0 ? void 0 : order.customer) === null || _d === void 0 ? void 0 : _d.name)
-                    || `${((_e = order === null || order === void 0 ? void 0 : order.customer) === null || _e === void 0 ? void 0 : _e.first_name) || ''} ${((_f = order === null || order === void 0 ? void 0 : order.customer) === null || _f === void 0 ? void 0 : _f.last_name) || ''}`.trim()
+                const customerName = ((_c = order === null || order === void 0 ? void 0 : order.customer) === null || _c === void 0 ? void 0 : _c.name)
+                    || `${((_d = order === null || order === void 0 ? void 0 : order.customer) === null || _d === void 0 ? void 0 : _d.first_name) || ''} ${((_e = order === null || order === void 0 ? void 0 : order.customer) === null || _e === void 0 ? void 0 : _e.last_name) || ''}`.trim()
                     || (order === null || order === void 0 ? void 0 : order.contact_name)
                     || (order === null || order === void 0 ? void 0 : order.billing_name)
                     || 'Consumidor Final';
-                const rawDoc = String((_k = (_h = (_g = order === null || order === void 0 ? void 0 : order.billing_address) === null || _g === void 0 ? void 0 : _g.doc_number) !== null && _h !== void 0 ? _h : (_j = order === null || order === void 0 ? void 0 : order.customer) === null || _j === void 0 ? void 0 : _j.doc_number) !== null && _k !== void 0 ? _k : '').replace(/\D/g, '');
-                const maybeCuit = rawDoc.length >= 10 ? rawDoc : undefined;
-                const condicionIvaRaw = (((_l = order === null || order === void 0 ? void 0 : order.billing_address) === null || _l === void 0 ? void 0 : _l.fiscal_regime)
-                    || ((_m = order === null || order === void 0 ? void 0 : order.customer) === null || _m === void 0 ? void 0 : _m.fiscal_regime)
-                    || ((_o = order === null || order === void 0 ? void 0 : order.customer) === null || _o === void 0 ? void 0 : _o.iva_condition)
+                const maybeCuit = extractTnCustomerCuit(order);
+                const condicionIvaRaw = ((order === null || order === void 0 ? void 0 : order.billing_fiscal_regime)
+                    || ((_f = order === null || order === void 0 ? void 0 : order.billing_address) === null || _f === void 0 ? void 0 : _f.fiscal_regime)
+                    || ((_g = order === null || order === void 0 ? void 0 : order.customer) === null || _g === void 0 ? void 0 : _g.fiscal_regime)
+                    || ((_h = order === null || order === void 0 ? void 0 : order.customer) === null || _h === void 0 ? void 0 : _h.iva_condition)
                     || 'Consumidor Final').toString();
-                payableOrders.push({
-                    orderId: String(order.id),
-                    orderNumber: String((_p = order.number) !== null && _p !== void 0 ? _p : order.id),
-                    total,
+                const customerId = `TN-${((_j = order === null || order === void 0 ? void 0 : order.customer) === null || _j === void 0 ? void 0 : _j.id) || order.id}`;
+                const afipResult = yield emitirAfip({
+                    id: `TN-${order.id}`,
                     date: String((order === null || order === void 0 ? void 0 : order.created_at) || new Date().toISOString().slice(0, 10)),
-                    customerId: `TN-${((_q = order === null || order === void 0 ? void 0 : order.customer) === null || _q === void 0 ? void 0 : _q.id) || order.id}`,
-                    customerName,
-                    customerCuit: maybeCuit,
+                    total: billableTotal,
+                    customerId
+                }, {
+                    id: customerId,
+                    businessName: customerName,
+                    cuit: maybeCuit,
                     condicionIva: condicionIvaRaw || 'Consumidor Final'
-                });
-            }
-            catch (e) {
-                results.push({
-                    orderId: orderIdStr,
-                    status: 'error',
-                    message: (e === null || e === void 0 ? void 0 : e.message) || 'Error emitiendo factura'
-                });
-            }
-        }
-        if (payableOrders.length > 0) {
-            const totalLote = payableOrders.reduce((acc, o) => acc + o.total, 0);
-            const base = payableOrders[0];
-            const sameCustomer = payableOrders.every((o) => o.customerId === base.customerId);
-            const afipResult = yield emitirAfip({
-                id: `TN-BULK-${Date.now()}`,
-                date: base.date,
-                total: totalLote,
-                customerId: sameCustomer ? base.customerId : 'TN-BULK-CF'
-            }, {
-                id: sameCustomer ? base.customerId : 'TN-BULK-CF',
-                businessName: sameCustomer ? base.customerName : 'Consumidor Final',
-                cuit: sameCustomer ? base.customerCuit : undefined,
-                condicionIva: sameCustomer ? base.condicionIva : 'Consumidor Final'
-            }, forceCbteTipo);
-            for (const o of payableOrders) {
+                }, forceCbteTipo);
                 const invoiceId = (0, uuid_1.v4)();
                 yield (0, db_1.execute)(`INSERT INTO external_invoices
            (id, source, external_order_id, order_number, customer_name, customer_cuit, customer_condicion_iva, total, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta)
            VALUES (?, 'TIENDANUBE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
                     invoiceId,
-                    o.orderId,
-                    o.orderNumber,
-                    o.customerName,
-                    o.customerCuit || null,
-                    o.condicionIva || null,
-                    o.total,
+                    String(order.id),
+                    String((_k = order.number) !== null && _k !== void 0 ? _k : order.id),
+                    customerName,
+                    maybeCuit || null,
+                    condicionIvaRaw || null,
+                    billableTotal,
                     afipResult.cae,
                     afipResult.caeFchVto || null,
                     afipResult.puntoVta,
@@ -3905,13 +4296,22 @@ const invoiceTiendaNubeOrdersBulk = (req, res) => __awaiter(void 0, void 0, void
                     afipResult.cbteHasta
                 ]);
                 results.push({
-                    orderId: o.orderId,
+                    orderId: orderIdStr,
                     status: 'invoiced',
                     invoiceId,
                     cae: afipResult.cae,
                     cbteTipo: afipResult.cbteTipo,
                     cbteDesde: afipResult.cbteDesde,
-                    cbteHasta: afipResult.cbteHasta
+                    cbteHasta: afipResult.cbteHasta,
+                    billableTotal,
+                    hasPartialRefund: tnOrderHasPartialRefund(order)
+                });
+            }
+            catch (e) {
+                results.push({
+                    orderId: orderIdStr,
+                    status: 'error',
+                    message: (e === null || e === void 0 ? void 0 : e.message) || 'Error emitiendo factura'
                 });
             }
         }
@@ -4149,6 +4549,166 @@ const getExternalInvoicesHistory = (req, res) => __awaiter(void 0, void 0, void 
     }
 });
 exports.getExternalInvoicesHistory = getExternalInvoicesHistory;
+function scaleExternalLineItemsToTotal(items, targetTotal) {
+    if (!items.length || !(targetTotal > 0))
+        return items;
+    const sum = items.reduce((acc, it) => acc + Math.round(it.quantity * it.unitPrice * 100) / 100, 0);
+    if (sum <= 0 || Math.abs(sum - targetTotal) <= 0.02)
+        return items;
+    const factor = targetTotal / sum;
+    return items.map((it) => (Object.assign(Object.assign({}, it), { unitPrice: Math.round(it.unitPrice * factor * 100) / 100 })));
+}
+function lookupNumeroDespachoForExternalProduct(args) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const sku = String(args.sku || '').trim();
+        const variantId = args.variantId != null ? String(args.variantId).trim() : '';
+        if (!sku && !variantId)
+            return undefined;
+        const params = [];
+        const orParts = [];
+        if (variantId) {
+            orParts.push('pv.tienda_nube_variant_id = ?');
+            params.push(variantId);
+        }
+        if (sku) {
+            orParts.push('pv.sku = ?', 'pv.external_sku = ?', 'p.sku = ?', "REPLACE(pv.sku, '-', '') = REPLACE(?, '-', '')");
+            params.push(sku, sku, sku, sku);
+        }
+        if (!orParts.length)
+            return undefined;
+        const row = (yield (0, db_1.get)(`SELECT COALESCE(d.numero_despacho) AS numero_despacho
+     FROM product_variants pv
+     JOIN product_colors pc ON pc.id = pv.product_color_id
+     JOIN products p ON p.id = pc.product_id
+     LEFT JOIN despachos d ON d.id = p.ultimo_despacho_id
+     WHERE ${orParts.join(' OR ')}
+     LIMIT 1`, params));
+        const n = String((row === null || row === void 0 ? void 0 : row.numero_despacho) || '').trim();
+        return n || undefined;
+    });
+}
+function enrichExternalProductsWithDespacho(products) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const out = [];
+        for (const p of products) {
+            const numeroDespacho = yield lookupNumeroDespachoForExternalProduct({
+                sku: p.sku,
+                variantId: p.variantId,
+            });
+            out.push({
+                name: p.name,
+                sku: p.sku,
+                quantity: p.quantity,
+                unitPrice: p.unitPrice,
+                numeroDespacho,
+            });
+        }
+        return out;
+    });
+}
+/** Datos para imprimir / descargar PDF de una factura externa (TN / ML). */
+const getExternalInvoicePrintData = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f, _g;
+    try {
+        const authUser = req.user;
+        if (!authUser || !['ADMIN', 'WAREHOUSE', 'DEPOSITO'].includes(authUser.role)) {
+            return res.status(403).json({ message: 'Sin permisos para ver facturas externas' });
+        }
+        const { id } = req.params;
+        if (!id)
+            return res.status(400).json({ message: 'ID de factura externa requerido' });
+        const inv = (yield (0, db_1.get)(`SELECT id, source, external_order_id, order_number, customer_name, customer_cuit, customer_condicion_iva,
+              total, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, created_at
+       FROM external_invoices WHERE id = ?`, [id]));
+        if (!inv)
+            return res.status(404).json({ message: 'Factura externa no encontrada' });
+        let products = [];
+        let customerAddress = '';
+        let customerCity = '';
+        if (inv.source === 'TIENDANUBE') {
+            const integration = yield (0, db_1.get)(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
+            const storeId = (integration === null || integration === void 0 ? void 0 : integration.store_id) || (integration === null || integration === void 0 ? void 0 : integration.user_id);
+            if ((integration === null || integration === void 0 ? void 0 : integration.access_token) && storeId) {
+                const orderRes = yield axios_1.default.get(`https://api.tiendanube.com/v1/${storeId}/orders/${encodeURIComponent(String(inv.external_order_id))}`, {
+                    headers: {
+                        Authentication: `bearer ${integration.access_token}`,
+                        'User-Agent': TN_USER_AGENT,
+                    },
+                    validateStatus: () => true,
+                });
+                if (orderRes.status === 200 && orderRes.data) {
+                    const order = orderRes.data;
+                    products = (order.products || []).map((p) => ({
+                        name: String(p.name || 'Producto').trim(),
+                        sku: String(p.sku || '').trim() || undefined,
+                        variantId: p.variant_id != null ? String(p.variant_id) : undefined,
+                        quantity: Math.max(0, Number(p.quantity) || 0),
+                        unitPrice: Math.max(0, Number(p.price) || 0),
+                    })).filter((p) => p.quantity > 0);
+                    const ship = order.shipping_address || {};
+                    customerAddress = [ship.address, ship.number].filter(Boolean).join(' ').trim();
+                    customerCity = [ship.city, ship.province].filter(Boolean).join(', ').trim();
+                }
+            }
+        }
+        else if (inv.source === 'MERCADOLIBRE') {
+            const mlToken = yield getValidMLToken();
+            if (mlToken) {
+                const orderRes = yield axios_1.default.get(`https://api.mercadolibre.com/orders/${encodeURIComponent(String(inv.external_order_id))}`, { headers: { Authorization: `Bearer ${mlToken}` }, validateStatus: () => true });
+                if (orderRes.status === 200 && orderRes.data) {
+                    const order = orderRes.data;
+                    products = (order.order_items || []).map((item) => {
+                        var _a, _b, _c;
+                        return ({
+                            name: String(((_a = item.item) === null || _a === void 0 ? void 0 : _a.title) || 'Producto').trim(),
+                            sku: String(((_b = item.item) === null || _b === void 0 ? void 0 : _b.seller_sku) || ((_c = item.item) === null || _c === void 0 ? void 0 : _c.seller_custom_field) || '').trim() || undefined,
+                            quantity: Math.max(0, Number(item.quantity) || 0),
+                            unitPrice: Math.max(0, Number(item.unit_price) || 0),
+                        });
+                    }).filter((p) => p.quantity > 0);
+                }
+            }
+        }
+        const invoiceTotal = Number(inv.total || 0);
+        products = scaleExternalLineItemsToTotal(products, invoiceTotal);
+        products = yield enrichExternalProductsWithDespacho(products);
+        if (!products.length && invoiceTotal > 0) {
+            const canal = inv.source === 'TIENDANUBE' ? 'Tienda Nube' : 'Mercado Libre';
+            products = [{
+                    name: `Venta ${canal} #${inv.order_number || inv.external_order_id}`,
+                    quantity: 1,
+                    unitPrice: invoiceTotal,
+                }];
+        }
+        res.json({
+            invoice: {
+                id: inv.id,
+                source: inv.source,
+                externalOrderId: inv.external_order_id,
+                orderNumber: (_a = inv.order_number) !== null && _a !== void 0 ? _a : undefined,
+                customerName: (_b = inv.customer_name) !== null && _b !== void 0 ? _b : undefined,
+                customerCuit: (_c = inv.customer_cuit) !== null && _c !== void 0 ? _c : undefined,
+                customerCondicionIva: (_d = inv.customer_condicion_iva) !== null && _d !== void 0 ? _d : undefined,
+                customerAddress: customerAddress || undefined,
+                customerCity: customerCity || undefined,
+                total: invoiceTotal,
+                cae: inv.cae,
+                caeFchVto: (_e = inv.cae_fch_vto) !== null && _e !== void 0 ? _e : undefined,
+                puntoVta: Number(inv.punto_venta),
+                cbteTipo: Number(inv.cbte_tipo),
+                cbteDesde: Number(inv.cbte_desde),
+                cbteHasta: Number((_f = inv.cbte_hasta) !== null && _f !== void 0 ? _f : inv.cbte_desde),
+                createdAt: (_g = inv.created_at) !== null && _g !== void 0 ? _g : undefined,
+            },
+            products,
+        });
+    }
+    catch (error) {
+        console.error('getExternalInvoicePrintData:', error);
+        res.status(500).json({ message: 'Error obteniendo datos para imprimir la factura' });
+    }
+});
+exports.getExternalInvoicePrintData = getExternalInvoicePrintData;
 /** Emite NC total para una factura externa (una por factura). */
 const emitirNotaCreditoExternalInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -4279,8 +4839,21 @@ const getMercadoLibreQuestions = (req, res) => __awaiter(void 0, void 0, void 0,
             const tb = b.dateCreated ? new Date(b.dateCreated).getTime() : 0;
             return tb - ta;
         });
+        const ids = questions.map((q) => String(q.id));
+        const suggestions = yield mlQuestionsAi.getSuggestionsByQuestionIds(ids);
+        const enriched = questions.map((q) => {
+            const s = suggestions.get(String(q.id));
+            if (!s || s.status !== 'pending')
+                return q;
+            return Object.assign(Object.assign({}, q), { aiSuggestion: {
+                    text: s.suggestionText,
+                    status: s.status,
+                    provider: s.llmProvider,
+                    updatedAt: s.updatedAt
+                } });
+        });
         res.json({
-            questions,
+            questions: enriched,
             total: typeof data.total === 'number' ? data.total : questions.length,
             offset: typeof data.offset === 'number' ? data.offset : offsetNum,
             limit: typeof data.limit === 'number' ? data.limit : limitNum,
@@ -5924,6 +6497,7 @@ const getMLQuestionsAiConfig = (req, res) => __awaiter(void 0, void 0, void 0, f
         const st = mlQuestionsAi.getLlmStatus();
         res.json({
             enabled: cfg.enabled,
+            mode: cfg.mode,
             extraSystemPrompt: cfg.extraSystemPrompt || '',
             openAiConfigured: st.configured,
             llmProvider: st.provider,
@@ -5938,8 +6512,17 @@ const getMLQuestionsAiConfig = (req, res) => __awaiter(void 0, void 0, void 0, f
 exports.getMLQuestionsAiConfig = getMLQuestionsAiConfig;
 const saveMLQuestionsAiConfig = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { enabled, extraSystemPrompt } = req.body || {};
-        yield mlQuestionsAi.saveMlQuestionsAiConfig(!!enabled, extraSystemPrompt != null ? String(extraSystemPrompt) : null);
+        const { enabled, mode, extraSystemPrompt } = req.body || {};
+        const modeNorm = mode === 'suggest' || mode === 'auto' || mode === 'off'
+            ? mode
+            : enabled === false
+                ? 'off'
+                : undefined;
+        yield mlQuestionsAi.saveMlQuestionsAiConfig({
+            enabled: enabled != null ? !!enabled : undefined,
+            mode: modeNorm,
+            extraSystemPrompt: extraSystemPrompt != null ? String(extraSystemPrompt) : undefined
+        });
         res.json({ success: true, message: 'Configuración guardada' });
     }
     catch (error) {
@@ -5948,12 +6531,15 @@ const saveMLQuestionsAiConfig = (req, res) => __awaiter(void 0, void 0, void 0, 
     }
 });
 exports.saveMLQuestionsAiConfig = saveMLQuestionsAiConfig;
-/** Procesa preguntas sin responder (manual). Requiere ML + clave IA (Gemini/Groq/OpenAI). */
+function mlQuestionsAiRoleOk(req) {
+    const user = req.user;
+    return !!user && ['ADMIN', 'WAREHOUSE', 'DEPOSITO'].includes(user.role);
+}
+/** Procesa preguntas sin responder (manual): sugerencias o auto-respuesta según modo. */
 const processMLQuestionsAi = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c, _d, _e;
     try {
-        const user = req.user;
-        if (!user || !['ADMIN', 'WAREHOUSE', 'DEPOSITO'].includes(user.role)) {
+        if (!mlQuestionsAiRoleOk(req)) {
             return res.status(403).json({ message: 'Solo administradores o depósito pueden ejecutar esto' });
         }
         if (!mlQuestionsAi.llmConfigured()) {
@@ -5967,11 +6553,15 @@ const processMLQuestionsAi = (req, res) => __awaiter(void 0, void 0, void 0, fun
         if (!token)
             return res.status(503).json({ message: 'Mercado Libre no conectado o token inválido' });
         const cfg = yield mlQuestionsAi.getMlQuestionsAiConfigRow();
+        if (cfg.mode === 'off') {
+            return res.status(400).json({ message: 'La IA de preguntas está desactivada. Activá modo sugerencias o automático en Configuración.' });
+        }
         const { processed, results } = yield mlQuestionsAi.processUnansweredBatch(token, {
             limit,
-            extraSystemPrompt: cfg.extraSystemPrompt
+            extraSystemPrompt: cfg.extraSystemPrompt,
+            mode: cfg.mode
         });
-        res.json({ processed, results });
+        res.json({ processed, results, mode: cfg.mode });
     }
     catch (error) {
         const detail = (_e = (_d = error === null || error === void 0 ? void 0 : error.response) === null || _d === void 0 ? void 0 : _d.data) !== null && _e !== void 0 ? _e : error === null || error === void 0 ? void 0 : error.message;
@@ -5980,6 +6570,100 @@ const processMLQuestionsAi = (req, res) => __awaiter(void 0, void 0, void 0, fun
     }
 });
 exports.processMLQuestionsAi = processMLQuestionsAi;
+/** Genera sugerencia IA para una pregunta (sin publicar en ML). */
+const suggestMLQuestionAi = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f;
+    try {
+        if (!mlQuestionsAiRoleOk(req)) {
+            return res.status(403).json({ message: 'Sin permiso' });
+        }
+        if (!mlQuestionsAi.llmConfigured()) {
+            return res.status(503).json({ message: 'Ninguna clave de IA configurada en el servidor' });
+        }
+        const questionId = String((_d = (_b = (_a = req.body) === null || _a === void 0 ? void 0 : _a.questionId) !== null && _b !== void 0 ? _b : (_c = req.params) === null || _c === void 0 ? void 0 : _c.questionId) !== null && _d !== void 0 ? _d : '').trim();
+        if (!questionId)
+            return res.status(400).json({ message: 'questionId requerido' });
+        const token = yield getValidMLToken();
+        if (!token)
+            return res.status(503).json({ message: 'Mercado Libre no conectado' });
+        const cfg = yield mlQuestionsAi.getMlQuestionsAiConfigRow();
+        const forceRegenerate = !!((_e = req.body) === null || _e === void 0 ? void 0 : _e.forceRegenerate);
+        const result = yield mlQuestionsAi.suggestForQuestion(token.access_token, questionId, {
+            extraSystemPrompt: cfg.extraSystemPrompt,
+            forceRegenerate
+        });
+        if (result.status === 'error') {
+            return res.status(500).json({ message: result.message });
+        }
+        const suggestion = yield mlQuestionsAi.getSuggestionByQuestionId(questionId);
+        res.json({ result, suggestion });
+    }
+    catch (error) {
+        console.error('suggestMLQuestionAi:', ((_f = error === null || error === void 0 ? void 0 : error.response) === null || _f === void 0 ? void 0 : _f.data) || error.message);
+        res.status(500).json({ message: (error === null || error === void 0 ? void 0 : error.message) || 'Error generando sugerencia' });
+    }
+});
+exports.suggestMLQuestionAi = suggestMLQuestionAi;
+/** Publica respuesta en ML (texto editado o sugerencia guardada). */
+const answerMLQuestion = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d;
+    try {
+        if (!mlQuestionsAiRoleOk(req)) {
+            return res.status(403).json({ message: 'Sin permiso' });
+        }
+        const questionId = String((_b = (_a = req.body) === null || _a === void 0 ? void 0 : _a.questionId) !== null && _b !== void 0 ? _b : '').trim();
+        const text = ((_c = req.body) === null || _c === void 0 ? void 0 : _c.text) != null ? String(req.body.text) : undefined;
+        if (!questionId)
+            return res.status(400).json({ message: 'questionId requerido' });
+        const token = yield getValidMLToken();
+        if (!token)
+            return res.status(503).json({ message: 'Mercado Libre no conectado' });
+        const result = yield mlQuestionsAi.approveAndSendSuggestion(token.access_token, questionId, text);
+        if (result.status === 'error') {
+            return res.status(500).json({ message: result.message });
+        }
+        if (result.status === 'skipped') {
+            return res.status(409).json({ message: result.reason });
+        }
+        res.json({ success: true, result });
+    }
+    catch (error) {
+        console.error('answerMLQuestion:', ((_d = error === null || error === void 0 ? void 0 : error.response) === null || _d === void 0 ? void 0 : _d.data) || error.message);
+        res.status(500).json({ message: (error === null || error === void 0 ? void 0 : error.message) || 'Error enviando respuesta' });
+    }
+});
+exports.answerMLQuestion = answerMLQuestion;
+/** Descarta sugerencia IA pendiente. */
+const rejectMLQuestionSuggestion = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        if (!mlQuestionsAiRoleOk(req)) {
+            return res.status(403).json({ message: 'Sin permiso' });
+        }
+        const questionId = String((_b = (_a = req.body) === null || _a === void 0 ? void 0 : _a.questionId) !== null && _b !== void 0 ? _b : '').trim();
+        if (!questionId)
+            return res.status(400).json({ message: 'questionId requerido' });
+        yield mlQuestionsAi.rejectSuggestion(questionId);
+        res.json({ success: true });
+    }
+    catch (error) {
+        console.error('rejectMLQuestionSuggestion:', error.message);
+        res.status(500).json({ message: (error === null || error === void 0 ? void 0 : error.message) || 'Error descartando sugerencia' });
+    }
+});
+exports.rejectMLQuestionSuggestion = rejectMLQuestionSuggestion;
+/** Métricas de calidad IA (envíos sin editar vs editados). */
+const getMLQuestionsAiMetrics = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    try {
+        const metrics = yield mlQuestionsAi.getMlQuestionsAiMetrics();
+        res.json(metrics);
+    }
+    catch (error) {
+        console.error('getMLQuestionsAiMetrics:', error.message);
+        res.status(500).json({ message: (error === null || error === void 0 ? void 0 : error.message) || 'Error obteniendo métricas' });
+    }
+});
+exports.getMLQuestionsAiMetrics = getMLQuestionsAiMetrics;
 /** Métricas por defecto para Product Ads (Mercado Ads API). */
 const ML_PADS_METRICS_DEFAULT = 'clicks,prints,ctr,cost,cpc,acos,cvr,roas,sov,direct_amount,indirect_amount,total_amount,units_quantity,direct_units_quantity,indirect_units_quantity,advertising_items_quantity,direct_items_quantity,indirect_items_quantity';
 /** Listado de anunciantes con acceso a Product Ads (PADS). */

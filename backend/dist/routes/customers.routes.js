@@ -17,6 +17,7 @@ router.get('/saldos-pendientes/export-sistema', auth_1.authMiddleware, customers
 router.get('/saldos-pendientes/export-por-cliente', auth_1.authMiddleware, customers_controller_1.exportSaldosPendientesByCustomerSheetsXlsx);
 router.get('/saldos-pendientes/export', auth_1.authMiddleware, customers_controller_1.exportSaldosPendientesCsv);
 router.get('/export-individuales', auth_1.authMiddleware, customers_controller_1.exportCustomersIndividualXlsx);
+router.get('/export-actualizacion-masiva', auth_1.authMiddleware, customers_controller_1.exportCustomersBulkUpdateXlsx);
 router.post('/export-por-hojas', auth_1.authMiddleware, customers_controller_1.exportCustomersBySheetsXlsx);
 router.get('/saldos-pendientes', auth_1.authMiddleware, customers_controller_1.getSaldosPendientes);
 router.get('/cartera-totals', auth_1.authMiddleware, customers_controller_1.getCarteraTotals);
@@ -30,6 +31,7 @@ router.get('/', auth_1.authMiddleware, customers_controller_1.getCustomers);
 router.post('/', auth_1.authMiddleware, customers_controller_1.createCustomer);
 router.post('/import', auth_1.authMiddleware, customers_controller_1.importCustomers);
 router.post('/bulk-update-cuit', auth_1.authMiddleware, customers_controller_1.bulkUpdateCuit);
+router.post('/bulk-update-fields', auth_1.authMiddleware, customers_controller_1.bulkUpdateCustomerFields);
 router.post('/:id/attach-user', auth_1.authMiddleware, customers_controller_1.attachUserToCustomer);
 router.post('/:id/clear-dispatched-pendings', auth_1.authMiddleware, customers_controller_1.clearDispatchedPendingsForCustomer);
 router.get('/:id/financial-summary', auth_1.authMiddleware, customers_controller_1.getCustomerFinancialSummary);

@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.exportCustomerDetailXlsx = exports.exportCustomerFinancialSummaryXlsx = exports.getCustomerFinancialSummary = exports.clearDispatchedPendingsForCustomer = exports.assignCustomerSellersFromResumen = exports.exportSaldosPendientesMultimediasXlsx = exports.exportSaldosPendientesByCustomerSheetsXlsx = exports.exportSaldosMovimientosSistemaXlsx = exports.exportSaldosPendientesDetalleXlsx = exports.exportSaldosPendientesCsv = exports.getCarteraTotals = exports.getSaldosPendientes = exports.bulkUpdateCuit = exports.importCustomers = exports.deleteCustomer = exports.attachUserToCustomer = exports.updateCustomer = exports.createCustomer = exports.exportCustomersBySheetsXlsx = exports.exportCustomersIndividualXlsx = exports.getCustomers = void 0;
+exports.exportCustomerDetailXlsx = exports.exportCustomerFinancialSummaryXlsx = exports.getCustomerFinancialSummary = exports.clearDispatchedPendingsForCustomer = exports.assignCustomerSellersFromResumen = exports.exportSaldosPendientesMultimediasXlsx = exports.exportSaldosPendientesByCustomerSheetsXlsx = exports.exportSaldosMovimientosSistemaXlsx = exports.exportSaldosPendientesDetalleXlsx = exports.exportSaldosPendientesCsv = exports.getCarteraTotals = exports.getSaldosPendientes = exports.bulkUpdateCustomerFields = exports.exportCustomersBulkUpdateXlsx = exports.bulkUpdateCuit = exports.importCustomers = exports.deleteCustomer = exports.attachUserToCustomer = exports.updateCustomer = exports.createCustomer = exports.exportCustomersBySheetsXlsx = exports.exportCustomersIndividualXlsx = exports.getCustomers = void 0;
 exports.queryCarteraTotalsForCustomer = queryCarteraTotalsForCustomer;
 const XLSX = __importStar(require("xlsx"));
 const exceljs_1 = __importDefault(require("exceljs"));
@@ -987,6 +987,242 @@ const bulkUpdateCuit = (req, res) => __awaiter(void 0, void 0, void 0, function*
     }
 });
 exports.bulkUpdateCuit = bulkUpdateCuit;
+/** Busca cliente por CUIT, código legacy, email o razón social (opcionalmente acotado a vendedor). */
+function findCustomerIdForBulkImport(identifiers) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d;
+        const sellerWhere = identifiers.sellerId ? ' AND seller_id = ?' : '';
+        const sellerParam = identifiers.sellerId ? [identifiers.sellerId] : [];
+        const cuitDigits = ((_a = identifiers.cuit) !== null && _a !== void 0 ? _a : '').toString().replace(/\D/g, '');
+        if (cuitDigits) {
+            const row = yield (0, db_1.get)(`SELECT id FROM customers
+       WHERE REPLACE(REPLACE(REPLACE(COALESCE(cuit, ''), '-', ''), '.', ''), ' ', '') = ?
+       ${sellerWhere}
+       LIMIT 1`, [cuitDigits, ...sellerParam]);
+            if (row)
+                return row.id;
+        }
+        const legacyCode = ((_b = identifiers.legacyCode) !== null && _b !== void 0 ? _b : '').toString().trim();
+        if (legacyCode) {
+            const padded = (0, multimediaHistorialExcel_1.padLegacyCode)(legacyCode);
+            const row = yield (0, db_1.get)(`SELECT id FROM customers WHERE legacy_code = ? OR legacy_code = ?${sellerWhere} LIMIT 1`, [legacyCode, padded, ...sellerParam]);
+            if (row)
+                return row.id;
+        }
+        const email = ((_c = identifiers.email) !== null && _c !== void 0 ? _c : '').toString().trim();
+        if (email) {
+            const row = yield (0, db_1.get)(`SELECT id FROM customers WHERE LOWER(TRIM(email)) = LOWER(?)${sellerWhere} LIMIT 1`, [email, ...sellerParam]);
+            if (row)
+                return row.id;
+        }
+        const businessName = ((_d = identifiers.businessName) !== null && _d !== void 0 ? _d : '').toString().trim();
+        if (businessName) {
+            const row = yield (0, db_1.get)(`SELECT id FROM customers WHERE TRIM(business_name) = ?${sellerWhere} LIMIT 1`, [businessName, ...sellerParam]);
+            if (row)
+                return row.id;
+        }
+        return null;
+    });
+}
+const PRICE_LIST_CLEAR_VALUES = new Set(['sin lista', '(ninguna)', 'ninguna', '-', '—', 'n/a', 'na']);
+function resolvePriceListIdFromImport(input, cache) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const raw = input.trim();
+        const cacheKey = raw.toLowerCase();
+        if (cache.has(cacheKey))
+            return cache.get(cacheKey);
+        if (PRICE_LIST_CLEAR_VALUES.has(cacheKey)) {
+            cache.set(cacheKey, null);
+            return null;
+        }
+        const byId = yield (0, db_1.get)('SELECT id FROM price_lists WHERE id = ? LIMIT 1', [raw]);
+        if (byId) {
+            cache.set(cacheKey, byId.id);
+            return byId.id;
+        }
+        const byName = yield (0, db_1.get)('SELECT id FROM price_lists WHERE LOWER(TRIM(name)) = LOWER(?) LIMIT 1', [raw]);
+        if (byName) {
+            cache.set(cacheKey, byName.id);
+            return byName.id;
+        }
+        cache.set(cacheKey, 'NOT_FOUND');
+        return 'NOT_FOUND';
+    });
+}
+/** Exportar Excel para actualización masiva: condición IVA, lista de precios y saldo inicial. */
+const exportCustomersBulkUpdateXlsx = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f, _g;
+    try {
+        const authUser = req.user;
+        const isAdmin = (authUser === null || authUser === void 0 ? void 0 : authUser.role) === 'ADMIN';
+        const sellerFilter = (authUser === null || authUser === void 0 ? void 0 : authUser.role) === 'SELLER' ? ' WHERE c.seller_id = ?' : '';
+        const params = (authUser === null || authUser === void 0 ? void 0 : authUser.role) === 'SELLER' ? [authUser.id] : [];
+        const rows = yield (0, db_1.query)(`SELECT
+         c.legacy_code,
+         c.business_name,
+         c.email,
+         c.cuit,
+         c.condicion_iva,
+         pl.name AS price_list_name,
+         c.opening_balance,
+         c.opening_balance_date
+       FROM customers c
+       LEFT JOIN price_lists pl ON pl.id = c.price_list_id
+       ${sellerFilter}
+       ORDER BY c.business_name ASC, c.name ASC`, params);
+        const workbook = new exceljs_1.default.Workbook();
+        workbook.creator = 'LupoHub';
+        workbook.created = new Date();
+        const ws = workbook.addWorksheet('Actualización clientes');
+        const columns = [
+            { header: 'Código legacy', key: 'legacy_code', width: 16 },
+            { header: 'Razón social', key: 'business_name', width: 34 },
+            { header: 'Email', key: 'email', width: 32 },
+            { header: 'CUIT', key: 'cuit', width: 16 },
+            { header: 'Condición IVA', key: 'condicion_iva', width: 28 },
+            { header: 'Lista de precios', key: 'price_list_name', width: 24 },
+        ];
+        if (isAdmin) {
+            columns.push({ header: 'Saldo inicio', key: 'opening_balance', width: 16 }, { header: 'Fecha saldo inicio', key: 'opening_balance_date', width: 18 });
+        }
+        ws.columns = columns;
+        ws.getRow(1).font = { bold: true };
+        ws.views = [{ state: 'frozen', ySplit: 1 }];
+        for (const r of rows) {
+            const rowData = {
+                legacy_code: (_a = r.legacy_code) !== null && _a !== void 0 ? _a : '',
+                business_name: (_b = r.business_name) !== null && _b !== void 0 ? _b : '',
+                email: (_c = r.email) !== null && _c !== void 0 ? _c : '',
+                cuit: (_d = r.cuit) !== null && _d !== void 0 ? _d : '',
+                condicion_iva: (_e = r.condicion_iva) !== null && _e !== void 0 ? _e : '',
+                price_list_name: (_f = r.price_list_name) !== null && _f !== void 0 ? _f : '',
+            };
+            if (isAdmin) {
+                rowData.opening_balance =
+                    r.opening_balance != null && r.opening_balance !== ''
+                        ? Math.round(Number(r.opening_balance) * 100) / 100
+                        : '';
+                rowData.opening_balance_date = (_g = (0, customerOpeningBalance_1.normalizeYmdDate)(r.opening_balance_date)) !== null && _g !== void 0 ? _g : '';
+            }
+            ws.addRow(rowData);
+        }
+        const out = yield workbook.xlsx.writeBuffer();
+        const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out));
+        const filename = `clientes_actualizacion_masiva_${new Date().toISOString().slice(0, 10)}.xlsx`;
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        return res.send(buf);
+    }
+    catch (error) {
+        console.error('exportCustomersBulkUpdateXlsx:', error);
+        return res.status(500).json({ message: 'Error exportando plantilla de actualización masiva' });
+    }
+});
+exports.exportCustomersBulkUpdateXlsx = exportCustomersBulkUpdateXlsx;
+/** Actualizar condición IVA, lista de precios y saldo inicial en lote (identificador: CUIT, código, email o razón social). */
+const bulkUpdateCustomerFields = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b, _c, _d, _e, _f;
+    try {
+        const authUser = req.user;
+        const isAdmin = (authUser === null || authUser === void 0 ? void 0 : authUser.role) === 'ADMIN';
+        const sellerScope = (authUser === null || authUser === void 0 ? void 0 : authUser.role) === 'SELLER' ? authUser.id : null;
+        const body = req.body;
+        const updates = Array.isArray(body.updates) ? body.updates : [];
+        let updated = 0;
+        let notFound = 0;
+        let skipped = 0;
+        const errors = [];
+        const priceListCache = new Map();
+        for (let i = 0; i < updates.length; i++) {
+            const u = updates[i];
+            const rowNum = i + 1;
+            const cuit = ((_a = u.cuit) !== null && _a !== void 0 ? _a : '').toString().trim() || undefined;
+            const email = ((_b = u.email) !== null && _b !== void 0 ? _b : '').toString().trim() || undefined;
+            const businessName = ((_c = u.businessName) !== null && _c !== void 0 ? _c : '').toString().trim() || undefined;
+            const legacyCode = ((_d = u.legacyCode) !== null && _d !== void 0 ? _d : '').toString().trim() || undefined;
+            if (!cuit && !email && !businessName && !legacyCode) {
+                errors.push({ row: rowNum, message: 'Falta identificador (CUIT, código legacy, email o razón social)' });
+                continue;
+            }
+            const hasCondicionIva = u.condicionIva !== undefined;
+            const hasPriceList = u.priceList !== undefined;
+            const hasOpeningBalance = u.openingBalance !== undefined;
+            const hasOpeningBalanceDate = u.openingBalanceDate !== undefined;
+            if (!hasCondicionIva && !hasPriceList && !hasOpeningBalance && !hasOpeningBalanceDate) {
+                skipped++;
+                continue;
+            }
+            if ((hasOpeningBalance || hasOpeningBalanceDate) && !isAdmin) {
+                errors.push({ row: rowNum, message: 'Solo administradores pueden modificar el saldo inicial' });
+                continue;
+            }
+            const customerId = yield findCustomerIdForBulkImport({
+                cuit,
+                email,
+                businessName,
+                legacyCode,
+                sellerId: sellerScope,
+            });
+            if (!customerId) {
+                notFound++;
+                continue;
+            }
+            const setClauses = [];
+            const params = [];
+            if (hasCondicionIva) {
+                setClauses.push('condicion_iva = ?');
+                params.push(((_e = u.condicionIva) !== null && _e !== void 0 ? _e : '').toString().trim() || null);
+            }
+            if (hasPriceList) {
+                const plRaw = ((_f = u.priceList) !== null && _f !== void 0 ? _f : '').toString().trim();
+                if (!plRaw) {
+                    setClauses.push('price_list_id = ?');
+                    params.push(null);
+                }
+                else {
+                    const plId = yield resolvePriceListIdFromImport(plRaw, priceListCache);
+                    if (plId === 'NOT_FOUND') {
+                        errors.push({ row: rowNum, message: `Lista de precios no encontrada: "${plRaw}"` });
+                        continue;
+                    }
+                    setClauses.push('price_list_id = ?');
+                    params.push(plId);
+                }
+            }
+            if (hasOpeningBalance) {
+                const ob = (0, customerOpeningBalance_1.parseOpeningBalanceInput)(u.openingBalance);
+                if (u.openingBalance != null && String(u.openingBalance).trim() !== '' && ob === null) {
+                    errors.push({ row: rowNum, message: 'Saldo inicio inválido' });
+                    continue;
+                }
+                setClauses.push('opening_balance = ?');
+                params.push(ob);
+            }
+            if (hasOpeningBalanceDate) {
+                const obd = (0, customerOpeningBalance_1.parseOpeningBalanceDateInput)(u.openingBalanceDate);
+                if (u.openingBalanceDate != null && u.openingBalanceDate !== '' && obd === null) {
+                    errors.push({ row: rowNum, message: 'Fecha saldo inicio inválida (use YYYY-MM-DD o DD/MM/YYYY)' });
+                    continue;
+                }
+                setClauses.push('opening_balance_date = ?');
+                params.push(obd);
+            }
+            if (setClauses.length === 0) {
+                skipped++;
+                continue;
+            }
+            params.push(customerId);
+            yield (0, db_1.execute)(`UPDATE customers SET ${setClauses.join(', ')} WHERE id = ?`, params);
+            updated++;
+        }
+        res.json({ updated, notFound, skipped, errors });
+    }
+    catch (error) {
+        console.error('bulkUpdateCustomerFields:', error);
+        res.status(500).json({ message: 'Error actualizando clientes en lote' });
+    }
+});
+exports.bulkUpdateCustomerFields = bulkUpdateCustomerFields;
 function roleCanViewSaldos(role) {
     return role === 'ADMIN' || role === 'SELLER' || role === 'WAREHOUSE' || role === 'DEPOSITO';
 }

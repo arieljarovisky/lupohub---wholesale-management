@@ -41,6 +41,57 @@ export function publicStatusFromManualStatus(status: ExpressTrackingStatus): {
   return { status, statusLabel: expressTrackingStatusLabel(status) };
 }
 
+export type ConfirmExpressDeliveryResult =
+  | { ok: true; alreadyDelivered: true; trackingCode: string; orderNumber: string | null }
+  | { ok: true; alreadyDelivered: false; trackingCode: string; orderNumber: string | null; deliveredAt: string }
+  | { ok: false; reason: 'not_found' | 'invalid_code' | 'cancelled' };
+
+/** Marca un envío express como entregado por código LHE (uso del repartidor vía QR). */
+export async function confirmExpressDeliveryByTrackingCode(
+  trackingCodeRaw: string,
+  deps: {
+    getRow: (code: string) => Promise<{
+      external_order_id: string;
+      order_number: string | null;
+      tracking_code: string;
+      manual_status: string | null;
+    } | null | undefined>;
+    updateDelivered: (code: string) => Promise<void>;
+  }
+): Promise<ConfirmExpressDeliveryResult> {
+  const trackingCode = String(trackingCodeRaw ?? '').trim().toUpperCase();
+  if (!/^LHE\d{8}$/i.test(trackingCode)) {
+    return { ok: false, reason: 'invalid_code' };
+  }
+
+  const row = await deps.getRow(trackingCode);
+  if (!row?.tracking_code) {
+    return { ok: false, reason: 'not_found' };
+  }
+
+  const currentStatus = String(row.manual_status || '').toLowerCase();
+  if (currentStatus === 'cancelled') {
+    return { ok: false, reason: 'cancelled' };
+  }
+  if (currentStatus === 'delivered') {
+    return {
+      ok: true,
+      alreadyDelivered: true,
+      trackingCode: String(row.tracking_code).toUpperCase(),
+      orderNumber: row.order_number || null,
+    };
+  }
+
+  await deps.updateDelivered(trackingCode);
+  return {
+    ok: true,
+    alreadyDelivered: false,
+    trackingCode: String(row.tracking_code).toUpperCase(),
+    orderNumber: row.order_number || null,
+    deliveredAt: new Date().toISOString(),
+  };
+}
+
 export function buildManualTrackingEvents(
   manualStatus: ExpressTrackingStatus,
   opts: {

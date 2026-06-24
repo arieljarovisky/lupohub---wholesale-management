@@ -1,8 +1,9 @@
 import { Request, Response } from 'express';
 import axios from 'axios';
-import { get } from '../database/db';
+import { get, execute } from '../database/db';
 import {
   buildManualTrackingEvents,
+  confirmExpressDeliveryByTrackingCode,
   expressTrackingStatusLabel,
   isExpressTrackingStatus,
   publicStatusFromManualStatus,
@@ -249,5 +250,281 @@ export const getPublicTrackingByCode = async (req: Request, res: Response) => {
     return res.status(status).json({
       message: error?.message || 'Error consultando el seguimiento',
     });
+  }
+};
+
+async function loadTrackingRowByCode(trackingCode: string) {
+  return get(
+    `SELECT external_order_id, order_number, tracking_code, manual_status, manual_status_updated_at, created_at
+     FROM tiendanube_express_tracking
+     WHERE UPPER(tracking_code) = ?`,
+    [trackingCode]
+  );
+}
+
+function escHtml(s: unknown): string {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function buildDeliveryPageHtml(opts: {
+  trackingCode: string;
+  orderNumber: string;
+  destinationCity: string | null;
+  customerName: string | null;
+  status: 'pending' | 'delivered' | 'cancelled' | 'invalid' | 'not_found';
+  postUrl: string;
+}): string {
+  const { trackingCode, orderNumber, destinationCity, customerName, status, postUrl } = opts;
+  const title =
+    status === 'delivered'
+      ? 'Entrega confirmada'
+      : status === 'cancelled'
+        ? 'Pedido cancelado'
+        : status === 'not_found' || status === 'invalid'
+          ? 'Código no válido'
+          : 'Confirmar entrega';
+
+  const bodyContent =
+    status === 'delivered'
+      ? `<div class="icon ok">✓</div>
+         <p class="lead">El envío <strong>${escHtml(trackingCode)}</strong> ya está marcado como entregado.</p>`
+      : status === 'cancelled'
+        ? `<div class="icon warn">!</div>
+           <p class="lead">Este pedido fue cancelado y no puede confirmarse como entrega.</p>`
+        : status === 'not_found' || status === 'invalid'
+          ? `<div class="icon warn">?</div>
+             <p class="lead">No encontramos un envío con ese código. Verificá que el QR sea de una etiqueta express válida.</p>`
+          : `<p class="lead">Pedido <strong>#${escHtml(orderNumber)}</strong></p>
+             ${customerName ? `<p class="meta">${escHtml(customerName)}</p>` : ''}
+             ${destinationCity ? `<p class="meta">${escHtml(destinationCity)}</p>` : ''}
+             <p class="code">${escHtml(trackingCode)}</p>
+             <button type="button" class="btn" id="confirmBtn">Confirmar entrega</button>
+             <p class="hint" id="hint">Al confirmar, el cliente verá el pedido como entregado.</p>
+             <div class="result" id="result" hidden></div>`;
+
+  const script =
+    status === 'pending'
+      ? `<script>
+(function () {
+  var btn = document.getElementById('confirmBtn');
+  var hint = document.getElementById('hint');
+  var result = document.getElementById('result');
+  if (!btn) return;
+  btn.addEventListener('click', function () {
+    btn.disabled = true;
+    btn.textContent = 'Confirmando…';
+    hint.textContent = '';
+    fetch(${JSON.stringify(postUrl)}, { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.data && res.data.message ? res.data.message : 'No se pudo confirmar');
+        result.hidden = false;
+        result.className = 'result ok';
+        result.innerHTML = '<strong>✓ Entrega confirmada</strong><br/>El envío quedó cerrado correctamente.';
+        btn.style.display = 'none';
+        document.title = 'Entrega confirmada';
+      })
+      .catch(function (err) {
+        btn.disabled = false;
+        btn.textContent = 'Confirmar entrega';
+        hint.textContent = err.message || 'Error al confirmar. Intentá de nuevo.';
+        hint.style.color = '#fca5a5';
+      });
+  });
+})();
+</script>`
+      : '';
+
+  return `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>${escHtml(title)}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+      background: linear-gradient(160deg, #0f172a 0%, #1e293b 100%);
+      color: #f8fafc; display: flex; align-items: center; justify-content: center; padding: 20px;
+    }
+    .card {
+      width: 100%; max-width: 400px; background: rgba(15,23,42,0.92); border: 1px solid rgba(148,163,184,0.25);
+      border-radius: 20px; padding: 24px 20px; text-align: center; box-shadow: 0 20px 50px rgba(0,0,0,0.35);
+    }
+    .brand { font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: #94a3b8; margin-bottom: 8px; }
+    h1 { margin: 0 0 16px; font-size: 22px; font-weight: 800; }
+    .lead { margin: 0 0 8px; font-size: 16px; line-height: 1.45; color: #e2e8f0; }
+    .meta { margin: 4px 0; font-size: 14px; color: #94a3b8; }
+    .code { margin: 14px 0 20px; font-family: ui-monospace, monospace; font-size: 18px; font-weight: 800; letter-spacing: 0.08em; color: #67e8f9; }
+    .btn {
+      width: 100%; border: none; border-radius: 14px; padding: 16px 20px; font-size: 17px; font-weight: 800;
+      background: linear-gradient(135deg, #059669, #10b981); color: #fff; cursor: pointer;
+      box-shadow: 0 8px 24px rgba(16,185,129,0.35);
+    }
+    .btn:disabled { opacity: 0.65; cursor: wait; }
+    .hint { margin: 12px 0 0; font-size: 12px; color: #64748b; line-height: 1.4; }
+    .icon { width: 56px; height: 56px; margin: 0 auto 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 900; }
+    .icon.ok { background: rgba(16,185,129,0.2); color: #34d399; }
+    .icon.warn { background: rgba(245,158,11,0.2); color: #fbbf24; }
+    .result { margin-top: 16px; padding: 12px; border-radius: 12px; font-size: 14px; line-height: 1.45; }
+    .result.ok { background: rgba(16,185,129,0.15); border: 1px solid rgba(52,211,153,0.35); color: #a7f3d0; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">Envío express</div>
+    <h1>${escHtml(title)}</h1>
+    ${bodyContent}
+  </div>
+  ${script}
+</body>
+</html>`;
+}
+
+/**
+ * Página móvil para repartidor: escanea QR de la etiqueta y confirma entrega.
+ * GET /api/public/entrega/:trackingCode
+ */
+export const getPublicDeliveryPage = async (req: Request, res: Response) => {
+  const trackingCode = normalizeTrackingCodeInput(req.params.trackingCode);
+  const postUrl = `/api/public/entrega/${encodeURIComponent(trackingCode)}`;
+
+  if (!trackingCode) {
+    return res.status(400).send(buildDeliveryPageHtml({
+      trackingCode: '',
+      orderNumber: '',
+      destinationCity: null,
+      customerName: null,
+      status: 'invalid',
+      postUrl,
+    }));
+  }
+  if (!isValidTrackingCode(trackingCode)) {
+    return res.status(400).send(buildDeliveryPageHtml({
+      trackingCode,
+      orderNumber: '',
+      destinationCity: null,
+      customerName: null,
+      status: 'invalid',
+      postUrl,
+    }));
+  }
+
+  try {
+    const row = await loadTrackingRowByCode(trackingCode);
+    if (!row?.tracking_code) {
+      return res.status(404).send(buildDeliveryPageHtml({
+        trackingCode,
+        orderNumber: '',
+        destinationCity: null,
+        customerName: null,
+        status: 'not_found',
+        postUrl,
+      }));
+    }
+
+    const manualStatus = String(row.manual_status || '').toLowerCase();
+    if (manualStatus === 'cancelled') {
+      return res.status(400).send(buildDeliveryPageHtml({
+        trackingCode: String(row.tracking_code).toUpperCase(),
+        orderNumber: String(row.order_number || ''),
+        destinationCity: null,
+        customerName: null,
+        status: 'cancelled',
+        postUrl,
+      }));
+    }
+    if (manualStatus === 'delivered') {
+      return res.send(buildDeliveryPageHtml({
+        trackingCode: String(row.tracking_code).toUpperCase(),
+        orderNumber: String(row.order_number || ''),
+        destinationCity: null,
+        customerName: null,
+        status: 'delivered',
+        postUrl,
+      }));
+    }
+
+    let destinationCity: string | null = null;
+    let customerName: string | null = null;
+    try {
+      const order = await fetchTiendaNubeOrder(String(row.external_order_id));
+      destinationCity = publicCityFromOrder(order);
+      customerName = String(order.shipping_address?.name || order.contact_name || '').trim() || null;
+    } catch {
+      /* datos TN opcionales para la pantalla */
+    }
+
+    return res.send(buildDeliveryPageHtml({
+      trackingCode: String(row.tracking_code).toUpperCase(),
+      orderNumber: String(row.order_number || ''),
+      destinationCity,
+      customerName,
+      status: 'pending',
+      postUrl,
+    }));
+  } catch (error: any) {
+    console.error('getPublicDeliveryPage:', error?.message || error);
+    return res.status(500).send(buildDeliveryPageHtml({
+      trackingCode,
+      orderNumber: '',
+      destinationCity: null,
+      customerName: null,
+      status: 'not_found',
+      postUrl,
+    }));
+  }
+};
+
+/**
+ * Confirma entrega express (repartidor).
+ * POST /api/public/entrega/:trackingCode
+ */
+export const confirmPublicDelivery = async (req: Request, res: Response) => {
+  const trackingCode = normalizeTrackingCodeInput(req.params.trackingCode);
+  if (!trackingCode) {
+    return res.status(400).json({ message: 'Código de seguimiento requerido' });
+  }
+
+  try {
+    const result = await confirmExpressDeliveryByTrackingCode(trackingCode, {
+      getRow: async (code) => loadTrackingRowByCode(code),
+      updateDelivered: async (code) => {
+        await execute(
+          `UPDATE tiendanube_express_tracking
+           SET manual_status = 'delivered', manual_status_updated_at = NOW()
+           WHERE UPPER(tracking_code) = ?`,
+          [code]
+        );
+      },
+    });
+
+    if (!result.ok) {
+      const messages: Record<string, string> = {
+        invalid_code: 'Código de seguimiento inválido',
+        not_found: 'No encontramos ese código de seguimiento',
+        cancelled: 'Este pedido está cancelado',
+      };
+      const status = result.reason === 'not_found' ? 404 : 400;
+      return res.status(status).json({ message: messages[result.reason] || 'No se pudo confirmar la entrega' });
+    }
+
+    return res.json({
+      ok: true,
+      alreadyDelivered: result.alreadyDelivered,
+      trackingCode: result.trackingCode,
+      orderNumber: result.orderNumber,
+      deliveredAt: result.alreadyDelivered ? null : result.deliveredAt,
+      status: 'delivered',
+      statusLabel: expressTrackingStatusLabel('delivered'),
+    });
+  } catch (error: any) {
+    console.error('confirmPublicDelivery:', error?.message || error);
+    return res.status(500).json({ message: 'Error al confirmar la entrega' });
   }
 };

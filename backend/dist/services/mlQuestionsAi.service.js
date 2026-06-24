@@ -13,14 +13,22 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ensureMlQuestionsAiConfigTable = ensureMlQuestionsAiConfigTable;
+exports.ensureMlQuestionsAiSuggestionsTable = ensureMlQuestionsAiSuggestionsTable;
 exports.getMlQuestionsAiConfigRow = getMlQuestionsAiConfigRow;
 exports.saveMlQuestionsAiConfig = saveMlQuestionsAiConfig;
+exports.getSuggestionByQuestionId = getSuggestionByQuestionId;
+exports.getSuggestionsByQuestionIds = getSuggestionsByQuestionIds;
+exports.rejectSuggestion = rejectSuggestion;
+exports.getMlQuestionsAiMetrics = getMlQuestionsAiMetrics;
 exports.openAiConfigured = openAiConfigured;
 exports.llmConfigured = llmConfigured;
 exports.getLlmStatus = getLlmStatus;
 exports.buildLocalCatalogSummaryForMlQuestions = buildLocalCatalogSummaryForMlQuestions;
 exports.fetchQuestion = fetchQuestion;
 exports.searchUnansweredQuestions = searchUnansweredQuestions;
+exports.publishAnswerToMl = publishAnswerToMl;
+exports.suggestForQuestion = suggestForQuestion;
+exports.approveAndSendSuggestion = approveAndSendSuggestion;
 exports.processOneQuestion = processOneQuestion;
 exports.processUnansweredBatch = processUnansweredBatch;
 exports.runMlQuestionsAiIfEnabled = runMlQuestionsAiIfEnabled;
@@ -47,7 +55,8 @@ Reglas:
   2) mencioná hasta 3 opciones concretas (nombre/SKU/talle/color) que sí estén en catálogo,
   3) si no hay alternativas, decilo claramente.
 - Cuando afirmes que "sí hay", apoyate en datos visibles del catálogo. No inventes productos ni talles.
-- Si algo no figura en la guía de talles, la descripción ni el catálogo (envíos, garantías, plazos, políticas), no inventes: decí que no tenés ese dato y ofrecé canalizar por mensaje de compra o consulta en la publicación.
+- Si un detalle del producto (material, si enrolla/estira, composición, cuidados, etc.) NO figura en la guía de talles, la descripción ni el catálogo, BUSCÁ en internet por marca, modelo y nombre del artículo antes de responder. Usá resultados confiables (fabricante, tiendas oficiales, fichas técnicas). Solo si después de buscar no hay dato creíble, decilo con honestidad y ofrecé consultar por mensaje post-compra.
+- Para envíos, garantías, plazos de retiro o políticas del vendedor que no estén en la ficha, no inventes: decí que no tenés ese dato operativo y ofrecé canalizar por mensaje de compra.
 - No uses markdown ni emojis en exceso (como mucho uno).
 - Máximo ~1200 caracteres. Sin listas largas. Siempre cerrá oraciones: la respuesta debe ser un texto completo y útil, nunca truncada a mitad de idea.`;
 function ensureMlQuestionsAiConfigTable() {
@@ -56,33 +65,256 @@ function ensureMlQuestionsAiConfigTable() {
     CREATE TABLE IF NOT EXISTS ml_questions_ai_config (
       id INT PRIMARY KEY DEFAULT 1,
       enabled BOOLEAN DEFAULT 0,
+      mode VARCHAR(16) DEFAULT 'off',
       extra_system_prompt TEXT NULL,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
   `);
+        try {
+            yield (0, db_1.execute)(`ALTER TABLE ml_questions_ai_config ADD COLUMN mode VARCHAR(16) DEFAULT 'off'`);
+        }
+        catch (_a) {
+            /* columna ya existe */
+        }
     });
+}
+function ensureMlQuestionsAiSuggestionsTable() {
+    return __awaiter(this, void 0, void 0, function* () {
+        yield (0, db_1.execute)(`
+    CREATE TABLE IF NOT EXISTS ml_questions_ai_suggestions (
+      question_id VARCHAR(64) PRIMARY KEY,
+      item_id VARCHAR(64) NULL,
+      question_text TEXT NULL,
+      suggestion_text TEXT NOT NULL,
+      status VARCHAR(16) DEFAULT 'pending',
+      llm_provider VARCHAR(32) NULL,
+      sent_text TEXT NULL,
+      was_edited TINYINT NULL,
+      sent_source VARCHAR(16) NULL,
+      sent_at DATETIME NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `);
+        for (const col of [
+            'sent_text TEXT NULL',
+            'was_edited TINYINT NULL',
+            'sent_source VARCHAR(16) NULL',
+            'sent_at DATETIME NULL'
+        ]) {
+            try {
+                yield (0, db_1.execute)(`ALTER TABLE ml_questions_ai_suggestions ADD COLUMN ${col}`);
+            }
+            catch (_a) {
+                /* columna ya existe */
+            }
+        }
+    });
+}
+function normalizeMode(raw, enabledFallback) {
+    const s = String(raw || '').trim().toLowerCase();
+    if (s === 'suggest' || s === 'auto' || s === 'off')
+        return s;
+    if (enabledFallback === true)
+        return 'auto';
+    return 'off';
 }
 function getMlQuestionsAiConfigRow() {
     return __awaiter(this, void 0, void 0, function* () {
         var _a;
         yield ensureMlQuestionsAiConfigTable();
-        const row = yield (0, db_1.get)(`SELECT enabled, extra_system_prompt AS extraSystemPrompt FROM ml_questions_ai_config WHERE id = 1`);
+        const row = yield (0, db_1.get)(`SELECT enabled, mode, extra_system_prompt AS extraSystemPrompt FROM ml_questions_ai_config WHERE id = 1`);
         if (!row) {
-            yield (0, db_1.execute)(`INSERT INTO ml_questions_ai_config (id, enabled, extra_system_prompt) VALUES (1, 0, NULL)`);
-            return { enabled: false, extraSystemPrompt: null };
+            yield (0, db_1.execute)(`INSERT INTO ml_questions_ai_config (id, enabled, mode, extra_system_prompt) VALUES (1, 0, 'off', NULL)`);
+            return { enabled: false, mode: 'off', extraSystemPrompt: null };
         }
+        const enabled = row.enabled === 1 || row.enabled === true;
+        const mode = normalizeMode(row.mode, enabled);
         return {
-            enabled: row.enabled === 1 || row.enabled === true,
+            enabled: mode !== 'off',
+            mode,
             extraSystemPrompt: (_a = row.extraSystemPrompt) !== null && _a !== void 0 ? _a : null
         };
     });
 }
-function saveMlQuestionsAiConfig(enabled, extraSystemPrompt) {
+function saveMlQuestionsAiConfig(params) {
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b;
         yield ensureMlQuestionsAiConfigTable();
-        yield (0, db_1.execute)(`INSERT INTO ml_questions_ai_config (id, enabled, extra_system_prompt)
-     VALUES (1, ?, ?)
-     ON DUPLICATE KEY UPDATE enabled = VALUES(enabled), extra_system_prompt = VALUES(extra_system_prompt)`, [enabled ? 1 : 0, (extraSystemPrompt === null || extraSystemPrompt === void 0 ? void 0 : extraSystemPrompt.trim()) || null]);
+        const current = yield getMlQuestionsAiConfigRow();
+        let mode = (_a = params.mode) !== null && _a !== void 0 ? _a : current.mode;
+        if (params.enabled != null && params.mode == null) {
+            mode = params.enabled ? (current.mode === 'off' ? 'auto' : current.mode) : 'off';
+        }
+        if (mode !== 'off' && mode !== 'suggest' && mode !== 'auto')
+            mode = 'off';
+        const enabled = mode !== 'off';
+        const extra = params.extraSystemPrompt !== undefined ? ((_b = params.extraSystemPrompt) === null || _b === void 0 ? void 0 : _b.trim()) || null : current.extraSystemPrompt;
+        yield (0, db_1.execute)(`INSERT INTO ml_questions_ai_config (id, enabled, mode, extra_system_prompt)
+     VALUES (1, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE enabled = VALUES(enabled), mode = VALUES(mode), extra_system_prompt = VALUES(extra_system_prompt)`, [enabled ? 1 : 0, mode, extra]);
+    });
+}
+function mapSuggestionRow(row) {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
+    return {
+        questionId: String((_a = row.questionId) !== null && _a !== void 0 ? _a : row.question_id),
+        itemId: (_c = (_b = row.itemId) !== null && _b !== void 0 ? _b : row.item_id) !== null && _c !== void 0 ? _c : null,
+        questionText: (_e = (_d = row.questionText) !== null && _d !== void 0 ? _d : row.question_text) !== null && _e !== void 0 ? _e : null,
+        suggestionText: String((_g = (_f = row.suggestionText) !== null && _f !== void 0 ? _f : row.suggestion_text) !== null && _g !== void 0 ? _g : ''),
+        status: (row.status || 'pending'),
+        llmProvider: (_j = (_h = row.llmProvider) !== null && _h !== void 0 ? _h : row.llm_provider) !== null && _j !== void 0 ? _j : null,
+        createdAt: (_l = (_k = row.createdAt) !== null && _k !== void 0 ? _k : row.created_at) !== null && _l !== void 0 ? _l : null,
+        updatedAt: (_o = (_m = row.updatedAt) !== null && _m !== void 0 ? _m : row.updated_at) !== null && _o !== void 0 ? _o : null
+    };
+}
+function getSuggestionByQuestionId(questionId) {
+    return __awaiter(this, void 0, void 0, function* () {
+        yield ensureMlQuestionsAiSuggestionsTable();
+        const row = yield (0, db_1.get)(`SELECT question_id AS questionId, item_id AS itemId, question_text AS questionText,
+            suggestion_text AS suggestionText, status, llm_provider AS llmProvider,
+            created_at AS createdAt, updated_at AS updatedAt
+     FROM ml_questions_ai_suggestions WHERE question_id = ?`, [questionId]);
+        return row ? mapSuggestionRow(row) : null;
+    });
+}
+function getSuggestionsByQuestionIds(ids) {
+    return __awaiter(this, void 0, void 0, function* () {
+        yield ensureMlQuestionsAiSuggestionsTable();
+        const map = new Map();
+        const clean = [...new Set(ids.map((id) => String(id).trim()).filter(Boolean))];
+        if (!clean.length)
+            return map;
+        const placeholders = clean.map(() => '?').join(',');
+        const rows = yield (0, db_1.query)(`SELECT question_id AS questionId, item_id AS itemId, question_text AS questionText,
+            suggestion_text AS suggestionText, status, llm_provider AS llmProvider,
+            created_at AS createdAt, updated_at AS updatedAt
+     FROM ml_questions_ai_suggestions WHERE question_id IN (${placeholders})`, clean);
+        for (const row of rows) {
+            const s = mapSuggestionRow(row);
+            map.set(s.questionId, s);
+        }
+        return map;
+    });
+}
+function upsertSuggestion(params) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d;
+        yield ensureMlQuestionsAiSuggestionsTable();
+        yield (0, db_1.execute)(`INSERT INTO ml_questions_ai_suggestions
+       (question_id, item_id, question_text, suggestion_text, status, llm_provider)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE
+       item_id = VALUES(item_id),
+       question_text = VALUES(question_text),
+       suggestion_text = VALUES(suggestion_text),
+       status = VALUES(status),
+       llm_provider = VALUES(llm_provider)`, [
+            params.questionId,
+            (_a = params.itemId) !== null && _a !== void 0 ? _a : null,
+            (_b = params.questionText) !== null && _b !== void 0 ? _b : null,
+            params.suggestionText,
+            (_c = params.status) !== null && _c !== void 0 ? _c : 'pending',
+            (_d = params.llmProvider) !== null && _d !== void 0 ? _d : null
+        ]);
+    });
+}
+function rejectSuggestion(questionId) {
+    return __awaiter(this, void 0, void 0, function* () {
+        yield ensureMlQuestionsAiSuggestionsTable();
+        yield (0, db_1.execute)(`UPDATE ml_questions_ai_suggestions SET status = 'rejected' WHERE question_id = ?`, [questionId]);
+    });
+}
+function normalizeTextForCompare(s) {
+    return s.trim().replace(/\s+/g, ' ');
+}
+function recordSuggestionSent(questionId, params) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a;
+        yield ensureMlQuestionsAiSuggestionsTable();
+        let wasEdited = null;
+        if (params.sentSource === 'review' && params.originalSuggestionText != null) {
+            wasEdited =
+                normalizeTextForCompare(params.originalSuggestionText) === normalizeTextForCompare(params.sentText) ? 0 : 1;
+        }
+        const existing = yield (0, db_1.get)(`SELECT question_id FROM ml_questions_ai_suggestions WHERE question_id = ?`, [questionId]);
+        if (!existing) {
+            yield (0, db_1.execute)(`INSERT INTO ml_questions_ai_suggestions
+         (question_id, suggestion_text, status, sent_text, was_edited, sent_source, sent_at)
+       VALUES (?, ?, 'sent', ?, ?, ?, NOW())`, [
+                questionId,
+                (_a = params.originalSuggestionText) !== null && _a !== void 0 ? _a : params.sentText,
+                params.sentText,
+                wasEdited,
+                params.sentSource
+            ]);
+            return;
+        }
+        yield (0, db_1.execute)(`UPDATE ml_questions_ai_suggestions
+     SET status = 'sent', sent_text = ?, was_edited = ?, sent_source = ?, sent_at = NOW()
+     WHERE question_id = ?`, [params.sentText, wasEdited, params.sentSource, questionId]);
+    });
+}
+function metricsReadyThresholds() {
+    const minSends = Math.max(5, parseInt(process.env.ML_QUESTIONS_AI_AUTO_READY_MIN_SENDS || '15', 10) || 15);
+    const ratePct = parseFloat(process.env.ML_QUESTIONS_AI_AUTO_READY_RATE || '85') || 85;
+    const rate = Math.min(100, Math.max(50, ratePct)) / 100;
+    return { minSends, rate };
+}
+function getMlQuestionsAiMetrics() {
+    return __awaiter(this, void 0, void 0, function* () {
+        yield ensureMlQuestionsAiSuggestionsTable();
+        const row = yield (0, db_1.get)(`
+    SELECT
+      COUNT(*) AS totalGenerated,
+      SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
+      SUM(CASE WHEN status = 'sent' AND sent_source = 'review' AND was_edited = 0 THEN 1 ELSE 0 END) AS sentUnchanged,
+      SUM(CASE WHEN status = 'sent' AND sent_source = 'review' AND was_edited = 1 THEN 1 ELSE 0 END) AS sentEdited,
+      SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) AS rejected,
+      SUM(CASE WHEN status = 'sent' AND sent_source = 'auto' THEN 1 ELSE 0 END) AS autoSent
+    FROM ml_questions_ai_suggestions
+  `);
+        const totalGenerated = Number(row === null || row === void 0 ? void 0 : row.totalGenerated) || 0;
+        const pending = Number(row === null || row === void 0 ? void 0 : row.pending) || 0;
+        const sentUnchanged = Number(row === null || row === void 0 ? void 0 : row.sentUnchanged) || 0;
+        const sentEdited = Number(row === null || row === void 0 ? void 0 : row.sentEdited) || 0;
+        const rejected = Number(row === null || row === void 0 ? void 0 : row.rejected) || 0;
+        const autoSent = Number(row === null || row === void 0 ? void 0 : row.autoSent) || 0;
+        const reviewSentTotal = sentUnchanged + sentEdited;
+        const unchangedRate = reviewSentTotal > 0 ? Math.round((sentUnchanged / reviewSentTotal) * 1000) / 10 : null;
+        const { minSends, rate } = metricsReadyThresholds();
+        const readyForAuto = reviewSentTotal >= minSends && unchangedRate != null && unchangedRate / 100 >= rate;
+        let recommendation;
+        if (reviewSentTotal === 0) {
+            recommendation =
+                'Todavía no hay respuestas enviadas tras revisión. Usá modo sugerencias y aprobá algunas preguntas para medir la calidad.';
+        }
+        else if (reviewSentTotal < minSends) {
+            recommendation = `Llevás ${reviewSentTotal} envío(s) revisado(s). Con ${minSends} o más podremos recomendar el modo automático.`;
+        }
+        else if (readyForAuto) {
+            recommendation = `El ${unchangedRate}% se envió sin editar. Buen momento para probar respuesta automática.`;
+        }
+        else if (unchangedRate != null && unchangedRate >= 70) {
+            recommendation = `El ${unchangedRate}% se envió sin editar. Cerca del objetivo (${Math.round(rate * 100)}%). Revisá las que editaste y ajustá el prompt si hace falta.`;
+        }
+        else {
+            recommendation = `Solo el ${unchangedRate !== null && unchangedRate !== void 0 ? unchangedRate : 0}% se envió sin editar. Seguí en modo sugerencias y refiná las instrucciones extra de la IA.`;
+        }
+        return {
+            totalGenerated,
+            pending,
+            sentUnchanged,
+            sentEdited,
+            rejected,
+            autoSent,
+            reviewSentTotal,
+            unchangedRate,
+            minReviewSendsForReady: minSends,
+            readyRateThreshold: Math.round(rate * 100),
+            readyForAuto,
+            recommendation
+        };
     });
 }
 function hasGeminiKey() {
@@ -94,9 +326,21 @@ function hasGroqKey() {
 function hasOpenAiKey() {
     return !!(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY.trim());
 }
-/** Orden por defecto: primero opciones con tier gratuito. */
+function ollamaBaseUrl() {
+    const raw = (process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434').trim();
+    return raw.replace(/\/$/, '');
+}
+function hasOllama() {
+    const explicit = (process.env.LLM_PROVIDER || process.env.AI_PROVIDER || '').trim().toLowerCase() === 'ollama';
+    if (explicit)
+        return true;
+    return !!(process.env.OLLAMA_BASE_URL && process.env.OLLAMA_BASE_URL.trim());
+}
+/** Orden por defecto: primero opciones con tier gratuito en la nube; Ollama si es el único configurado. */
 function resolveProvider() {
     const explicit = (process.env.LLM_PROVIDER || process.env.AI_PROVIDER || '').trim().toLowerCase();
+    if (explicit === 'ollama' && hasOllama())
+        return 'ollama';
     if (explicit === 'gemini' && hasGeminiKey())
         return 'gemini';
     if (explicit === 'groq' && hasGroqKey())
@@ -111,6 +355,8 @@ function resolveProvider() {
         return 'groq';
     if (hasOpenAiKey())
         return 'openai';
+    if (hasOllama())
+        return 'ollama';
     return null;
 }
 /** Compatibilidad: “hay algún LLM configurado”. */
@@ -121,11 +367,13 @@ function llmConfigured() {
     return resolveProvider() !== null;
 }
 function getLlmStatus() {
+    var _a;
     const provider = resolveProvider();
     const labels = {
         gemini: 'Google Gemini (gratis en AI Studio)',
         groq: 'Groq (gratis)',
-        openai: 'OpenAI (de pago)'
+        openai: 'OpenAI (de pago)',
+        ollama: `Ollama local (${((_a = process.env.OLLAMA_MODEL) === null || _a === void 0 ? void 0 : _a.trim()) || 'llama3.2'})`
     };
     return {
         configured: provider !== null,
@@ -234,8 +482,49 @@ function getCachedCatalogSummary() {
     });
 }
 const ML_SIZE_CHART_MAX_CHARS = 14000;
+function webSearchEnabled() {
+    const v = (process.env.ML_QUESTIONS_AI_WEB_SEARCH || 'true').trim().toLowerCase();
+    return v !== '0' && v !== 'false' && v !== 'no';
+}
+/** Atributos ML útiles para buscar el producto en internet (marca, modelo, etc.). */
+function extractItemSearchHints(item) {
+    const lines = [];
+    const attrs = Array.isArray(item === null || item === void 0 ? void 0 : item.attributes) ? item.attributes : [];
+    const pick = (ids) => {
+        var _a, _b;
+        for (const id of ids) {
+            const a = attrs.find((x) => String((x === null || x === void 0 ? void 0 : x.id) || '').toUpperCase() === id.toUpperCase());
+            if (!a)
+                continue;
+            const name = (_a = a.value_name) !== null && _a !== void 0 ? _a : a.value_id;
+            if (name != null && String(name).trim())
+                return String(name).trim();
+            if (Array.isArray(a.values) && ((_b = a.values[0]) === null || _b === void 0 ? void 0 : _b.name))
+                return String(a.values[0].name).trim();
+        }
+        return null;
+    };
+    const brand = pick(['BRAND', 'MARCA']);
+    const model = pick(['MODEL', 'MODELO']);
+    const line = pick(['LINE', 'LINEA']);
+    const gender = pick(['GENDER', 'GÉNERO', 'GENERO']);
+    const material = pick(['MATERIAL', 'MAIN_MATERIAL', 'FABRIC']);
+    if (brand)
+        lines.push(`Marca: ${brand}`);
+    if (model)
+        lines.push(`Modelo: ${model}`);
+    if (line)
+        lines.push(`Línea: ${line}`);
+    if (gender)
+        lines.push(`Género: ${gender}`);
+    if (material)
+        lines.push(`Material: ${material}`);
+    if (item === null || item === void 0 ? void 0 : item.category_id)
+        lines.push(`Categoría ML: ${item.category_id}`);
+    return lines.length ? lines.join('\n') : '';
+}
 function buildMlQuestionUserPrompt(params) {
-    var _a, _b;
+    var _a, _b, _c;
     const cat = (_a = params.catalogSummary) === null || _a === void 0 ? void 0 : _a.trim();
     const catBlock = cat
         ? `Catálogo LupoHub (inventario interno; puede estar incompleto o truncado):\n${cat}\n\n---\n\n`
@@ -244,56 +533,108 @@ function buildMlQuestionUserPrompt(params) {
     const guideBlock = guide
         ? `Guía de talles (Mercado Libre, publicación actual):\n${guide}\n\n---\n\n`
         : '';
+    const hints = (_c = params.itemSearchHints) === null || _c === void 0 ? void 0 : _c.trim();
+    const hintsBlock = hints ? `Datos del ítem para buscar en internet si hace falta:\n${hints}\n\n` : '';
     return (`${catBlock}` +
         `Publicación de Mercado Libre donde está la pregunta (ID ítem: ${params.itemListingId}):\n` +
         `Título: ${params.itemTitle}\n\n` +
+        `${hintsBlock}` +
         `${guideBlock}` +
         `Descripción (texto plano):\n${params.description || '(sin descripción)'}\n\n` +
-        `Pregunta del comprador:\n${params.questionText}`);
+        `Pregunta del comprador:\n${params.questionText}\n\n` +
+        `(Si la respuesta no está en la ficha ni en el catálogo, buscá en internet el producto por título/marca/modelo antes de decir que no tenés el dato.)`);
+}
+function isGeminiToolConfigError(err) {
+    var _a, _b;
+    if (!axios_1.default.isAxiosError(err))
+        return false;
+    const st = (_a = err.response) === null || _a === void 0 ? void 0 : _a.status;
+    if (st === 400 || st === 422)
+        return true;
+    const msg = JSON.stringify(((_b = err.response) === null || _b === void 0 ? void 0 : _b.data) || '').toLowerCase();
+    return msg.includes('google_search') || msg.includes('tool') || msg.includes('googlesearch');
 }
 function callGeminiAnswer(params) {
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c, _d, _e, _f, _g;
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k;
         const key = (_a = process.env.GEMINI_API_KEY) === null || _a === void 0 ? void 0 : _a.trim();
         if (!key)
             throw new Error('GEMINI_API_KEY no configurada');
         const system = [DEFAULT_SYSTEM, (_b = params.extraSystem) === null || _b === void 0 ? void 0 : _b.trim()].filter(Boolean).join('\n\n');
         const user = params.userPrompt;
-        const body = {
-            systemInstruction: { parts: [{ text: system }] },
-            contents: [{ role: 'user', parts: [{ text: user }] }],
-            generationConfig: {
-                temperature: 0.4,
-                /** Gemini 2.5 puede usar parte del cupo en razonamiento interno; 1024 dejaba respuestas cortadas a mitad de frase. */
-                maxOutputTokens: 4096
-            }
-        };
+        const useWebSearch = webSearchEnabled();
+        const timeoutMs = useWebSearch ? 120000 : 60000;
         let lastErr;
         for (const model of geminiModelAttempts()) {
             const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
-            try {
-                const res = yield axios_1.default.post(url, body, {
-                    headers: { 'Content-Type': 'application/json' },
-                    timeout: 60000
+            const attempts = [];
+            if (useWebSearch) {
+                attempts.push({
+                    label: 'google_search',
+                    body: {
+                        systemInstruction: { parts: [{ text: system }] },
+                        contents: [{ role: 'user', parts: [{ text: user }] }],
+                        tools: [{ google_search: {} }],
+                        generationConfig: { temperature: 0.4, maxOutputTokens: 4096 }
+                    }
                 });
-                const cand = (_d = (_c = res.data) === null || _c === void 0 ? void 0 : _c.candidates) === null || _d === void 0 ? void 0 : _d[0];
-                const finish = cand === null || cand === void 0 ? void 0 : cand.finishReason;
-                if (finish && finish !== 'STOP') {
-                    console.warn(`[ML Questions AI] Gemini finishReason=${finish} (respuesta puede estar incompleta)`);
-                }
-                const block = finish && finish !== 'STOP' ? ` (${finish})` : '';
-                const text = ((_g = (_f = (_e = cand === null || cand === void 0 ? void 0 : cand.content) === null || _e === void 0 ? void 0 : _e.parts) === null || _f === void 0 ? void 0 : _f.map((p) => p.text || '').join('')) === null || _g === void 0 ? void 0 : _g.trim()) || '';
-                if (!text)
-                    throw new Error(`Gemini no devolvió texto${block}`);
-                return truncateAnswer(text);
+                attempts.push({
+                    label: 'googleSearch',
+                    body: {
+                        systemInstruction: { parts: [{ text: system }] },
+                        contents: [{ role: 'user', parts: [{ text: user }] }],
+                        tools: [{ googleSearch: {} }],
+                        generationConfig: { temperature: 0.4, maxOutputTokens: 4096 }
+                    }
+                });
             }
-            catch (err) {
-                lastErr = err;
-                if (isGeminiModelNotFound(err)) {
-                    console.warn(`[ML Questions AI] Modelo Gemini no disponible (${model}), probando siguiente…`);
-                    continue;
+            attempts.push({
+                label: 'plain',
+                body: {
+                    systemInstruction: { parts: [{ text: system }] },
+                    contents: [{ role: 'user', parts: [{ text: user }] }],
+                    generationConfig: { temperature: 0.4, maxOutputTokens: 4096 }
                 }
-                throw err;
+            });
+            for (const attempt of attempts) {
+                if (attempt.label !== 'plain' && !useWebSearch)
+                    continue;
+                try {
+                    const res = yield axios_1.default.post(url, attempt.body, {
+                        headers: { 'Content-Type': 'application/json' },
+                        timeout: timeoutMs
+                    });
+                    const cand = (_d = (_c = res.data) === null || _c === void 0 ? void 0 : _c.candidates) === null || _d === void 0 ? void 0 : _d[0];
+                    const finish = cand === null || cand === void 0 ? void 0 : cand.finishReason;
+                    if (finish && finish !== 'STOP') {
+                        console.warn(`[ML Questions AI] Gemini finishReason=${finish} (respuesta puede estar incompleta)`);
+                    }
+                    const grounding = (_g = (_f = (_e = res.data) === null || _e === void 0 ? void 0 : _e.candidates) === null || _f === void 0 ? void 0 : _f[0]) === null || _g === void 0 ? void 0 : _g.groundingMetadata;
+                    if (grounding && attempt.label !== 'plain') {
+                        const queries = (grounding === null || grounding === void 0 ? void 0 : grounding.webSearchQueries) || (grounding === null || grounding === void 0 ? void 0 : grounding.searchEntryPoint);
+                        console.log('[ML Questions AI] Gemini usó búsqueda web', queries ? JSON.stringify(queries).slice(0, 200) : '');
+                    }
+                    const block = finish && finish !== 'STOP' ? ` (${finish})` : '';
+                    const text = ((_k = (_j = (_h = cand === null || cand === void 0 ? void 0 : cand.content) === null || _h === void 0 ? void 0 : _h.parts) === null || _j === void 0 ? void 0 : _j.map((p) => p.text || '').join('')) === null || _k === void 0 ? void 0 : _k.trim()) || '';
+                    if (!text)
+                        throw new Error(`Gemini no devolvió texto${block}`);
+                    return truncateAnswer(text);
+                }
+                catch (err) {
+                    lastErr = err;
+                    if (attempt.label !== 'plain' && isGeminiToolConfigError(err)) {
+                        console.warn(`[ML Questions AI] Búsqueda web no disponible (${model}, ${attempt.label}), probando…`);
+                        continue;
+                    }
+                    if (isGeminiModelNotFound(err))
+                        break;
+                    if (attempt.label === 'plain')
+                        throw err;
+                }
+            }
+            if (isGeminiModelNotFound(lastErr)) {
+                console.warn(`[ML Questions AI] Modelo Gemini no disponible (${model}), probando siguiente…`);
+                continue;
             }
         }
         throw lastErr instanceof Error ? lastErr : new Error('Gemini: sin modelo disponible');
@@ -359,17 +700,43 @@ function callOpenAiAnswer(params) {
         return truncateAnswer(text);
     });
 }
+function callOllamaAnswer(params) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d, _e, _f, _g;
+        const model = ((_a = process.env.OLLAMA_MODEL) === null || _a === void 0 ? void 0 : _a.trim()) || 'llama3.2';
+        const system = [DEFAULT_SYSTEM, (_b = params.extraSystem) === null || _b === void 0 ? void 0 : _b.trim()].filter(Boolean).join('\n\n');
+        const url = `${ollamaBaseUrl()}/v1/chat/completions`;
+        const timeoutMs = Math.min(300000, Math.max(30000, parseInt(process.env.OLLAMA_TIMEOUT_MS || '120000', 10) || 120000));
+        const res = yield axios_1.default.post(url, {
+            model,
+            messages: [
+                { role: 'system', content: system },
+                { role: 'user', content: params.userPrompt }
+            ],
+            temperature: 0.4,
+            stream: false
+        }, {
+            headers: { 'Content-Type': 'application/json' },
+            timeout: timeoutMs
+        });
+        const text = (_g = (_f = (_e = (_d = (_c = res.data) === null || _c === void 0 ? void 0 : _c.choices) === null || _d === void 0 ? void 0 : _d[0]) === null || _e === void 0 ? void 0 : _e.message) === null || _f === void 0 ? void 0 : _f.content) === null || _g === void 0 ? void 0 : _g.trim();
+        if (!text)
+            throw new Error('Ollama no devolvió texto');
+        return truncateAnswer(text);
+    });
+}
 function generateLlmAnswer(params) {
     return __awaiter(this, void 0, void 0, function* () {
         var _a;
         const provider = resolveProvider();
         if (!provider) {
-            throw new Error('Ningún proveedor de IA configurado. Agregá GEMINI_API_KEY (recomendado, gratis), GROQ_API_KEY (gratis) u OPENAI_API_KEY en el servidor.');
+            throw new Error('Ningún proveedor de IA configurado. Opciones: GEMINI_API_KEY, GROQ_API_KEY, OPENAI_API_KEY, o Ollama local (LLM_PROVIDER=ollama).');
         }
         const userPrompt = buildMlQuestionUserPrompt({
             catalogSummary: params.catalogSummary,
             itemListingId: params.itemListingId,
             itemTitle: params.itemTitle,
+            itemSearchHints: params.itemSearchHints,
             description: params.description,
             sizeGuideFromMl: (_a = params.sizeGuideFromMl) !== null && _a !== void 0 ? _a : '',
             questionText: params.questionText
@@ -379,6 +746,8 @@ function generateLlmAnswer(params) {
             return callGeminiAnswer(common);
         if (provider === 'groq')
             return callGroqAnswer(common);
+        if (provider === 'ollama')
+            return callOllamaAnswer(common);
         return callOpenAiAnswer(common);
     });
 }
@@ -553,35 +922,143 @@ function isQuestionUnanswered(q) {
         return false;
     return true;
 }
-function processOneQuestion(accessToken, questionId, opts) {
+function loadQuestionContext(accessToken, questionId) {
     return __awaiter(this, void 0, void 0, function* () {
         const q = yield fetchQuestion(accessToken, questionId);
         if (!isQuestionUnanswered(q)) {
             return { questionId, status: 'skipped', reason: 'Ya respondida o cerrada' };
         }
-        const itemId = q.item_id;
+        const itemId = String(q.item_id || '').trim();
         const questionText = String(q.text || '').trim();
         if (!questionText) {
             return { questionId, status: 'skipped', reason: 'Pregunta vacía' };
         }
+        if (!itemId) {
+            return { questionId, status: 'skipped', reason: 'Sin publicación asociada' };
+        }
         const item = yield fetchItem(accessToken, itemId);
         const title = String((item === null || item === void 0 ? void 0 : item.title) || '(sin título)');
+        const itemSearchHints = extractItemSearchHints(item);
         const description = yield fetchDescription(accessToken, itemId);
         const sizeGridId = extractSizeGridIdFromItem(item);
         const sizeGuideFromMl = sizeGridId ? yield fetchMlSizeChartForPrompt(accessToken, sizeGridId) : '';
         const catalogSummary = yield getCachedCatalogSummary();
-        const answerText = yield generateLlmAnswer({
-            itemTitle: title,
-            description,
+        return {
+            questionId,
+            itemId,
             questionText,
-            extraSystem: opts === null || opts === void 0 ? void 0 : opts.extraSystemPrompt,
-            catalogSummary,
-            itemListingId: String(itemId),
-            sizeGuideFromMl
+            itemTitle: title,
+            itemSearchHints,
+            description,
+            sizeGuideFromMl,
+            catalogSummary
+        };
+    });
+}
+function generateAnswerFromContext(ctx, extraSystemPrompt) {
+    return __awaiter(this, void 0, void 0, function* () {
+        return generateLlmAnswer({
+            itemTitle: ctx.itemTitle,
+            itemSearchHints: ctx.itemSearchHints,
+            description: ctx.description,
+            questionText: ctx.questionText,
+            extraSystem: extraSystemPrompt,
+            catalogSummary: ctx.catalogSummary,
+            itemListingId: ctx.itemId,
+            sizeGuideFromMl: ctx.sizeGuideFromMl
         });
+    });
+}
+function publishAnswerToMl(accessToken, questionId, answerText, opts) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a;
+        const final = truncateAnswer(answerText);
         yield mlPost(accessToken, '/answers', {
             question_id: Number(questionId),
-            text: answerText
+            text: final
+        });
+        yield recordSuggestionSent(questionId, {
+            sentText: final,
+            originalSuggestionText: opts === null || opts === void 0 ? void 0 : opts.originalSuggestionText,
+            sentSource: (_a = opts === null || opts === void 0 ? void 0 : opts.sentSource) !== null && _a !== void 0 ? _a : 'review'
+        });
+    });
+}
+/** Genera sugerencia IA sin publicar en Mercado Libre. */
+function suggestForQuestion(accessToken, questionId, opts) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const loaded = yield loadQuestionContext(accessToken, questionId);
+        if ('status' in loaded)
+            return loaded;
+        const ctx = loaded;
+        if (!(opts === null || opts === void 0 ? void 0 : opts.forceRegenerate)) {
+            const existing = yield getSuggestionByQuestionId(questionId);
+            if ((existing === null || existing === void 0 ? void 0 : existing.status) === 'pending' && existing.suggestionText.trim()) {
+                return { questionId, status: 'suggested', preview: existing.suggestionText.slice(0, 160) };
+            }
+        }
+        const provider = resolveProvider();
+        const answerText = yield generateAnswerFromContext(ctx, opts === null || opts === void 0 ? void 0 : opts.extraSystemPrompt);
+        yield upsertSuggestion({
+            questionId,
+            itemId: ctx.itemId,
+            questionText: ctx.questionText,
+            suggestionText: answerText,
+            status: 'pending',
+            llmProvider: provider
+        });
+        return { questionId, status: 'suggested', preview: answerText.slice(0, 160) };
+    });
+}
+function approveAndSendSuggestion(accessToken, questionId, text) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b;
+        const loaded = yield loadQuestionContext(accessToken, questionId);
+        if ('status' in loaded)
+            return loaded;
+        let answerText = (text !== null && text !== void 0 ? text : '').trim();
+        if (!answerText) {
+            const existing = yield getSuggestionByQuestionId(questionId);
+            answerText = ((_a = existing === null || existing === void 0 ? void 0 : existing.suggestionText) === null || _a === void 0 ? void 0 : _a.trim()) || '';
+        }
+        if (!answerText) {
+            return { questionId, status: 'error', message: 'No hay texto de respuesta' };
+        }
+        const existing = yield getSuggestionByQuestionId(questionId);
+        yield publishAnswerToMl(accessToken, questionId, answerText, {
+            sentSource: 'review',
+            originalSuggestionText: (_b = existing === null || existing === void 0 ? void 0 : existing.suggestionText) !== null && _b !== void 0 ? _b : answerText
+        });
+        return { questionId, status: 'answered', preview: answerText.slice(0, 160) };
+    });
+}
+function processOneQuestion(accessToken, questionId, opts) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a;
+        const mode = (_a = opts === null || opts === void 0 ? void 0 : opts.mode) !== null && _a !== void 0 ? _a : 'auto';
+        if (mode === 'off') {
+            return { questionId, status: 'skipped', reason: 'IA desactivada' };
+        }
+        if (mode === 'suggest') {
+            return suggestForQuestion(accessToken, questionId, { extraSystemPrompt: opts === null || opts === void 0 ? void 0 : opts.extraSystemPrompt });
+        }
+        const loaded = yield loadQuestionContext(accessToken, questionId);
+        if ('status' in loaded)
+            return loaded;
+        const ctx = loaded;
+        const answerText = yield generateAnswerFromContext(ctx, opts === null || opts === void 0 ? void 0 : opts.extraSystemPrompt);
+        const provider = resolveProvider();
+        yield upsertSuggestion({
+            questionId,
+            itemId: ctx.itemId,
+            questionText: ctx.questionText,
+            suggestionText: answerText,
+            status: 'pending',
+            llmProvider: provider
+        });
+        yield publishAnswerToMl(accessToken, questionId, answerText, {
+            sentSource: 'auto',
+            originalSuggestionText: answerText
         });
         return { questionId, status: 'answered', preview: answerText.slice(0, 160) };
     });
@@ -599,7 +1076,8 @@ function processUnansweredBatch(mlToken, opts) {
                 continue;
             try {
                 const r = yield processOneQuestion(mlToken.access_token, id, {
-                    extraSystemPrompt: opts === null || opts === void 0 ? void 0 : opts.extraSystemPrompt
+                    extraSystemPrompt: opts === null || opts === void 0 ? void 0 : opts.extraSystemPrompt,
+                    mode: opts === null || opts === void 0 ? void 0 : opts.mode
                 });
                 results.push(r);
                 yield new Promise((r) => setTimeout(r, 400));
@@ -612,13 +1090,13 @@ function processUnansweredBatch(mlToken, opts) {
         return { processed: results.length, results };
     });
 }
-/** Si la configuración y OpenAI están activos, procesa preguntas sin responder (para webhook o cron). */
+/** Si la configuración y el LLM están activos, procesa preguntas sin responder (webhook o cron). */
 function runMlQuestionsAiIfEnabled(getToken, opts) {
     return __awaiter(this, void 0, void 0, function* () {
         var _a;
         const cfg = yield getMlQuestionsAiConfigRow();
-        if (!cfg.enabled) {
-            return { ran: false, message: 'Auto-respuesta desactivada' };
+        if (cfg.mode === 'off') {
+            return { ran: false, message: 'IA de preguntas desactivada' };
         }
         if (!llmConfigured()) {
             return { ran: false, message: 'Ninguna clave de IA configurada (GEMINI_API_KEY, GROQ_API_KEY u OPENAI_API_KEY)' };
@@ -629,7 +1107,8 @@ function runMlQuestionsAiIfEnabled(getToken, opts) {
         }
         const { processed, results } = yield processUnansweredBatch(token, {
             limit: (_a = opts === null || opts === void 0 ? void 0 : opts.limit) !== null && _a !== void 0 ? _a : 5,
-            extraSystemPrompt: cfg.extraSystemPrompt
+            extraSystemPrompt: cfg.extraSystemPrompt,
+            mode: cfg.mode
         });
         return { ran: true, processed, results };
     });

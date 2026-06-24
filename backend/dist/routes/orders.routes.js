@@ -23,6 +23,8 @@ router.post('/:id/invoice/reemitir-con-agip', auth_1.authMiddleware, orders_cont
 router.get('/:id/credit-notes', orders_controller_1.getOrderCreditNotes);
 router.post('/:id/emitir-factura', auth_1.authMiddleware, orders_controller_1.emitirFactura);
 router.post('/:id/emitir-nota-credito', auth_1.authMiddleware, orders_controller_1.emitirNotaCredito);
+router.get('/:id/debit-notes', orders_controller_1.getOrderDebitNotes);
+router.post('/:id/emitir-nota-debito', auth_1.authMiddleware, orders_controller_1.emitirNotaDebito);
 router.get('/:id/items-missing-despacho', orders_controller_1.getOrderItemsMissingDespacho);
 router.put('/:id/assign-despachos', auth_1.authMiddleware, orders_controller_1.assignDespachosToOrderItems);
 router.post('/:id/remito-number/assign', orders_controller_1.assignRemitoNumber);

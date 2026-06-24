@@ -149,7 +149,7 @@ const corsOpts: cors.CorsOptions = {
 const publicApiCorsOpts: cors.CorsOptions = {
   origin: true,
   credentials: false,
-  methods: ['GET', 'OPTIONS'],
+  methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type'],
 };
 

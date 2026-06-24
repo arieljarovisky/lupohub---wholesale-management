@@ -39,13 +39,16 @@ function isTnOrderPaid(order) {
     const detailStates = paymentDetails
         .map((d) => { var _a, _b; return String((_b = (_a = d === null || d === void 0 ? void 0 : d.status) !== null && _a !== void 0 ? _a : d === null || d === void 0 ? void 0 : d.state) !== null && _b !== void 0 ? _b : '').trim().toLowerCase(); })
         .filter(Boolean);
-    const looksRefunded = rawPaymentStatus === 'refunded' || detailStates.some((s) => s.includes('refund'));
+    const looksRefunded = rawPaymentStatus === 'refunded' || detailStates.some((s) => s === 'refunded');
+    const looksPartiallyRefunded = rawPaymentStatus === 'partially_refunded' || detailStates.some((s) => s === 'partially_refunded');
     const looksVoided = rawPaymentStatus === 'voided' ||
         rawPaymentStatus === 'cancelled' ||
-        detailStates.some((s) => s.includes('void') || s.includes('cancel'));
+        detailStates.some((s) => s.includes('void') || s === 'cancelled' || s === 'canceled');
     if (looksRefunded || looksVoided)
         return false;
     return (rawPaymentStatus === 'paid' ||
+        rawPaymentStatus === 'partially_paid' ||
+        looksPartiallyRefunded ||
         !!order.paid_at ||
         detailStates.some((s) => s === 'paid' || s === 'approved' || s === 'accredited' || s === 'captured'));
 }
