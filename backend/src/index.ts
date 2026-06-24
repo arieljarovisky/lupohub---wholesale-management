@@ -69,6 +69,7 @@ import { addCompanyFinanceFixedExpensesTable } from './database/add_company_fina
 import { addMarketingLeadsTable } from './database/add_marketing_leads_table';
 import { addMarketingLeadsWebhookSupport } from './database/add_marketing_leads_webhook';
 import marketingLeadsRoutes from './routes/marketingLeads.routes';
+import publicTrackingRoutes from './routes/publicTracking.routes';
 import companyFinanceRoutes from './routes/companyFinance.routes';
 import { addRemitoSequence } from './database/add_remito_sequence';
 import { addTiendaNubeExpressTracking } from './database/add_tiendanube_express_tracking';
@@ -166,6 +167,7 @@ app.use('/api/payments', paymentsRoutes);
 app.use('/api/user-tasks', userTasksRoutes);
 app.use('/api/company-finance', companyFinanceRoutes);
 app.use('/api/marketing', marketingLeadsRoutes);
+app.use('/api/public', publicTrackingRoutes);
 
 // Manejador global de errores: devuelve JSON con el mensaje para que el front pueda mostrarlo
 app.use((err: any, req: express.Request, res: express.Response, _next: express.NextFunction) => {
