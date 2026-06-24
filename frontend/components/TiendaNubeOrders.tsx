@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Package, User, MapPin, Truck, ChevronLeft, ChevronRight, Loader2, ShoppingBag, Calendar, Search, X, Clock, CheckCircle, XCircle, ChevronDown, FileText, Download } from 'lucide-react';
+import { RefreshCw, Package, User, MapPin, Truck, ChevronLeft, ChevronRight, Loader2, ShoppingBag, Calendar, Search, X, Clock, CheckCircle, XCircle, ChevronDown, FileText, Download, Tag } from 'lucide-react';
 import { api } from '../services/api';
 import { getRemitente } from '../services/apiIntegration';
 import { openExternalInvoicePdf } from '../utils/externalInvoicePdf';
+import { buildTiendaNubeExpressLabelHtml, buildTiendaNubeExpressLabelInnerHtml, EXPRESS_LABEL_CSS } from '../utils/tiendaNubeExpressLabelHtml';
 
 interface TiendaNubeOrder {
   id: number;
@@ -17,6 +18,8 @@ interface TiendaNubeOrder {
   shippingStatus: string;
   shippingMethod?: string;
   hasExpressShipping?: boolean;
+  trackingCode?: string | null;
+  trackingAssignedAt?: string | null;
   total: string;
   currency: string;
   customer: {
@@ -85,6 +88,7 @@ const TiendaNubeOrders: React.FC = () => {
   const [selectingAllFiltered, setSelectingAllFiltered] = useState(false);
   const [bulkCbteTipo, setBulkCbteTipo] = useState<'auto' | 'A' | 'B'>('auto');
   const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null);
+  const [assigningTrackingOrderId, setAssigningTrackingOrderId] = useState<number | null>(null);
   const perPage = 15;
 
   const fetchOrders = async () => {
@@ -196,7 +200,31 @@ const TiendaNubeOrders: React.FC = () => {
 
   const clearSelection = () => setSelectedOrderIds([]);
 
-  const buildTiendaNubeReceiptHtml = (order: TiendaNubeOrder): string => {
+  const hasExpressShipping = (order: TiendaNubeOrder): boolean => {
+    if (order.hasExpressShipping === true) return true;
+    const blob = `${order.shippingMethod || ''} ${order.shippingStatus || ''}`.toLowerCase();
+    return /\bexpress\b|\bexpr[eé]s\b|\bflash\b|\bsame\s*day\b|\benv[ií]o\s+en\s+el\s+d[ií]a\b|\br[aá]pido\b|\br[aá]pida\b/.test(blob);
+  };
+
+  const ensureExpressTrackingCode = async (order: TiendaNubeOrder): Promise<string> => {
+    if (order.trackingCode) return order.trackingCode;
+    const res = await api.assignTiendaNubeExpressTracking(order.id, order.number);
+    const code = res.trackingCode;
+    setOrders(prev => prev.map(o => o.id === order.id ? { ...o, trackingCode: code, trackingAssignedAt: res.createdAt || new Date().toISOString() } : o));
+    return code;
+  };
+
+  const openPrintWindow = (html: string, blockedMessage: string) => {
+    const w = window.open('', '_blank');
+    if (!w) {
+      window.alert(blockedMessage);
+      return;
+    }
+    w.document.write(html);
+    w.document.close();
+  };
+
+  const buildTiendaNubeReceiptHtml = (order: TiendaNubeOrder, trackingCode?: string | null): string => {
     const remitente = getRemitente();
     const empresa = (remitente.businessName || 'Multimedias SA').toString();
     const empresaCuit = (remitente.cuit || '').toString();
@@ -237,6 +265,14 @@ const TiendaNubeOrders: React.FC = () => {
       </tr>`;
     }).join('');
 
+    const isExpress = hasExpressShipping(order);
+    const trackingBlock = trackingCode
+      ? `<div class="card" style="margin-top:10px;border-color:#0e7490;">
+        <div><strong>Envío express</strong> — Código de seguimiento:</div>
+        <div style="font-size:18px;font-weight:900;font-family:monospace;letter-spacing:0.1em;margin-top:4px;">${trackingCode}</div>
+      </div>`
+      : '';
+
     return `<!DOCTYPE html>
 <html>
 <head>
@@ -258,6 +294,7 @@ const TiendaNubeOrders: React.FC = () => {
     .sig { border-top: 1px solid #333; padding-top: 6px; text-align: center; min-height: 56px; }
     .print-actions { margin-top: 18px; }
     @media print { .print-actions { display: none; } }
+    ${EXPRESS_LABEL_CSS}
   </style>
 </head>
 <body>
@@ -276,8 +313,10 @@ const TiendaNubeOrders: React.FC = () => {
         <div><strong>ID:</strong> ${order.id}</div>
         <div><strong>Fecha pedido:</strong> ${createdAtStr}</div>
         <div><strong>Total unidades:</strong> ${totalUnits}</div>
+        ${isExpress ? '<div><strong>Tipo envío:</strong> Express</div>' : ''}
       </div>
     </div>
+    ${trackingBlock}
     <div class="row">
       <div class="card">
         <div><strong>Cliente:</strong> ${customerName}</div>
@@ -315,26 +354,48 @@ const TiendaNubeOrders: React.FC = () => {
       <button onclick="window.print()" style="padding:10px 14px;background:#1f2937;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;">Descargar PDF / Imprimir</button>
       <button onclick="window.close()" style="padding:10px 14px;margin-left:8px;background:#94a3b8;color:#fff;border:none;border-radius:6px;cursor:pointer;">Cerrar</button>
     </div>
+    ${isExpress && trackingCode ? `
+    <div class="express-label-page">
+      <h2 style="margin:0 0 8px;font-size:16px;">Etiqueta de envío express</h2>
+      ${buildTiendaNubeExpressLabelInnerHtml(order, trackingCode, remitente)}
+    </div>` : ''}
   </div>
 </body>
 </html>`;
   };
 
-  const hasExpressShipping = (order: TiendaNubeOrder): boolean => {
-    if (order.hasExpressShipping === true) return true;
-    const blob = `${order.shippingMethod || ''} ${order.shippingStatus || ''}`.toLowerCase();
-    return /\bexpress\b|\bexpr[eé]s\b|\bflash\b|\bsame\s*day\b|\benv[ií]o\s+en\s+el\s+d[ií]a\b|\br[aá]pido\b|\br[aá]pida\b/.test(blob);
+  const openReceiptForSignature = async (order: TiendaNubeOrder) => {
+    try {
+      let trackingCode: string | null = order.trackingCode || null;
+      if (hasExpressShipping(order)) {
+        setAssigningTrackingOrderId(order.id);
+        trackingCode = await ensureExpressTrackingCode(order);
+      }
+      const html = buildTiendaNubeReceiptHtml(order, trackingCode);
+      openPrintWindow(html, 'El navegador bloqueó la ventana del recibo. Permití popups para este sitio e intentá de nuevo.');
+    } catch (error: any) {
+      window.alert(error?.message || 'No se pudo generar el recibo');
+    } finally {
+      setAssigningTrackingOrderId(null);
+    }
   };
 
-  const openReceiptForSignature = (order: TiendaNubeOrder) => {
-    const html = buildTiendaNubeReceiptHtml(order);
-    const w = window.open('', '_blank');
-    if (!w) {
-      window.alert('El navegador bloqueó la ventana del recibo. Permití popups para este sitio e intentá de nuevo.');
+  const openExpressLabel = async (order: TiendaNubeOrder, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (!hasExpressShipping(order)) {
+      window.alert('Este pedido no tiene envío express.');
       return;
     }
-    w.document.write(html);
-    w.document.close();
+    setAssigningTrackingOrderId(order.id);
+    try {
+      const trackingCode = await ensureExpressTrackingCode(order);
+      const html = buildTiendaNubeExpressLabelHtml(order, trackingCode, getRemitente());
+      openPrintWindow(html, 'El navegador bloqueó la ventana de la etiqueta. Permití popups para este sitio e intentá de nuevo.');
+    } catch (error: any) {
+      window.alert(error?.message || 'No se pudo generar la etiqueta express');
+    } finally {
+      setAssigningTrackingOrderId(null);
+    }
   };
 
   const handleDownloadInvoice = async (order: TiendaNubeOrder, e?: React.MouseEvent) => {
@@ -736,6 +797,16 @@ const TiendaNubeOrders: React.FC = () => {
                           <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold ${order.invoiced ? 'bg-emerald-700/20 text-emerald-300' : 'bg-slate-700/40 text-slate-300'}`}>
                             {order.invoiced ? 'FACTURADA' : 'SIN FACTURA'}
                           </span>
+                          {hasExpressShipping(order) && (
+                            <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-fuchsia-700/20 text-fuchsia-300 border border-fuchsia-600/30">
+                              EXPRESS
+                            </span>
+                          )}
+                          {order.trackingCode && (
+                            <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-sky-700/20 text-sky-200 font-mono" title="Código de seguimiento">
+                              {order.trackingCode}
+                            </span>
+                          )}
                           {showRefundHint && (
                             <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-amber-700/20 text-amber-300" title="Se factura solo lo que el cliente pagó (después del reembolso parcial)">
                               A FACTURAR: ${formatCurrency(String(billableAmount))}
@@ -760,14 +831,35 @@ const TiendaNubeOrders: React.FC = () => {
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          openReceiptForSignature(order);
+                          void openReceiptForSignature(order);
                         }}
-                        className="px-3 py-2 rounded-xl bg-cyan-700/30 border border-cyan-600/40 text-cyan-100 text-xs font-black hover:bg-cyan-700/50 flex items-center gap-2"
-                        title="Generar recibo PDF para firma"
+                        disabled={assigningTrackingOrderId === order.id}
+                        className="px-3 py-2 rounded-xl bg-cyan-700/30 border border-cyan-600/40 text-cyan-100 text-xs font-black hover:bg-cyan-700/50 flex items-center gap-2 disabled:opacity-50"
+                        title={hasExpressShipping(order) ? 'Generar recibo con etiqueta express y código de seguimiento' : 'Generar recibo PDF para firma'}
                       >
-                        <FileText size={14} />
+                        {assigningTrackingOrderId === order.id ? (
+                          <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                          <FileText size={14} />
+                        )}
                         Recibo PDF
                       </button>
+                      {hasExpressShipping(order) && (
+                        <button
+                          type="button"
+                          onClick={(e) => void openExpressLabel(order, e)}
+                          disabled={assigningTrackingOrderId === order.id}
+                          className="px-3 py-2 rounded-xl bg-fuchsia-700/30 border border-fuchsia-600/40 text-fuchsia-100 text-xs font-black hover:bg-fuchsia-700/50 flex items-center gap-2 disabled:opacity-50"
+                          title="Generar etiqueta de envío express con código de seguimiento"
+                        >
+                          {assigningTrackingOrderId === order.id ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <Tag size={14} />
+                          )}
+                          Etiqueta Express
+                        </button>
+                      )}
                       {order.invoiced && order.invoice?.id && (
                         <button
                           type="button"
@@ -825,6 +917,12 @@ const TiendaNubeOrders: React.FC = () => {
                             {order.shippingAddress.city}, {order.shippingAddress.province}
                           </p>
                           <p className="text-slate-500 text-sm">CP: {order.shippingAddress.zipcode}</p>
+                          {order.shippingMethod && (
+                            <p className="text-fuchsia-300 text-sm mt-1 font-bold">{order.shippingMethod}</p>
+                          )}
+                          {order.trackingCode && (
+                            <p className="text-sky-300 text-sm mt-1 font-mono">Seguimiento: {order.trackingCode}</p>
+                          )}
                         </div>
                       )}
 

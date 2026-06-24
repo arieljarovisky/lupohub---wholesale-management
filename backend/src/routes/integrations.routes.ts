@@ -24,6 +24,7 @@ import {
   getMlTnSyncIssues,
   importStockFromMercadoLibre,
   getTiendaNubeOrders,
+  assignTiendaNubeExpressTracking,
   getTiendaNubeStock,
   getTiendaNubeStockTotals,
   getTiendaNubeProductVariants,
@@ -162,6 +163,7 @@ router.post('/mercadolibre/invoice-bulk', authMiddleware, invoiceMercadoLibreOrd
 router.get('/tiendanube/auth', getTiendaNubeAuthUrl);
 router.get('/tiendanube/callback', handleTiendaNubeCallback);
 router.get('/tiendanube/orders', getTiendaNubeOrders);
+router.post('/tiendanube/orders/:orderId/express-tracking/assign', authMiddleware, assignTiendaNubeExpressTracking);
 router.get('/tiendanube/stock', getTiendaNubeStock);
 router.get('/tiendanube/stock/totals', getTiendaNubeStockTotals);
 router.get('/tiendanube/sales-report-export', authMiddleware, exportTiendaNubeSalesReportXlsx);

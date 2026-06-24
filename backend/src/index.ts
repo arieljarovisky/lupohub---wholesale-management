@@ -71,6 +71,7 @@ import { addMarketingLeadsWebhookSupport } from './database/add_marketing_leads_
 import marketingLeadsRoutes from './routes/marketingLeads.routes';
 import companyFinanceRoutes from './routes/companyFinance.routes';
 import { addRemitoSequence } from './database/add_remito_sequence';
+import { addTiendaNubeExpressTracking } from './database/add_tiendanube_express_tracking';
 import { addCustomerDeliveryAddresses } from './database/add_customer_delivery_addresses';
 import { addCustomerSellerCommission } from './database/add_customer_seller_commission';
 import { addCustomerOpeningBalance } from './database/add_customer_opening_balance';
@@ -237,6 +238,7 @@ async function initDatabase() {
       await addMarketingLeadsTable();
       await addMarketingLeadsWebhookSupport();
       await addRemitoSequence();
+      await addTiendaNubeExpressTracking();
       await addCustomerDeliveryAddresses();
       await addCustomerSellerCommission();
       await addCustomerOpeningBalance();

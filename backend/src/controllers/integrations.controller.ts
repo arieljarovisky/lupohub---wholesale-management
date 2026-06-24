@@ -4393,6 +4393,32 @@ export const getTiendaNubeOrders = async (req: Request, res: Response) => {
       });
     }
 
+    // Códigos de seguimiento express ya asignados.
+    const orderIdsForTracking = Array.from(new Set((orders as any[]).map((o: any) => String(o.id)).filter(Boolean)));
+    if (orderIdsForTracking.length > 0) {
+      try {
+        const trPlaceholders = orderIdsForTracking.map(() => '?').join(', ');
+        const trackingRows = await query(
+          `SELECT external_order_id, tracking_code, created_at
+           FROM tiendanube_express_tracking
+           WHERE external_order_id IN (${trPlaceholders})`,
+          orderIdsForTracking
+        ) as any[];
+        const trackingByOrderId = new Map<string, any>();
+        for (const row of trackingRows) trackingByOrderId.set(String(row.external_order_id), row);
+        orders = (orders as any[]).map((o: any) => {
+          const tr = trackingByOrderId.get(String(o.id));
+          return {
+            ...o,
+            trackingCode: tr?.tracking_code || null,
+            trackingAssignedAt: tr?.created_at || null
+          };
+        });
+      } catch (trackingErr: any) {
+        console.warn('[getTiendaNubeOrders] No se pudieron cargar códigos express:', trackingErr?.message || trackingErr);
+      }
+    }
+
     res.json({
       orders,
       page: pageNum,
@@ -4402,6 +4428,90 @@ export const getTiendaNubeOrders = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Error fetching TN orders:', error.response?.data || error.message);
     res.status(500).json({ message: 'Error obteniendo órdenes de Tienda Nube', error: error.message });
+  }
+};
+
+const TN_EXPRESS_TRACKING_PREFIX = 'LHE';
+
+async function ensureTnExpressTrackingSequence(): Promise<void> {
+  await execute(
+    `INSERT IGNORE INTO tiendanube_express_tracking_sequence (id, next_value) VALUES (1, 100001)`
+  );
+}
+
+function formatTnExpressTrackingCode(seq: number): string {
+  return `${TN_EXPRESS_TRACKING_PREFIX}${String(seq).padStart(8, '0')}`;
+}
+
+/**
+ * Asigna (o devuelve si ya existía) un código de seguimiento único para un envío express de Tienda Nube.
+ * Idempotente: reimprimir etiqueta/recibo conserva el mismo código.
+ */
+export const assignTiendaNubeExpressTracking = async (req: Request, res: Response) => {
+  const orderId = String(req.params.orderId || '').trim();
+  const orderNumber = String((req.body as any)?.orderNumber || '').trim() || null;
+  if (!orderId) return res.status(400).json({ message: 'ID de orden inválido' });
+
+  try {
+    const existing = await get(
+      `SELECT external_order_id, order_number, tracking_code, created_at
+       FROM tiendanube_express_tracking WHERE external_order_id = ?`,
+      [orderId]
+    );
+    if (existing?.tracking_code) {
+      return res.json({
+        orderId,
+        orderNumber: existing.order_number || orderNumber,
+        trackingCode: existing.tracking_code,
+        assigned: false,
+        createdAt: existing.created_at
+      });
+    }
+
+    await ensureTnExpressTrackingSequence();
+    const inc = await execute(
+      `UPDATE tiendanube_express_tracking_sequence SET next_value = LAST_INSERT_ID(next_value) + 1 WHERE id = 1`
+    );
+    const seq = Number((inc as any)?.insertId || 0);
+    if (!seq) {
+      return res.status(500).json({ message: 'No se pudo obtener el próximo código de seguimiento express.' });
+    }
+    const trackingCode = formatTnExpressTrackingCode(seq);
+
+    try {
+      await execute(
+        `INSERT INTO tiendanube_express_tracking (external_order_id, order_number, tracking_code)
+         VALUES (?, ?, ?)`,
+        [orderId, orderNumber, trackingCode]
+      );
+      return res.json({
+        orderId,
+        orderNumber,
+        trackingCode,
+        assigned: true
+      });
+    } catch (insertErr: any) {
+      if (insertErr?.code === 'ER_DUP_ENTRY') {
+        const raced = await get(
+          `SELECT external_order_id, order_number, tracking_code, created_at
+           FROM tiendanube_express_tracking WHERE external_order_id = ?`,
+          [orderId]
+        );
+        if (raced?.tracking_code) {
+          return res.json({
+            orderId,
+            orderNumber: raced.order_number || orderNumber,
+            trackingCode: raced.tracking_code,
+            assigned: false,
+            createdAt: raced.created_at
+          });
+        }
+      }
+      throw insertErr;
+    }
+  } catch (error: any) {
+    console.error('assignTiendaNubeExpressTracking:', error);
+    return res.status(500).json({ message: 'Error asignando código de seguimiento express' });
   }
 };
 

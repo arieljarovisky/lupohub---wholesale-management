@@ -2854,6 +2854,24 @@ export const api = {
     }, 'invoiceTiendaNubeOrdersBulk');
   },
 
+  /** Asigna o devuelve el código de seguimiento express de una orden TN (idempotente). */
+  assignTiendaNubeExpressTracking: async (
+    orderId: string | number,
+    orderNumber?: string | number
+  ): Promise<{
+    orderId: string;
+    orderNumber?: string | null;
+    trackingCode: string;
+    assigned: boolean;
+    createdAt?: string;
+  }> => {
+    return await request(
+      `/integrations/tiendanube/orders/${encodeURIComponent(String(orderId))}/express-tracking/assign`,
+      'POST',
+      { orderNumber: orderNumber != null ? String(orderNumber) : undefined }
+    );
+  },
+
   // Órdenes de Mercado Libre
   getMercadoLibreOrders: async (params?: { offset?: number; limit?: number; status?: string; date_from?: string; date_to?: string; only_pending_shipment_and_cancelled?: boolean }): Promise<{ orders: any[]; total: number }> => {
     return handleRequest(async () => {
