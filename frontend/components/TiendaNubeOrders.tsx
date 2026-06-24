@@ -113,10 +113,41 @@ const TiendaNubeOrders: React.FC = () => {
   };
 
   const paymentStatusConfig: Record<string, { label: string; color: string; bg: string }> = {
-    paid: { label: 'PAGADO', color: 'text-green-400', bg: 'bg-green-500/10' },
-    pending: { label: 'Pendiente', color: 'text-yellow-400', bg: 'bg-yellow-500/10' },
-    refunded: { label: 'Reembolsado', color: 'text-red-400', bg: 'bg-red-500/10' },
-    voided: { label: 'Anulado', color: 'text-slate-400', bg: 'bg-slate-500/10' },
+    paid: { label: 'Pagado', color: 'text-green-400', bg: 'bg-green-500/10 border-green-500/30' },
+    pending: { label: 'Pendiente', color: 'text-yellow-400', bg: 'bg-yellow-500/10 border-yellow-500/30' },
+    refunded: { label: 'Reembolsado', color: 'text-red-400', bg: 'bg-red-500/10 border-red-500/30' },
+    voided: { label: 'Anulado', color: 'text-slate-400', bg: 'bg-slate-500/10 border-slate-500/30' },
+  };
+
+  const shippingStatusConfig: Record<string, { label: string; color: string; bg: string }> = {
+    unfulfilled: { label: 'Sin despachar', color: 'text-orange-300', bg: 'bg-orange-500/10 border-orange-500/30' },
+    unshipped: { label: 'Sin enviar', color: 'text-orange-300', bg: 'bg-orange-500/10 border-orange-500/30' },
+    unpacked: { label: 'En preparación', color: 'text-purple-200', bg: 'bg-purple-600/40 border-purple-500/40' },
+    packed: { label: 'Empaquetado', color: 'text-cyan-300', bg: 'bg-cyan-500/10 border-cyan-500/30' },
+    shipped: { label: 'Enviado', color: 'text-blue-300', bg: 'bg-blue-500/10 border-blue-500/30' },
+    delivered: { label: 'Entregado', color: 'text-green-300', bg: 'bg-green-500/10 border-green-500/30' },
+    in_preparation: { label: 'En preparación', color: 'text-purple-200', bg: 'bg-purple-600/40 border-purple-500/40' },
+    ready_to_ship: { label: 'Listo para enviar', color: 'text-cyan-300', bg: 'bg-cyan-500/10 border-cyan-500/30' },
+  };
+
+  const badgeBase = 'inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold border whitespace-nowrap';
+
+  const totalUnitsForOrder = (order: TiendaNubeOrder): number =>
+    (order.products || []).reduce((acc, p) => acc + Math.max(0, Number(p.quantity) || 0), 0);
+
+  const resolveShippingStatus = (raw: string) => {
+    const key = raw.toLowerCase().trim().replace(/\s+/g, '_');
+    if (shippingStatusConfig[key]) return shippingStatusConfig[key];
+    const label = raw.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    return { label, color: 'text-slate-300', bg: 'bg-slate-700/40 border-slate-600/40' };
+  };
+
+  const shouldShowShippingMethod = (order: TiendaNubeOrder, isExpress: boolean): boolean => {
+    const method = (order.shippingMethod || '').trim();
+    if (!method) return false;
+    if (/^[A-Z]{2,}\d/.test(method)) return true;
+    if (isExpress && /\bexpress\b/i.test(method)) return false;
+    return method.length > 3;
   };
 
   const formatDate = (dateStr: string) => {
@@ -656,13 +687,16 @@ const TiendaNubeOrders: React.FC = () => {
           <p className="text-slate-500 text-sm mt-1">Intenta cambiar los filtros de búsqueda</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {filteredOrders.map((order) => {
             const status = statusConfig[order.status] || statusConfig.open;
             const normalizedPayment = (order.isPaid === true ? 'paid' : order.paymentStatus) || 'pending';
             const payment = paymentStatusConfig[normalizedPayment] || paymentStatusConfig.pending;
+            const shipping = order.shippingStatus ? resolveShippingStatus(order.shippingStatus) : null;
             const dateInfo = formatDate(order.createdAt);
             const isExpanded = expandedOrder === order.id;
+            const totalUnits = totalUnitsForOrder(order);
+            const isExpress = hasExpressShipping(order);
 
             return (
               <div 
@@ -673,12 +707,11 @@ const TiendaNubeOrders: React.FC = () => {
               >
                 {/* Order Header */}
                 <div 
-                  className="p-4 cursor-pointer"
+                  className="px-5 py-4 cursor-pointer"
                   onClick={() => setExpandedOrder(isExpanded ? null : order.id)}
                 >
-                  <div className="flex flex-wrap items-center justify-between gap-4">
-                    {/* Left: Order Info */}
-                    <div className="flex items-center gap-4">
+                  <div className="flex items-start gap-4">
+                    <div className="flex items-start gap-3 shrink-0 pt-1">
                       <label
                         className="flex items-center"
                         onClick={(e) => e.stopPropagation()}
@@ -692,65 +725,93 @@ const TiendaNubeOrders: React.FC = () => {
                           title="Seleccionar para facturación masiva"
                         />
                       </label>
-                      <div className="flex flex-col items-center">
-                        <span className="text-xs text-slate-500">{dateInfo.date}</span>
-                        <span className="text-[10px] text-slate-600">{dateInfo.time}</span>
-                      </div>
-                      <div className="w-px h-10 bg-slate-700/50" />
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-white font-black text-lg">#{order.number}</span>
-                          <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border ${status.bg} ${status.color}`}>
-                            {status.label.toUpperCase()}
-                          </span>
-                          <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold ${payment.bg} ${payment.color}`}>
-                            {payment.label}
-                          </span>
-                          <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold ${order.invoiced ? 'bg-emerald-700/20 text-emerald-300' : 'bg-slate-700/40 text-slate-300'}`}>
-                            {order.invoiced ? 'FACTURADA' : 'SIN FACTURA'}
-                          </span>
-                          {order.paymentStatusRaw && order.paymentStatusRaw !== normalizedPayment && (
-                            <span className="px-2 py-1 rounded-lg text-[10px] font-bold bg-slate-700/40 text-slate-300">
-                              TN: {order.paymentStatusRaw}
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-slate-400 text-sm mt-0.5">
-                          <User size={12} className="inline mr-1" />
-                          {order.customer.name}
-                        </p>
+                      <div className="flex flex-col items-center min-w-[3.25rem]">
+                        <span className="text-xs text-slate-400 font-medium">{dateInfo.date}</span>
+                        <span className="text-[11px] text-slate-500">{dateInfo.time}</span>
                       </div>
                     </div>
 
-                    {/* Right: Cantidad de productos (sin monto) */}
-                    <div className="flex items-center gap-4">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openReceiptForSignature(order);
-                        }}
-                        className="px-3 py-2 rounded-xl bg-cyan-700/30 border border-cyan-600/40 text-cyan-100 text-xs font-black hover:bg-cyan-700/50 flex items-center gap-2"
-                        title="Generar recibo PDF para firma"
-                      >
-                        <FileText size={14} />
-                        Recibo PDF
-                      </button>
-                      <div className="text-right">
-                        <p className="text-sm font-bold text-white">{order.products.length} producto{order.products.length !== 1 ? 's' : ''}</p>
-                        <p className="text-xs text-slate-500">#{order.number}</p>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <p className="text-white font-black text-lg leading-tight">#{order.number}</p>
+                          <p className="text-slate-400 text-sm mt-1 truncate" title={order.customer.name}>
+                            <User size={13} className="inline mr-1.5 -mt-0.5 opacity-70" />
+                            {order.customer.name}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <div className="text-right">
+                            <p className="text-sm font-bold text-white">
+                              {totalUnits} unidad{totalUnits !== 1 ? 'es' : ''}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {order.products.length} línea{order.products.length !== 1 ? 's' : ''}
+                            </p>
+                          </div>
+                          <ChevronDown 
+                            size={20} 
+                            className={`text-slate-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`} 
+                          />
+                        </div>
                       </div>
-                      <ChevronDown 
-                        size={20} 
-                        className={`text-slate-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`} 
-                      />
+
+                      <div className="flex flex-wrap items-center gap-1.5 mt-3">
+                        <span className={`${badgeBase} ${status.bg} ${status.color}`}>
+                          {status.label}
+                        </span>
+                        <span className={`${badgeBase} ${payment.bg} ${payment.color}`}>
+                          {payment.label}
+                        </span>
+                        <span className={`${badgeBase} ${order.invoiced ? 'bg-emerald-700/20 text-emerald-300 border-emerald-600/30' : 'bg-slate-700/40 text-slate-300 border-slate-600/40'}`}>
+                          {order.invoiced ? 'Facturada' : 'Sin factura'}
+                        </span>
+                        {isExpress && (
+                          <span className={`${badgeBase} bg-fuchsia-500/10 text-fuchsia-300 border-fuchsia-500/30`}>
+                            Express
+                          </span>
+                        )}
+                        {shipping && order.status !== 'cancelled' && (
+                          <span className={`${badgeBase} ${shipping.bg} ${shipping.color}`}>
+                            {shipping.label}
+                          </span>
+                        )}
+                        {order.shippingMethod && shouldShowShippingMethod(order, isExpress) && (
+                          <span
+                            className={`${badgeBase} bg-sky-500/10 text-sky-300 border-sky-500/30 font-mono text-[10px]`}
+                            title="Método de envío"
+                          >
+                            {order.shippingMethod}
+                          </span>
+                        )}
+                        {order.paymentStatusRaw && order.paymentStatusRaw !== normalizedPayment && (
+                          <span className={`${badgeBase} bg-slate-700/40 text-slate-400 border-slate-600/40`}>
+                            TN: {order.paymentStatusRaw}
+                          </span>
+                        )}
+                      </div>
+
+                      <div
+                        className="flex flex-wrap items-center gap-2 mt-3"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => openReceiptForSignature(order)}
+                          className="px-3 py-1.5 rounded-lg bg-cyan-700/25 border border-cyan-600/35 text-cyan-100 text-xs font-bold hover:bg-cyan-700/45 flex items-center gap-1.5"
+                          title="Generar recibo PDF para firma"
+                        >
+                          <FileText size={13} />
+                          Recibo PDF
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
 
                 {/* Expanded Content */}
                 {isExpanded && (
-                  <div className="px-4 pb-4 border-t border-slate-700/30 pt-4">
+                  <div className="px-5 pb-5 border-t border-slate-700/30 pt-4">
                     <div className="grid lg:grid-cols-3 gap-4">
                       {/* Customer Info */}
                       <div className="bg-slate-900/30 rounded-xl p-4">
