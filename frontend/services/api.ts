@@ -1776,6 +1776,19 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
+  /** Exporta plantilla para actualización masiva (IVA, lista de precios, saldo inicio). */
+  exportCustomersBulkUpdate: async (): Promise<void> => {
+    const blob = await getBlob('/customers/export-actualizacion-masiva');
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `clientes_actualizacion_masiva_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
   /** Exporta un Excel con una hoja por cliente (opcionalmente solo IDs seleccionados). */
   exportCustomersBySheets: async (customerIds?: string[]): Promise<void> => {
     const blob = await postBlob('/customers/export-por-hojas', {
@@ -2170,6 +2183,22 @@ export const api = {
   /** Actualizar solo el CUIT de clientes existentes (identificados por razón social o email). */
   bulkUpdateCuit: async (updates: Array<{ businessName?: string; email?: string; cuit: string }>): Promise<{ updated: number; notFound: number; errors: { row: number; message: string }[] }> => {
     return request<any>('/customers/bulk-update-cuit', 'POST', { updates });
+  },
+
+  /** Actualizar condición IVA, lista de precios y saldo inicial en lote. */
+  bulkUpdateCustomerFields: async (
+    updates: Array<{
+      businessName?: string;
+      email?: string;
+      cuit?: string;
+      legacyCode?: string;
+      condicionIva?: string;
+      priceList?: string;
+      openingBalance?: number | string | null;
+      openingBalanceDate?: string | null;
+    }>
+  ): Promise<{ updated: number; notFound: number; skipped: number; errors: { row: number; message: string }[] }> => {
+    return request<any>('/customers/bulk-update-fields', 'POST', { updates });
   },
 
   updateCustomer: async (id: string, data: Partial<Customer> & { transporteIds?: string[] }): Promise<Customer> => {
