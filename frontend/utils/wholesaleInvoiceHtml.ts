@@ -1580,7 +1580,6 @@ export function buildExternalChannelFacturaHtml(params: {
   const netoGravado = Math.round((grossTotal / IVA_MULTIPLIER) * 100) / 100;
   const totales = calcTotalesDesdeNetoGravado(netoGravado, cbteTipoNum, 0);
   const { neto: netoImpreso, iva: iva21, total } = totales;
-  const subtotalBruto = discriminaIva ? netoGravado : Math.round((netoGravado + totales.iva) * 100) / 100;
   // TN/ML envían precios con IVA incluido: en B se muestran tal cual; en A se divide por 1.21.
   const factorPrecioLinea = discriminaIva ? 1 / IVA_MULTIPLIER : 1;
 
@@ -1767,15 +1766,8 @@ export function buildExternalChannelFacturaHtml(params: {
             <div class="qr-label">Comprobante autorizado<br/>AFIP</div>
           </div>
           <div class="totals">
-            ${
-              discriminaIva
-                ? `<div class="r"><span>Subtotal Bruto</span><span>$${formatMoneyAr(subtotalBruto)}</span></div>
-                   <div class="r"><span>Subtotal Neto</span><span>$${formatMoneyAr(netoImpreso)}</span></div>
-                   <div class="r"><span>IVA 21%</span><span>$${formatMoneyAr(iva21)}</span></div>`
-                : `<div class="r"><span>Subtotal</span><span>$${formatMoneyAr(subtotalBruto)}</span></div>
-                   <div class="r"><span>Subtotal Neto</span><span>$${formatMoneyAr(netoImpreso)}</span></div>
-                   <div class="r"><span>IVA 21%</span><span>$${formatMoneyAr(iva21)}</span></div>`
-            }
+            <div class="r"><span>Subtotal Neto</span><span>$${formatMoneyAr(netoImpreso)}</span></div>
+            <div class="r"><span>IVA 21%</span><span>$${formatMoneyAr(iva21)}</span></div>
             <div class="r"><span>Total</span><span>$${formatMoneyAr(total)}</span></div>
           </div>
         </div>
