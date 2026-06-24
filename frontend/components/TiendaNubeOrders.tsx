@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Package, User, MapPin, Truck, ChevronLeft, ChevronRight, Loader2, ShoppingBag, Calendar, Search, X, Clock, CheckCircle, XCircle, ChevronDown, FileText } from 'lucide-react';
+import { RefreshCw, Package, User, MapPin, Truck, ChevronLeft, ChevronRight, Loader2, ShoppingBag, Calendar, Search, X, Clock, CheckCircle, XCircle, ChevronDown, FileText, Download } from 'lucide-react';
 import { api } from '../services/api';
 import { getRemitente } from '../services/apiIntegration';
+import { openExternalInvoicePdf } from '../utils/externalInvoicePdf';
 
 interface TiendaNubeOrder {
   id: number;
@@ -83,6 +84,7 @@ const TiendaNubeOrders: React.FC = () => {
   } | null>(null);
   const [selectingAllFiltered, setSelectingAllFiltered] = useState(false);
   const [bulkCbteTipo, setBulkCbteTipo] = useState<'auto' | 'A' | 'B'>('auto');
+  const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null);
   const perPage = 15;
 
   const fetchOrders = async () => {
@@ -334,6 +336,24 @@ const TiendaNubeOrders: React.FC = () => {
     w.document.write(html);
     w.document.close();
   };
+
+  const handleDownloadInvoice = async (order: TiendaNubeOrder, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const invoiceId = order.invoice?.id;
+    if (!invoiceId) {
+      window.alert('Este pedido aún no tiene factura emitida en LupoHub.');
+      return;
+    }
+    setDownloadingInvoiceId(invoiceId);
+    try {
+      await openExternalInvoicePdf(invoiceId);
+    } catch (error: any) {
+      window.alert(error?.message || 'No se pudo abrir la factura');
+    } finally {
+      setDownloadingInvoiceId(null);
+    }
+  };
+
   const selectAllFilteredPaid = async () => {
     setSelectingAllFiltered(true);
     try {
@@ -735,7 +755,7 @@ const TiendaNubeOrders: React.FC = () => {
                     </div>
 
                     {/* Right: Cantidad de productos (sin monto) */}
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2 flex-wrap justify-end">
                       <button
                         type="button"
                         onClick={(e) => {
@@ -748,6 +768,22 @@ const TiendaNubeOrders: React.FC = () => {
                         <FileText size={14} />
                         Recibo PDF
                       </button>
+                      {order.invoiced && order.invoice?.id && (
+                        <button
+                          type="button"
+                          onClick={(e) => handleDownloadInvoice(order, e)}
+                          disabled={downloadingInvoiceId === order.invoice.id}
+                          className="px-3 py-2 rounded-xl bg-emerald-700/30 border border-emerald-600/40 text-emerald-100 text-xs font-black hover:bg-emerald-700/50 disabled:opacity-50 flex items-center gap-2"
+                          title="Descargar factura AFIP (PDF)"
+                        >
+                          {downloadingInvoiceId === order.invoice.id ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <Download size={14} />
+                          )}
+                          Factura PDF
+                        </button>
+                      )}
                       <div className="text-right">
                         <p className="text-sm font-bold text-white">{order.products.length} producto{order.products.length !== 1 ? 's' : ''}</p>
                         <p className="text-xs text-slate-500">#{order.number}</p>

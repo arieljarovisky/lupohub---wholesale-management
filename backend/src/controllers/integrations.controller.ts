@@ -4898,6 +4898,127 @@ export const getExternalInvoicesHistory = async (req: Request, res: Response) =>
   }
 };
 
+function scaleExternalLineItemsToTotal(
+  items: Array<{ name: string; sku?: string; quantity: number; unitPrice: number }>,
+  targetTotal: number
+): Array<{ name: string; sku?: string; quantity: number; unitPrice: number }> {
+  if (!items.length || !(targetTotal > 0)) return items;
+  const sum = items.reduce((acc, it) => acc + Math.round(it.quantity * it.unitPrice * 100) / 100, 0);
+  if (sum <= 0 || Math.abs(sum - targetTotal) <= 0.02) return items;
+  const factor = targetTotal / sum;
+  return items.map((it) => ({
+    ...it,
+    unitPrice: Math.round(it.unitPrice * factor * 100) / 100,
+  }));
+}
+
+/** Datos para imprimir / descargar PDF de una factura externa (TN / ML). */
+export const getExternalInvoicePrintData = async (req: Request, res: Response) => {
+  try {
+    const authUser = (req as any).user;
+    if (!authUser || !['ADMIN', 'WAREHOUSE', 'DEPOSITO'].includes(authUser.role)) {
+      return res.status(403).json({ message: 'Sin permisos para ver facturas externas' });
+    }
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ message: 'ID de factura externa requerido' });
+
+    const inv = (await get(
+      `SELECT id, source, external_order_id, order_number, customer_name, customer_cuit, customer_condicion_iva,
+              total, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, created_at
+       FROM external_invoices WHERE id = ?`,
+      [id]
+    )) as any;
+    if (!inv) return res.status(404).json({ message: 'Factura externa no encontrada' });
+
+    let products: Array<{ name: string; sku?: string; quantity: number; unitPrice: number }> = [];
+    let customerAddress = '';
+    let customerCity = '';
+
+    if (inv.source === 'TIENDANUBE') {
+      const integration = await get(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
+      const storeId = integration?.store_id || integration?.user_id;
+      if (integration?.access_token && storeId) {
+        const orderRes = await axios.get(
+          `https://api.tiendanube.com/v1/${storeId}/orders/${encodeURIComponent(String(inv.external_order_id))}`,
+          {
+            headers: {
+              Authentication: `bearer ${integration.access_token}`,
+              'User-Agent': TN_USER_AGENT,
+            },
+            validateStatus: () => true,
+          }
+        );
+        if (orderRes.status === 200 && orderRes.data) {
+          const order = orderRes.data;
+          products = (order.products || []).map((p: any) => ({
+            name: String(p.name || 'Producto').trim(),
+            sku: String(p.sku || '').trim() || undefined,
+            quantity: Math.max(0, Number(p.quantity) || 0),
+            unitPrice: Math.max(0, Number(p.price) || 0),
+          })).filter((p: { quantity: number }) => p.quantity > 0);
+          const ship = order.shipping_address || {};
+          customerAddress = [ship.address, ship.number].filter(Boolean).join(' ').trim();
+          customerCity = [ship.city, ship.province].filter(Boolean).join(', ').trim();
+        }
+      }
+    } else if (inv.source === 'MERCADOLIBRE') {
+      const mlToken = await getValidMLToken();
+      if (mlToken) {
+        const orderRes = await axios.get(
+          `https://api.mercadolibre.com/orders/${encodeURIComponent(String(inv.external_order_id))}`,
+          { headers: { Authorization: `Bearer ${mlToken}` }, validateStatus: () => true }
+        );
+        if (orderRes.status === 200 && orderRes.data) {
+          const order = orderRes.data;
+          products = (order.order_items || []).map((item: any) => ({
+            name: String(item.item?.title || 'Producto').trim(),
+            sku: String(item.item?.seller_sku || item.item?.seller_custom_field || '').trim() || undefined,
+            quantity: Math.max(0, Number(item.quantity) || 0),
+            unitPrice: Math.max(0, Number(item.unit_price) || 0),
+          })).filter((p: { quantity: number }) => p.quantity > 0);
+        }
+      }
+    }
+
+    const invoiceTotal = Number(inv.total || 0);
+    products = scaleExternalLineItemsToTotal(products, invoiceTotal);
+    if (!products.length && invoiceTotal > 0) {
+      const canal = inv.source === 'TIENDANUBE' ? 'Tienda Nube' : 'Mercado Libre';
+      products = [{
+        name: `Venta ${canal} #${inv.order_number || inv.external_order_id}`,
+        quantity: 1,
+        unitPrice: invoiceTotal,
+      }];
+    }
+
+    res.json({
+      invoice: {
+        id: inv.id,
+        source: inv.source,
+        externalOrderId: inv.external_order_id,
+        orderNumber: inv.order_number ?? undefined,
+        customerName: inv.customer_name ?? undefined,
+        customerCuit: inv.customer_cuit ?? undefined,
+        customerCondicionIva: inv.customer_condicion_iva ?? undefined,
+        customerAddress: customerAddress || undefined,
+        customerCity: customerCity || undefined,
+        total: invoiceTotal,
+        cae: inv.cae,
+        caeFchVto: inv.cae_fch_vto ?? undefined,
+        puntoVta: Number(inv.punto_venta),
+        cbteTipo: Number(inv.cbte_tipo),
+        cbteDesde: Number(inv.cbte_desde),
+        cbteHasta: Number(inv.cbte_hasta ?? inv.cbte_desde),
+        createdAt: inv.created_at ?? undefined,
+      },
+      products,
+    });
+  } catch (error: any) {
+    console.error('getExternalInvoicePrintData:', error);
+    res.status(500).json({ message: 'Error obteniendo datos para imprimir la factura' });
+  }
+};
+
 /** Emite NC total para una factura externa (una por factura). */
 export const emitirNotaCreditoExternalInvoice = async (req: Request, res: Response) => {
   try {

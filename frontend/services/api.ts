@@ -2930,6 +2930,31 @@ export const api = {
     }, { total: 0, offset: 0, limit: params?.limit || 50, totals: { all: 0, tn: 0, ml: 0 }, invoices: [] }, 'getExternalInvoicesHistory');
   },
 
+  getExternalInvoicePrintData: async (externalInvoiceId: string): Promise<{
+    invoice: {
+      id: string;
+      source: string;
+      externalOrderId: string;
+      orderNumber?: string;
+      customerName?: string;
+      customerCuit?: string;
+      customerCondicionIva?: string;
+      customerAddress?: string;
+      customerCity?: string;
+      total: number;
+      cae: string;
+      caeFchVto?: string;
+      puntoVta: number;
+      cbteTipo: number;
+      cbteDesde: number;
+      cbteHasta?: number;
+      createdAt?: string;
+    };
+    products: Array<{ name: string; sku?: string; quantity: number; unitPrice: number }>;
+  }> => {
+    return await request(`/integrations/invoices/external/${encodeURIComponent(externalInvoiceId)}/print-data`, 'GET');
+  },
+
   emitirNotaCreditoExternalInvoice: async (externalInvoiceId: string): Promise<{
     id: string;
     externalInvoiceId: string;

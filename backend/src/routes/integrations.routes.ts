@@ -53,6 +53,7 @@ import {
   invoiceTiendaNubeOrdersBulk,
   invoiceMercadoLibreOrdersBulk,
   getExternalInvoicesHistory,
+  getExternalInvoicePrintData,
   emitirNotaCreditoExternalInvoice,
   getMercadoLibreProductAdsAdvertisers,
   getMercadoLibreProductAdsCampaigns,
@@ -188,6 +189,7 @@ router.post('/tiendanube/sync-orders-from-date', authMiddleware, syncTiendaNubeO
 router.get('/tiendanube/sync-orders-from-date', authMiddleware, syncTiendaNubeOrdersFromDate);
 router.post('/tiendanube/invoice-bulk', authMiddleware, invoiceTiendaNubeOrdersBulk);
 router.get('/invoices/external', authMiddleware, getExternalInvoicesHistory);
+router.get('/invoices/external/:id/print-data', authMiddleware, getExternalInvoicePrintData);
 router.post('/invoices/external/:id/credit-note', authMiddleware, emitirNotaCreditoExternalInvoice);
 
 router.delete('/:platform/disconnect', disconnectIntegration);

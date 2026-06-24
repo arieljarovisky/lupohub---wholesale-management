@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { RefreshCw, Loader2, FileText, ChevronLeft, ChevronRight } from 'lucide-react';
+import { RefreshCw, Loader2, FileText, ChevronLeft, ChevronRight, Download } from 'lucide-react';
 import TiendaNubeOrders from './TiendaNubeOrders';
 import MercadoLibreOrders from './MercadoLibreOrders';
 import { api } from '../services/api';
+import { openExternalInvoicePdf } from '../utils/externalInvoicePdf';
 
 type SourceFilter = 'ALL' | 'TIENDANUBE' | 'MERCADOLIBRE';
 type ChannelTab = 'TN' | 'ML';
@@ -37,6 +38,7 @@ const BulkInvoicing: React.FC = () => {
   const [selectedInvoice, setSelectedInvoice] = useState<ExternalInvoiceRow | null>(null);
   const [historyLimit, setHistoryLimit] = useState(20);
   const [globalTotals, setGlobalTotals] = useState({ all: 0, tn: 0, ml: 0 });
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   const fetchHistory = async () => {
     setLoadingHistory(true);
@@ -78,6 +80,17 @@ const BulkInvoicing: React.FC = () => {
   const historyPages = Math.max(1, Math.ceil(historyTotal / historyLimit));
 
   const stats = useMemo(() => globalTotals, [globalTotals]);
+
+  const handleDownloadInvoice = async (row: ExternalInvoiceRow) => {
+    setDownloadingId(row.id);
+    try {
+      await openExternalInvoicePdf(row.id);
+    } catch (error: any) {
+      window.alert(error?.message || 'No se pudo abrir la factura');
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   const handleEmitNC = async (row: ExternalInvoiceRow) => {
     if (row.hasCreditNote) {
@@ -197,7 +210,7 @@ const BulkInvoicing: React.FC = () => {
                   <th className="text-right p-3 text-slate-500">Total</th>
                   <th className="text-left p-3 text-slate-500">Comprobante</th>
                   <th className="text-left p-3 text-slate-500">CAE</th>
-                  <th className="text-left p-3 text-slate-500">Detalle</th>
+                  <th className="text-left p-3 text-slate-500">Factura</th>
                   <th className="text-left p-3 text-slate-500">Nota de crédito</th>
                 </tr>
               </thead>
@@ -216,13 +229,25 @@ const BulkInvoicing: React.FC = () => {
                     <td className="p-3 text-slate-300">{h.cbteTipo} - {h.cbteDesde}</td>
                     <td className="p-3 text-emerald-300 font-mono">{h.cae}</td>
                     <td className="p-3">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedInvoice(h)}
-                        className="px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-800 border border-slate-700 text-slate-200 hover:bg-slate-700/70"
-                      >
-                        Ver
-                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadInvoice(h)}
+                          disabled={downloadingId === h.id}
+                          className="px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-700/30 border border-emerald-600/40 text-emerald-200 hover:bg-emerald-700/50 disabled:opacity-50 flex items-center gap-1"
+                          title="Descargar PDF / imprimir factura AFIP"
+                        >
+                          {downloadingId === h.id ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                          PDF
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedInvoice(h)}
+                          className="px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-800 border border-slate-700 text-slate-200 hover:bg-slate-700/70"
+                        >
+                          Ver
+                        </button>
+                      </div>
                     </td>
                     <td className="p-3">
                       {h.hasCreditNote ? (
@@ -307,6 +332,17 @@ const BulkInvoicing: React.FC = () => {
               <div className="text-slate-400">CAE</div><div className="text-emerald-300 font-mono">{selectedInvoice.cae}</div>
               <div className="text-slate-400">Fecha</div><div className="text-white">{selectedInvoice.createdAt ? new Date(selectedInvoice.createdAt).toLocaleString('es-AR') : '-'}</div>
               <div className="text-slate-400">NC</div><div className="text-white">{selectedInvoice.hasCreditNote ? `Sí (${selectedInvoice.creditNote?.cbteTipo}-${selectedInvoice.creditNote?.cbteDesde || ''})` : 'No emitida'}</div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => handleDownloadInvoice(selectedInvoice)}
+                disabled={downloadingId === selectedInvoice.id}
+                className="px-4 py-2 rounded-xl text-sm font-bold bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 flex items-center gap-2"
+              >
+                {downloadingId === selectedInvoice.id ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                Descargar PDF
+              </button>
             </div>
           </div>
         </div>
