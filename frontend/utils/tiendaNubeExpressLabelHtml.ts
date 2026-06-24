@@ -106,7 +106,7 @@ export function buildTiendaNubeExpressLabelInnerHtml(
       <div class="qr-row">
         <img src="${qrUrl}" alt="QR confirmar entrega" />
       </div>
-      <div class="qr-caption">Escanear para confirmar entrega</div>
+      <div class="qr-caption">Escanear para iniciar viaje / confirmar entrega</div>
     </div>
     <div class="meta">
       <span>${esc(shippingMethod)}</span>
