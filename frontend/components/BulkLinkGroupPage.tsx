@@ -427,6 +427,53 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
     [tnVariants, tnSearch]
   );
 
+  const assignedMlKeys = useMemo(() => {
+    const map = new Map<string, string>();
+    variants.forEach((v) => {
+      const a = assignments[v.variantId];
+      const ml = a?.ml?.trim();
+      if (!ml) return;
+      const key = mlAssignmentKey(ml, a?.mlItemId);
+      if (key) map.set(key, v.variantId);
+    });
+    return map;
+  }, [variants, assignments]);
+
+  const assignedTnKeys = useMemo(() => {
+    const map = new Map<string, string>();
+    variants.forEach((v) => {
+      const a = assignments[v.variantId];
+      const tn = a?.tn?.trim();
+      if (!tn) return;
+      const key = tnAssignmentKey(tn, a?.tnProductId);
+      if (key) map.set(key, v.variantId);
+    });
+    return map;
+  }, [variants, assignments]);
+
+  const getVisibleMlOptions = useCallback(
+    (variantId: string, selectedMl?: string, selectedMlItemId?: string) => {
+      const base = filteredMl.filter((m) => {
+        const owner = assignedMlKeys.get(mlOptionKey(m));
+        return !owner || owner === variantId;
+      });
+      const selected = (selectedMl || '').trim();
+      if (!selected || /^ML[A-Z]{1,5}\d+$/i.test(selected)) return base;
+      if (
+        base.some(
+          (m) => m.variationId === selected && (!selectedMlItemId || m.itemId === selectedMlItemId)
+        )
+      ) {
+        return base;
+      }
+      const opt = mlVariations.find(
+        (m) => m.variationId === selected && (!selectedMlItemId || m.itemId === selectedMlItemId)
+      );
+      return opt ? [opt, ...base] : base;
+    },
+    [filteredMl, mlVariations, assignedMlKeys]
+  );
+
   const linkStats = useMemo(() => {
     let ml = 0;
     let tn = 0;
@@ -459,9 +506,13 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
     }
   }, [loading, variants, assignments, catalogsLoaded]);
 
-  const getVisibleTnOptions = (selectedValue?: string, selectedProductId?: string) => {
+  const getVisibleTnOptions = (variantId: string, selectedValue?: string, selectedProductId?: string) => {
     const selected = (selectedValue || '').trim();
-    const base = filteredTn.length > 0 ? filteredTn : tnVariants;
+    const pool = filteredTn.length > 0 ? filteredTn : tnVariants;
+    const base = pool.filter((t) => {
+      const owner = assignedTnKeys.get(tnOptionKey(t));
+      return !owner || owner === variantId;
+    });
     if (!selected) return base;
     if (
       base.some(
@@ -1625,7 +1676,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                               }`}
                             >
                               <option value="">Elegir de ML cargado…</option>
-                              {filteredMl.map((m) => (
+                              {getVisibleMlOptions(v.variantId, mlVal, assignments[v.variantId]?.mlItemId).map((m) => (
                                 <option key={mlOptionKey(m)} value={mlOptionKey(m)}>
                                   {m.itemId} · {formatOptionLabel(m)}
                                 </option>
@@ -1682,7 +1733,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                               className="w-full bg-slate-800/80 border border-cyan-800/40 rounded-lg px-2.5 py-2 text-white text-xs outline-none focus:border-cyan-500/70"
                             >
                               <option value="">Elegir variante TN…</option>
-                              {getVisibleTnOptions(tnVal, tnProductId).map((t) => (
+                              {getVisibleTnOptions(v.variantId, tnVal, tnProductId).map((t) => (
                                 <option key={tnOptionKey(t)} value={tnOptionKey(t)}>
                                   {t.productId} · {formatOptionLabel(t)}
                                 </option>
