@@ -259,23 +259,33 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       const nextAssign: Record<string, VariantAssignment> = {};
       list.forEach((v: any, idx: number) => {
         const pubs = pubResults[idx] || [];
-        const mlPub = pubs.find((p: { platform: string }) => p.platform === 'mercadolibre');
+        const mlPub = pubs.find((p: { platform: string }) => p.platform === 'mercadolibre') as
+          | { external_product_id?: string; external_variant_id?: string }
+          | undefined;
         const tnPub = pubs.find((p: { platform: string }) => p.platform === 'tiendanube');
-        const mlVal =
-          v.externalIds?.mercadoLibreVariant != null &&
-          String(v.externalIds.mercadoLibreVariant).trim() !== ''
+        const savedMlItemId =
+          v.externalIds?.mercadoLibreItemId != null && String(v.externalIds.mercadoLibreItemId).trim() !== ''
+            ? String(v.externalIds.mercadoLibreItemId).trim()
+            : '';
+        const savedMlVarId =
+          v.externalIds?.mercadoLibreVariant != null && String(v.externalIds.mercadoLibreVariant).trim() !== ''
             ? String(v.externalIds.mercadoLibreVariant).trim()
-            : v.externalIds?.mercadoLibreItemId != null &&
-                String(v.externalIds.mercadoLibreItemId).trim() !== ''
-              ? String(v.externalIds.mercadoLibreItemId).trim()
+            : mlPub?.external_variant_id != null && String(mlPub.external_variant_id).trim() !== ''
+              ? String(mlPub.external_variant_id).trim()
               : '';
+        const mlVal = savedMlVarId || savedMlItemId;
         const mlItemId = !mlVal
           ? undefined
-          : /^ML[A-Z]{1,5}\d+$/i.test(mlVal)
-            ? mlVal.toUpperCase()
-            : (mlPub as { external_product_id?: string } | undefined)?.external_product_id ||
+          : savedMlVarId
+            ? savedMlItemId ||
+              mlPub?.external_product_id ||
               parentMl ||
-              undefined;
+              undefined
+            : /^ML[A-Z]{1,5}\d+$/i.test(mlVal)
+              ? mlVal.toUpperCase()
+              : mlPub?.external_product_id ||
+                parentMl ||
+                undefined;
         const tnVal = v.externalIds?.tiendaNubeVariant
           ? String(v.externalIds.tiendaNubeVariant)
           : '';
