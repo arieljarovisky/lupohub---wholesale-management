@@ -70,6 +70,7 @@ import { exportMercadoLibreToTiendaNube } from '../controllers/mlToTiendaNubeExp
 import { getVariantChannelPrices, bulkUpdateChannelPrices } from '../controllers/channelPrices.controller';
 import { getChannelMargins, exportChannelMarginsXlsx } from '../controllers/channelMargins.controller';
 import { exportTiendaNubeSalesReportXlsx } from '../controllers/tiendanubeSalesReport.controller';
+import { exportMercadoLibreSalesReportXlsx } from '../controllers/mercadolibreSalesReport.controller';
 import {
   listTiendaNubeCategoryMatches,
   downloadTiendaNubeCategoryImagesZip,
@@ -127,6 +128,7 @@ router.get('/mercadolibre/display-ads/advertisers', getMercadoLibreDisplayAdsAdv
 router.get('/mercadolibre/display-ads/campaigns', getMercadoLibreDisplayAdsCampaigns);
 /** Excel: publicaciones ML + precio mayorista + último FOB por variante (requiere login). */
 router.get('/mercadolibre/publications-export', authMiddleware, exportMercadolibrePublicationsXlsx);
+router.get('/mercadolibre/sales-report-export', authMiddleware, exportMercadoLibreSalesReportXlsx);
 router.get('/mercadolibre/items/:itemId/variations', getMercadoLibreItemVariations);
 router.post('/variant-external-stocks', getVariantExternalStocks);
 router.post('/variant-channel-prices', authMiddleware, getVariantChannelPrices);

@@ -3,7 +3,7 @@ import { RefreshCw, Package, User, MapPin, Truck, ChevronLeft, ChevronRight, Loa
 import { api } from '../services/api';
 import { getRemitente } from '../services/apiIntegration';
 import { openExternalInvoicePdf } from '../utils/externalInvoicePdf';
-import { buildTiendaNubeExpressLabelHtml, buildTiendaNubeExpressLabelInnerHtml, EXPRESS_LABEL_CSS } from '../utils/tiendaNubeExpressLabelHtml';
+import { buildTiendaNubeExpressLabelHtml, buildTiendaNubeExpressLabelInnerHtml, buildTiendaNubeExpressLabelsBulkHtml, EXPRESS_LABEL_CSS } from '../utils/tiendaNubeExpressLabelHtml';
 
 const EXPRESS_TRACKING_STATUS_OPTIONS = [
   { value: 'pending', label: 'Pendiente' },
@@ -104,6 +104,8 @@ const TiendaNubeOrders: React.FC = () => {
   const [bulkCbteTipo, setBulkCbteTipo] = useState<'auto' | 'A' | 'B'>('auto');
   const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null);
   const [assigningTrackingOrderId, setAssigningTrackingOrderId] = useState<number | null>(null);
+  const [bulkLabelsGenerating, setBulkLabelsGenerating] = useState(false);
+  const [bulkLabelsProgress, setBulkLabelsProgress] = useState<{ done: number; total: number } | null>(null);
   const [updatingTrackingStatusOrderId, setUpdatingTrackingStatusOrderId] = useState<number | null>(null);
   const [trackingStatusDrafts, setTrackingStatusDrafts] = useState<Record<number, ExpressTrackingStatus>>({});
   const perPage = 15;
@@ -481,6 +483,87 @@ const TiendaNubeOrders: React.FC = () => {
     }
   };
 
+  const resolveSelectedOrders = async (): Promise<TiendaNubeOrder[]> => {
+    const byId = new Map<number, TiendaNubeOrder>(orders.map((o) => [o.id, o]));
+    const missing = selectedOrderIds.filter((id) => !byId.has(id));
+    if (missing.length === 0) {
+      return selectedOrderIds.map((id) => byId.get(id)).filter(Boolean) as TiendaNubeOrder[];
+    }
+
+    let currentPage = 1;
+    const perPageFetch = 100;
+    while (missing.some((id) => !byId.has(id)) && currentPage <= 100) {
+      const params: Record<string, unknown> = { page: currentPage, per_page: perPageFetch };
+      if (!showAllOrders) params.only_paid_pending_shipment = true;
+      if (filterStatus) params.status = filterStatus;
+      if (dateFrom) params.created_at_min = dateFrom;
+      if (dateTo) params.created_at_max = dateTo;
+      const res = await api.getTiendaNubeOrders(params);
+      for (const o of res.orders || []) byId.set(o.id, o as TiendaNubeOrder);
+      if (!res.orders || res.orders.length < perPageFetch) break;
+      currentPage += 1;
+    }
+
+    return selectedOrderIds.map((id) => byId.get(id)).filter(Boolean) as TiendaNubeOrder[];
+  };
+
+  const openBulkExpressLabels = async () => {
+    if (selectedOrderIds.length === 0) {
+      window.alert('Seleccioná al menos una orden.');
+      return;
+    }
+    setBulkLabelsGenerating(true);
+    setBulkLabelsProgress(null);
+    try {
+      const selectedOrders = await resolveSelectedOrders();
+      const expressOrders = selectedOrders.filter(hasExpressShipping);
+      const skipped = selectedOrders.length - expressOrders.length;
+
+      if (expressOrders.length === 0) {
+        window.alert('Ninguna de las órdenes seleccionadas tiene envío express.');
+        return;
+      }
+
+      const remitente = getRemitente();
+      const labelItems: Array<{ order: TiendaNubeOrder; trackingCode: string }> = [];
+      const errors: string[] = [];
+
+      for (let i = 0; i < expressOrders.length; i += 1) {
+        const order = expressOrders[i];
+        setBulkLabelsProgress({ done: i, total: expressOrders.length });
+        try {
+          const trackingCode = await ensureExpressTrackingCode(order);
+          labelItems.push({ order, trackingCode });
+        } catch (error: any) {
+          errors.push(`#${order.number}: ${error?.message || 'error'}`);
+        }
+      }
+
+      if (labelItems.length === 0) {
+        window.alert('No se pudo generar ninguna etiqueta.\n\n' + errors.join('\n'));
+        return;
+      }
+
+      const html = buildTiendaNubeExpressLabelsBulkHtml(labelItems, remitente);
+      openPrintWindow(
+        html,
+        'El navegador bloqueó la ventana de etiquetas. Permití popups para este sitio e intentá de nuevo.'
+      );
+
+      if (errors.length > 0 || skipped > 0) {
+        const parts: string[] = [`Se generaron ${labelItems.length} etiqueta(s) en un solo PDF.`];
+        if (skipped > 0) parts.push(`${skipped} orden(es) sin express omitida(s).`);
+        if (errors.length > 0) parts.push(`Errores:\n${errors.join('\n')}`);
+        window.alert(parts.join('\n\n'));
+      }
+    } catch (error: any) {
+      window.alert(error?.message || 'No se pudieron generar las etiquetas express');
+    } finally {
+      setBulkLabelsGenerating(false);
+      setBulkLabelsProgress(null);
+    }
+  };
+
   const handleDownloadInvoice = async (order: TiendaNubeOrder, e?: React.MouseEvent) => {
     e?.stopPropagation();
     const invoiceId = order.invoice?.id;
@@ -634,6 +717,22 @@ const TiendaNubeOrders: React.FC = () => {
             Limpiar selección
           </button>
           <button
+            type="button"
+            onClick={() => void openBulkExpressLabels()}
+            disabled={bulkLabelsGenerating || selectedOrderIds.length === 0}
+            className="bg-fuchsia-700/40 border border-fuchsia-600/40 text-fuchsia-100 px-4 py-2.5 rounded-xl text-sm font-black disabled:opacity-50 flex items-center gap-2"
+            title="Imprime hasta 4 etiquetas express por hoja A4 en un solo PDF"
+          >
+            {bulkLabelsGenerating ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <Tag size={16} />
+            )}
+            {bulkLabelsGenerating && bulkLabelsProgress
+              ? `Etiquetas ${bulkLabelsProgress.done}/${bulkLabelsProgress.total}`
+              : `Etiquetas express (${selectedOrderIds.length})`}
+          </button>
+          <button
             onClick={handleBulkInvoice}
             disabled={bulkInvoicing || selectedOrderIds.length === 0}
             className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-xl text-sm font-black disabled:opacity-50"
@@ -655,6 +754,11 @@ const TiendaNubeOrders: React.FC = () => {
       {bulkInvoicing && bulkProgress && (
         <div className="text-xs text-emerald-300 bg-emerald-900/20 border border-emerald-700/40 rounded-xl px-3 py-2">
           Facturando lote {bulkProgress.chunksDone}/{bulkProgress.chunksTotal} - {bulkProgress.processed}/{bulkProgress.total} ordenes procesadas.
+        </div>
+      )}
+      {bulkLabelsGenerating && bulkLabelsProgress && (
+        <div className="text-xs text-fuchsia-200 bg-fuchsia-900/20 border border-fuchsia-700/40 rounded-xl px-3 py-2">
+          Generando etiquetas express {bulkLabelsProgress.done}/{bulkLabelsProgress.total}…
         </div>
       )}
 

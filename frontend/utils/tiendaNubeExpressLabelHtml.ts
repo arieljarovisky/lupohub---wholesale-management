@@ -136,6 +136,99 @@ export const EXPRESS_LABEL_CSS = `
   .express-label-page { page-break-before: always; margin-top: 24px; }
 `;
 
+export const EXPRESS_LABEL_BULK_CSS = `
+  @page { size: A4 portrait; margin: 6mm; }
+  * { box-sizing: border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #111; margin: 0; }
+  ${EXPRESS_LABEL_CSS}
+  .labels-page { page-break-after: always; }
+  .labels-page:last-child { page-break-after: auto; }
+  .labels-sheet {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4mm;
+    align-items: start;
+  }
+  .label-cell { break-inside: avoid; page-break-inside: avoid; }
+  .labels-sheet .express-label {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    font-size: 9px;
+    padding: 4px;
+    gap: 4px;
+  }
+  .labels-sheet .express-label .badge { font-size: 11px; padding: 3px 6px; }
+  .labels-sheet .express-label .order-ref strong { font-size: 12px; }
+  .labels-sheet .express-label .dest-name { font-size: 12px; }
+  .labels-sheet .express-label .tracking-code { font-size: 15px; }
+  .labels-sheet .express-label .qr-row img { width: 50px; height: 50px; }
+  .labels-sheet .express-label .qr-caption { font-size: 7px; }
+  .print-header {
+    text-align: center; font-size: 11px; color: #444; margin-bottom: 4mm;
+    padding-bottom: 2mm; border-bottom: 1px dashed #ccc;
+  }
+  .print-actions { margin-top: 12px; text-align: center; }
+  @media print {
+    .print-actions, .print-header { display: none; }
+    body { margin: 0; }
+  }
+`;
+
+export type ExpressLabelPrintItem = {
+  order: TiendaNubeExpressLabelOrder;
+  trackingCode: string;
+};
+
+const LABELS_PER_A4_PAGE = 4;
+
+/** Varias etiquetas express en un solo HTML/PDF (hasta 4 por hoja A4). */
+export function buildTiendaNubeExpressLabelsBulkHtml(
+  items: ExpressLabelPrintItem[],
+  remitente: RemitenteConfig
+): string {
+  if (items.length === 0) {
+    return `<!DOCTYPE html><html><body><p>Sin etiquetas para imprimir.</p></body></html>`;
+  }
+
+  const pages: string[] = [];
+  for (let i = 0; i < items.length; i += LABELS_PER_A4_PAGE) {
+    const chunk = items.slice(i, i + LABELS_PER_A4_PAGE);
+    const cells = chunk
+      .map(
+        ({ order, trackingCode }) =>
+          `<div class="label-cell">${buildTiendaNubeExpressLabelInnerHtml(order, trackingCode, remitente)}</div>`
+      )
+      .join('');
+    pages.push(`<div class="labels-page"><div class="labels-sheet">${cells}</div></div>`);
+  }
+
+  const orderNumbers = items.map((it) => it.order.number).join(', ');
+  const title =
+    items.length === 1
+      ? `Etiqueta Express TN #${items[0].order.number}`
+      : `Etiquetas Express (${items.length})`;
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${esc(title)}</title>
+  <style>${EXPRESS_LABEL_BULK_CSS}</style>
+</head>
+<body>
+  <div class="print-header">
+    ${items.length} etiqueta${items.length !== 1 ? 's' : ''} express · ${LABELS_PER_A4_PAGE} por hoja A4 · Pedidos: ${esc(orderNumbers)}
+  </div>
+  ${pages.join('')}
+  <div class="print-actions">
+    <button onclick="window.print()" style="padding:10px 14px;background:#1f2937;color:#fff;border:none;border-radius:6px;font-weight:700;cursor:pointer;">Imprimir / PDF (${items.length} etiquetas)</button>
+    <button onclick="window.close()" style="padding:10px 14px;margin-left:8px;background:#94a3b8;color:#fff;border:none;border-radius:6px;cursor:pointer;">Cerrar</button>
+  </div>
+</body>
+</html>`;
+}
+
 /** HTML imprimible de etiqueta express (100×150 mm aprox.) con código de seguimiento. */
 export function buildTiendaNubeExpressLabelHtml(
   order: TiendaNubeExpressLabelOrder,
