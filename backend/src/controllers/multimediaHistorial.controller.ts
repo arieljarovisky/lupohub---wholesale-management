@@ -23,6 +23,7 @@ import {
   SQL_ORDER_SALDO_RESIDUAL
 } from '../services/orderPaymentBalance.service';
 import { normalizeLedgerDocType } from '../utils/ledgerDocType';
+import { paymentCoversSupersededReinvoiceCargo } from '../utils/reinvoicePaymentSaldo';
 import {
   applyLedgerRunningSaldo,
   applyLedgerRunningSaldoSimple,
@@ -827,6 +828,12 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
         source: 'system' as const
       };
     });
+    const supersededReinvoiceCreditNotes = creditNoteRows
+      .filter((cn) => Number(cn.superseded_by_reinvoice) === 1)
+      .map((cn) => ({
+        order_id: String(cn.order_id || ''),
+        amount_credited: Number(cn.amount_credited || 0),
+      }));
     const paymentAsEntries = paymentEntries
       .filter((p) => ledgerMovementVisibleAfterOpening(openingBalanceDate, p.date))
       .map((p, idx) => {
@@ -847,11 +854,23 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
           ...(p.order_id ? [String(p.order_id).trim()] : []),
         ])
       ).filter((oid) => oid && !oid.startsWith('mm-'));
+      const unallocated =
+        orderRefs.length === 0 &&
+        comprobantes.length === 0 &&
+        !String(p.invoice_id || '').trim();
+      const excludeFromSaldo = paymentCoversSupersededReinvoiceCargo(
+        Number(p.amount || 0),
+        orderRefs,
+        supersededReinvoiceCreditNotes,
+        unallocated
+      );
       const parts: string[] = [];
       if (comprobantes.length) parts.push(`Factura(s) AFIP: ${comprobantes.join(' | ')}`);
       if (orderRefs.length) parts.push(`Pedido(s): ${orderRefs.join(' | ')}`);
       const refsText = parts.length ? parts.join(' · ') : 'Sin imputar';
-      const detail = `${refsText}${p.notes ? ` | ${String(p.notes).trim()}` : ''}`;
+      const detail = `${refsText}${
+        excludeFromSaldo ? ' · Cobro del cargo anterior a reemisión IIBB (no modifica saldo)' : ''
+      }${p.notes ? ` | ${String(p.notes).trim()}` : ''}`;
       return {
         lineOrder: maxLineOrder + 100000 + idx,
         lineDate: p.date,
@@ -863,6 +882,8 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
         saldo: null,
         detalle: detail,
         paginaPdf: null,
+        excluirDeSaldo: excludeFromSaldo,
+        supersededReinvoicePayment: excludeFromSaldo,
         source: 'system'
       };
     });

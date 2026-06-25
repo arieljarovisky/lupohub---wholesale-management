@@ -122,6 +122,29 @@ function getRowLinkStatus(ml?: string, tn?: string): RowLinkStatus {
   return 'empty';
 }
 
+function hasMlAssignment(a?: VariantAssignment): boolean {
+  return !!a?.ml?.trim();
+}
+
+function variantHadMlLink(externalIds?: {
+  mercadoLibreVariant?: string | number | null;
+  mercadoLibreItemId?: string | null;
+}): boolean {
+  if (!externalIds) return false;
+  if (externalIds.mercadoLibreVariant != null && String(externalIds.mercadoLibreVariant).trim() !== '') {
+    return true;
+  }
+  return externalIds.mercadoLibreItemId != null && String(externalIds.mercadoLibreItemId).trim() !== '';
+}
+
+function clearMlAssignmentFields(assignment?: VariantAssignment): VariantAssignment {
+  return {
+    ...assignment,
+    ml: '',
+    mlItemId: undefined,
+  };
+}
+
 export interface BulkLinkGroupPageProps {
   groupKey: string;
   onNavigate: (view: string) => void;
@@ -231,8 +254,9 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                 String(v.externalIds.mercadoLibreItemId).trim() !== ''
               ? String(v.externalIds.mercadoLibreItemId).trim()
               : '';
-        const mlItemId =
-          mlVal && /^ML[A-Z]{1,5}\d+$/i.test(mlVal)
+        const mlItemId = !mlVal
+          ? undefined
+          : /^ML[A-Z]{1,5}\d+$/i.test(mlVal)
             ? mlVal.toUpperCase()
             : (mlPub as { external_product_id?: string } | undefined)?.external_product_id ||
               parentMl ||
@@ -858,6 +882,10 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
         if (!nextSku || nextSku === v.sku) continue;
         await api.updateVariant(String(v.variantId), { sku: nextSku });
       }
+      const mlUnlinks = variants.filter((v) => {
+        const a = assignments[v.variantId];
+        return variantHadMlLink(v.externalIds) && !hasMlAssignment(a);
+      });
       const links = variants
         .map((v) => {
           const a = assignments[v.variantId];
@@ -867,7 +895,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
           return {
             variantId: String(v.variantId),
             mercadoLibreVariantId: !isMlItemId && ml ? ml : undefined,
-            mercadoLibreItemId: isMlItemId ? ml : a?.mlItemId?.trim() || undefined,
+            mercadoLibreItemId: isMlItemId ? ml : ml && a?.mlItemId?.trim() ? a.mlItemId.trim() : undefined,
             tiendaNubeVariantId: tn || undefined,
             tiendaNubeProductId: a?.tnProductId?.trim() || undefined,
           };
@@ -875,27 +903,37 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
         .filter(
           (l) => l.mercadoLibreVariantId != null || l.mercadoLibreItemId != null || l.tiendaNubeVariantId != null
         );
-      if (links.length === 0) {
+      if (links.length === 0 && mlUnlinks.length === 0) {
         showToast('info', 'Asigná al menos una variación ML o variante TN.');
         setSaving(false);
         return;
       }
-      const allMlOwn =
-        links.every((l) => {
-          const ml = assignments[l.variantId]?.ml?.trim() || '';
-          return !ml || /^ML[A-Z]{1,5}\d+$/i.test(ml);
-        }) && links.some((l) => /^ML[A-Z]{1,5}\d+$/i.test(assignments[l.variantId]?.ml?.trim() || ''));
-      const primaryMl = mlSources[0]?.id;
-      const primaryTn = tnSources[0]?.id;
-      const res = await api.bulkLinkVariants({
-        productId,
-        mercadoLibreItemId: allMlOwn ? undefined : primaryMl || undefined,
-        tiendaNubeProductId: primaryTn && /^\d+$/.test(primaryTn) ? primaryTn : undefined,
-        links,
-      });
+      for (const v of mlUnlinks) {
+        await api.updateVariantExternalIds(v.variantId, {
+          mercadoLibreVariantId: null,
+          mercadoLibreItemId: null,
+        });
+      }
+      let updated = mlUnlinks.length;
+      let synced = 0;
+      if (links.length > 0) {
+        const allMlOwn =
+          links.every((l) => {
+            const ml = assignments[l.variantId]?.ml?.trim() || '';
+            return !ml || /^ML[A-Z]{1,5}\d+$/i.test(ml);
+          }) && links.some((l) => /^ML[A-Z]{1,5}\d+$/i.test(assignments[l.variantId]?.ml?.trim() || ''));
+        const primaryMl = mlSources[0]?.id;
+        const primaryTn = tnSources[0]?.id;
+        const res = await api.bulkLinkVariants({
+          productId,
+          mercadoLibreItemId: allMlOwn ? undefined : primaryMl || undefined,
+          tiendaNubeProductId: primaryTn && /^\d+$/.test(primaryTn) ? primaryTn : undefined,
+          links,
+        });
+        updated = (res as any)?.updated ?? links.length;
+        synced = (res as any)?.synced ?? 0;
+      }
       const extraPubs = await syncAllSourcePublications();
-      const updated = (res as any)?.updated ?? links.length;
-      const synced = (res as any)?.synced ?? 0;
       onImportComplete?.();
       showToast(
         'success',
@@ -1433,18 +1471,21 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                           <input
                             type="text"
                             value={mlVal}
-                            onChange={(e) =>
+                            onChange={(e) => {
+                              const trimmed = e.target.value.trim();
                               setAssignments((prev) => ({
                                 ...prev,
-                                [v.variantId]: {
-                                  ...prev[v.variantId],
-                                  ml: e.target.value.trim(),
-                                  mlItemId: /^ML[A-Z]{1,5}\d+$/i.test(e.target.value.trim())
-                                    ? undefined
-                                    : prev[v.variantId]?.mlItemId,
-                                },
-                              }))
-                            }
+                                [v.variantId]: !trimmed
+                                  ? clearMlAssignmentFields(prev[v.variantId])
+                                  : {
+                                      ...prev[v.variantId],
+                                      ml: trimmed,
+                                      mlItemId: /^ML[A-Z]{1,5}\d+$/i.test(trimmed)
+                                        ? undefined
+                                        : prev[v.variantId]?.mlItemId,
+                                    },
+                              }));
+                            }}
                             placeholder={mlVariations.length > 0 ? 'ID variación o MLA' : 'MLA o variación'}
                             className="w-full bg-slate-800/80 border border-amber-800/40 rounded-lg px-2.5 py-2 text-white text-xs font-mono outline-none focus:border-amber-500/70"
                           />
@@ -1455,10 +1496,23 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                           )}
                           {mlVariations.length > 0 ? (
                             <select
-                              value=""
+                              value={
+                                mlVal && assignments[v.variantId]?.mlItemId
+                                  ? mlOptionKey({
+                                      itemId: assignments[v.variantId]!.mlItemId!,
+                                      variationId: mlVal,
+                                    } as MlVariationRow)
+                                  : ''
+                              }
                               onChange={(e) => {
                                 const val = e.target.value;
-                                if (!val) return;
+                                if (!val) {
+                                  setAssignments((prev) => ({
+                                    ...prev,
+                                    [v.variantId]: clearMlAssignmentFields(prev[v.variantId]),
+                                  }));
+                                  return;
+                                }
                                 const [itemId, variationId] = val.split('::');
                                 const conflict = findMlAssignmentConflict(v.variantId, variationId, itemId);
                                 if (conflict) {

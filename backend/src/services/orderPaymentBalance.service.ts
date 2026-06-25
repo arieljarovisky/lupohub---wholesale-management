@@ -1,5 +1,55 @@
 import { execute, get, query } from '../database/db';
-import { IVA_MULTIPLIER, ORDER_PRICES_INCLUDE_IVA } from '../config/orderPricing';
+import {
+  IVA_MULTIPLIER,
+  ORDER_PRICES_INCLUDE_IVA,
+  sqlNetoAfipToAmountWithIva,
+} from '../config/orderPricing';
+
+export const SQL_PAYMENT_IS_UNALLOCATED = `(
+  NOT EXISTS (SELECT 1 FROM payment_orders po_u WHERE po_u.payment_id = p.id)
+  AND NOT EXISTS (SELECT 1 FROM payment_invoices pi_u WHERE pi_u.payment_id = p.id)
+  AND (p.invoice_id IS NULL OR TRIM(COALESCE(p.invoice_id, '')) = '')
+  AND (p.order_id IS NULL OR TRIM(COALESCE(p.order_id, '')) = '')
+)`;
+
+/**
+ * Recibo que cubre el cargo previo a una reemisión IIBB (mismo importe que la NC fiscal).
+ * La NC ya reemplazó ese cargo; el recibo no debe restar otra vez del saldo actual.
+ */
+export const SQL_PAYMENT_EXCLUDE_SUPERSEDED_REINVOICE_CARGO = `EXISTS (
+  SELECT 1
+  FROM credit_notes cn_r
+  INNER JOIN orders o_r ON o_r.id = cn_r.order_id
+  WHERE COALESCE(cn_r.superseded_by_reinvoice, 0) = 1
+    AND o_r.customer_id = p.customer_id
+    AND ROUND(ABS(COALESCE(p.amount, 0)), 2) = ${sqlNetoAfipToAmountWithIva('COALESCE(cn_r.amount_credited, 0)')}
+    AND (
+      p.order_id = cn_r.order_id
+      OR EXISTS (
+        SELECT 1 FROM payment_orders po_sr
+        WHERE po_sr.payment_id = p.id AND po_sr.order_id = cn_r.order_id
+      )
+      OR EXISTS (
+        SELECT 1 FROM payment_invoices pi_sr
+        INNER JOIN invoices i_sr ON i_sr.id = pi_sr.invoice_id
+        WHERE pi_sr.payment_id = p.id AND i_sr.order_id = cn_r.order_id
+      )
+      OR EXISTS (
+        SELECT 1 FROM invoices i_ld
+        WHERE i_ld.id = p.invoice_id AND i_ld.order_id = cn_r.order_id
+      )
+      OR ${SQL_PAYMENT_IS_UNALLOCATED}
+    )
+)`;
+
+/** Importe del recibo que impacta saldo cartera/historial (0 si cubre cargo previo a reemisión IIBB). */
+export const SQL_PAYMENT_SALDO_CONTRIBUTION_AMOUNT = `ROUND(
+  CASE
+    WHEN (${SQL_PAYMENT_EXCLUDE_SUPERSEDED_REINVOICE_CARGO}) THEN 0
+    ELSE COALESCE(p.amount, 0)
+  END,
+  2
+)`;
 
 export const SQL_ORDER_NETO_GRAVADO = `GREATEST(
   COALESCE(o.total, 0),

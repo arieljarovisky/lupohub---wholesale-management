@@ -11,7 +11,8 @@ import {
   SQL_ORDER_BASE_MINUS_NC,
   SQL_ORDER_IN_SALDO_SCOPE,
   SQL_ORDER_NETO_AFIP,
-  SQL_ORDER_SALDO_RESIDUAL
+  SQL_ORDER_SALDO_RESIDUAL,
+  SQL_PAYMENT_SALDO_CONTRIBUTION_AMOUNT,
 } from '../services/orderPaymentBalance.service';
 import {
   IVA_MULTIPLIER,
@@ -1600,15 +1601,18 @@ export const getSaldosPendientes = async (req: Request, res: Response) => {
   const paymentsJoin =
     user.role === 'SELLER'
       ? `LEFT JOIN (
-      SELECT p.customer_id, SUM(p.amount) AS total_pagos
+      SELECT p.customer_id, SUM(${SQL_PAYMENT_SALDO_CONTRIBUTION_AMOUNT}) AS total_pagos
       FROM payments p
       INNER JOIN customers c2 ON c2.id = p.customer_id
       WHERE (p.seller_id = ? OR c2.seller_id = ?)
       GROUP BY p.customer_id
     ) pay ON pay.customer_id = t.customerId`
       : `LEFT JOIN (
-      SELECT customer_id, SUM(amount) AS total_pagos
-      FROM payments
+      SELECT customer_id, SUM(saldo_amount) AS total_pagos
+      FROM (
+        SELECT p.customer_id, ${SQL_PAYMENT_SALDO_CONTRIBUTION_AMOUNT} AS saldo_amount
+        FROM payments p
+      ) pay_inner
       GROUP BY customer_id
     ) pay ON pay.customer_id = t.customerId`;
 
@@ -1736,11 +1740,12 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
 
   const paymentsSubquery =
     user.role === 'SELLER'
-      ? `SELECT d.customer_id, SUM(d.amount) AS total_pagos
+      ? `SELECT d.customer_id, SUM(d.saldo_amount) AS total_pagos
          FROM (
            SELECT
              p.customer_id,
              ROUND(COALESCE(p.amount, 0), 2) AS amount,
+             ${SQL_PAYMENT_SALDO_CONTRIBUTION_AMOUNT} AS saldo_amount,
              CASE
                WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
                ELSE UPPER(
@@ -1793,11 +1798,12 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
              END
          ) d
          GROUP BY d.customer_id`
-      : `SELECT d.customer_id, SUM(d.amount) AS total_pagos
+      : `SELECT d.customer_id, SUM(d.saldo_amount) AS total_pagos
          FROM (
            SELECT
              p.customer_id,
              ROUND(COALESCE(p.amount, 0), 2) AS amount,
+             ${SQL_PAYMENT_SALDO_CONTRIBUTION_AMOUNT} AS saldo_amount,
              CASE
                WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
                ELSE UPPER(
@@ -1940,9 +1946,9 @@ export async function queryCarteraTotalsForCustomer(
   const sellerFilter = user.role === 'SELLER' ? ' AND c.seller_id = ?' : '';
   const paymentsSubquery =
     user.role === 'SELLER'
-      ? `SELECT d.customer_id, SUM(d.amount) AS total_pagos
+      ? `SELECT d.customer_id, SUM(d.saldo_amount) AS total_pagos
          FROM (
-           SELECT p.customer_id, ROUND(COALESCE(p.amount, 0), 2) AS amount,
+           SELECT p.customer_id, ROUND(COALESCE(p.amount, 0), 2) AS amount, ${SQL_PAYMENT_SALDO_CONTRIBUTION_AMOUNT} AS saldo_amount,
              CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
              ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END AS receipt_norm
            FROM payments p
@@ -1964,9 +1970,9 @@ export async function queryCarteraTotalsForCustomer(
              CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
              ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END
          ) d GROUP BY d.customer_id`
-      : `SELECT d.customer_id, SUM(d.amount) AS total_pagos
+      : `SELECT d.customer_id, SUM(d.saldo_amount) AS total_pagos
          FROM (
-           SELECT p.customer_id, ROUND(COALESCE(p.amount, 0), 2) AS amount,
+           SELECT p.customer_id, ROUND(COALESCE(p.amount, 0), 2) AS amount, ${SQL_PAYMENT_SALDO_CONTRIBUTION_AMOUNT} AS saldo_amount,
              CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
              ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END AS receipt_norm
            FROM payments p
@@ -2041,9 +2047,9 @@ async function fetchCarteraSaldoUnificadoMap(
   const baseParams: any[] = sellerIdFilter ? [sellerIdFilter] : user.role === 'SELLER' ? [user.id] : [];
   const sellerScoped = !!sellerIdFilter || user.role === 'SELLER';
   const paymentsSubquery = sellerScoped
-    ? `SELECT d.customer_id, SUM(d.amount) AS total_pagos
+    ? `SELECT d.customer_id, SUM(d.saldo_amount) AS total_pagos
          FROM (
-           SELECT p.customer_id, ROUND(COALESCE(p.amount, 0), 2) AS amount,
+           SELECT p.customer_id, ROUND(COALESCE(p.amount, 0), 2) AS amount, ${SQL_PAYMENT_SALDO_CONTRIBUTION_AMOUNT} AS saldo_amount,
              CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
              ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END AS receipt_norm
            FROM payments p
@@ -2066,9 +2072,9 @@ async function fetchCarteraSaldoUnificadoMap(
              CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
              ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END
          ) d GROUP BY d.customer_id`
-    : `SELECT d.customer_id, SUM(d.amount) AS total_pagos
+    : `SELECT d.customer_id, SUM(d.saldo_amount) AS total_pagos
          FROM (
-           SELECT p.customer_id, ROUND(COALESCE(p.amount, 0), 2) AS amount,
+           SELECT p.customer_id, ROUND(COALESCE(p.amount, 0), 2) AS amount, ${SQL_PAYMENT_SALDO_CONTRIBUTION_AMOUNT} AS saldo_amount,
              CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
              ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END AS receipt_norm
            FROM payments p
@@ -2136,11 +2142,12 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
   const paymentsJoin =
     user.role === 'SELLER'
       ? `LEFT JOIN (
-      SELECT d.customer_id, SUM(d.amount) AS total_pagos
+      SELECT d.customer_id, SUM(d.saldo_amount) AS total_pagos
       FROM (
         SELECT
           p.customer_id,
           ROUND(COALESCE(p.amount, 0), 2) AS amount,
+          ${SQL_PAYMENT_SALDO_CONTRIBUTION_AMOUNT} AS saldo_amount,
           CASE
             WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
             ELSE UPPER(
@@ -2165,11 +2172,12 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
       GROUP BY d.customer_id
     ) pay ON pay.customer_id = t.customerId`
       : `LEFT JOIN (
-      SELECT d.customer_id, SUM(d.amount) AS total_pagos
+      SELECT d.customer_id, SUM(d.saldo_amount) AS total_pagos
       FROM (
         SELECT
           p.customer_id,
           ROUND(COALESCE(p.amount, 0), 2) AS amount,
+          ${SQL_PAYMENT_SALDO_CONTRIBUTION_AMOUNT} AS saldo_amount,
           CASE
             WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
             ELSE UPPER(
@@ -3665,15 +3673,18 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
   const paymentsJoin =
     user.role === 'SELLER'
       ? `LEFT JOIN (
-      SELECT p.customer_id, SUM(p.amount) AS total_pagos
+      SELECT p.customer_id, SUM(${SQL_PAYMENT_SALDO_CONTRIBUTION_AMOUNT}) AS total_pagos
       FROM payments p
       INNER JOIN customers c2 ON c2.id = p.customer_id
       WHERE (p.seller_id = ? OR c2.seller_id = ?)
       GROUP BY p.customer_id
     ) pay ON pay.customer_id = t.customerId`
       : `LEFT JOIN (
-      SELECT customer_id, SUM(amount) AS total_pagos
-      FROM payments
+      SELECT customer_id, SUM(saldo_amount) AS total_pagos
+      FROM (
+        SELECT p.customer_id, ${SQL_PAYMENT_SALDO_CONTRIBUTION_AMOUNT} AS saldo_amount
+        FROM payments p
+      ) pay_inner
       GROUP BY customer_id
     ) pay ON pay.customer_id = t.customerId`;
   const payParams: any[] = user.role === 'SELLER' ? [user.id, user.id] : [];
@@ -3683,15 +3694,18 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
   const payMmJoin =
     user.role === 'SELLER'
       ? `LEFT JOIN (
-      SELECT p.customer_id, SUM(p.amount) AS total_pagos
+      SELECT p.customer_id, SUM(${SQL_PAYMENT_SALDO_CONTRIBUTION_AMOUNT}) AS total_pagos
       FROM payments p
       INNER JOIN customers c2 ON c2.id = p.customer_id
       WHERE (p.seller_id = ? OR c2.seller_id = ?)
       GROUP BY p.customer_id
     ) pay_mm ON pay_mm.customer_id = c.id`
       : `LEFT JOIN (
-      SELECT customer_id, SUM(amount) AS total_pagos
-      FROM payments
+      SELECT customer_id, SUM(saldo_amount) AS total_pagos
+      FROM (
+        SELECT p.customer_id, ${SQL_PAYMENT_SALDO_CONTRIBUTION_AMOUNT} AS saldo_amount
+        FROM payments p
+      ) pay_inner
       GROUP BY customer_id
     ) pay_mm ON pay_mm.customer_id = c.id`;
   const mmParams = [...baseParams, ...payParams];
@@ -4606,7 +4620,7 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
         COALESCE(p.receipt_number, '') AS comprobante,
         p.order_id AS order_id,
         0 AS debe,
-        ROUND(COALESCE(p.amount, 0), 2) AS haber,
+        ${SQL_PAYMENT_SALDO_CONTRIBUTION_AMOUNT} AS haber,
         COALESCE(p.notes, '') AS detalle
       FROM payments p
       LEFT JOIN (
