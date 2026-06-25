@@ -655,7 +655,14 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
     return dup;
   }, [variants, assignments]);
 
-  const assignmentConflictCount = duplicateMlByVariant.dup.size + duplicateTnByVariant.size;
+  const conflictingVariantIds = useMemo(() => {
+    const ids = new Set<string>();
+    duplicateMlByVariant.dup.forEach((id) => ids.add(id));
+    duplicateTnByVariant.forEach((id) => ids.add(id));
+    return ids;
+  }, [duplicateMlByVariant, duplicateTnByVariant]);
+
+  const assignmentConflictCount = conflictingVariantIds.size;
 
   const suggestedUnifyPair = useMemo((): { absorbId: string; keeperId: string } | null => {
     const uTokens = new Set(['U', '170']);
