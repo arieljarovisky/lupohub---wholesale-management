@@ -307,6 +307,8 @@ const Settings: React.FC<SettingsProps> = ({
   const [stockSyncResult, setStockSyncResult] = useState<{ platform: string; updated: number; errors: number; logs: string[] } | null>(null);
   const [showStockSyncModal, setShowStockSyncModal] = useState(false);
   const [mlPublicationsExportLoading, setMlPublicationsExportLoading] = useState(false);
+  const [mlSalesReportLoading, setMlSalesReportLoading] = useState(false);
+  const [mlSalesArticles, setMlSalesArticles] = useState('');
   const [mlReportFrom, setMlReportFrom] = useState(() => ymdDaysAgo(30));
   const [mlReportTo, setMlReportTo] = useState(() => ymdToday());
   const [tnSalesReportLoading, setTnSalesReportLoading] = useState(false);
@@ -757,6 +759,30 @@ const Settings: React.FC<SettingsProps> = ({
       showToast('error', e?.message || 'Error al generar el Excel de publicaciones');
     } finally {
       setMlPublicationsExportLoading(false);
+    }
+  };
+
+  const handleExportMlSalesReport = async () => {
+    if (!mlReportFrom || !mlReportTo) {
+      showToast('error', 'Completá desde y hasta para el reporte de ventas.');
+      return;
+    }
+    if (mlReportFrom > mlReportTo) {
+      showToast('error', 'El rango es inválido: "desde" no puede ser mayor que "hasta".');
+      return;
+    }
+    setMlSalesReportLoading(true);
+    try {
+      const articles = mlSalesArticles
+        .split(',')
+        .map((x) => x.trim())
+        .filter(Boolean);
+      await api.exportMercadoLibreSalesReport({ from: mlReportFrom, to: mlReportTo, articles });
+      showToast('success', 'Reporte de ventas de Mercado Libre descargado.');
+    } catch (e: any) {
+      showToast('error', e?.message || 'Error al generar el reporte de ventas de Mercado Libre');
+    } finally {
+      setMlSalesReportLoading(false);
     }
   };
 
@@ -2671,8 +2697,30 @@ const Settings: React.FC<SettingsProps> = ({
                           title="Descarga Excel con precio ML, mayorista, FOB y margen aproximado"
                         >
                           {mlPublicationsExportLoading ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />}
-                          DESCARGAR REPORTE ML
+                          REPORTE COMERCIAL ML
                         </button>
+                        <button
+                          type="button"
+                          onClick={handleExportMlSalesReport}
+                          disabled={mlSalesReportLoading}
+                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
+                          title="Descargar ventas de Mercado Libre agrupadas por artículo"
+                        >
+                          {mlSalesReportLoading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                          REPORTE VENTAS ML
+                        </button>
+                      </div>
+                      <div>
+                        <label className="text-[11px] text-slate-400 block">
+                          Artículos a incluir (opcional: código de artículo, ej. 661; separados por coma)
+                        </label>
+                        <input
+                          type="text"
+                          value={mlSalesArticles}
+                          onChange={(e) => setMlSalesArticles(e.target.value)}
+                          placeholder="Ej: 661, 24650 (vacío = todos los artículos)"
+                          className="mt-1 w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-xs"
+                        />
                       </div>
                     </div>
                     <p className="text-slate-500 text-xs">

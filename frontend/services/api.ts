@@ -2509,6 +2509,25 @@ export const api = {
     );
   },
 
+  /** Reporte de ventas Mercado Libre por período (Excel), agrupado por artículo. */
+  exportMercadoLibreSalesReport: async (params: { from: string; to: string; articles?: string[] }): Promise<void> => {
+    const query = new URLSearchParams();
+    query.set('from', params.from);
+    query.set('to', params.to);
+    if (params.articles && params.articles.length > 0) {
+      query.set('articles', params.articles.join(','));
+    }
+    const blob = await getBlob(`/integrations/mercadolibre/sales-report-export?${query.toString()}`, 180000);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ventas_mercadolibre_${params.from}_a_${params.to}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
   /** Reporte de ventas Tienda Nube por período (Excel), opcionalmente filtrado por productos. */
   exportTiendaNubeSalesReport: async (params: { from: string; to: string; products?: string[] }): Promise<void> => {
     const query = new URLSearchParams();
