@@ -279,15 +279,16 @@ function buildDeliveryPageHtml(opts: {
   phase: 'ready_to_start' | 'in_transit' | 'delivered' | 'cancelled' | 'invalid' | 'not_found';
   statusLabel?: string | null;
   postUrl: string;
+  showDeliverNow?: boolean;
 }): string {
-  const { trackingCode, orderNumber, destinationCity, customerName, phase, statusLabel, postUrl } = opts;
+  const { trackingCode, orderNumber, destinationCity, customerName, phase, statusLabel, postUrl, showDeliverNow } = opts;
   const title =
     phase === 'delivered'
       ? 'Entrega confirmada'
       : phase === 'in_transit'
         ? 'Confirmar entrega'
         : phase === 'ready_to_start'
-          ? 'Iniciar viaje'
+          ? 'Despachar envío'
           : phase === 'cancelled'
             ? 'Pedido cancelado'
             : 'Código no válido';
@@ -309,10 +310,11 @@ function buildDeliveryPageHtml(opts: {
              ${statusLabel ? `<p class="status-pill">${escHtml(statusLabel)}</p>` : ''}
              ${
                phase === 'ready_to_start'
-                 ? `<button type="button" class="btn btn-start" id="actionBtn" data-action="start">Iniciar viaje</button>
-                    <p class="hint" id="hint">Al salir del depósito, iniciá el viaje para avisar al cliente que el pedido está en camino.</p>`
-                 : `<button type="button" class="btn btn-deliver" id="actionBtn" data-action="deliver">Confirmar entrega</button>
-                    <p class="hint" id="hint">Al entregar el paquete al cliente, confirmá para cerrar el envío.</p>`
+                 ? `<button type="button" class="btn btn-start" id="actionBtn" data-action="start">Marcar en camino</button>
+                    ${showDeliverNow ? `<button type="button" class="btn btn-deliver btn-secondary" id="deliverNowBtn" data-action="deliver">Entregar al cliente</button>` : ''}
+                    <p class="hint" id="hint">En depósito: «Marcar en camino». Al entregar: «Entregar al cliente» (podés escanear de nuevo o usar el botón de abajo).</p>`
+                 : `<button type="button" class="btn btn-deliver" id="actionBtn" data-action="deliver">Entregar al cliente</button>
+                    <p class="hint" id="hint">Confirmá cuando el cliente recibe el paquete.</p>`
              }
              <div class="result" id="result" hidden></div>`;
 
@@ -321,14 +323,17 @@ function buildDeliveryPageHtml(opts: {
       ? `<script>
 (function () {
   var btn = document.getElementById('actionBtn');
+  var deliverNowBtn = document.getElementById('deliverNowBtn');
   var hint = document.getElementById('hint');
   var result = document.getElementById('result');
   if (!btn) return;
-  var defaultLabel = btn.textContent;
-  btn.addEventListener('click', function () {
-    var action = btn.getAttribute('data-action') || 'deliver';
-    btn.disabled = true;
-    btn.textContent = action === 'start' ? 'Iniciando…' : 'Confirmando…';
+
+  function runAction(action, sourceBtn) {
+    var defaultLabel = sourceBtn.textContent;
+    sourceBtn.disabled = true;
+    if (deliverNowBtn && deliverNowBtn !== sourceBtn) deliverNowBtn.disabled = true;
+    if (btn !== sourceBtn) btn.disabled = true;
+    sourceBtn.textContent = action === 'start' ? 'Marcando…' : 'Confirmando…';
     hint.textContent = '';
     fetch(${JSON.stringify(postUrl)}, {
       method: 'POST',
@@ -341,28 +346,42 @@ function buildDeliveryPageHtml(opts: {
         result.hidden = false;
         result.className = 'result ok';
         if (action === 'start') {
-          result.innerHTML = '<strong>✓ Viaje iniciado</strong><br/>El pedido figura en camino. Volvé a escanear al entregar.';
+          result.innerHTML = '<strong>✓ En camino</strong><br/>El cliente ya puede ver el envío en tránsito.';
           btn.setAttribute('data-action', 'deliver');
-          btn.textContent = 'Confirmar entrega';
+          btn.textContent = 'Entregar al cliente';
           btn.className = 'btn btn-deliver';
           btn.disabled = false;
-          document.querySelector('.status-pill').textContent = 'En camino';
+          if (deliverNowBtn) deliverNowBtn.style.display = 'none';
+          var pill = document.querySelector('.status-pill');
+          if (pill) pill.textContent = 'En camino';
           document.title = 'En camino';
-          hint.textContent = 'Cuando entregues el paquete, tocá confirmar entrega.';
+          hint.textContent = 'Cuando entregues el paquete, tocá «Entregar al cliente».';
           hint.style.color = '#64748b';
         } else {
           result.innerHTML = '<strong>✓ Entrega confirmada</strong><br/>El envío quedó cerrado correctamente.';
           btn.style.display = 'none';
+          if (deliverNowBtn) deliverNowBtn.style.display = 'none';
           document.title = 'Entrega confirmada';
         }
       })
       .catch(function (err) {
-        btn.disabled = false;
-        btn.textContent = defaultLabel;
+        sourceBtn.disabled = false;
+        sourceBtn.textContent = defaultLabel;
+        if (deliverNowBtn) deliverNowBtn.disabled = false;
+        if (btn !== sourceBtn) btn.disabled = false;
         hint.textContent = err.message || 'Error. Intentá de nuevo.';
         hint.style.color = '#fca5a5';
       });
+  }
+
+  btn.addEventListener('click', function () {
+    runAction(btn.getAttribute('data-action') || 'deliver', btn);
   });
+  if (deliverNowBtn) {
+    deliverNowBtn.addEventListener('click', function () {
+      runAction('deliver', deliverNowBtn);
+    });
+  }
 })();
 </script>`
       : '';
@@ -405,6 +424,7 @@ function buildDeliveryPageHtml(opts: {
       background: linear-gradient(135deg, #059669, #10b981);
       box-shadow: 0 8px 24px rgba(16,185,129,0.35);
     }
+    .btn-secondary { margin-top: 10px; background: linear-gradient(135deg, #047857, #059669); }
     .btn:disabled { opacity: 0.65; cursor: wait; }
     .hint { margin: 12px 0 0; font-size: 12px; color: #64748b; line-height: 1.4; }
     .icon { width: 56px; height: 56px; margin: 0 auto 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 900; }
@@ -510,6 +530,7 @@ export const getPublicDeliveryPage = async (req: Request, res: Response) => {
       phase,
       statusLabel,
       postUrl,
+      showDeliverNow: phase === 'ready_to_start',
     }));
   } catch (error: any) {
     console.error('getPublicDeliveryPage:', error?.message || error);
@@ -592,7 +613,6 @@ export const confirmPublicDelivery = async (req: Request, res: Response) => {
         invalid_code: 'Código de seguimiento inválido',
         not_found: 'No encontramos ese código de seguimiento',
         cancelled: 'Este pedido está cancelado',
-        not_ready: 'Primero iniciá el viaje escaneando el QR al salir del depósito',
       };
       const status = result.reason === 'not_found' ? 404 : 400;
       return res.status(status).json({ message: messages[result.reason] || 'No se pudo confirmar la entrega' });

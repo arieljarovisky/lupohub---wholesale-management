@@ -33,14 +33,20 @@ function esc(s: unknown): string {
     .replace(/"/g, '&quot;');
 }
 
-/** URL pública para que el repartidor confirme la entrega al escanear el QR. */
+const DEFAULT_PRODUCTION_API = 'https://lupohub-wholesale-management-production.up.railway.app/api';
+
+/** URL pública para que el repartidor gestione el envío al escanear el QR. */
 export function getExpressDeliveryQrUrl(trackingCode: string): string {
   const code = encodeURIComponent(String(trackingCode || '').trim().toUpperCase());
   const envBase = (import.meta.env.VITE_PUBLIC_DELIVERY_BASE_URL as string | undefined)?.trim();
   if (envBase) {
     return `${envBase.replace(/\/$/, '')}/${code}`;
   }
-  const apiUrl = ((import.meta.env.VITE_API_URL as string) || 'http://127.0.0.1:3010/api').replace(/\/$/, '');
+  const apiUrl = (
+    (import.meta.env.VITE_API_URL as string | undefined)?.trim() ||
+    (typeof window !== 'undefined' ? localStorage.getItem('lupo_api_base') : null) ||
+    DEFAULT_PRODUCTION_API
+  ).replace(/\/$/, '');
   const apiRoot = apiUrl.replace(/\/api$/i, '');
   return `${apiRoot}/api/public/entrega/${code}`;
 }
@@ -75,7 +81,7 @@ export function buildTiendaNubeExpressLabelInnerHtml(
   const totalUnits = (order.products || []).reduce((acc, p) => acc + (Number(p.quantity) || 0), 0);
   const barcodeUrl = `https://bwipjs-api.metafloor.com/?bcid=code128&text=${encodeURIComponent(trackingCode)}&scale=3&height=12&includetext`;
   const deliveryUrl = getExpressDeliveryQrUrl(trackingCode);
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(deliveryUrl)}`;
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&margin=8&data=${encodeURIComponent(deliveryUrl)}`;
 
   return `
   <div class="express-label">
@@ -106,7 +112,7 @@ export function buildTiendaNubeExpressLabelInnerHtml(
       <div class="qr-row">
         <img src="${qrUrl}" alt="QR confirmar entrega" />
       </div>
-      <div class="qr-caption">Escanear para iniciar viaje / confirmar entrega</div>
+      <div class="qr-caption">Escanear: marcar en camino o entregar al cliente</div>
     </div>
     <div class="meta">
       <span>${esc(shippingMethod)}</span>
@@ -130,7 +136,7 @@ export const EXPRESS_LABEL_CSS = `
   .express-label .tracking-label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: #444; margin-bottom: 4px; }
   .express-label .barcode img { max-width: 100%; height: auto; display: block; margin: 4px auto 0; }
   .express-label .qr-row { display: flex; justify-content: center; align-items: center; gap: 8px; margin-top: 6px; }
-  .express-label .qr-row img { width: 64px; height: 64px; border: 1px solid #ccc; }
+  .express-label .qr-row img { width: 80px; height: 80px; border: 1px solid #ccc; }
   .express-label .qr-caption { font-size: 8px; text-transform: uppercase; letter-spacing: 0.06em; color: #444; margin-top: 4px; font-weight: 700; }
   .express-label .meta { font-size: 10px; color: #333; display: flex; justify-content: space-between; gap: 8px; }
   .express-label-page { page-break-before: always; margin-top: 24px; }

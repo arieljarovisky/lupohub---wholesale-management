@@ -44,7 +44,7 @@ export function publicStatusFromManualStatus(status: ExpressTrackingStatus): {
 export type ConfirmExpressDeliveryResult =
   | { ok: true; alreadyDelivered: true; trackingCode: string; orderNumber: string | null }
   | { ok: true; alreadyDelivered: false; trackingCode: string; orderNumber: string | null; deliveredAt: string }
-  | { ok: false; reason: 'not_found' | 'invalid_code' | 'cancelled' | 'not_ready' };
+  | { ok: false; reason: 'not_found' | 'invalid_code' | 'cancelled' };
 
 export type StartExpressTripResult =
   | { ok: true; alreadyStarted: true; trackingCode: string; orderNumber: string | null }
@@ -145,9 +145,6 @@ export async function confirmExpressDeliveryByTrackingCode(
       trackingCode: String(row.tracking_code).toUpperCase(),
       orderNumber: row.order_number || null,
     };
-  }
-  if (currentStatus !== 'shipped') {
-    return { ok: false, reason: 'not_ready' };
   }
 
   await deps.updateDelivered(trackingCode);
