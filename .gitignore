@@ -10,3 +10,4 @@ backend/afip-certs/*.pem
 
 # Documentación .md (no subir a Git)
 *.md
+docs/
