@@ -25,17 +25,34 @@ export function isVoidedReinvoiceLedgerEntry(entry: {
   detalle?: string | null;
   excluirDeSaldo?: boolean;
   voidedForReinvoice?: boolean;
+  supersededReinvoicePayment?: boolean;
 }): boolean {
   if (entry.voidedForReinvoice) return true;
   if (entry.excluirDeSaldo && normalizeLedgerDocType(entry.tipo) === 'FAC') return true;
   return /factura anulada/i.test(String(entry.detalle || ''));
 }
 
+export function isSupersededReinvoicePaymentLedgerEntry(entry: {
+  tipo?: string | null;
+  excluirDeSaldo?: boolean;
+  supersededReinvoicePayment?: boolean;
+}): boolean {
+  if (entry.supersededReinvoicePayment) return true;
+  if (entry.excluirDeSaldo && normalizeLedgerDocType(entry.tipo) === 'REC') return true;
+  return false;
+}
+
 export function ledgerTipoDisplay(
   tipo: string | null | undefined,
-  opts?: { detalle?: string | null; excluirDeSaldo?: boolean; voidedForReinvoice?: boolean }
+  opts?: {
+    detalle?: string | null;
+    excluirDeSaldo?: boolean;
+    voidedForReinvoice?: boolean;
+    supersededReinvoicePayment?: boolean;
+  }
 ): string {
   if (opts && isVoidedReinvoiceLedgerEntry({ tipo, ...opts })) return 'FAC anulada';
+  if (opts && isSupersededReinvoicePaymentLedgerEntry({ tipo, ...opts })) return 'REC (cargo anterior)';
   const norm = normalizeLedgerDocType(tipo);
   if (norm === 'SALDO') return 'Saldo inicial';
   if (norm === 'NC' && String(tipo || '').trim().toUpperCase().startsWith('CDE')) return 'NC (CDE)';

@@ -922,7 +922,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                       {ledgerTipoDisplay(e.tipo, {
                         detalle: e.detalle,
                         excluirDeSaldo: e.excluirDeSaldo,
-                        voidedForReinvoice: e.voidedForReinvoice
+                        voidedForReinvoice: e.voidedForReinvoice,
+                        supersededReinvoicePayment: e.supersededReinvoicePayment,
                       })}
                       {ledgerClickable ? <ChevronRight size={12} className="opacity-70" aria-hidden /> : null}
                     </span>

@@ -536,7 +536,7 @@ export const updateVariantExternalIds = async (req: any, res: any) => {
         ? String(mercadoLibreItemId).trim()
         : null;
     const mlVarOnVariant =
-      !mlItemOnVariant && hasMlVar && mercadoLibreVariantId != null && String(mercadoLibreVariantId).trim() !== ''
+      hasMlVar && mercadoLibreVariantId != null && String(mercadoLibreVariantId).trim() !== ''
         ? String(mercadoLibreVariantId).trim()
         : null;
 
@@ -548,7 +548,10 @@ export const updateVariantExternalIds = async (req: any, res: any) => {
         tiendaNubeVariantId != null && String(tiendaNubeVariantId).trim() !== '' ? String(tiendaNubeVariantId).trim() : null
       );
     }
-    if (mlItemOnVariant) {
+    if (mlItemOnVariant && mlVarOnVariant) {
+      sets.push('mercado_libre_item_id = ?', 'mercado_libre_variant_id = ?');
+      params.push(mlItemOnVariant, mlVarOnVariant);
+    } else if (mlItemOnVariant) {
       sets.push('mercado_libre_item_id = ?', 'mercado_libre_variant_id = NULL');
       params.push(mlItemOnVariant);
     } else if (mlVarOnVariant) {
@@ -853,7 +856,7 @@ export const bulkLinkVariants = async (req: Request, res: Response) => {
       if (!variantId) continue;
       const mlItemId = (linkMlItemId != null && String(linkMlItemId).trim() !== '') ? String(linkMlItemId).trim() : null;
       const mlVarId =
-        !mlItemId && mercadoLibreVariantId != null && String(mercadoLibreVariantId).trim() !== ''
+        mercadoLibreVariantId != null && String(mercadoLibreVariantId).trim() !== ''
           ? String(mercadoLibreVariantId).trim()
           : null;
       const tnVarId =
@@ -869,7 +872,10 @@ export const bulkLinkVariants = async (req: Request, res: Response) => {
         sets.push('tienda_nube_variant_id = ?');
         params.push(tnVarId);
       }
-      if (mlItemId != null) {
+      if (mlItemId && mlVarId) {
+        sets.push('mercado_libre_item_id = ?', 'mercado_libre_variant_id = ?');
+        params.push(mlItemId, mlVarId);
+      } else if (mlItemId != null) {
         sets.push('mercado_libre_item_id = ?', 'mercado_libre_variant_id = NULL');
         params.push(mlItemId);
       } else if (mlVarId != null) {
