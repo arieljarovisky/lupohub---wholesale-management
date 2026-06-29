@@ -2895,6 +2895,50 @@ export const api = {
     );
   },
 
+  updateTiendaNubeExpressTrackingStatus: async (
+    orderId: string | number,
+    status: 'pending' | 'preparing' | 'shipped' | 'delivered' | 'cancelled'
+  ): Promise<{
+    orderId: string;
+    orderNumber?: string | null;
+    trackingCode: string;
+    trackingStatus: string;
+    trackingStatusLabel: string;
+    trackingStatusUpdatedAt?: string | null;
+  }> => {
+    return await request(
+      `/integrations/tiendanube/orders/${encodeURIComponent(String(orderId))}/express-tracking/status`,
+      'PATCH',
+      { status }
+    );
+  },
+
+  /** Consulta pública del estado de un envío express por código LHE########. */
+  getPublicTracking: async (trackingCode: string): Promise<{
+    trackingCode: string;
+    orderNumber: string;
+    source: string;
+    status: string;
+    statusLabel: string;
+    statusSource?: 'manual' | 'tiendanube';
+    shippingStatus: string | null;
+    shippingStatusLabel: string | null;
+    orderStatus: string | null;
+    orderStatusLabel: string | null;
+    shippingMethod: string;
+    destinationCity: string | null;
+    createdAt: string | null;
+    paidAt: string | null;
+    shippedAt: string | null;
+    updatedAt: string | null;
+    trackingAssignedAt: string | null;
+    trackingStatusUpdatedAt?: string | null;
+    events: Array<{ key: string; label: string; at: string | null; done: boolean }>;
+  }> => {
+    const code = encodeURIComponent(String(trackingCode || '').trim().toUpperCase());
+    return await request(`/public/tracking/${code}`, 'GET');
+  },
+
   // Órdenes de Mercado Libre
   getMercadoLibreOrders: async (params?: { offset?: number; limit?: number; status?: string; date_from?: string; date_to?: string; only_pending_shipment_and_cancelled?: boolean }): Promise<{ orders: any[]; total: number }> => {
     return handleRequest(async () => {
