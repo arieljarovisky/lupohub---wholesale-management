@@ -174,17 +174,128 @@ function renderResultBlock(data: PublicTrackingPayload, inline?: boolean): strin
   </div>`;
 }
 
-/** HTML embebido en Tienda Nube (sin iframe ni script: TN los bloquea). */
-export function buildTiendaNubeInlinePageContent(seguimientoUrl: string): string {
+/** HTML interactivo embebido en Tienda Nube: consulta sin salir de multilupo.com.ar */
+export function buildTiendaNubeInlinePageContent(apiBaseUrl: string): string {
+  const apiBase = escHtml(apiBaseUrl.replace(/\/$/, ''));
   const cardStyle =
     'max-width:560px;margin:0 auto;padding:24px 16px;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#111;';
   const innerCardStyle =
     'background:#fff;border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,0.08);padding:32px 28px 28px;';
-  return `<div style="${cardStyle}">
+
+  return `<div id="lh-tracking-root" data-api-base="${apiBase}" style="${cardStyle}">
   <div style="${innerCardStyle}">
-    ${renderTrackingFormFields({ action: seguimientoUrl, inline: true })}
+    <p style="margin:0 0 28px;text-align:center;font-size:15px;line-height:1.55;color:#333;">
+      Ingresá tu código de seguimiento para conocer el estado de tu envío express.
+    </p>
+    <form id="lh-tracking-form" style="margin:0;" onsubmit="return false;">
+      <label style="display:block;margin:0 0 10px;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#9ca3af;text-align:center;">
+        Código de seguimiento
+      </label>
+      <input
+        id="lh-tracking-code"
+        type="text"
+        name="code"
+        required
+        placeholder="${PLACEHOLDER_CODE}"
+        autocomplete="off"
+        style="width:100%;padding:16px 14px;border:1px solid #e5e7eb;border-radius:8px;font-size:20px;font-weight:700;text-align:center;letter-spacing:0.06em;color:#111;background:#fff;box-sizing:border-box;"
+      />
+      <p style="margin:10px 0 0;text-align:center;font-size:12px;color:#9ca3af;line-height:1.4;">
+        El código figura en el mail de confirmación de envío.
+      </p>
+      <button
+        id="lh-tracking-submit"
+        type="submit"
+        style="margin-top:22px;width:100%;padding:16px;border:0;border-radius:8px;background:#111;color:#fff;font-size:13px;font-weight:800;letter-spacing:0.14em;text-transform:uppercase;cursor:pointer;"
+      >
+        Consultar
+      </button>
+    </form>
+    <div id="lh-tracking-result"></div>
   </div>
-</div>`;
+  <div id="lh-tracking-error" style="display:none;align-items:flex-start;gap:10px;max-width:560px;margin:16px auto 0;padding:14px 16px;border:1px solid #f87171;border-radius:8px;background:#fef2f2;color:#dc2626;font-size:13px;line-height:1.45;">
+    <span style="flex-shrink:0;width:18px;height:18px;border:1.5px solid #dc2626;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;">!</span>
+    <span id="lh-tracking-error-text"></span>
+  </div>
+</div>
+<script>
+(function () {
+  var root = document.getElementById('lh-tracking-root');
+  if (!root) return;
+  var apiBase = root.getAttribute('data-api-base') || '';
+  var form = document.getElementById('lh-tracking-form');
+  var input = document.getElementById('lh-tracking-code');
+  var btn = document.getElementById('lh-tracking-submit');
+  var errBox = document.getElementById('lh-tracking-error');
+  var errText = document.getElementById('lh-tracking-error-text');
+  var resultBox = document.getElementById('lh-tracking-result');
+
+  function esc(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+  function formatDate(iso) {
+    if (!iso) return '';
+    try { return new Date(iso).toLocaleString('es-AR'); } catch (e) { return ''; }
+  }
+  function friendlyError(msg) {
+    if (!msg) return 'No pudimos consultar el seguimiento. Intentá de nuevo en unos minutos.';
+    if (msg === 'No encontramos ese código de seguimiento' || msg === 'Código de seguimiento inválido' || msg === 'Ingresá un código de seguimiento') return msg;
+    return 'No pudimos consultar el seguimiento. Intentá de nuevo en unos minutos.';
+  }
+  function showError(msg) {
+    errText.textContent = friendlyError(msg);
+    errBox.style.display = 'flex';
+    resultBox.innerHTML = '';
+  }
+  function hideError() {
+    errBox.style.display = 'none';
+    errText.textContent = '';
+  }
+  function renderResult(data) {
+    hideError();
+    var events = (data.events || []).map(function (ev) {
+      return '<li style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid #f3f4f6;font-size:13px;color:' + (ev.done ? '#111' : '#9ca3af') + ';">' +
+        '<span style="width:10px;height:10px;border-radius:50%;margin-top:4px;background:' + (ev.done ? '#111' : '#d1d5db') + ';flex-shrink:0;"></span>' +
+        '<span><strong>' + esc(ev.label) + '</strong>' + (ev.at ? '<br/><span style="color:#9ca3af;font-size:12px;">' + esc(formatDate(ev.at)) + '</span>' : '') + '</span></li>';
+    }).join('');
+    resultBox.innerHTML =
+      '<div style="margin-top:28px;padding-top:24px;border-top:1px solid #f1f5f9;text-align:center;">' +
+      '<span style="display:inline-block;padding:5px 12px;border-radius:999px;background:#f3f4f6;color:#111;font-size:12px;font-weight:800;">' + esc(data.statusLabel) + '</span>' +
+      '<div style="margin:12px 0 6px;font-size:22px;font-weight:800;letter-spacing:0.08em;">' + esc(data.trackingCode) + '</div>' +
+      (data.orderNumber ? '<p style="margin:0;font-size:13px;color:#6b7280;">Pedido #' + esc(data.orderNumber) + '</p>' : '') +
+      (data.destinationCity ? '<p style="margin:4px 0 0;font-size:13px;color:#6b7280;">Destino: ' + esc(data.destinationCity) + '</p>' : '') +
+      '<ul style="list-style:none;margin:20px 0 0;padding:0;text-align:left;">' + events + '</ul></div>';
+  }
+  function search() {
+    var code = String(input.value || '').trim().toUpperCase();
+    hideError();
+    resultBox.innerHTML = '';
+    if (!code) {
+      showError('Ingresá un código de seguimiento');
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = 'Consultando…';
+    fetch(apiBase + '/public/tracking/' + encodeURIComponent(code))
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.data && res.data.message ? res.data.message : 'Error');
+        renderResult(res.data);
+      })
+      .catch(function (e) {
+        showError(e.message || 'Error');
+      })
+      .finally(function () {
+        btn.disabled = false;
+        btn.textContent = 'Consultar';
+      });
+  }
+  if (form) form.addEventListener('submit', function (e) { e.preventDefault(); search(); });
+  if (input) input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); search(); } });
+  var q = new URLSearchParams(window.location.search).get('code');
+  if (q) { input.value = q; search(); }
+})();
+</script>`;
 }
 
 /** Página completa en el backend (formulario + resultado server-side, sin JS). */

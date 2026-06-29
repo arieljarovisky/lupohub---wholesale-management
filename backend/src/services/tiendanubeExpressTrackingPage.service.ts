@@ -39,8 +39,7 @@ export function getPublicApiBaseUrl(): string {
 }
 
 export function buildStorePageContent(): string {
-  const seguimientoUrl = `${getPublicApiBaseUrl()}/public/seguimiento`;
-  return buildTiendaNubeInlinePageContent(seguimientoUrl);
+  return buildTiendaNubeInlinePageContent(getPublicApiBaseUrl());
 }
 
 /** @deprecated Tienda Nube bloquea iframes en páginas custom. Usar buildStorePageContent(). */
