@@ -2563,8 +2563,9 @@ const Settings: React.FC<SettingsProps> = ({
                             </p>
                             <p className="text-slate-500 text-xs mt-1 leading-relaxed">
                               Publica en{' '}
-                              <code className="text-emerald-400 font-mono">/seguimiento-de-envios/</code> el
-                              formulario para consultar envíos con código LHE. Requiere permiso{' '}
+                              <code className="text-emerald-400 font-mono">/seguimiento-de-envios/</code> un
+                              formulario que consulta el envío <strong className="text-slate-400">sin salir del sitio</strong>.
+                              Requiere permiso{' '}
                               <strong className="text-slate-400">Contenido</strong> en Tienda Nube y reconectar la
                               integración. Si el menú queda duplicado, eliminá el ítem extra en Diseño → Menús.
                             </p>

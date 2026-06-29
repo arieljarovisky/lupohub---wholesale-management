@@ -4,9 +4,13 @@ import {
   getPublicDeliveryPage,
   getPublicTrackingByCode,
   getPublicTrackingPage,
+  getSeguimientoWidgetScript,
 } from '../controllers/publicTracking.controller';
 
 const router = Router();
+
+/** Widget JS para consulta en el sitio (multilupo.com.ar) sin redirigir. */
+router.get('/seguimiento-widget.js', getSeguimientoWidgetScript);
 
 /** Consulta pública de seguimiento express (JSON). */
 router.get('/tracking/:trackingCode', getPublicTrackingByCode);

@@ -13,6 +13,7 @@ import {
 import { getPublicApiBaseUrl } from '../services/tiendanubeExpressTrackingPage.service';
 import {
   buildPublicTrackingFullPageHtml,
+  buildSeguimientoWidgetScript,
   publicTrackingErrorMessage,
   type PublicTrackingPayload,
 } from '../services/publicTrackingPageHtml.service';
@@ -244,6 +245,13 @@ export const getPublicTrackingByCode = async (req: Request, res: Response) => {
       message: error?.message || 'Error consultando el seguimiento',
     });
   }
+};
+
+/** GET /api/public/seguimiento-widget.js — lógica del formulario embebido en Tienda Nube */
+export const getSeguimientoWidgetScript = async (_req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=300');
+  res.send(buildSeguimientoWidgetScript());
 };
 
 /** GET /api/public/seguimiento — formulario público (HTML, sin JS obligatorio) */
