@@ -2,14 +2,20 @@ import { Request, Response } from 'express';
 import axios from 'axios';
 import { get, execute } from '../database/db';
 import {
-  buildManualTrackingEvents,
   confirmExpressDeliveryByTrackingCode,
+  buildManualTrackingEvents,
   expressTrackingStatusLabel,
   isExpressTrackingStatus,
   publicStatusFromManualStatus,
   startExpressTripByTrackingCode,
   type ExpressTrackingStatus,
 } from '../services/tiendanubeExpressTracking.service';
+import { getPublicApiBaseUrl } from '../services/tiendanubeExpressTrackingPage.service';
+import {
+  buildPublicTrackingFullPageHtml,
+  publicTrackingErrorMessage,
+  type PublicTrackingPayload,
+} from '../services/publicTrackingPageHtml.service';
 
 const TN_USER_AGENT = process.env.TIENDA_NUBE_USER_AGENT || 'LupoHub (support@lupo.ar)';
 const TRACKING_CODE_RE = /^LHE\d{8}$/i;
@@ -59,19 +65,10 @@ function tnShippingMethodFromOrder(order: any): string {
 function publicStatusFromOrder(order: any): { status: string; statusLabel: string } {
   const orderStatus = String(order.status || '').toLowerCase();
   const shippingStatus = String(order.shipping_status || '').toLowerCase();
-
-  if (orderStatus === 'cancelled') {
-    return { status: 'cancelled', statusLabel: 'Cancelado' };
-  }
-  if (shippingStatus === 'delivered') {
-    return { status: 'delivered', statusLabel: 'Entregado' };
-  }
-  if (shippingStatus === 'shipped') {
-    return { status: 'shipped', statusLabel: 'En camino' };
-  }
-  if (shippingStatus === 'partial') {
-    return { status: 'partial', statusLabel: 'Envío parcial' };
-  }
+  if (orderStatus === 'cancelled') return { status: 'cancelled', statusLabel: 'Cancelado' };
+  if (shippingStatus === 'delivered') return { status: 'delivered', statusLabel: 'Entregado' };
+  if (shippingStatus === 'shipped') return { status: 'shipped', statusLabel: 'En camino' };
+  if (shippingStatus === 'partial') return { status: 'partial', statusLabel: 'Envío parcial' };
   if (order.paid_at || String(order.payment_status || '').toLowerCase() === 'paid') {
     return { status: 'preparing', statusLabel: 'En preparación' };
   }
@@ -82,19 +79,14 @@ function buildTrackingEventsFromTn(order: any, trackingAssignedAt: string | null
   const shippingStatus = String(order.shipping_status || '').toLowerCase();
   const orderStatus = String(order.status || '').toLowerCase();
   const isCancelled = orderStatus === 'cancelled';
-
   const events: TrackingEvent[] = [];
   const push = (key: string, label: string, at: string | null, done: boolean) => {
     events.push({ key, label, at, done });
   };
-
   push('created', 'Pedido registrado', order.created_at || null, true);
   push('tracking', 'Código de seguimiento generado', trackingAssignedAt, !!trackingAssignedAt);
-
-  const isPaid =
-    !!order.paid_at || String(order.payment_status || '').toLowerCase() === 'paid';
+  const isPaid = !!order.paid_at || String(order.payment_status || '').toLowerCase() === 'paid';
   push('paid', 'Pago confirmado', order.paid_at || null, isPaid && !isCancelled);
-
   const isPreparing =
     !isCancelled &&
     isPaid &&
@@ -105,10 +97,8 @@ function buildTrackingEventsFromTn(order: any, trackingAssignedAt: string | null
     isPreparing ? order.updated_at || order.paid_at || null : null,
     isPreparing
   );
-
   const isShipped = shippingStatus === 'shipped' || shippingStatus === 'delivered' || shippingStatus === 'partial';
   push('shipped', 'Despachado', order.shipped_at || (isShipped ? order.updated_at || null : null), isShipped);
-
   const isDelivered = shippingStatus === 'delivered';
   push(
     'delivered',
@@ -116,11 +106,9 @@ function buildTrackingEventsFromTn(order: any, trackingAssignedAt: string | null
     isDelivered ? order.updated_at || order.shipped_at || null : null,
     isDelivered
   );
-
   if (isCancelled) {
     push('cancelled', 'Pedido cancelado', order.cancelled_at || order.updated_at || null, true);
   }
-
   return events;
 }
 
@@ -168,11 +156,76 @@ async function fetchTiendaNubeOrder(orderId: string): Promise<any> {
   return res.data;
 }
 
-/**
- * Consulta pública del estado de un envío express por código LHE########.
- * GET /api/public/tracking/:trackingCode
- * GET /api/public/tracking?code=LHE100001
- */
+async function loadTrackingRowByCode(trackingCode: string) {
+  return get(
+    `SELECT external_order_id, order_number, tracking_code, manual_status, manual_status_updated_at, created_at
+     FROM tiendanube_express_tracking
+     WHERE UPPER(tracking_code) = ?`,
+    [trackingCode]
+  );
+}
+
+async function resolvePublicTracking(trackingCode: string) {
+  const row = await loadTrackingRowByCode(trackingCode);
+  if (!row?.external_order_id) {
+    const err: any = new Error('No encontramos ese código de seguimiento');
+    err.status = 404;
+    throw err;
+  }
+
+  const order = await fetchTiendaNubeOrder(String(row.external_order_id));
+  const trackingAssignedAt = row.created_at ? new Date(row.created_at).toISOString() : null;
+  const manualStatusUpdatedAt = row.manual_status_updated_at
+    ? new Date(row.manual_status_updated_at).toISOString()
+    : null;
+
+  const manualStatus = isExpressTrackingStatus(row.manual_status) ? row.manual_status : null;
+  const useManual = manualStatus != null;
+
+  const { status, statusLabel } = useManual
+    ? publicStatusFromManualStatus(manualStatus)
+    : publicStatusFromOrder(order);
+
+  const shippingStatus = useManual
+    ? manualStatus
+    : String(order.shipping_status || '').toLowerCase();
+
+  const events = useManual
+    ? buildManualTrackingEvents(manualStatus, {
+        trackingAssignedAt,
+        manualStatusUpdatedAt,
+        orderCreatedAt: order.created_at || null,
+        orderPaidAt: order.paid_at || null,
+      })
+    : buildTrackingEventsFromTn(order, trackingAssignedAt);
+
+  return {
+    trackingCode: String(row.tracking_code || trackingCode).toUpperCase(),
+    orderNumber: String(row.order_number || order.number || ''),
+    source: 'TIENDANUBE' as const,
+    status,
+    statusLabel,
+    statusSource: useManual ? ('manual' as const) : ('tiendanube' as const),
+    shippingStatus: shippingStatus || null,
+    shippingStatusLabel: useManual
+      ? expressTrackingStatusLabel(manualStatus)
+      : TN_SHIPPING_STATUS_LABELS[String(order.shipping_status || '').toLowerCase()] ||
+        (order.shipping_status ? String(order.shipping_status) : null),
+    orderStatus: String(order.status || '') || null,
+    orderStatusLabel: TN_ORDER_STATUS_LABELS[String(order.status || '').toLowerCase()] || null,
+    shippingMethod: tnShippingMethodFromOrder(order),
+    destinationCity: publicCityFromOrder(order),
+    createdAt: order.created_at || null,
+    paidAt: order.paid_at || null,
+    shippedAt: order.shipped_at || null,
+    updatedAt: useManual ? manualStatusUpdatedAt : order.updated_at || null,
+    trackingAssignedAt,
+    trackingStatusUpdatedAt: manualStatusUpdatedAt,
+    events,
+  };
+}
+
+/** GET /api/public/tracking/:trackingCode */
 export const getPublicTrackingByCode = async (req: Request, res: Response) => {
   const trackingCode = normalizeTrackingCodeInput(req.params.trackingCode ?? req.query.code);
   if (!trackingCode) {
@@ -183,68 +236,7 @@ export const getPublicTrackingByCode = async (req: Request, res: Response) => {
   }
 
   try {
-    const row = await get(
-      `SELECT external_order_id, order_number, tracking_code, manual_status, manual_status_updated_at, created_at
-       FROM tiendanube_express_tracking
-       WHERE UPPER(tracking_code) = ?`,
-      [trackingCode]
-    );
-    if (!row?.external_order_id) {
-      return res.status(404).json({ message: 'No encontramos ese código de seguimiento' });
-    }
-
-    const order = await fetchTiendaNubeOrder(String(row.external_order_id));
-    const trackingAssignedAt = row.created_at
-      ? new Date(row.created_at).toISOString()
-      : null;
-    const manualStatusUpdatedAt = row.manual_status_updated_at
-      ? new Date(row.manual_status_updated_at).toISOString()
-      : null;
-
-    const manualStatus = isExpressTrackingStatus(row.manual_status) ? row.manual_status : null;
-    const useManual = manualStatus != null;
-
-    const { status, statusLabel } = useManual
-      ? publicStatusFromManualStatus(manualStatus)
-      : publicStatusFromOrder(order);
-
-    const shippingStatus = useManual
-      ? manualStatus
-      : String(order.shipping_status || '').toLowerCase();
-
-    const events = useManual
-      ? buildManualTrackingEvents(manualStatus, {
-          trackingAssignedAt,
-          manualStatusUpdatedAt,
-          orderCreatedAt: order.created_at || null,
-          orderPaidAt: order.paid_at || null,
-        })
-      : buildTrackingEventsFromTn(order, trackingAssignedAt);
-
-    return res.json({
-      trackingCode: String(row.tracking_code || trackingCode).toUpperCase(),
-      orderNumber: String(row.order_number || order.number || ''),
-      source: 'TIENDANUBE',
-      status,
-      statusLabel,
-      statusSource: useManual ? 'manual' : 'tiendanube',
-      shippingStatus: shippingStatus || null,
-      shippingStatusLabel: useManual
-        ? expressTrackingStatusLabel(manualStatus)
-        : TN_SHIPPING_STATUS_LABELS[String(order.shipping_status || '').toLowerCase()] ||
-          (order.shipping_status ? String(order.shipping_status) : null),
-      orderStatus: String(order.status || '') || null,
-      orderStatusLabel: TN_ORDER_STATUS_LABELS[String(order.status || '').toLowerCase()] || null,
-      shippingMethod: tnShippingMethodFromOrder(order),
-      destinationCity: publicCityFromOrder(order),
-      createdAt: order.created_at || null,
-      paidAt: order.paid_at || null,
-      shippedAt: order.shipped_at || null,
-      updatedAt: useManual ? manualStatusUpdatedAt : order.updated_at || null,
-      trackingAssignedAt,
-      trackingStatusUpdatedAt: manualStatusUpdatedAt,
-      events,
-    });
+    return res.json(await resolvePublicTracking(trackingCode));
   } catch (error: any) {
     const status = typeof error?.status === 'number' ? error.status : 500;
     if (status >= 500) console.error('getPublicTrackingByCode:', error?.message || error);
@@ -254,14 +246,38 @@ export const getPublicTrackingByCode = async (req: Request, res: Response) => {
   }
 };
 
-async function loadTrackingRowByCode(trackingCode: string) {
-  return get(
-    `SELECT external_order_id, order_number, tracking_code, manual_status, manual_status_updated_at, created_at
-     FROM tiendanube_express_tracking
-     WHERE UPPER(tracking_code) = ?`,
-    [trackingCode]
-  );
-}
+/** GET /api/public/seguimiento — formulario público (HTML, sin JS obligatorio) */
+export const getPublicTrackingPage = async (req: Request, res: Response) => {
+  const seguimientoUrl = `${getPublicApiBaseUrl()}/public/seguimiento`;
+  const code = normalizeTrackingCodeInput(req.query.code);
+  let data: PublicTrackingPayload | null = null;
+  let error: string | null = null;
+
+  if (code) {
+    if (!isValidTrackingCode(code)) {
+      error = 'Código de seguimiento inválido';
+    } else {
+      try {
+        const resolved = await resolvePublicTracking(code);
+        data = {
+          trackingCode: resolved.trackingCode,
+          orderNumber: resolved.orderNumber,
+          statusLabel: resolved.statusLabel,
+          destinationCity: resolved.destinationCity,
+          events: resolved.events,
+        };
+      } catch (e: any) {
+        error = publicTrackingErrorMessage(e?.message) || 'No pudimos consultar el seguimiento. Intentá de nuevo en unos minutos.';
+      }
+    }
+  }
+
+  const html = buildPublicTrackingFullPageHtml({ seguimientoUrl, code, data, error });
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Content-Security-Policy', 'frame-ancestors *');
+  res.removeHeader('X-Frame-Options');
+  res.send(html);
+};
 
 function escHtml(s: unknown): string {
   return String(s ?? '')

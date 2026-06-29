@@ -17,6 +17,10 @@ import {
   isExpressTrackingStatus,
   type ExpressTrackingStatus,
 } from '../services/tiendanubeExpressTracking.service';
+import {
+  loadExpressTrackingPageConfig,
+  syncExpressTrackingPageToStore,
+} from '../services/tiendanubeExpressTrackingPage.service';
 const ML_AUTH_URL = 'https://auth.mercadolibre.com.ar/authorization';
 const ML_TOKEN_URL = 'https://api.mercadolibre.com/oauth/token';
 
@@ -891,7 +895,7 @@ export const getTiendaNubeAuthUrl = (req: Request, res: Response) => {
 
   // Scope read_orders es necesario para poder obtener el detalle de la orden cuando llega el webhook order/paid y descontar stock
   const redirectUri = process.env.TIENDA_NUBE_REDIRECT_URI || 'http://localhost:3010/api/integrations/tiendanube/callback';
-  const url = `https://www.tiendanube.com/apps/${appId}/authorize?response_type=code&scope=write_products,read_products,read_orders&redirect_uri=${encodeURIComponent(redirectUri)}`;
+  const url = `https://www.tiendanube.com/apps/${appId}/authorize?response_type=code&scope=write_products,read_products,read_orders,write_scripts,write_content&redirect_uri=${encodeURIComponent(redirectUri)}`;
   res.json({ url });
 };
 
@@ -955,6 +959,16 @@ export const handleTiendaNubeCallback = async (req: Request, res: Response) => {
       }
     } else {
       console.warn('[TN] Configure BACKEND_URL (HTTPS) en .env para activar descuento de stock automático por ventas.');
+    }
+
+    try {
+      const pageCfg = await loadExpressTrackingPageConfig();
+      if (pageCfg.enabled) {
+        await syncExpressTrackingPageToStore({ enabled: true });
+        console.log('[TN] Página de seguimiento express sincronizada tras reconexión OAuth.');
+      }
+    } catch (pageErr: any) {
+      console.warn('[TN] No se pudo sincronizar página de seguimiento tras OAuth:', pageErr?.message || pageErr);
     }
 
     res.redirect(`${FRONTEND_URL}/#settings?status=success&platform=tiendanube`);

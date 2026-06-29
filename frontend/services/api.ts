@@ -2913,6 +2913,41 @@ export const api = {
     );
   },
 
+  getTiendaNubeExpressTrackingPageConfig: async (): Promise<{
+    config: {
+      enabled: boolean;
+      pageId?: number | null;
+      pageHandle?: string;
+      pageUrl?: string | null;
+      lastSyncedAt?: string | null;
+      lastError?: string | null;
+    };
+  }> => {
+    return handleRequest(
+      async () =>
+        request<{ config: Record<string, unknown> }>(
+          '/integrations/tiendanube/express-tracking-page/config',
+          'GET'
+        ),
+      { config: { enabled: false } },
+      'getTiendaNubeExpressTrackingPageConfig'
+    );
+  },
+
+  saveTiendaNubeExpressTrackingPageConfig: async (enabled: boolean): Promise<{
+    ok: boolean;
+    config: {
+      enabled: boolean;
+      pageId?: number | null;
+      pageHandle?: string;
+      pageUrl?: string | null;
+      lastSyncedAt?: string | null;
+      lastError?: string | null;
+    };
+  }> => {
+    return request('/integrations/tiendanube/express-tracking-page/config', 'PUT', { enabled });
+  },
+
   /** Consulta pública del estado de un envío express por código LHE########. */
   getPublicTracking: async (trackingCode: string): Promise<{
     trackingCode: string;

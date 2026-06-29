@@ -322,6 +322,11 @@ const Settings: React.FC<SettingsProps> = ({
   });
   const [tnSalesTo, setTnSalesTo] = useState(() => ymdToday());
   const [tnSalesProducts, setTnSalesProducts] = useState('');
+  const [tnExpressTrackingPageEnabled, setTnExpressTrackingPageEnabled] = useState(false);
+  const [tnExpressTrackingPageUrl, setTnExpressTrackingPageUrl] = useState<string | null>(null);
+  const [tnExpressTrackingPageError, setTnExpressTrackingPageError] = useState<string | null>(null);
+  const [tnExpressTrackingPageLoading, setTnExpressTrackingPageLoading] = useState(false);
+  const [tnExpressTrackingPageSaving, setTnExpressTrackingPageSaving] = useState(false);
 
   // ML Auto Message Config
   const [mlAutoMessageEnabled, setMlAutoMessageEnabled] = useState(true);
@@ -375,6 +380,18 @@ const Settings: React.FC<SettingsProps> = ({
       }
     };
     fetchStatus();
+
+    const fetchTnExpressTrackingPageConfig = async () => {
+      try {
+        const res = await api.getTiendaNubeExpressTrackingPageConfig();
+        setTnExpressTrackingPageEnabled(!!res.config?.enabled);
+        setTnExpressTrackingPageUrl(res.config?.pageUrl || null);
+        setTnExpressTrackingPageError(res.config?.lastError || null);
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    fetchTnExpressTrackingPageConfig();
 
     const fetchAdsConfig = async () => {
       try {
@@ -807,6 +824,27 @@ const Settings: React.FC<SettingsProps> = ({
       showToast('error', e?.message || 'Error al generar el reporte de ventas de Tienda Nube');
     } finally {
       setTnSalesReportLoading(false);
+    }
+  };
+
+  const handleToggleTnExpressTrackingPage = async (enabled: boolean) => {
+    setTnExpressTrackingPageSaving(true);
+    setTnExpressTrackingPageError(null);
+    try {
+      const res = await api.saveTiendaNubeExpressTrackingPageConfig(enabled);
+      setTnExpressTrackingPageEnabled(!!res.config?.enabled);
+      setTnExpressTrackingPageUrl(res.config?.pageUrl || null);
+      setTnExpressTrackingPageError(res.config?.lastError || null);
+      showToast(
+        'success',
+        enabled
+          ? 'Página de seguimiento publicada en Tienda Nube.'
+          : 'Página de seguimiento desactivada.'
+      );
+    } catch (e: any) {
+      showToast('error', e?.message || 'No se pudo actualizar la página de seguimiento');
+    } finally {
+      setTnExpressTrackingPageSaving(false);
     }
   };
 
@@ -2514,6 +2552,49 @@ const Settings: React.FC<SettingsProps> = ({
                           SINCRONIZAR SKU
                         </button>
                       </div>
+                    </div>
+                    <div className="rounded-xl border border-emerald-900/50 bg-emerald-950/10 p-4 space-y-3">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Ship size={14} className="text-emerald-400 shrink-0" />
+                          <div>
+                            <p className="text-emerald-200 text-xs font-black uppercase tracking-wide">
+                              Seguimiento express (página pública)
+                            </p>
+                            <p className="text-slate-500 text-xs mt-1 leading-relaxed">
+                              Publica en{' '}
+                              <code className="text-emerald-400 font-mono">/seguimiento-de-envios/</code> el
+                              formulario para consultar envíos con código LHE. Requiere permiso{' '}
+                              <strong className="text-slate-400">Contenido</strong> en Tienda Nube y reconectar la
+                              integración. Si el menú queda duplicado, eliminá el ítem extra en Diseño → Menús.
+                            </p>
+                          </div>
+                        </div>
+                        <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={tnExpressTrackingPageEnabled}
+                            disabled={tnExpressTrackingPageLoading || tnExpressTrackingPageSaving}
+                            onChange={(e) => handleToggleTnExpressTrackingPage(e.target.checked)}
+                            className="rounded border-slate-600"
+                          />
+                          {tnExpressTrackingPageSaving ? 'Publicando…' : 'Activar'}
+                        </label>
+                      </div>
+                      {tnExpressTrackingPageEnabled && tnExpressTrackingPageUrl && (
+                        <p className="text-xs text-slate-400">
+                          Ruta en la tienda:{' '}
+                          <code className="bg-slate-800 px-1.5 py-0.5 rounded text-emerald-400 font-mono">
+                            {tnExpressTrackingPageUrl}
+                          </code>
+                        </p>
+                      )}
+                      {tnExpressTrackingPageError && (
+                        <p className="text-xs text-amber-400 flex items-start gap-1">
+                          <AlertCircle size={12} className="shrink-0 mt-0.5" />
+                          {tnExpressTrackingPageError}
+                        </p>
+                      )}
                     </div>
                     <div className="rounded-xl border border-cyan-900/50 bg-cyan-950/10 p-3 space-y-3">
                       <div className="flex items-center gap-2">

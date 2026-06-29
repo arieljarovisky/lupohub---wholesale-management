@@ -80,6 +80,10 @@ import {
   getTiendaNubeCatalogConfig,
   saveTiendaNubeCatalogConfig,
 } from '../controllers/tiendanubeCatalogConfig.controller';
+import {
+  getTiendaNubeExpressTrackingPageConfig,
+  saveTiendaNubeExpressTrackingPageConfig,
+} from '../controllers/tiendanubeExpressTrackingPage.controller';
 import { authMiddleware, marketingAdsAccessMiddleware } from '../middleware/auth';
 import {
   getLupoWebhookConfigEndpoint,
@@ -176,6 +180,8 @@ router.get('/tiendanube/category-images/download', authMiddleware, downloadTiend
 router.get('/tiendanube/catalog', authMiddleware, getTiendaNubeCatalog);
 router.get('/tiendanube/catalog/config', authMiddleware, getTiendaNubeCatalogConfig);
 router.put('/tiendanube/catalog/config', authMiddleware, saveTiendaNubeCatalogConfig);
+router.get('/tiendanube/express-tracking-page/config', authMiddleware, getTiendaNubeExpressTrackingPageConfig);
+router.put('/tiendanube/express-tracking-page/config', authMiddleware, saveTiendaNubeExpressTrackingPageConfig);
 router.get('/tiendanube/products/:productId/variants', getTiendaNubeProductVariants);
 router.post('/tiendanube/products', createTiendaNubeProduct);
 router.post('/tiendanube/products/:productId/duplicate', duplicateTiendaNubeProduct);
