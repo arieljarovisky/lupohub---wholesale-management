@@ -3,7 +3,6 @@ import { query, execute, get } from '../database/db';
 import { touchProductUpdatedAtByVariantId } from '../utils/touchProductUpdatedAt';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
-import { updateMercadoLibreStock } from './integrations.controller';
 import { tnPutWithRetry } from '../utils/tiendanubeClient';
 import { skuToCanonicalString } from '../utils/skuString';
 import { enqueueStockWebhookForVariant } from '../services/lupoStockWebhook.service';
@@ -621,7 +620,6 @@ export const syncStockToExternalPlatforms = async (variantId: string, newStock: 
 
       const stockTN = stockForPlatform(newStock, variant.tn_pack);
       const stockML = stockForPlatform(newStock, variant.ml_pack);
-      const skuMLTN = variant.external_sku || variant.sku;
 
       if (variant.tienda_nube_id && variant.tienda_nube_variant_id) {
         await runExternalSyncWithRetries(
@@ -657,15 +655,8 @@ export const syncStockToExternalPlatforms = async (variantId: string, newStock: 
           `ML legacy=${variant.mercado_libre_id}/${ownMlVarId} variant=${variantId}`,
           () => updateMercadoLibreStockByVariant(variant.mercado_libre_id, ownMlVarId, stockML)
         );
-      } else if (skuMLTN) {
-        await runExternalSyncWithRetries(
-          `ML legacy sku=${skuMLTN} variant=${variantId}`,
-          async () => {
-            await updateMercadoLibreStock(skuMLTN, stockML);
-            return true;
-          }
-        );
       }
+      // Sin vínculo ML explícito (ítem propio o variación del catálogo padre): no sincronizar por SKU.
     }
   } catch (error) {
     console.error('Error syncing stock to external platforms:', error);
