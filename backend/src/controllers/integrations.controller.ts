@@ -3600,6 +3600,7 @@ export const getVariantExternalStocks = async (req: Request, res: Response) => {
     const placeholders = variantIds.map(() => '?').join(',');
     const rows = await query(
       `SELECT pv.id AS variant_id,
+              pc.product_id,
               COALESCE(pv.external_sku, pv.sku) AS sku,
               c.code AS color_code, c.name AS color_name,
               s.size_code,
@@ -3613,6 +3614,53 @@ export const getVariantExternalStocks = async (req: Request, res: Response) => {
        WHERE pv.id IN (${placeholders})`,
       variantIds
     );
+
+    const { shouldSyncMlPublication } = await import('../services/variantPublicationFilter');
+    const mlItemsByProduct = new Map<string, Set<string>>();
+    const variantLinkMeta = new Map<
+      string,
+      {
+        productId: string;
+        ownItemId: string | null;
+        ownVarId: string | null;
+        parentItemId: string | null;
+        siblingOwnItemIds: Set<string>;
+      }
+    >();
+    for (const r of rows || []) {
+      const variantId = String((r as any).variant_id || '');
+      const productId = String((r as any).product_id || '');
+      if (!variantId || !productId) continue;
+      const ownItemId =
+        (r as any).mercado_libre_item_id != null && String((r as any).mercado_libre_item_id).trim() !== ''
+          ? String((r as any).mercado_libre_item_id).trim()
+          : null;
+      if (ownItemId) {
+        if (!mlItemsByProduct.has(productId)) mlItemsByProduct.set(productId, new Set());
+        mlItemsByProduct.get(productId)!.add(ownItemId);
+      }
+      variantLinkMeta.set(variantId, {
+        productId,
+        ownItemId,
+        ownVarId:
+          (r as any).mercado_libre_variant_id != null && String((r as any).mercado_libre_variant_id).trim() !== ''
+            ? String((r as any).mercado_libre_variant_id).trim()
+            : null,
+        parentItemId:
+          (r as any).mercado_libre_id != null && String((r as any).mercado_libre_id).trim() !== ''
+            ? String((r as any).mercado_libre_id).trim()
+            : null,
+        siblingOwnItemIds: new Set()
+      });
+    }
+    for (const [variantId, meta] of variantLinkMeta) {
+      const productItems = mlItemsByProduct.get(meta.productId);
+      if (!productItems) continue;
+      meta.siblingOwnItemIds = new Set(
+        [...productItems].filter((itemId) => itemId !== meta.ownItemId)
+      );
+      variantLinkMeta.set(variantId, meta);
+    }
 
     const pubsByVariant = new Map<string, Array<{ itemId: string; variationId: string | null }>>();
     try {
@@ -3692,7 +3740,25 @@ export const getVariantExternalStocks = async (req: Request, res: Response) => {
         };
 
         const pubs = pubsByVariant.get(variantId) || [];
+        const linkCtx = variantLinkMeta.get(variantId);
         for (const pub of pubs) {
+          if (
+            linkCtx &&
+            !shouldSyncMlPublication(
+              { external_product_id: pub.itemId, external_variant_id: pub.variationId },
+              {
+                variantId,
+                ownItemId: linkCtx.ownItemId,
+                ownVarId: linkCtx.ownVarId,
+                parentItemId: linkCtx.parentItemId,
+                ownTnVariantId: null,
+                siblingOwnItemIds: linkCtx.siblingOwnItemIds,
+                siblingTnVariantIds: new Set()
+              }
+            )
+          ) {
+            continue;
+          }
           pushMlLink(pub.itemId, { ...baseLink, variationId: pub.variationId });
         }
 

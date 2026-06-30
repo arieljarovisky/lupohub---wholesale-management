@@ -561,8 +561,18 @@ export const syncStockToExternalPlatforms = async (variantId: string, newStock: 
     );
 
     if (publications && (publications as any[]).length > 0) {
+      const { loadVariantMlLinkContext, filterMlPublicationsForSync, filterTnPublicationsForSync } = await import(
+        '../services/variantPublicationFilter'
+      );
+      const linkCtx = await loadVariantMlLinkContext(variantId);
+      const pubsToSync = linkCtx
+        ? [
+            ...filterTnPublicationsForSync(publications as any[], linkCtx),
+            ...filterMlPublicationsForSync(publications as any[], linkCtx)
+          ]
+        : (publications as any[]);
       const tasks: Promise<boolean>[] = [];
-      for (const pub of publications as any[]) {
+      for (const pub of pubsToSync) {
         const pack = Math.max(1, Number(pub.pack_size) || 1);
         const stockToSend = stockForPlatform(newStock, pack);
         if (pub.platform === 'tiendanube' && pub.external_variant_id) {
