@@ -78,6 +78,23 @@ type VariantAssignment = {
   tnProductId?: string;
 };
 
+function primaryMlItemIdFromAssignment(a?: VariantAssignment): string | null {
+  if (!a) return null;
+  const ml = (a.ml || '').trim();
+  if (/^ML[A-Z]{1,5}\d+$/i.test(ml)) return ml.toUpperCase();
+  const item = (a.mlItemId || '').trim();
+  return item || null;
+}
+
+function primaryMlItemIdFromVariantExternal(v: { externalIds?: { mercadoLibreItemId?: unknown } }): string | null {
+  const own =
+    v.externalIds?.mercadoLibreItemId != null && String(v.externalIds.mercadoLibreItemId).trim() !== ''
+      ? String(v.externalIds.mercadoLibreItemId).trim()
+      : '';
+  if (!own) return null;
+  return /^ML[A-Z]{1,5}\d+$/i.test(own) ? own.toUpperCase() : own;
+}
+
 function parseIdsFromInput(raw: string, platform: 'ml' | 'tn'): string[] {
   const parts = raw
     .split(/[\n,;]+/)
@@ -246,10 +263,33 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
           api.getVariantPublications(v.variantId).catch(() => [] as Array<{ platform: string; external_product_id: string }>)
         )
       );
+      const primaryMlByVariant = new Map<string, string>();
+      list.forEach((v: { variantId: string; externalIds?: { mercadoLibreItemId?: unknown } }, idx: number) => {
+        const fromExt = primaryMlItemIdFromVariantExternal(v);
+        const pubs = pubResults[idx] || [];
+        const mlPub = pubs.find((p: { platform: string }) => p.platform === 'mercadolibre') as
+          | { external_product_id?: string }
+          | undefined;
+        const primary =
+          fromExt ||
+          (mlPub?.external_product_id != null && String(mlPub.external_product_id).trim() !== ''
+            ? String(mlPub.external_product_id).trim()
+            : '');
+        if (primary) primaryMlByVariant.set(v.variantId, primary);
+        if (primary) mlSet.add(primary);
+      });
+      const allPrimaryMl = new Set(primaryMlByVariant.values());
+      list.forEach((v: { variantId: string }, idx: number) => {
+        const ownPrimary = primaryMlByVariant.get(v.variantId);
+        (pubResults[idx] || []).forEach((pub: { platform: string; external_product_id?: string }) => {
+          if (pub.platform !== 'mercadolibre' || !pub.external_product_id) return;
+          const id = String(pub.external_product_id).trim();
+          if (!id) return;
+          if (id !== ownPrimary && allPrimaryMl.has(id)) return;
+          mlSet.add(id);
+        });
+      });
       pubResults.flat().forEach((pub) => {
-        if (pub.platform === 'mercadolibre' && pub.external_product_id) {
-          mlSet.add(pub.external_product_id);
-        }
         if (pub.platform === 'tiendanube' && pub.external_product_id) {
           tnSet.add(pub.external_product_id);
         }
@@ -899,42 +939,130 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
 
   const syncAllSourcePublications = async () => {
     let added = 0;
+    const mlSourceIds = new Set(
+      mlSources.map((s) => normalizeMercadoLibreItemId(s.id)).filter(Boolean) as string[]
+    );
+    const tnSourceIds = new Set(tnSources.map((s) => s.id).filter(Boolean));
+
+    const primaryMlByVariant = new Map<string, string | null>();
+    const allPrimaryMl = new Set<string>();
     for (const v of variants) {
+      const primary = primaryMlItemIdFromAssignment(assignments[v.variantId]);
+      primaryMlByVariant.set(v.variantId, primary);
+      if (primary) {
+        const norm = normalizeMercadoLibreItemId(primary) || primary;
+        allPrimaryMl.add(norm);
+      }
+    }
+
+    const primaryTnByVariant = new Map<string, string | null>();
+    const allPrimaryTn = new Set<string>();
+    for (const v of variants) {
+      const a = assignments[v.variantId];
+      const key = tnAssignmentKey(a?.tn?.trim() || '', a?.tnProductId);
+      primaryTnByVariant.set(v.variantId, key);
+      if (key) allPrimaryTn.add(key);
+    }
+
+    for (const v of variants) {
+      const a = assignments[v.variantId];
       const local = {
         sku: (skuEdits[v.variantId] ?? v.sku ?? '').toString(),
         size: v.size,
         color: v.color,
       };
-      for (const row of mlVariations) {
-        if (!matchLocalToRow(local, row)) continue;
-        try {
-          await api.addVariantPublication(v.variantId, {
-            platform: 'mercadolibre',
-            externalProductId: row.itemId,
-            externalVariantId: row.variationId,
-            packSize: packMl,
-          });
-          added++;
-        } catch {
-          /* ya vinculada */
+      const ownPrimaryMl = primaryMlByVariant.get(v.variantId);
+      const ownPrimaryMlNorm = ownPrimaryMl ? normalizeMercadoLibreItemId(ownPrimaryMl) || ownPrimaryMl : null;
+      const hasMlAssignment = !!(a?.ml?.trim() || ownPrimaryMl);
+
+      if (hasMlAssignment) {
+        for (const row of mlVariations) {
+          if (!matchLocalToRow(local, row)) continue;
+          const itemId = normalizeMercadoLibreItemId(row.itemId);
+          if (!itemId || !mlSourceIds.has(itemId)) continue;
+          if (itemId !== ownPrimaryMlNorm && allPrimaryMl.has(itemId)) continue;
+          try {
+            await api.addVariantPublication(v.variantId, {
+              platform: 'mercadolibre',
+              externalProductId: row.itemId,
+              externalVariantId: row.variationId,
+              packSize: packMl,
+            });
+            added++;
+          } catch {
+            /* ya vinculada */
+          }
         }
       }
-      for (const row of tnVariants) {
-        if (!matchLocalToRow(local, row)) continue;
-        try {
-          await api.addVariantPublication(v.variantId, {
-            platform: 'tiendanube',
-            externalProductId: row.productId,
-            externalVariantId: row.variantId,
-            packSize: packTn,
-          });
-          added++;
-        } catch {
-          /* ya vinculada */
+
+      const hasTnAssignment = !!(a?.tn?.trim());
+      if (hasTnAssignment) {
+        const ownPrimaryTn = primaryTnByVariant.get(v.variantId);
+        for (const row of tnVariants) {
+          if (!matchLocalToRow(local, row)) continue;
+          if (!tnSourceIds.has(row.productId)) continue;
+          const rowKey = tnOptionKey(row);
+          if (rowKey !== ownPrimaryTn && allPrimaryTn.has(rowKey)) continue;
+          try {
+            await api.addVariantPublication(v.variantId, {
+              platform: 'tiendanube',
+              externalProductId: row.productId,
+              externalVariantId: row.variantId,
+              packSize: packTn,
+            });
+            added++;
+          } catch {
+            /* ya vinculada */
+          }
         }
       }
     }
     return added;
+  };
+
+  /** Quita publicaciones ML/TN que pertenecen al vínculo principal de otra variante del mismo artículo. */
+  const cleanupSiblingPublications = async () => {
+    const primaryMlByVariant = new Map<string, string | null>();
+    const allPrimaryMl = new Set<string>();
+    for (const v of variants) {
+      const primary = primaryMlItemIdFromAssignment(assignments[v.variantId]);
+      primaryMlByVariant.set(v.variantId, primary);
+      if (primary) allPrimaryMl.add(normalizeMercadoLibreItemId(primary) || primary);
+    }
+
+    const primaryTnByVariant = new Map<string, string | null>();
+    const allPrimaryTn = new Set<string>();
+    for (const v of variants) {
+      const a = assignments[v.variantId];
+      const key = tnAssignmentKey(a?.tn?.trim() || '', a?.tnProductId);
+      primaryTnByVariant.set(v.variantId, key);
+      if (key) allPrimaryTn.add(key);
+    }
+
+    let removed = 0;
+    for (const v of variants) {
+      const pubs = await api.getVariantPublications(v.variantId).catch(() => []);
+      const ownMl = primaryMlByVariant.get(v.variantId);
+      const ownMlNorm = ownMl ? normalizeMercadoLibreItemId(ownMl) || ownMl : null;
+      const ownTn = primaryTnByVariant.get(v.variantId);
+      for (const pub of pubs) {
+        if (pub.platform === 'mercadolibre' && pub.external_product_id) {
+          const id = normalizeMercadoLibreItemId(pub.external_product_id) || String(pub.external_product_id).trim();
+          if (id && id !== ownMlNorm && allPrimaryMl.has(id)) {
+            await api.deleteVariantPublication(v.variantId, pub.id);
+            removed++;
+          }
+        }
+        if (pub.platform === 'tiendanube' && pub.external_variant_id) {
+          const key = tnAssignmentKey(String(pub.external_variant_id), pub.external_product_id);
+          if (key && key !== ownTn && allPrimaryTn.has(key)) {
+            await api.deleteVariantPublication(v.variantId, pub.id);
+            removed++;
+          }
+        }
+      }
+    }
+    return removed;
   };
 
   const handleSave = async () => {
@@ -1028,13 +1156,15 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
         updated = (res as any)?.updated ?? links.length;
         synced = (res as any)?.synced ?? 0;
       }
+      const removed = await cleanupSiblingPublications();
       const extraPubs = await syncAllSourcePublications();
       onImportComplete?.();
+      const removedNote = removed > 0 ? ` Se quitaron ${removed} publicación(es) duplicada(s) de otras variantes.` : '';
       showToast(
         'success',
         synced > 0
-          ? `Guardadas ${updated} vinculación(es). Stock enviado a ${synced} variante(s).${extraPubs > 0 ? ` ${extraPubs} publicación(es) extra sincronizadas.` : ''}`
-          : `Guardadas ${updated} vinculación(es).${extraPubs > 0 ? ` ${extraPubs} publicación(es) extra sincronizadas.` : ''}`
+          ? `Guardadas ${updated} vinculación(es). Stock enviado a ${synced} variante(s).${extraPubs > 0 ? ` ${extraPubs} publicación(es) extra sincronizadas.` : ''}${removedNote}`
+          : `Guardadas ${updated} vinculación(es).${extraPubs > 0 ? ` ${extraPubs} publicación(es) extra sincronizadas.` : ''}${removedNote}`
       );
       goBack();
     } catch (e: any) {
@@ -1401,7 +1531,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
               <h2 className="text-sm font-bold text-white">Paso 2 · Emparejar variantes</h2>
               <p className="text-xs text-slate-400 mt-0.5">
                 Una variación ML o variante TN solo puede asignarse a una fila. Si tenés duplicados locales, marcá dos filas y usá{' '}
-                <strong className="text-violet-300">Unificar</strong>. Las publicaciones extra del paso 1 se sincronizan al guardar.
+                <strong className="text-violet-300">Unificar</strong>. Las publicaciones <strong>extra</strong> del paso 1 (pack u otro canal) se sincronizan al guardar; no se agregan las de otras variantes del mismo artículo.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2 text-[11px]">
