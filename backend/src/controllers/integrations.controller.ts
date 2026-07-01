@@ -339,25 +339,7 @@ function extractMlVariationsFromItemData(it: any): MlVariationRow[] {
   const out: MlVariationRow[] = [];
   if (Array.isArray(it.variations) && it.variations.length > 0) {
     for (const v of it.variations) {
-      const skuAttr = Array.isArray(v.attributes) && v.attributes.find((a: any) => (a.id || '').toString().toUpperCase() === 'SELLER_SKU');
-      const skuFromAttr = skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '').toString().trim() : '';
-      const sku = skuFromAttr || (v.seller_sku ?? v.seller_custom_field ?? '').toString().trim();
-      let color = '';
-      let size = '';
-      (v.attribute_combinations || []).forEach((attr: any) => {
-        const id = (attr.id || '').toString().toUpperCase();
-        const name = (attr.value_name || attr.name || '').toString().trim();
-        if (id === 'COLOR' || id === 'COLOUR' || id === 'COR') color = name;
-        if (id === 'SIZE' || id === 'SIZE_TYPE' || id === 'TALLE' || id === 'Talla') size = name;
-      });
-      out.push({
-        variationId: String(v.id),
-        itemId: String(it.id || ''),
-        sku,
-        color,
-        size,
-        stock: v.available_quantity || 0
-      });
+      out.push(mlVariationRowFromApiVariation(v, it));
     }
     return dedupeMlVariationRows(out);
   }
@@ -410,13 +392,76 @@ function mlVariationSkuFromApi(v: any): string {
 function mlVariationColorSizeFromApi(v: any): { color: string; size: string } {
   let color = '';
   let size = '';
-  (v?.attribute_combinations || []).forEach((attr: any) => {
-    const id = (attr.id || '').toString().toUpperCase();
-    const name = (attr.value_name || attr.name || '').toString().trim();
-    if (id === 'COLOR' || id === 'COLOUR' || id === 'COR') color = name;
-    if (id === 'SIZE' || id === 'SIZE_TYPE' || id === 'TALLE' || id === 'Talla') size = name;
-  });
+  const absorb = (attr: any) => {
+    const id = (attr?.id || '').toString().toUpperCase();
+    const name = (attr?.value_name ?? attr?.value ?? attr?.name ?? '').toString().trim();
+    if (!name) return;
+    if (id === 'COLOR' || id === 'COLOUR' || id === 'COR') color = color || name;
+    if (id === 'SIZE' || id === 'SIZE_TYPE' || id === 'TALLE' || id === 'TALLA') size = size || name;
+  };
+  (v?.attribute_combinations || []).forEach(absorb);
+  (Array.isArray(v?.attributes) ? v.attributes : []).forEach(absorb);
   return { color, size };
+}
+
+function mlVariationRowFromApiVariation(v: any, item: any): MlVariationRow {
+  const { color, size } = mlVariationColorSizeFromApi(v);
+  const sku = mlVariationSkuFromApi(v);
+  const title = (item?.title || '').toString().trim();
+  const parsed = !color && !size && title ? mlColorSizeFromTitle(title) : { color: '', size: '' };
+  return {
+    variationId: String(v.id),
+    itemId: String(item?.id || ''),
+    sku,
+    color: color || parsed.color,
+    size: size || parsed.size,
+    stock: v.available_quantity || 0
+  };
+}
+
+/** El GET /items/{id} suele devolver variaciones sin attribute_combinations; completar con GET /variations/{vid}. */
+async function enrichMercadoLibreItemVariationsForCatalog(item: any, accessToken: string): Promise<any> {
+  const itemId = String(item?.id || '').trim();
+  const variations = Array.isArray(item?.variations) ? item.variations : [];
+  if (!itemId || variations.length === 0) return item;
+
+  const needsEnrich = (v: any) => {
+    const ac = v?.attribute_combinations;
+    if (!Array.isArray(ac) || ac.length === 0) return true;
+    const { color, size } = mlVariationColorSizeFromApi(v);
+    return !mlVariationSkuFromApi(v) && !color && !size;
+  };
+
+  if (!variations.some(needsEnrich)) return item;
+
+  const headers = { Authorization: `Bearer ${accessToken}` };
+  const enriched = await Promise.all(
+    variations.map(async (v: any) => {
+      if (!needsEnrich(v)) return v;
+      const vid = v?.id;
+      if (vid == null) return v;
+      try {
+        const r = await axios.get(`https://api.mercadolibre.com/items/${itemId}/variations/${vid}`, {
+          headers,
+          validateStatus: () => true
+        });
+        if (r.status === 200 && r.data) {
+          return {
+            ...v,
+            ...r.data,
+            id: v.id,
+            available_quantity: v.available_quantity ?? r.data.available_quantity,
+            attribute_combinations: r.data.attribute_combinations ?? v.attribute_combinations,
+            attributes: r.data.attributes ?? v.attributes
+          };
+        }
+      } catch {
+        /* ignorar variación inválida */
+      }
+      return v;
+    })
+  );
+  return { ...item, variations: enriched };
 }
 
 /** Empareja la variación ML correcta (evita usar el stock total del ítem cuando hay varias). */
@@ -551,7 +596,8 @@ async function aggregateMercadoLibreVariationsFromItemIds(
       const itemRes = await axios.get(`https://api.mercadolibre.com/items/${candidate}?include_attributes=all`, {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
-      merged.push(...extractMlVariationsFromItemData(itemRes?.data));
+      const enriched = await enrichMercadoLibreItemVariationsForCatalog(itemRes?.data, accessToken);
+      merged.push(...extractMlVariationsFromItemData(enriched));
     } catch {
       // ignorar ítem inválido
     }
@@ -6216,7 +6262,9 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
       userProductResolveDebug = upResolved.debug;
     }
 
-    const singleItemVariations = extractMlVariationsFromItemData(item);
+    const singleItemVariations = extractMlVariationsFromItemData(
+      await enrichMercadoLibreItemVariationsForCatalog(item, mlToken.access_token)
+    );
     const requestRaw = String(req.params.itemId || '');
     const requestLooksLikeCatalog =
       /\/p\/MLA/i.test(requestRaw) ||

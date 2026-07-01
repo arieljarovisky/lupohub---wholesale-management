@@ -37,12 +37,31 @@ function formatSizeForLink(size: string | undefined | null): string {
   return code && code !== s ? `${code} - ${s}` : s;
 }
 
-function formatOptionLabel(item: { sku?: string; size?: string; color?: string }): string {
+function formatOptionLabel(item: { sku?: string; size?: string; color?: string; variationId?: string; variantId?: string }): string {
   const parts = [
     item.sku?.trim() || '',
     [formatSizeForLink(item.size), item.color].filter(Boolean).join(' / '),
   ].filter(Boolean);
-  return parts.join(' · ') || '—';
+  if (parts.length > 0) return parts.join(' · ');
+  const id = (item.variationId ?? item.variantId ?? '').toString().trim();
+  return id ? `ID ${id}` : '—';
+}
+
+function formatMlOptionLabel(row: MlVariationRow): string {
+  const label = formatOptionLabel(row);
+  return label.startsWith('ID ') ? label : `${row.variationId} · ${label}`;
+}
+
+function dedupeMlCatalogRows(rows: MlVariationRow[]): MlVariationRow[] {
+  const byKey = new Map<string, MlVariationRow>();
+  for (const row of rows) {
+    const key = mlOptionKey(row);
+    const prev = byKey.get(key);
+    if (!prev || (!prev.sku && row.sku) || (!prev.color && row.color) || (!prev.size && row.size)) {
+      byKey.set(key, row);
+    }
+  }
+  return Array.from(byKey.values());
 }
 
 const norm = (s: string) => (s || '').toString().trim().toLowerCase().replace(/\s+/g, ' ');
@@ -718,7 +737,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       (m) =>
         m.variationId === value && (!a?.mlItemId || m.itemId === a.mlItemId)
     );
-    if (opt) return `${opt.itemId} · ${formatOptionLabel(opt)}`;
+    if (opt) return `${opt.itemId} · ${formatMlOptionLabel(opt)}`;
     return a?.mlItemId ? `${a.mlItemId} / ${value}` : `Variación ${value}`;
   };
 
@@ -1022,7 +1041,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
         const itemNorm = normalizeMercadoLibreItemId(row.itemId) || row.itemId;
         return !fetchedIds.has(row.itemId) && !fetchedIds.has(itemNorm);
       });
-      return [...kept, ...allRows];
+      return dedupeMlCatalogRows([...kept, ...allRows]);
     });
     return { rows: allRows, sources: nextSources };
   };
@@ -2088,7 +2107,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                               <option value="">Elegir de ML cargado…</option>
                               {getVisibleMlOptions(v.variantId, mlVal, assignments[v.variantId]?.mlItemId).map((m) => (
                                 <option key={mlOptionKey(m)} value={mlOptionKey(m)}>
-                                  {m.itemId} · {formatOptionLabel(m)}
+                                  {m.itemId} · {formatMlOptionLabel(m)}
                                 </option>
                               ))}
                             </select>
