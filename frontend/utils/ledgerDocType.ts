@@ -42,16 +42,44 @@ export function isSupersededReinvoicePaymentLedgerEntry(entry: {
   return false;
 }
 
+export function isSupersededReinvoiceNcLedgerEntry(entry: {
+  tipo?: string | null;
+  detalle?: string | null;
+  excluirDeSaldo?: boolean;
+  supersededByReinvoice?: boolean;
+}): boolean {
+  if (entry.supersededByReinvoice) return true;
+  if (entry.excluirDeSaldo && normalizeLedgerDocType(entry.tipo) === 'NC') return true;
+  return /reemisión\s*iibb/i.test(String(entry.detalle || ''));
+}
+
+export function isInformationalLedgerEntry(entry: {
+  tipo?: string | null;
+  detalle?: string | null;
+  excluirDeSaldo?: boolean;
+  voidedForReinvoice?: boolean;
+  supersededByReinvoice?: boolean;
+  supersededReinvoicePayment?: boolean;
+}): boolean {
+  return (
+    isVoidedReinvoiceLedgerEntry(entry) ||
+    isSupersededReinvoiceNcLedgerEntry(entry) ||
+    isSupersededReinvoicePaymentLedgerEntry(entry)
+  );
+}
+
 export function ledgerTipoDisplay(
   tipo: string | null | undefined,
   opts?: {
     detalle?: string | null;
     excluirDeSaldo?: boolean;
     voidedForReinvoice?: boolean;
+    supersededByReinvoice?: boolean;
     supersededReinvoicePayment?: boolean;
   }
 ): string {
   if (opts && isVoidedReinvoiceLedgerEntry({ tipo, ...opts })) return 'FAC anulada';
+  if (opts && isSupersededReinvoiceNcLedgerEntry({ tipo, ...opts })) return 'NC (reemisión)';
   if (opts && isSupersededReinvoicePaymentLedgerEntry({ tipo, ...opts })) return 'REC (cargo anterior)';
   const norm = normalizeLedgerDocType(tipo);
   if (norm === 'SALDO') return 'Saldo inicial';

@@ -765,6 +765,9 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
           detalle: reemision
             ? `Pedido ${cn.order_id || ''} · NC AFIP LupoHub (reemisión IIBB)`
             : `Pedido ${cn.order_id || ''} · NC AFIP LupoHub`,
+          /** Par informativo con la FAC anulada: la factura nueva ya está en cartera. */
+          excluirDeSaldo: reemision,
+          supersededByReinvoice: reemision,
           paginaPdf: null,
           orderId: cn.order_id ? String(cn.order_id) : null,
           ncLinks,

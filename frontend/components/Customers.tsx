@@ -12,7 +12,13 @@ import { formatMoneyAr } from '../utils/moneyFormat';
 import { formatOrderDate } from '../utils/formatDate';
 import { canonicalizeCityInput, cityDisplayLabel, isCabaCity, normalizeCityKey } from '../utils/cityNormalize';
 import { CityInput } from './CityInput';
-import { isVoidedReinvoiceLedgerEntry, ledgerTipoDisplay, normalizeLedgerDocType } from '../utils/ledgerDocType';
+import {
+  isInformationalLedgerEntry,
+  isSupersededReinvoiceNcLedgerEntry,
+  isVoidedReinvoiceLedgerEntry,
+  ledgerTipoDisplay,
+  normalizeLedgerDocType
+} from '../utils/ledgerDocType';
 
 interface CustomersProps {
   customers: Customer[];
@@ -856,6 +862,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             <tbody className="text-slate-300 divide-y divide-slate-800/80">
               {shown.map((e, idx) => {
                 const voidedReinvoice = isVoidedReinvoiceLedgerEntry(e);
+                const supersededNc = isSupersededReinvoiceNcLedgerEntry(e);
+                const informational = isInformationalLedgerEntry(e);
                 const ledgerNorm = normalizeLedgerDocType(e.tipo, e.detalle);
                 const isFac = ledgerNorm === 'FAC';
                 const isPed = ledgerNorm === 'PED';
@@ -878,7 +886,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                       : undefined
                   }
                   className={
-                    voidedReinvoice
+                    informational
                       ? 'bg-violet-950/20 text-slate-500 hover:bg-violet-950/30 cursor-pointer'
                       : ledgerClickable
                         ? isPed
@@ -895,7 +903,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                     title={
                       voidedReinvoice
                         ? 'Factura anulada — tocá para ver pedido y factura nueva'
-                        : ledgerClickable
+                        : supersededNc
+                          ? 'NC de reemisión IIBB — informativa; no resta del saldo (la factura nueva ya suma)'
+                          : ledgerClickable
                           ? isPed
                             ? 'Tocá para ver el pedido'
                             : isFac
@@ -906,7 +916,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   >
                     <span
                       className={
-                        voidedReinvoice
+                        informational
                           ? 'inline-flex items-center gap-1 rounded-md bg-violet-900/40 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-300/90'
                           : ledgerClickable
                             ? `inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
@@ -923,6 +933,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                         detalle: e.detalle,
                         excluirDeSaldo: e.excluirDeSaldo,
                         voidedForReinvoice: e.voidedForReinvoice,
+                        supersededByReinvoice: e.supersededByReinvoice,
                         supersededReinvoicePayment: e.supersededReinvoicePayment,
                       })}
                       {ledgerClickable ? <ChevronRight size={12} className="opacity-70" aria-hidden /> : null}
@@ -935,19 +946,31 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                     {e.numero ?? '—'}
                   </td>
                   <td
-                    className={`px-3 py-1.5 text-right tabular-nums ${voidedReinvoice ? 'line-through decoration-violet-400/50' : ''}`}
-                    title={voidedReinvoice ? 'Importe histórico; no suma al saldo' : undefined}
+                    className={`px-3 py-1.5 text-right tabular-nums ${informational ? 'line-through decoration-violet-400/50' : ''}`}
+                    title={
+                      voidedReinvoice
+                        ? 'Importe histórico; no suma al saldo'
+                        : supersededNc
+                          ? 'NC informativa; no resta del saldo'
+                          : undefined
+                    }
                   >
                     {e.importe != null ? `$${Number(e.importe).toLocaleString('es-AR')}` : '—'}
                   </td>
                   <td
                     className="px-3 py-1.5 text-right tabular-nums text-slate-500"
-                    title={voidedReinvoice ? 'Sin cambio: la factura fue anulada y reemitida' : undefined}
+                    title={
+                      voidedReinvoice
+                        ? 'Sin cambio: la factura fue anulada y reemitida'
+                        : supersededNc
+                          ? 'Sin cambio: la NC anuló la factura anterior ya reemplazada'
+                          : undefined
+                    }
                   >
                     {e.saldo != null ? `$${Number(e.saldo).toLocaleString('es-AR')}` : '—'}
                   </td>
                   <td
-                    className={`px-3 py-1.5 max-w-[240px] truncate italic ${voidedReinvoice ? 'text-violet-300/70' : 'text-slate-400'}`}
+                    className={`px-3 py-1.5 max-w-[240px] truncate italic ${informational ? 'text-violet-300/70' : 'text-slate-400'}`}
                     title={e.detalle || ''}
                   >
                     {e.detalle || '—'}

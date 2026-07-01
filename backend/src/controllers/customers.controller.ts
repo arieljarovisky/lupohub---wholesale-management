@@ -1511,7 +1511,8 @@ const SQL_CARTERA_AFIP_INVOICES_SUBQUERY = `
 
 /**
  * NC AFIP (× IVA) que restan del saldo. Solo punto de venta 21.
- * Incluye NC de reemisión con IIBB: anulan la factura anterior y la nueva factura suma por separado.
+ * Excluye NC de reemisión IIBB (superseded_by_reinvoice): la factura anterior no figura en cartera
+ * porque se actualiza en el mismo registro; solo cuenta la factura nueva.
  */
 const SQL_CARTERA_AFIP_NC_SUBQUERY = `
   SELECT
@@ -1521,6 +1522,7 @@ const SQL_CARTERA_AFIP_NC_SUBQUERY = `
   INNER JOIN orders o ON o.id = cn.order_id
   INNER JOIN customers co ON co.id = o.customer_id
   WHERE cn.punto_venta = 21
+    AND COALESCE(cn.superseded_by_reinvoice, 0) = 0
     AND ${SQL_OPENING_AFIP_CN_DATE_WHERE}
   GROUP BY o.customer_id
 `;
@@ -4493,6 +4495,8 @@ type CustomerFinancialMovement = {
   debe: number;
   haber: number;
   detalle: string;
+  /** NC de reemisión IIBB: visible en historial pero no resta del saldo (la factura nueva ya suma). */
+  supersededByReinvoice?: boolean;
 };
 
 async function buildCustomerFinancialSummary(customerId: string): Promise<{
@@ -4562,7 +4566,8 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
         cn.order_id AS order_id,
         0 AS debe,
         ROUND(COALESCE(cn.amount_credited, 0) * 1.21, 2) AS haber,
-        CONCAT('NC sobre pedido ', COALESCE(cn.order_id, '')) AS detalle
+        CONCAT('NC sobre pedido ', COALESCE(cn.order_id, '')) AS detalle,
+        COALESCE(cn.superseded_by_reinvoice, 0) AS superseded_by_reinvoice
       FROM credit_notes cn
       JOIN orders o ON o.id = cn.order_id
       WHERE o.customer_id = ?
@@ -4763,6 +4768,7 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
   const mapped: CustomerFinancialMovement[] = movements.map((m) => {
     const debe = Number(m.debe || 0);
     const haber = Number(m.haber || 0);
+    const supersededByReinvoice = Number(m.superseded_by_reinvoice || 0) === 1;
     return {
       fecha: m.fecha ?? null,
       tipo: m.tipo,
@@ -4770,7 +4776,8 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
       orderId: m.orderId ?? null,
       debe,
       haber,
-      detalle: m.detalle ?? ''
+      detalle: m.detalle ?? '',
+      supersededByReinvoice: supersededByReinvoice || undefined
     };
   });
   mapped.sort((a, b) => {
@@ -4787,7 +4794,7 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
   let totalRecibos = 0;
   for (const m of periodMovements) {
     if (m.tipo === 'FACTURA' || m.tipo === 'PEDIDO') totalFacturas += m.debe;
-    if (m.tipo === 'NC') totalNc += m.haber;
+    if (m.tipo === 'NC' && !m.supersededByReinvoice) totalNc += m.haber;
     if (m.tipo === 'RECIBO') totalRecibos += m.haber;
   }
   totalFacturas = Math.round(totalFacturas * 100) / 100;
