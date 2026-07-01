@@ -317,11 +317,15 @@ type MlVariationRow = { variationId: string; itemId?: string; sku: string; color
 function dedupeMlVariationRows(rows: MlVariationRow[]): MlVariationRow[] {
   const byKey = new Map<string, MlVariationRow>();
   for (const row of rows) {
-    const skuKey = normSkuForMlStockMatch(row.sku);
-    const attrKey =
-      skuKey ||
-      `${normTextForMlStockMatch(row.color)}|${normTextForMlStockMatch(row.size)}`;
-    const key = attrKey || String(row.variationId || '').trim();
+    // normSkuForMlStockMatch devuelve '0' como centinela cuando el SKU está vacío o no
+    // tiene dígitos: usarlo directo como clave colapsaba todas las variaciones sin SKU
+    // numérico (muy común en ML) en una sola fila, perdiendo el resto de las variantes.
+    const rawSku = String(row.sku ?? '').trim();
+    const skuKey = rawSku ? normSkuForMlStockMatch(rawSku) : '';
+    const colorN = normTextForMlStockMatch(row.color);
+    const sizeN = normTextForMlStockMatch(row.size);
+    const attrKey = colorN || sizeN ? `${colorN}|${sizeN}` : '';
+    const key = skuKey || attrKey || `${row.itemId || ''}#${String(row.variationId || '').trim()}`;
     if (!key) continue;
     const prev = byKey.get(key);
     if (!prev) {
@@ -472,9 +476,13 @@ function matchMlVariationForVariantLink(variations: any[], link: VariantMlStockL
     const byId = variations.find((x: any) => String(x?.id) === varId);
     if (byId) return byId;
   }
-  const localSku = normSkuForMlStockMatch(link.sku);
-  if (localSku) {
-    const bySku = variations.find((v: any) => normSkuForMlStockMatch(mlVariationSkuFromApi(v)) === localSku);
+  const rawLocalSku = String(link.sku ?? '').trim();
+  if (rawLocalSku) {
+    const localSku = normSkuForMlStockMatch(rawLocalSku);
+    const bySku = variations.find((v: any) => {
+      const rawRemoteSku = mlVariationSkuFromApi(v).trim();
+      return rawRemoteSku && normSkuForMlStockMatch(rawRemoteSku) === localSku;
+    });
     if (bySku) return bySku;
   }
   const colorN = normTextForMlStockMatch(link.color);
