@@ -689,10 +689,9 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
           parentTn ||
           undefined;
         const tnProductId = tnProductIdRaw ? normalizedTnCatalogId(tnProductIdRaw) : undefined;
-        const hasStock = variantHasStock({ stock: Number(v.stock ?? 0) });
         nextAssign[v.variantId] = {
-          ml: hasStock ? mlVal : '',
-          mlItemId: hasStock ? mlItemId : undefined,
+          ml: mlVal,
+          mlItemId: mlItemId,
           tn: tnVal,
           tnProductId,
         };
@@ -899,23 +898,19 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
   const getVisibleMlOptions = useCallback(
     (variantId: string, selectedMl?: string, selectedMlItemId?: string) => {
       const pool = filteredMl.length > 0 ? filteredMl : mlVariations;
-      const base = pool.filter((m) => {
-        const owner = assignedMlKeys.get(mlOptionKey(m));
-        return !owner || owner === variantId;
-      });
       const selected = (selectedMl || '').trim();
-      if (!selected || /^ML[A-Z]{1,5}\d+$/i.test(selected)) return base;
+      if (!selected || /^ML[A-Z]{1,5}\d+$/i.test(selected)) return pool;
       if (
-        base.some(
+        pool.some(
           (m) => m.variationId === selected && (!selectedMlItemId || m.itemId === selectedMlItemId)
         )
       ) {
-        return base;
+        return pool;
       }
       const opt = mlVariations.find(
         (m) => m.variationId === selected && (!selectedMlItemId || m.itemId === selectedMlItemId)
       );
-      if (opt) return [opt, ...base];
+      if (opt) return [opt, ...pool];
       if (selectedMlItemId) {
         const synthetic = {
           itemId: selectedMlItemId,
@@ -924,11 +919,11 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
           color: '',
           size: '',
         } as MlVariationRow;
-        return [synthetic, ...base];
+        return [synthetic, ...pool];
       }
-      return base;
+      return pool;
     },
-    [filteredMl, mlVariations, assignedMlKeys]
+    [filteredMl, mlVariations]
   );
 
   const linkStats = useMemo(() => {
@@ -966,22 +961,18 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
   const getVisibleTnOptions = (variantId: string, selectedValue?: string, selectedProductId?: string) => {
     const selected = (selectedValue || '').trim();
     const pool = filteredTn.length > 0 ? filteredTn : tnVariants;
-    const base = pool.filter((t) => {
-      const owner = assignedTnKeys.get(tnOptionKey(t));
-      return !owner || owner === variantId;
-    });
-    if (!selected) return base;
+    if (!selected) return pool;
     if (
-      base.some(
+      pool.some(
         (t) => String(t.variantId) === selected && (!selectedProductId || t.productId === selectedProductId)
       )
     ) {
-      return base;
+      return pool;
     }
     const opt = tnVariants.find(
       (t) => String(t.variantId) === selected && (!selectedProductId || t.productId === selectedProductId)
     );
-    return opt ? [opt, ...base] : base;
+    return opt ? [opt, ...pool] : pool;
   };
 
   const resolveMlLabel = (variantId: string) => {
@@ -2438,11 +2429,16 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                               }`}
                             >
                               <option value="">Elegir de ML cargado…</option>
-                              {getVisibleMlOptions(v.variantId, mlVal, assignments[v.variantId]?.mlItemId).map((m) => (
-                                <option key={mlOptionKey(m)} value={mlOptionKey(m)}>
-                                  {m.itemId} · {formatMlOptionLabel(m)}
-                                </option>
-                              ))}
+                              {getVisibleMlOptions(v.variantId, mlVal, assignments[v.variantId]?.mlItemId).map((m) => {
+                                const owner = assignedMlKeys.get(mlOptionKey(m));
+                                const takenElsewhere = owner && owner !== v.variantId;
+                                return (
+                                  <option key={mlOptionKey(m)} value={mlOptionKey(m)}>
+                                    {m.itemId} · {formatMlOptionLabel(m)}
+                                    {takenElsewhere ? ' · en otra fila' : ''}
+                                  </option>
+                                );
+                              })}
                             </select>
                           ) : (
                             !mlVal && (
@@ -2451,18 +2447,10 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                           )}
                           {mlVariations.length > 0 &&
                             !mlVal &&
-                            !variantHasStock(v) && (
-                              <p className="text-[10px] text-slate-500 pl-0.5">
-                                Sin stock local: la variación ML queda vacía.
-                              </p>
-                            )}
-                          {mlVariations.length > 0 &&
-                            !mlVal &&
-                            variantHasStock(v) &&
                             getVisibleMlOptions(v.variantId, mlVal, assignments[v.variantId]?.mlItemId).length ===
                               0 && (
                               <p className="text-[10px] text-amber-400/90 pl-0.5">
-                                Las {mlVariations.length} variaciones cargadas ya están en otras filas.
+                                No hay variaciones ML cargadas para este filtro.
                               </p>
                             )}
                         </div>
