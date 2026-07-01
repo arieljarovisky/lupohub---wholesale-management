@@ -4525,7 +4525,8 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
       m.order_id AS orderId,
       m.debe,
       m.haber,
-      m.detalle
+      m.detalle,
+      m.superseded_by_reinvoice
     FROM (
       SELECT
         COALESCE(i.created_at, o.date) AS fecha,
@@ -4543,7 +4544,8 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
         o.id AS order_id,
         ${sqlInvoiceAmountFromOrderTotal()} AS debe,
         0 AS haber,
-        CONCAT('Pedido ', COALESCE(o.id, '')) AS detalle
+        CONCAT('Pedido ', COALESCE(o.id, '')) AS detalle,
+        0 AS superseded_by_reinvoice
       FROM invoices i
       JOIN orders o ON o.id = i.order_id
       WHERE o.customer_id = ?
@@ -4590,7 +4592,8 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
         m.ref_order_id AS order_id,
         CASE WHEN m.tipo = 'FACTURA' THEN ROUND(m.importe_neto + COALESCE(m.agip_ret_per, 0), 2) ELSE 0 END AS debe,
         CASE WHEN m.tipo = 'NC' THEN ROUND(m.importe_neto, 2) ELSE 0 END AS haber,
-        CONCAT('Comprobante manual', COALESCE(CONCAT(' · ', m.notes), '')) AS detalle
+        CONCAT('Comprobante manual', COALESCE(CONCAT(' · ', m.notes), '')) AS detalle,
+        0 AS superseded_by_reinvoice
       FROM customer_manual_comprobantes m
       WHERE m.customer_id = ?
 
@@ -4603,7 +4606,8 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
         o.id AS order_id,
         (${SQL_ORDER_SALDO_RESIDUAL}) AS debe,
         0 AS haber,
-        'Saldo pendiente del pedido' AS detalle
+        'Saldo pendiente del pedido' AS detalle,
+        0 AS superseded_by_reinvoice
       FROM orders o
       LEFT JOIN (
         SELECT order_id, SUM(amount_credited) AS cn_total
@@ -4626,7 +4630,8 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
         p.order_id AS order_id,
         0 AS debe,
         ${SQL_PAYMENT_SALDO_CONTRIBUTION_AMOUNT} AS haber,
-        COALESCE(p.notes, '') AS detalle
+        COALESCE(p.notes, '') AS detalle,
+        0 AS superseded_by_reinvoice
       FROM payments p
       LEFT JOIN (
         SELECT
