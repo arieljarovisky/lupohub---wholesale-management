@@ -200,6 +200,26 @@ function repairMlAssignmentsFromCatalog(
 
   for (const local of localVariants) {
     if (!variantHasStock(local)) continue;
+    const a = next[local.variantId];
+    const ml = (a?.ml || '').trim();
+    if (!ml || isMercadoLibrePublicationId(ml)) continue;
+    const exact = mlList.find(
+      (m) =>
+        m.variationId === ml && (!a?.mlItemId || mercadoLibreItemIdsMatch(a.mlItemId, m.itemId))
+    );
+    if (exact) {
+      const key = mlOptionKey(exact);
+      if (!usedKeys.has(key)) {
+        usedKeys.add(key);
+        if (a?.mlItemId !== exact.itemId) {
+          next[local.variantId] = { ...a, ml: exact.variationId, mlItemId: exact.itemId };
+        }
+      }
+    }
+  }
+
+  for (const local of localVariants) {
+    if (!variantHasStock(local)) continue;
     const a = next[local.variantId] || { ml: '', tn: '' };
     const ml = (a.ml || '').trim();
     const key = ml && !isMercadoLibrePublicationId(ml) ? mlAssignmentKey(ml, a.mlItemId) : null;
@@ -310,21 +330,19 @@ function writeDismissedSources(groupKey: string, dismissed: DismissedSources): v
   }
 }
 
-function applyDismissedSources(
-  groupKey: string,
-  mlSet: Set<string>,
-  tnSet: Set<string>,
-  protectedMl?: Set<string>,
-  protectedTn?: Set<string>
-): void {
+function applyDismissedSources(groupKey: string, mlSet: Set<string>, tnSet: Set<string>): void {
   const dismissed = readDismissedSources(groupKey);
   dismissed.ml.forEach((id) => {
-    if (protectedMl?.has(id)) return;
-    mlSet.delete(id);
+    const norm = normalizeMercadoLibreItemId(id) || id;
+    for (const entry of [...mlSet]) {
+      if ((normalizeMercadoLibreItemId(entry) || entry) === norm) mlSet.delete(entry);
+    }
   });
   dismissed.tn.forEach((id) => {
-    if (protectedTn?.has(id)) return;
-    tnSet.delete(id);
+    const norm = normalizedTnCatalogId(id);
+    for (const entry of [...tnSet]) {
+      if (normalizedTnCatalogId(entry) === norm) tnSet.delete(entry);
+    }
   });
 }
 
@@ -332,6 +350,33 @@ function addNormalizedMlId(mlSet: Set<string>, raw: unknown): void {
   if (raw == null || String(raw).trim() === '') return;
   const norm = normalizeMercadoLibreItemId(String(raw).trim());
   if (norm) mlSet.add(norm);
+}
+
+function normalizedTnCatalogId(raw: unknown): string {
+  return normalizeTiendaNubeProductId(raw) || String(raw ?? '').trim();
+}
+
+function isTnCatalogIdDismissed(dismissed: DismissedSources, raw: unknown): boolean {
+  const norm = normalizedTnCatalogId(raw);
+  if (!norm) return false;
+  return dismissed.tn.some((id) => normalizedTnCatalogId(id) === norm);
+}
+
+function isMlCatalogIdDismissed(dismissed: DismissedSources, raw: unknown): boolean {
+  const norm = normalizeMercadoLibreItemId(String(raw ?? '').trim());
+  if (!norm) return false;
+  return dismissed.ml.some((id) => (normalizeMercadoLibreItemId(id) || id) === norm);
+}
+
+function addTnCatalogId(tnSet: Set<string>, raw: unknown, dismissed: DismissedSources): void {
+  const norm = normalizedTnCatalogId(raw);
+  if (!norm || !/^\d+$/.test(norm) || isTnCatalogIdDismissed(dismissed, norm)) return;
+  tnSet.add(norm);
+}
+
+function addMlCatalogId(mlSet: Set<string>, raw: unknown, dismissed: DismissedSources): void {
+  if (isMlCatalogIdDismissed(dismissed, raw)) return;
+  addNormalizedMlId(mlSet, raw);
 }
 
 function mlSelectValue(
@@ -428,27 +473,28 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
   };
 
   const dismissTnSource = (id: string) => {
-    if (!dismissedSourcesRef.current.tn.includes(id)) {
+    const norm = normalizedTnCatalogId(id);
+    if (!dismissedSourcesRef.current.tn.includes(norm)) {
       dismissedSourcesRef.current = {
         ...dismissedSourcesRef.current,
-        tn: [...dismissedSourcesRef.current.tn, id],
+        tn: [...dismissedSourcesRef.current.tn, norm],
       };
       writeDismissedSources(groupKey, dismissedSourcesRef.current);
     }
-    setTnSources((prev) => prev.filter((s) => s.id !== id));
-    setTnVariants((prev) => prev.filter((row) => row.productId !== id));
+    setTnSources((prev) => prev.filter((s) => normalizedTnCatalogId(s.id) !== norm));
+    setTnVariants((prev) => prev.filter((row) => normalizedTnCatalogId(row.productId) !== norm));
   };
 
   const restoreDismissedSource = (platform: 'ml' | 'tn', id: string) => {
-    const norm = platform === 'ml' ? normalizeMercadoLibreItemId(id) || id : id;
+    const norm = platform === 'ml' ? normalizeMercadoLibreItemId(id) || id : normalizedTnCatalogId(id);
     dismissedSourcesRef.current = {
       ml:
         platform === 'ml'
-          ? dismissedSourcesRef.current.ml.filter((x) => x !== norm)
+          ? dismissedSourcesRef.current.ml.filter((x) => (normalizeMercadoLibreItemId(x) || x) !== norm)
           : dismissedSourcesRef.current.ml,
       tn:
         platform === 'tn'
-          ? dismissedSourcesRef.current.tn.filter((x) => x !== id)
+          ? dismissedSourcesRef.current.tn.filter((x) => normalizedTnCatalogId(x) !== norm)
           : dismissedSourcesRef.current.tn,
     };
     writeDismissedSources(groupKey, dismissedSourcesRef.current);
@@ -475,12 +521,8 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       setProductName(p.name || groupKey);
       setPackMl(p.mercado_libre_pack_size ?? 1);
       setPackTn(p.tienda_nube_pack_size ?? 1);
-      const mlSet = new Set<string>();
-      const tnSet = new Set<string>();
       const parentMl = normalizeMercadoLibreItemId(p.externalIds?.mercadoLibre || '');
       const parentTn = normalizeTiendaNubeProductId(p.externalIds?.tiendaNube || '');
-      if (parentMl) mlSet.add(parentMl);
-      if (parentTn && /^\d+$/.test(parentTn)) tnSet.add(parentTn);
       const list = (p.variants || []).map((v: any) => {
         const variantId = v.variant_id;
         const rawSku = (v.variant_sku ?? '').toString().trim();
@@ -503,6 +545,32 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
           api.getVariantPublications(v.variantId).catch(() => [] as Array<{ platform: string; external_product_id: string }>)
         )
       );
+      let dismissed = readDismissedSources(groupKey);
+      const linkedMlNorms = new Set<string>();
+      list.forEach((v: { externalIds?: { mercadoLibreItemId?: unknown } }) => {
+        const norm = normalizeMercadoLibreItemId(String(v.externalIds?.mercadoLibreItemId ?? '').trim());
+        if (norm) linkedMlNorms.add(norm);
+      });
+      pubResults.flat().forEach((pub) => {
+        if (pub.platform === 'mercadolibre' && pub.external_product_id) {
+          const norm = normalizeMercadoLibreItemId(pub.external_product_id);
+          if (norm) linkedMlNorms.add(norm);
+        }
+      });
+      if (parentMl) {
+        const norm = normalizeMercadoLibreItemId(parentMl);
+        if (norm) linkedMlNorms.add(norm);
+      }
+      const prunedMlDismissed = dismissed.ml.filter(
+        (id) => !linkedMlNorms.has(normalizeMercadoLibreItemId(id) || id)
+      );
+      if (prunedMlDismissed.length !== dismissed.ml.length) {
+        dismissed = { ...dismissed, ml: prunedMlDismissed };
+        writeDismissedSources(groupKey, dismissed);
+      }
+      dismissedSourcesRef.current = dismissed;
+      const mlSet = new Set<string>();
+      const tnSet = new Set<string>();
       const primaryMlByVariant = new Map<string, string>();
       list.forEach((v: { variantId: string; externalIds?: { mercadoLibreItemId?: unknown } }, idx: number) => {
         const fromExt = primaryMlItemIdFromVariantExternal(v);
@@ -516,7 +584,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
             ? String(mlPub.external_product_id).trim()
             : '');
         if (primary) primaryMlByVariant.set(v.variantId, primary);
-        if (primary) mlSet.add(primary);
+        addMlCatalogId(mlSet, primary, dismissed);
       });
       const allPrimaryMl = new Set(primaryMlByVariant.values());
       list.forEach((v: { variantId: string }, idx: number) => {
@@ -526,15 +594,15 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
           const id = String(pub.external_product_id).trim();
           if (!id) return;
           if (id !== ownPrimary && allPrimaryMl.has(id)) return;
-          mlSet.add(id);
+          addMlCatalogId(mlSet, id, dismissed);
         });
       });
       pubResults.flat().forEach((pub) => {
         if (pub.platform === 'tiendanube' && pub.external_product_id) {
-          tnSet.add(pub.external_product_id);
+          addTnCatalogId(tnSet, pub.external_product_id, dismissed);
         }
         if (pub.platform === 'mercadolibre' && pub.external_product_id) {
-          addNormalizedMlId(mlSet, pub.external_product_id);
+          addMlCatalogId(mlSet, pub.external_product_id, dismissed);
         }
       });
       const nextAssign: Record<string, VariantAssignment> = {};
@@ -579,10 +647,11 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                 String((tnPub as { external_variant_id?: string }).external_variant_id).trim() !== ''
               ? String((tnPub as { external_variant_id?: string }).external_variant_id).trim()
               : '';
-        const tnProductId =
+        const tnProductIdRaw =
           (tnPub as { external_product_id?: string } | undefined)?.external_product_id ||
           parentTn ||
           undefined;
+        const tnProductId = tnProductIdRaw ? normalizedTnCatalogId(tnProductIdRaw) : undefined;
         const hasStock = variantHasStock({ stock: Number(v.stock ?? 0) });
         nextAssign[v.variantId] = {
           ml: hasStock ? mlVal : '',
@@ -591,28 +660,27 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
           tnProductId,
         };
       });
+      const anyVariantOwnMlItem = list.some(
+        (v: { externalIds?: { mercadoLibreItemId?: unknown } }) =>
+          v.externalIds?.mercadoLibreItemId != null && String(v.externalIds.mercadoLibreItemId).trim() !== ''
+      );
       for (const a of Object.values(nextAssign)) {
         const ml = (a.ml || '').trim();
         if (!ml || /^ML[A-Z]{1,5}\d+$/i.test(ml)) {
           const item = primaryMlItemIdFromAssignment(a);
-          addNormalizedMlId(mlSet, item);
+          addMlCatalogId(mlSet, item, dismissed);
           continue;
         }
-        addNormalizedMlId(mlSet, a.mlItemId);
+        addMlCatalogId(mlSet, a.mlItemId, dismissed);
       }
       list.forEach((v: { externalIds?: { mercadoLibreVariant?: unknown; mercadoLibreItemId?: unknown } }) => {
-        addNormalizedMlId(mlSet, v.externalIds?.mercadoLibreItemId);
+        addMlCatalogId(mlSet, v.externalIds?.mercadoLibreItemId, dismissed);
       });
-      if (
-        list.some(
-          (v: { externalIds?: { mercadoLibreVariant?: unknown } }) =>
-            v.externalIds?.mercadoLibreVariant != null && String(v.externalIds.mercadoLibreVariant).trim() !== ''
-        ) &&
-        parentMl
-      ) {
-        mlSet.add(parentMl);
+      if (!anyVariantOwnMlItem && parentMl) {
+        addMlCatalogId(mlSet, parentMl, dismissed);
       }
-      applyDismissedSources(groupKey, mlSet, tnSet, new Set(mlSet), new Set(tnSet));
+      addTnCatalogId(tnSet, parentTn, dismissed);
+      applyDismissedSources(groupKey, mlSet, tnSet);
       const mlSourceIds = [...mlSet];
       const tnSourceIds = [...tnSet];
       setMlSources(mlSourceIds.map((id) => ({ id, autoLoaded: true })));
