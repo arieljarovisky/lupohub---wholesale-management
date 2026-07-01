@@ -181,6 +181,19 @@ function findMlCatalogMatchForLocal(
   return match;
 }
 
+function mlKeyUsedByOtherVariant(
+  assignments: Record<string, VariantAssignment>,
+  variantId: string,
+  key: string
+): boolean {
+  for (const [vid, a] of Object.entries(assignments)) {
+    if (vid === variantId) continue;
+    const otherKey = mlAssignmentKey(a?.ml || '', a?.mlItemId);
+    if (otherKey === key) return true;
+  }
+  return false;
+}
+
 function repairMlAssignmentsFromCatalog(
   localVariants: Array<{ variantId: string; sku: string; size: string; color: string; stock: number }>,
   current: Record<string, VariantAssignment>,
@@ -191,16 +204,8 @@ function repairMlAssignmentsFromCatalog(
   const next: Record<string, VariantAssignment> = { ...current };
   const usedKeys = new Set<string>();
 
+  // Normalizar IDs guardados contra el catálogo cargado (sin tratar la propia fila como duplicada).
   for (const local of localVariants) {
-    const a = next[local.variantId];
-    const ml = (a?.ml || '').trim();
-    if (!ml || isMercadoLibrePublicationId(ml)) continue;
-    const key = mlAssignmentKey(ml, a?.mlItemId);
-    if (key) usedKeys.add(key);
-  }
-
-  for (const local of localVariants) {
-    if (!variantHasStock(local)) continue;
     const a = next[local.variantId];
     const ml = (a?.ml || '').trim();
     if (!ml || isMercadoLibrePublicationId(ml)) continue;
@@ -209,13 +214,9 @@ function repairMlAssignmentsFromCatalog(
         m.variationId === ml && (!a?.mlItemId || mercadoLibreItemIdsMatch(a.mlItemId, m.itemId))
     );
     if (exact) {
+      next[local.variantId] = { ...a, ml: exact.variationId, mlItemId: exact.itemId };
       const key = mlOptionKey(exact);
-      if (!usedKeys.has(key)) {
-        usedKeys.add(key);
-        if (a?.mlItemId !== exact.itemId) {
-          next[local.variantId] = { ...a, ml: exact.variationId, mlItemId: exact.itemId };
-        }
-      }
+      if (key) usedKeys.add(key);
     }
   }
 
@@ -224,7 +225,7 @@ function repairMlAssignmentsFromCatalog(
     const a = next[local.variantId] || { ml: '', tn: '' };
     const ml = (a.ml || '').trim();
     const key = ml && !isMercadoLibrePublicationId(ml) ? mlAssignmentKey(ml, a.mlItemId) : null;
-    const isDuplicate = key != null && usedKeys.has(key);
+    const isDuplicate = key != null && mlKeyUsedByOtherVariant(next, local.variantId, key);
     const needsRepair = !ml || isMercadoLibrePublicationId(ml) || isDuplicate;
     if (!needsRepair) continue;
 
@@ -233,7 +234,8 @@ function repairMlAssignmentsFromCatalog(
       : (a.mlItemId || undefined);
     const match = findMlCatalogMatchForLocal(local, mlList, preferredItemId);
     if (!match) {
-      if (needsRepair) {
+      // Solo borrar si nunca hubo un ID válido o es duplicado/MLA mal guardado.
+      if (needsRepair && (!ml || isMercadoLibrePublicationId(ml) || isDuplicate)) {
         next[local.variantId] = {
           ...a,
           ml: '',
@@ -246,7 +248,7 @@ function repairMlAssignmentsFromCatalog(
     }
 
     const matchKey = mlOptionKey(match);
-    if (usedKeys.has(matchKey)) continue;
+    if (mlKeyUsedByOtherVariant(next, local.variantId, matchKey)) continue;
     if (key) usedKeys.delete(key);
     usedKeys.add(matchKey);
     next[local.variantId] = { ...a, ml: match.variationId, mlItemId: match.itemId };
@@ -348,6 +350,23 @@ function applyDismissedSources(groupKey: string, mlSet: Set<string>, tnSet: Set<
     for (const entry of [...tnSet]) {
       if (normalizedTnCatalogId(entry) === norm) tnSet.delete(entry);
     }
+  });
+}
+
+/** Fuentes aún vinculadas en la base: siempre deben cargarse aunque el usuario las haya descartado antes. */
+function enforceLinkedCatalogSources(
+  mlSet: Set<string>,
+  tnSet: Set<string>,
+  linkedMlNorms: Set<string>,
+  linkedTnNorms: Set<string>
+): void {
+  linkedMlNorms.forEach((id) => {
+    const norm = normalizeMercadoLibreItemId(id) || id;
+    if (norm) mlSet.add(norm);
+  });
+  linkedTnNorms.forEach((id) => {
+    const norm = normalizedTnCatalogId(id);
+    if (norm && /^\d+$/.test(norm)) tnSet.add(norm);
   });
 }
 
@@ -553,6 +572,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       );
       let dismissed = readDismissedSources(groupKey);
       const linkedMlNorms = new Set<string>();
+      const linkedTnNorms = new Set<string>();
       list.forEach((v: { externalIds?: { mercadoLibreItemId?: unknown } }) => {
         const norm = normalizeMercadoLibreItemId(String(v.externalIds?.mercadoLibreItemId ?? '').trim());
         if (norm) linkedMlNorms.add(norm);
@@ -562,16 +582,27 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
           const norm = normalizeMercadoLibreItemId(pub.external_product_id);
           if (norm) linkedMlNorms.add(norm);
         }
+        if (pub.platform === 'tiendanube' && pub.external_product_id) {
+          const norm = normalizedTnCatalogId(pub.external_product_id);
+          if (norm) linkedTnNorms.add(norm);
+        }
       });
       if (parentMl) {
         const norm = normalizeMercadoLibreItemId(parentMl);
         if (norm) linkedMlNorms.add(norm);
       }
+      if (parentTn) {
+        const norm = normalizedTnCatalogId(parentTn);
+        if (norm) linkedTnNorms.add(norm);
+      }
       const prunedMlDismissed = dismissed.ml.filter(
         (id) => !linkedMlNorms.has(normalizeMercadoLibreItemId(id) || id)
       );
-      if (prunedMlDismissed.length !== dismissed.ml.length) {
-        dismissed = { ...dismissed, ml: prunedMlDismissed };
+      const prunedTnDismissed = dismissed.tn.filter(
+        (id) => !linkedTnNorms.has(normalizedTnCatalogId(id))
+      );
+      if (prunedMlDismissed.length !== dismissed.ml.length || prunedTnDismissed.length !== dismissed.tn.length) {
+        dismissed = { ml: prunedMlDismissed, tn: prunedTnDismissed };
         writeDismissedSources(groupKey, dismissed);
       }
       dismissedSourcesRef.current = dismissed;
@@ -687,6 +718,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       }
       addTnCatalogId(tnSet, parentTn, dismissed);
       applyDismissedSources(groupKey, mlSet, tnSet);
+      enforceLinkedCatalogSources(mlSet, tnSet, linkedMlNorms, linkedTnNorms);
       const mlSourceIds = [...mlSet];
       const tnSourceIds = [...tnSet];
       setMlSources(mlSourceIds.map((id) => ({ id, autoLoaded: true })));
