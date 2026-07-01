@@ -2129,12 +2129,19 @@ export const api = {
     return await request(`/customers/${encodeURIComponent(customerId)}/financial-summary`, 'GET');
   },
 
-  exportCustomerFinancialSummary: async (customerId: string): Promise<void> => {
-    const blob = await getBlob(`/customers/${encodeURIComponent(customerId)}/financial-summary/export`, 120000);
+  exportCustomerFinancialSummary: async (
+    customerId: string,
+    opts?: { includeTango?: boolean }
+  ): Promise<void> => {
+    const q = opts?.includeTango ? '?includeTango=1' : '';
+    const blob = await getBlob(
+      `/customers/${encodeURIComponent(customerId)}/financial-summary/export${q}`,
+      120000
+    );
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `saldo_facturas_recibos_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.download = `saldo_facturas_recibos_${opts?.includeTango ? 'con_tango_' : ''}${new Date().toISOString().slice(0, 10)}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();

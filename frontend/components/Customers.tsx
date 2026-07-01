@@ -278,6 +278,23 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [customerDetailExportTo, setCustomerDetailExportTo] = useState('');
   const [exportingCustomerDetail, setExportingCustomerDetail] = useState(false);
   const [exportingFinancialSummary, setExportingFinancialSummary] = useState(false);
+  const [financialExportMenuOpen, setFinancialExportMenuOpen] = useState(false);
+  const financialExportMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setFinancialExportMenuOpen(false);
+  }, [selectedCustomer?.id]);
+
+  useEffect(() => {
+    if (!financialExportMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (financialExportMenuRef.current && !financialExportMenuRef.current.contains(e.target as Node)) {
+        setFinancialExportMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [financialExportMenuOpen]);
   const [multimediaLedger, setMultimediaLedger] = useState<Awaited<ReturnType<typeof api.getCustomerMultimediaLedger>> | null>(null);
   const [multimediaLedgerLoading, setMultimediaLedgerLoading] = useState(false);
   const [selectedLedgerEntry, setSelectedLedgerEntry] = useState<
@@ -2010,7 +2027,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   </div>
                 )}
               </div>
-              <div className="flex flex-col items-stretch sm:items-end gap-2 shrink-0">
+              <div className="relative flex flex-col items-stretch sm:items-end gap-2 shrink-0" ref={financialExportMenuRef}>
                 <p
                   className={`text-3xl font-black tabular-nums sm:text-right ${
                     getSaldoPendienteTotal(selectedCustomer) < -0.01
@@ -2038,22 +2055,65 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 <button
                   type="button"
                   disabled={exportingFinancialSummary}
-                  onClick={async () => {
-                    try {
-                      setExportingFinancialSummary(true);
-                      await api.exportCustomerFinancialSummary(selectedCustomer.id);
-                      showToast('success', 'Excel descargado');
-                    } catch (err: any) {
-                      showToast('error', err?.message || 'No se pudo exportar');
-                    } finally {
-                      setExportingFinancialSummary(false);
-                    }
-                  }}
+                  onClick={() => setFinancialExportMenuOpen((open) => !open)}
                   className="px-4 py-2.5 rounded-xl bg-amber-700 hover:bg-amber-600 text-white text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50 touch-manipulation"
                 >
-                  {exportingFinancialSummary ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                  {exportingFinancialSummary ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <Download size={16} />
+                  )}
                   Exportar Excel
+                  <ChevronDown size={14} className={financialExportMenuOpen ? 'rotate-180 transition' : 'transition'} />
                 </button>
+                {financialExportMenuOpen && !exportingFinancialSummary ? (
+                  <div className="absolute right-0 top-full z-30 mt-1 w-72 rounded-xl border border-slate-600 bg-slate-900 shadow-2xl overflow-hidden">
+                    <p className="px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-slate-500 border-b border-slate-700/80">
+                      Incluir import Tango
+                    </p>
+                    <button
+                      type="button"
+                      className="w-full px-3 py-3 text-left text-sm text-slate-100 hover:bg-slate-800 transition border-b border-slate-800/80"
+                      onClick={async () => {
+                        setFinancialExportMenuOpen(false);
+                        try {
+                          setExportingFinancialSummary(true);
+                          await api.exportCustomerFinancialSummary(selectedCustomer.id, { includeTango: false });
+                          showToast('success', 'Excel descargado (solo LupoHub)');
+                        } catch (err: any) {
+                          showToast('error', err?.message || 'No se pudo exportar');
+                        } finally {
+                          setExportingFinancialSummary(false);
+                        }
+                      }}
+                    >
+                      <span className="font-bold block">Sin Tango</span>
+                      <span className="text-xs text-slate-400">Facturas, NC y recibos cargados en LupoHub</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="w-full px-3 py-3 text-left text-sm text-slate-100 hover:bg-slate-800 transition"
+                      onClick={async () => {
+                        setFinancialExportMenuOpen(false);
+                        try {
+                          setExportingFinancialSummary(true);
+                          await api.exportCustomerFinancialSummary(selectedCustomer.id, { includeTango: true });
+                          showToast('success', 'Excel descargado (con import Tango)');
+                        } catch (err: any) {
+                          showToast('error', err?.message || 'No se pudo exportar');
+                        } finally {
+                          setExportingFinancialSummary(false);
+                        }
+                      }}
+                    >
+                      <span className="font-bold block">Con Tango (legacy)</span>
+                      <span className="text-xs text-slate-400">
+                        Suma movimientos importados del Excel
+                        {multimediaLedger?.legacyCode ? ` · ${multimediaLedger.legacyCode}` : ''}
+                      </span>
+                    </button>
+                  </div>
+                ) : null}
               </div>
             </div>
 

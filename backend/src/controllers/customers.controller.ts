@@ -4499,13 +4499,17 @@ type CustomerFinancialMovement = {
   supersededByReinvoice?: boolean;
 };
 
-async function buildCustomerFinancialSummary(customerId: string): Promise<{
+async function buildCustomerFinancialSummary(
+  customerId: string,
+  opts?: { includeTangoImport?: boolean }
+): Promise<{
   totalFacturas: number;
   totalNc: number;
   totalRecibos: number;
   saldoPendiente: number;
   movements: CustomerFinancialMovement[];
 }> {
+  const includeTangoImport = opts?.includeTangoImport ?? INCLUDE_TANGO_IMPORT_IN_SYSTEM;
   const custOpening = (await get(
     `SELECT opening_balance, opening_balance_date FROM customers WHERE id = ?`,
     [customerId]
@@ -4670,7 +4674,7 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
     [customerId, customerId, customerId, customerId, customerId]
   )) as any[];
 
-  const importedEntries = INCLUDE_TANGO_IMPORT_IN_SYSTEM
+  const importedEntries = includeTangoImport
     ? ((await query(
         `
     SELECT
@@ -4747,7 +4751,7 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
     existingKeys.add(toKey(tipo, m.fecha, m.comprobante, Number(m.debe || 0), Number(m.haber || 0)));
   }
 
-  if (INCLUDE_TANGO_IMPORT_IN_SYSTEM) {
+  if (includeTangoImport) {
     for (const e of importedEntries) {
       const tipo = classifyImportedEntry(String(e.tipo_raw || ''), String(e.detalle || ''));
       if (!tipo) continue;
@@ -4888,7 +4892,16 @@ export const exportCustomerFinancialSummaryXlsx = async (req: Request, res: Resp
       return res.status(403).json({ message: 'Solo podés exportar clientes asignados a tu usuario' });
     }
 
-    const summary = await buildCustomerFinancialSummary(customerId);
+    const includeTango =
+      String(req.query.includeTango || '')
+        .trim()
+        .toLowerCase() === '1' ||
+      ['true', 'yes', 'si', 'sí'].includes(
+        String(req.query.includeTango || '')
+          .trim()
+          .toLowerCase()
+      );
+    const summary = await buildCustomerFinancialSummary(customerId, { includeTangoImport: includeTango });
 
     const wb = new ExcelJS.Workbook();
     wb.creator = 'LupoHub';
@@ -4919,7 +4932,7 @@ export const exportCustomerFinancialSummaryXlsx = async (req: Request, res: Resp
       debe: summary.totalFacturas,
       haber: summary.totalNc + summary.totalRecibos,
       saldo: summary.saldoPendiente,
-      detalle: `Facturas: ${summary.totalFacturas.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | NC: ${summary.totalNc.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | Recibos: ${summary.totalRecibos.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      detalle: `Facturas: ${summary.totalFacturas.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | NC: ${summary.totalNc.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | Recibos: ${summary.totalRecibos.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${includeTango ? ' | Incluye import Tango' : ' | Solo LupoHub'}`
     });
     ws.addRow({});
 
@@ -4946,7 +4959,7 @@ export const exportCustomerFinancialSummaryXlsx = async (req: Request, res: Resp
 
     const out = await wb.xlsx.writeBuffer();
     const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out as ArrayBufferLike));
-    const filename = `saldo_facturas_recibos_${(customer.business_name || customer.name || customer.id).toString().replace(/[^\w\-]+/g, '_').slice(0, 40)}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const filename = `saldo_facturas_recibos_${includeTango ? 'con_tango_' : ''}${(customer.business_name || customer.name || customer.id).toString().replace(/[^\w\-]+/g, '_').slice(0, 40)}_${new Date().toISOString().slice(0, 10)}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     return res.send(buf);
