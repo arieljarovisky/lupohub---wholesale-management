@@ -45,18 +45,41 @@ function isTnOrderPaid(order: Record<string, unknown>): boolean {
   );
 }
 
+export type AfipInvoicedSourceBreakdown = {
+  total: number;
+  net: number;
+  count: number;
+};
+
+export type AfipInvoicedSummary = {
+  total: number;
+  net: number;
+  iva: number;
+  count: number;
+  wholesale: AfipInvoicedSourceBreakdown;
+  mercadoLibre: AfipInvoicedSourceBreakdown;
+  tiendaNube: AfipInvoicedSourceBreakdown;
+};
+
+function netToAfipTotals(net: number): { total: number; net: number; iva: number } {
+  const n = round2(net);
+  const total = round2(n * 1.21);
+  return { total, net: n, iva: round2(total - n) };
+}
+
+function sourceBreakdown(net: number, count: number): AfipInvoicedSourceBreakdown {
+  const { total, net: n } = netToAfipTotals(net);
+  return { total, net: n, count };
+}
+
 /**
- * Suma facturas AFIP emitidas en el rango (por `invoices.created_at`).
- * - `net`: suma de `orders.total - notas_credito` (neto sin IVA).
- * - `iva`: 21% sobre el neto.
- * - `total`: net + iva (importe del comprobante con IVA).
- * Misma fórmula que `listPendingInvoices` para consistencia.
+ * Suma todo lo facturado AFIP en el rango:
+ * - Mayorista: `invoices` + pedidos (`orders.total` neto de NC).
+ * - Mercado Libre / Tienda Nube: `external_invoices` neto de NC externas.
+ * Importes con IVA 21% sobre neto (misma fórmula que cartera mayorista).
  */
-export async function sumInvoicedInRange(
-  from: string,
-  to: string
-): Promise<{ total: number; net: number; iva: number; count: number }> {
-  const row = (await get(
+export async function sumInvoicedInRange(from: string, to: string): Promise<AfipInvoicedSummary> {
+  const wholesaleRow = (await get(
     `SELECT
        COALESCE(SUM(GREATEST(0, o.total - COALESCE(cn.cn_total, 0))), 0) AS net,
        COUNT(*) AS cnt
@@ -70,10 +93,40 @@ export async function sumInvoicedInRange(
      WHERE DATE(i.created_at) >= ? AND DATE(i.created_at) <= ?`,
     [from, to]
   )) as { net: string | number; cnt: number } | undefined;
-  const net = round2(Number(row?.net ?? 0));
-  const total = round2(net * 1.21);
-  const iva = round2(total - net);
-  return { total, net, iva, count: Number(row?.cnt ?? 0) };
+
+  const externalRows = (await query(
+    `SELECT
+       ei.source,
+       COALESCE(SUM(GREATEST(0, ei.total - COALESCE(ecn.amount_credited, 0))), 0) AS net,
+       COUNT(*) AS cnt
+     FROM external_invoices ei
+     LEFT JOIN external_credit_notes ecn ON ecn.external_invoice_id = ei.id
+     WHERE DATE(ei.created_at) >= ? AND DATE(ei.created_at) <= ?
+     GROUP BY ei.source`,
+    [from, to]
+  )) as Array<{ source: string; net: string | number; cnt: number }>;
+
+  const wholesaleNet = Number(wholesaleRow?.net ?? 0);
+  const wholesaleCount = Number(wholesaleRow?.cnt ?? 0);
+  const mlRow = externalRows.find((r) => String(r.source || '').toUpperCase() === 'MERCADOLIBRE');
+  const tnRow = externalRows.find((r) => String(r.source || '').toUpperCase() === 'TIENDANUBE');
+  const mlNet = Number(mlRow?.net ?? 0);
+  const tnNet = Number(tnRow?.net ?? 0);
+  const mlCount = Number(mlRow?.cnt ?? 0);
+  const tnCount = Number(tnRow?.cnt ?? 0);
+
+  const totalNet = round2(wholesaleNet + mlNet + tnNet);
+  const { total, net, iva } = netToAfipTotals(totalNet);
+
+  return {
+    total,
+    net,
+    iva,
+    count: wholesaleCount + mlCount + tnCount,
+    wholesale: sourceBreakdown(wholesaleNet, wholesaleCount),
+    mercadoLibre: sourceBreakdown(mlNet, mlCount),
+    tiendaNube: sourceBreakdown(tnNet, tnCount),
+  };
 }
 
 export async function sumReceiptsInRange(from: string, to: string): Promise<{ total: number; count: number }> {

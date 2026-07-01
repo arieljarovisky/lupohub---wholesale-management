@@ -445,6 +445,15 @@ export const api = {
     invoicedNet: number;
     invoicedIva: number;
     invoicedCount: number;
+    invoicedWholesaleTotal: number;
+    invoicedWholesaleNet: number;
+    invoicedWholesaleCount: number;
+    invoicedMlTotal: number;
+    invoicedMlNet: number;
+    invoicedMlCount: number;
+    invoicedTnTotal: number;
+    invoicedTnNet: number;
+    invoicedTnCount: number;
     pendingInvoicesTotal: number;
     pendingInvoicesCount: number;
     pendingInvoices: Array<{
