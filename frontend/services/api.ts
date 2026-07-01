@@ -3156,8 +3156,14 @@ export const api = {
     }, { totalProducts: 0, totalStock: 0, lowStockCount: 0, noStockCount: 0 }, 'getMercadoLibreStockTotals');
   },
 
-  getMercadoLibreItemVariations: async (itemId: string): Promise<{ variations: { variationId: number | string; sku: string; color: string; size: string; stock: number }[]; singleProduct?: boolean; itemId: string }> => {
-    return request<{ variations: { variationId: number | string; sku: string; color: string; size: string; stock: number }[]; singleProduct?: boolean; itemId: string }>(`/integrations/mercadolibre/items/${encodeURIComponent(itemId)}/variations`, 'GET');
+  getMercadoLibreItemVariations: async (itemId: string): Promise<{ variations: { variationId: number | string; itemId?: string; sku: string; color: string; size: string; stock: number }[]; singleProduct?: boolean; itemId: string; resolvedItemId?: string }> => {
+    return request<{ variations: { variationId: number | string; itemId?: string; sku: string; color: string; size: string; stock: number }[]; singleProduct?: boolean; itemId: string; resolvedItemId?: string }>(
+      `/integrations/mercadolibre/items/${encodeURIComponent(itemId)}/variations?_=${Date.now()}`,
+      'GET',
+      undefined,
+      undefined,
+      120000
+    );
   },
 
   /** Mercado Ads — Product Ads: anunciantes, campañas y métricas por publicación (API oficial). */
@@ -3477,7 +3483,10 @@ export const api = {
   },
 
   getTiendaNubeProductVariants: async (productId: string): Promise<{ variants: { variantId: number | string; sku: string; color: string; size: string; stock: number }[]; productId: number | string }> => {
-    return request<{ variants: { variantId: number | string; sku: string; color: string; size: string; stock: number }[]; productId: number | string }>(`/integrations/tiendanube/products/${encodeURIComponent(productId)}/variants`, 'GET');
+    return request<{ variants: { variantId: number | string; sku: string; color: string; size: string; stock: number }[]; productId: number | string }>(
+      `/integrations/tiendanube/products/${encodeURIComponent(productId)}/variants?_=${Date.now()}`,
+      'GET'
+    );
   },
 
   // Configuración de mensaje automático de ML

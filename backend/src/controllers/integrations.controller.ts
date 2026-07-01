@@ -311,7 +311,7 @@ export async function resolveMercadoLibreUserProductItems(
   }
 }
 
-type MlVariationRow = { variationId: string; sku: string; color: string; size: string; stock: number };
+type MlVariationRow = { variationId: string; itemId?: string; sku: string; color: string; size: string; stock: number };
 
 /** Una fila por SKU (o color+talle); evita duplicados al agregar varios ítems ML. */
 function dedupeMlVariationRows(rows: MlVariationRow[]): MlVariationRow[] {
@@ -352,6 +352,7 @@ function extractMlVariationsFromItemData(it: any): MlVariationRow[] {
       });
       out.push({
         variationId: String(v.id),
+        itemId: String(it.id || ''),
         sku,
         color,
         size,
@@ -368,6 +369,7 @@ function extractMlVariationsFromItemData(it: any): MlVariationRow[] {
   const parsed = mlColorSizeFromTitle((it.title || '').toString().trim());
   out.push({
     variationId: String(it.id),
+    itemId: String(it.id || ''),
     sku,
     color: (colorAttr ? (colorAttr.value_name ?? colorAttr.value ?? '') : parsed.color).toString().trim(),
     size: (sizeAttr ? (sizeAttr.value_name ?? sizeAttr.value ?? '') : parsed.size).toString().trim(),
@@ -6367,6 +6369,7 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
         const size = sizeFromAttr || titleParsed.size || '';
         return {
           variationId: it.id,
+          itemId: String(it.id || ''),
           sku,
           color,
           size,
@@ -6441,6 +6444,7 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
     return res.json({
       variations: [{
         variationId: item.id,
+        itemId: String(item.id || ''),
         sku: singleSku,
         color: parsed.color || '',
         size: parsed.size || '',
@@ -6476,10 +6480,17 @@ export const getTiendaNubeProductVariants = async (req: Request, res: Response) 
     }
     const headers = {
       'Authentication': `bearer ${integration.access_token}`,
-      'User-Agent': TN_USER_AGENT
+      'User-Agent': TN_USER_AGENT,
+      'Cache-Control': 'no-cache',
+      Pragma: 'no-cache',
     };
+    const cacheBust = Date.now();
 
-    const productRes = await axios.get(`https://api.tiendanube.com/v1/${storeId}/products/${productId}`, { headers, validateStatus: () => true });
+    const productRes = await axios.get(`https://api.tiendanube.com/v1/${storeId}/products/${productId}`, {
+      headers,
+      params: { _: cacheBust },
+      validateStatus: () => true,
+    });
     if (productRes.status !== 200) {
       const errMsg = (productRes.data && (productRes.data.description || productRes.data.message)) || productRes.statusText;
       return res.status(productRes.status >= 400 ? 404 : 502).json({ message: 'Producto no encontrado en Tienda Nube', detail: errMsg });
@@ -6504,7 +6515,7 @@ export const getTiendaNubeProductVariants = async (req: Request, res: Response) 
     while (hasMoreVariants) {
       const variantsRes = await axios.get(
         `https://api.tiendanube.com/v1/${storeId}/products/${productId}/variants`,
-        { headers, params: { page: vPage, per_page: perPage }, validateStatus: () => true }
+        { headers, params: { page: vPage, per_page: perPage, _: cacheBust }, validateStatus: () => true }
       );
       const chunk = variantsRes.status === 200 && Array.isArray(variantsRes.data) ? variantsRes.data : [];
       variantsList = variantsList.concat(chunk);
