@@ -3,7 +3,20 @@ import axios from 'axios';
 import { query, execute, get } from '../database/db';
 import { Product } from '../types';
 import { v4 as uuidv4 } from 'uuid';
-import { nombreTalleDesdeCodigo, codigoTalleParaSku } from '../talles-tango';
+import { nombreTalleDesdeCodigo, codigoTalleParaSku, sizeCodeLookupCandidates } from '../talles-tango';
+
+async function resolveSizeId(sizeCode: string): Promise<string | null> {
+  for (const candidate of sizeCodeLookupCandidates(sizeCode)) {
+    const row = await get(`SELECT id FROM sizes WHERE size_code = ?`, [candidate]);
+    if (row?.id) return row.id as string;
+  }
+  const letter = nombreTalleDesdeCodigo(sizeCode);
+  if (letter) {
+    const row = await get(`SELECT id FROM sizes WHERE UPPER(name) = ?`, [letter.toUpperCase()]);
+    if (row?.id) return row.id as string;
+  }
+  return null;
+}
 import { normalizeColorCodeForImportValue } from '../utils/colorCodeCanonical';
 import { syncStockToExternalPlatforms, updateMercadoLibreSku, updateTiendaNubeSku } from './stock.controller';
 import { skuToCanonicalString } from '../utils/skuString';
@@ -203,8 +216,9 @@ export const createProduct = async (req: any, res: any) => {
         }
       }
 
-      let sizeId = (await get(`SELECT id FROM sizes WHERE size_code = ?`, [sizeCode]))?.id;
+      let sizeId = await resolveSizeId(String(sizeCode));
       if (!sizeId) {
+        console.log('[createProduct] Talle no encontrado:', sizeCode, 'candidatos=', sizeCodeLookupCandidates(sizeCode).join(', '));
         return res.status(400).json({
           message: `No existe el talle con código "${sizeCode}". Creálo en Configuración > Talles.`,
         });
@@ -215,6 +229,7 @@ export const createProduct = async (req: any, res: any) => {
         colorId = (await get(`SELECT id FROM colors WHERE name = ?`, [colorCode]))?.id;
       }
       if (!colorId) {
+        console.log('[createProduct] Color no encontrado:', colorCode);
         return res.status(400).json({
           message: `No existe el color con código "${colorCode}". Creálo en Configuración > Colores.`,
         });
@@ -233,6 +248,7 @@ export const createProduct = async (req: any, res: any) => {
       if (existingVariant) {
         const productRow = await get(`SELECT name, category, base_price, tienda_nube_id, mercado_libre_id FROM products WHERE id = ?`, [productId]);
         const stockRow = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [existingVariant.id]);
+        console.log('[createProduct] Variante ya existía:', sku, 'variantId=', existingVariant.id);
         return res.status(200).json({
           id: existingVariant.id,
           sku: existingVariant.sku ?? sku,

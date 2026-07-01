@@ -278,23 +278,11 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [customerDetailExportTo, setCustomerDetailExportTo] = useState('');
   const [exportingCustomerDetail, setExportingCustomerDetail] = useState(false);
   const [exportingFinancialSummary, setExportingFinancialSummary] = useState(false);
-  const [financialExportMenuOpen, setFinancialExportMenuOpen] = useState(false);
-  const financialExportMenuRef = useRef<HTMLDivElement>(null);
+  const [showFinancialExportModal, setShowFinancialExportModal] = useState(false);
 
   useEffect(() => {
-    setFinancialExportMenuOpen(false);
+    setShowFinancialExportModal(false);
   }, [selectedCustomer?.id]);
-
-  useEffect(() => {
-    if (!financialExportMenuOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (financialExportMenuRef.current && !financialExportMenuRef.current.contains(e.target as Node)) {
-        setFinancialExportMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [financialExportMenuOpen]);
   const [multimediaLedger, setMultimediaLedger] = useState<Awaited<ReturnType<typeof api.getCustomerMultimediaLedger>> | null>(null);
   const [multimediaLedgerLoading, setMultimediaLedgerLoading] = useState(false);
   const [selectedLedgerEntry, setSelectedLedgerEntry] = useState<
@@ -1581,6 +1569,87 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
           </div>
         )}
 
+        {showFinancialExportModal && selectedCustomer && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+            <div className="w-full max-w-md bg-slate-900 border border-amber-700/50 rounded-2xl shadow-2xl overflow-hidden">
+              <div className="p-4 border-b border-slate-800 flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-white font-bold">Exportar saldo del cliente</h3>
+                  <p className="text-xs text-slate-400 mt-0.5 truncate">{selectedCustomer.businessName}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowFinancialExportModal(false)}
+                  className="text-slate-400 hover:text-white shrink-0"
+                  disabled={exportingFinancialSummary}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="p-4 space-y-3">
+                <p className="text-sm text-slate-400 leading-relaxed">
+                  Elegí si el Excel incluye los movimientos importados de Tango (Multimedia) o solo lo cargado en LupoHub.
+                </p>
+                <button
+                  type="button"
+                  disabled={exportingFinancialSummary}
+                  onClick={async () => {
+                    try {
+                      setExportingFinancialSummary(true);
+                      await api.exportCustomerFinancialSummary(selectedCustomer.id, { includeTango: false });
+                      showToast('success', 'Excel descargado (solo LupoHub)');
+                      setShowFinancialExportModal(false);
+                    } catch (err: any) {
+                      showToast('error', err?.message || 'No se pudo exportar');
+                    } finally {
+                      setExportingFinancialSummary(false);
+                    }
+                  }}
+                  className="w-full text-left rounded-xl border border-emerald-700/50 bg-emerald-950/30 hover:bg-emerald-950/50 px-4 py-3.5 transition disabled:opacity-50"
+                >
+                  <span className="font-bold text-emerald-200 block">Sin Tango (recomendado)</span>
+                  <span className="text-xs text-slate-400 mt-1 block">
+                    Facturas AFIP, notas de crédito y recibos cargados en LupoHub
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  disabled={exportingFinancialSummary}
+                  onClick={async () => {
+                    try {
+                      setExportingFinancialSummary(true);
+                      await api.exportCustomerFinancialSummary(selectedCustomer.id, { includeTango: true });
+                      showToast('success', 'Excel descargado (con import Tango)');
+                      setShowFinancialExportModal(false);
+                    } catch (err: any) {
+                      showToast('error', err?.message || 'No se pudo exportar');
+                    } finally {
+                      setExportingFinancialSummary(false);
+                    }
+                  }}
+                  className="w-full text-left rounded-xl border border-amber-700/50 bg-amber-950/20 hover:bg-amber-950/40 px-4 py-3.5 transition disabled:opacity-50"
+                >
+                  <span className="font-bold text-amber-200 block">Con import Tango (legacy)</span>
+                  <span className="text-xs text-slate-400 mt-1 block">
+                    Incluye facturas, NC y recibos del Excel importado
+                    {multimediaLedger?.legacyCode ? ` · código ${multimediaLedger.legacyCode}` : ''}
+                  </span>
+                </button>
+              </div>
+              <div className="p-4 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowFinancialExportModal(false)}
+                  disabled={exportingFinancialSummary}
+                  className="w-full bg-slate-700 hover:bg-slate-600 text-white px-4 py-2.5 rounded-xl font-semibold disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {selectedLedgerEntry && (() => {
           const entry = selectedLedgerEntry;
           const kind = normalizeLedgerDocType(entry.tipo, entry.detalle);
@@ -2027,7 +2096,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   </div>
                 )}
               </div>
-              <div className="relative flex flex-col items-stretch sm:items-end gap-2 shrink-0" ref={financialExportMenuRef}>
+              <div className="flex flex-col items-stretch sm:items-end gap-2 shrink-0">
                 <p
                   className={`text-3xl font-black tabular-nums sm:text-right ${
                     getSaldoPendienteTotal(selectedCustomer) < -0.01
@@ -2055,7 +2124,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 <button
                   type="button"
                   disabled={exportingFinancialSummary}
-                  onClick={() => setFinancialExportMenuOpen((open) => !open)}
+                  onClick={() => setShowFinancialExportModal(true)}
                   className="px-4 py-2.5 rounded-xl bg-amber-700 hover:bg-amber-600 text-white text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50 touch-manipulation"
                 >
                   {exportingFinancialSummary ? (
@@ -2064,56 +2133,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                     <Download size={16} />
                   )}
                   Exportar Excel
-                  <ChevronDown size={14} className={financialExportMenuOpen ? 'rotate-180 transition' : 'transition'} />
                 </button>
-                {financialExportMenuOpen && !exportingFinancialSummary ? (
-                  <div className="absolute right-0 top-full z-30 mt-1 w-72 rounded-xl border border-slate-600 bg-slate-900 shadow-2xl overflow-hidden">
-                    <p className="px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-slate-500 border-b border-slate-700/80">
-                      Incluir import Tango
-                    </p>
-                    <button
-                      type="button"
-                      className="w-full px-3 py-3 text-left text-sm text-slate-100 hover:bg-slate-800 transition border-b border-slate-800/80"
-                      onClick={async () => {
-                        setFinancialExportMenuOpen(false);
-                        try {
-                          setExportingFinancialSummary(true);
-                          await api.exportCustomerFinancialSummary(selectedCustomer.id, { includeTango: false });
-                          showToast('success', 'Excel descargado (solo LupoHub)');
-                        } catch (err: any) {
-                          showToast('error', err?.message || 'No se pudo exportar');
-                        } finally {
-                          setExportingFinancialSummary(false);
-                        }
-                      }}
-                    >
-                      <span className="font-bold block">Sin Tango</span>
-                      <span className="text-xs text-slate-400">Facturas, NC y recibos cargados en LupoHub</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="w-full px-3 py-3 text-left text-sm text-slate-100 hover:bg-slate-800 transition"
-                      onClick={async () => {
-                        setFinancialExportMenuOpen(false);
-                        try {
-                          setExportingFinancialSummary(true);
-                          await api.exportCustomerFinancialSummary(selectedCustomer.id, { includeTango: true });
-                          showToast('success', 'Excel descargado (con import Tango)');
-                        } catch (err: any) {
-                          showToast('error', err?.message || 'No se pudo exportar');
-                        } finally {
-                          setExportingFinancialSummary(false);
-                        }
-                      }}
-                    >
-                      <span className="font-bold block">Con Tango (legacy)</span>
-                      <span className="text-xs text-slate-400">
-                        Suma movimientos importados del Excel
-                        {multimediaLedger?.legacyCode ? ` · ${multimediaLedger.legacyCode}` : ''}
-                      </span>
-                    </button>
-                  </div>
-                ) : null}
               </div>
             </div>
 

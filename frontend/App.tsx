@@ -696,6 +696,7 @@ const App: React.FC = () => {
       }
       const created: Product[] = [];
       let duplicates = 0;
+      const creationErrors: string[] = [];
       const runGroup = async (group: Product[]) => {
         const groupCreated: Product[] = [];
         let groupDupes = 0;
@@ -721,9 +722,11 @@ const App: React.FC = () => {
             } as Product);
           } catch (err: any) {
             const msg = (err?.message || '').toLowerCase();
-            if (msg.includes('duplicate') || msg.includes('sku ya existe') || msg.includes('409')) {
+            if (msg.includes('duplicate') || msg.includes('sku ya existe') || msg.includes('409') || msg.includes('ya exist')) {
               groupDupes++;
             } else {
+              const detail = err?.message || 'Error desconocido';
+              creationErrors.push(`${p?.sku}: ${detail}`);
               console.error('Error creando producto:', p?.sku, err);
             }
           }
@@ -744,6 +747,10 @@ const App: React.FC = () => {
         showToast('success', `${created.length} variante(s) creadas. ${duplicates} ya existían y se omitieron.`);
       } else if (created.length > 0) {
         showToast('success', `${created.length} variante(s) creadas exitosamente.`);
+      } else if (creationErrors.length > 0) {
+        const preview = creationErrors.slice(0, 2).join('\n');
+        const extra = creationErrors.length > 2 ? `\n...y ${creationErrors.length - 2} más` : '';
+        showToast('error', `No se pudo crear ninguna variante:\n${preview}${extra}`);
       } else {
         showToast('error', 'No se pudo crear ninguna variante. Revisá la consola o la conexión.');
       }
