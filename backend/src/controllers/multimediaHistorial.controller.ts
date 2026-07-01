@@ -13,7 +13,7 @@ import {
   normalizeCuitDigits,
   type MultimediaMovementRow,
 } from '../utils/multimediaHistorialExcel';
-import { INCLUDE_TANGO_IMPORT_IN_SYSTEM } from '../sql/carteraImportedSql';
+import { INCLUDE_TANGO_IMPORT_IN_SYSTEM, SQL_WHERE_PAYMENT_SOLO_LUPOHUB } from '../sql/carteraImportedSql';
 import { invoiceLedgerImporte, ncLedgerImporte, ndLedgerImporte } from '../config/orderPricing';
 import { movementOnOrAfterOpeningDate, normalizeYmdDate } from '../sql/customerOpeningBalance';
 import {
@@ -492,6 +492,7 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
        LEFT JOIN payment_invoice_refs pir ON pir.payment_id = p.id
        LEFT JOIN payment_orders po ON po.payment_id = p.id
        WHERE p.customer_id = ?
+         AND ${SQL_WHERE_PAYMENT_SOLO_LUPOHUB}
        GROUP BY p.id, p.date, p.created_at, p.receipt_number, p.amount, p.notes, p.invoice_id, p.order_id
        ORDER BY p.created_at ASC, p.date ASC`,
       [id]

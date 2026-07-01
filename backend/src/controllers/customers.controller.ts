@@ -28,7 +28,8 @@ import {
   SQL_CARTERA_IMPORT_JOIN,
   SQL_CARTERA_IMPORT_NC_EXPR,
   SQL_CARTERA_IMPORT_REC_EXPR,
-  SQL_CARTERA_MULTIMEDIA_SALDO_EXPR
+  SQL_CARTERA_MULTIMEDIA_SALDO_EXPR,
+  SQL_WHERE_PAYMENT_SOLO_LUPOHUB
 } from '../sql/carteraImportedSql';
 import {
   SQL_CUSTOMER_OPENING_BALANCE_EXPR,
@@ -1786,6 +1787,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
             END
            WHERE (p.seller_id = ? OR c2.seller_id = ?)
              AND me_rec.customer_id IS NULL
+             AND ${SQL_WHERE_PAYMENT_SOLO_LUPOHUB}
              AND ${sqlOpeningPaymentDateWhere('c2')}
              AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
            GROUP BY
@@ -1843,6 +1845,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
               )
             END
            WHERE me_rec.customer_id IS NULL
+             AND ${SQL_WHERE_PAYMENT_SOLO_LUPOHUB}
              AND ${sqlOpeningPaymentDateWhere('cp')}
              AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
            GROUP BY
@@ -1967,6 +1970,7 @@ export async function queryCarteraTotalsForCustomer(
              AND me_rec.receipt_norm = CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
              ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END
            WHERE (p.seller_id = ? OR c2.seller_id = ?) AND me_rec.customer_id IS NULL
+             AND ${SQL_WHERE_PAYMENT_SOLO_LUPOHUB}
              AND ${sqlOpeningPaymentDateWhere('c2')} AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
            GROUP BY p.customer_id, DATE(p.date), ROUND(COALESCE(p.amount, 0), 2),
              CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
@@ -1990,7 +1994,7 @@ export async function queryCarteraTotalsForCustomer(
              AND me_rec.amount = ROUND(COALESCE(p.amount, 0), 2)
              AND me_rec.receipt_norm = CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
              ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END
-           WHERE me_rec.customer_id IS NULL AND ${sqlOpeningPaymentDateWhere('cp')} AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
+           WHERE me_rec.customer_id IS NULL AND ${SQL_WHERE_PAYMENT_SOLO_LUPOHUB} AND ${sqlOpeningPaymentDateWhere('cp')} AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
            GROUP BY p.customer_id, DATE(p.date), ROUND(COALESCE(p.amount, 0), 2),
              CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
              ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END
@@ -2068,6 +2072,7 @@ async function fetchCarteraSaldoUnificadoMap(
              AND me_rec.receipt_norm = CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
              ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END
            WHERE (p.seller_id = ? OR c2.seller_id = ?) AND me_rec.customer_id IS NULL
+             AND ${SQL_WHERE_PAYMENT_SOLO_LUPOHUB}
              AND ${sqlOpeningPaymentDateWhere('c2')}
              AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
            GROUP BY p.customer_id, DATE(p.date), ROUND(COALESCE(p.amount, 0), 2),
@@ -2093,6 +2098,7 @@ async function fetchCarteraSaldoUnificadoMap(
              AND me_rec.receipt_norm = CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
              ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END
            WHERE me_rec.customer_id IS NULL
+             AND ${SQL_WHERE_PAYMENT_SOLO_LUPOHUB}
              AND ${sqlOpeningPaymentDateWhere('cp')}
              AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
            GROUP BY p.customer_id, DATE(p.date), ROUND(COALESCE(p.amount, 0), 2),
@@ -4667,6 +4673,7 @@ async function buildCustomerFinancialSummary(
        END
       WHERE p.customer_id = ?
         AND me_rec.customer_id IS NULL
+        AND ${SQL_WHERE_PAYMENT_SOLO_LUPOHUB}
         AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
     ) m
     ORDER BY m.fecha ASC, m.tipo ASC, m.comprobante ASC
@@ -5124,6 +5131,7 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
           END
          WHERE p.customer_id = ?
            AND me_rec.customer_id IS NULL
+             AND ${SQL_WHERE_PAYMENT_SOLO_LUPOHUB}
            AND ${SQL_PAYMENT_UNALLOCATED_COND}
            AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
          GROUP BY
