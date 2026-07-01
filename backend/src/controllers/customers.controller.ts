@@ -2340,21 +2340,30 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
     const sellerWhere = user.role === 'SELLER' ? 'WHERE c.seller_id = ?' : '';
     const sellerParams: any[] = user.role === 'SELLER' ? [user.id] : [];
 
-    const movements = await query(
-      `
-      SELECT
-        m.customer_id,
-        m.customer_name,
-        m.seller_id,
-        m.seller_name,
-        m.fecha,
-        m.tipo,
-        m.comprobante,
-        m.order_id,
-        m.debe,
-        m.haber
-      FROM (
+    const branchNcImportadaTango = `
         SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
+          e.line_date AS fecha,
+          'NOTA_CREDITO_IMPORTADA' AS tipo,
+          COALESCE(NULLIF(TRIM(e.numero), ''), 'NC importada') AS comprobante,
+          NULL AS order_id,
+          0 AS debe,
+          ROUND(ABS(COALESCE(e.importe, 0)), 2) AS haber
+        FROM customer_multimedia_entries e
+        JOIN customers c ON c.id = e.customer_id
+        LEFT JOIN users u ON u.id = c.seller_id
+        WHERE (
+          UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'NOTA DE CRÉDITO')
+          OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
+          OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CRÉDITO%'
+          OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
+        )`;
+
+    const detalleUnionBranches = [
+      `SELECT
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
           c.seller_id AS seller_id,
@@ -2377,11 +2386,8 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
         FROM invoices i
         JOIN orders o ON o.id = i.order_id
         JOIN customers c ON c.id = o.customer_id
-        LEFT JOIN users u ON u.id = c.seller_id
-
-        UNION ALL
-
-        SELECT
+        LEFT JOIN users u ON u.id = c.seller_id`,
+      `SELECT
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
           c.seller_id AS seller_id,
@@ -2406,11 +2412,8 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
         JOIN orders o ON o.id = cn.order_id
         LEFT JOIN invoices inv ON inv.id = cn.invoice_id
         JOIN customers c ON c.id = o.customer_id
-        LEFT JOIN users u ON u.id = c.seller_id
-
-        UNION ALL
-
-        SELECT
+        LEFT JOIN users u ON u.id = c.seller_id`,
+      `SELECT
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
           c.seller_id AS seller_id,
@@ -2437,34 +2440,9 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
           ON REPLACE(REPLACE(REPLACE(COALESCE(c.cuit, ''), '-', ''), '.', ''), ' ', '') =
              REPLACE(REPLACE(REPLACE(COALESCE(ei.customer_cuit, ''), '-', ''), '.', ''), ' ', '')
         LEFT JOIN users u ON u.id = c.seller_id
-        WHERE REPLACE(REPLACE(REPLACE(COALESCE(ei.customer_cuit, ''), '-', ''), '.', ''), ' ', '') <> ''
-
-        UNION ALL
-
-        SELECT
-          c.id AS customer_id,
-          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
-          c.seller_id AS seller_id,
-          u.name AS seller_name,
-          e.line_date AS fecha,
-          'NOTA_CREDITO_IMPORTADA' AS tipo,
-          COALESCE(NULLIF(TRIM(e.numero), ''), 'NC importada') AS comprobante,
-          NULL AS order_id,
-          0 AS debe,
-          ROUND(ABS(COALESCE(e.importe, 0)), 2) AS haber
-        FROM customer_multimedia_entries e
-        JOIN customers c ON c.id = e.customer_id
-        LEFT JOIN users u ON u.id = c.seller_id
-        WHERE (
-          UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'NOTA DE CRÉDITO')
-          OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
-          OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CRÉDITO%'
-          OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
-        )
-
-        UNION ALL
-
-        SELECT
+        WHERE REPLACE(REPLACE(REPLACE(COALESCE(ei.customer_cuit, ''), '-', ''), '.', ''), ' ', '') <> ''`,
+      ...(INCLUDE_TANGO_IMPORT_IN_SYSTEM ? [branchNcImportadaTango] : []),
+      `SELECT
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
           c.seller_id AS seller_id,
@@ -2477,7 +2455,24 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
           ROUND(COALESCE(p.amount, 0), 2) AS haber
         FROM payments p
         JOIN customers c ON c.id = p.customer_id
-        LEFT JOIN users u ON u.id = c.seller_id
+        LEFT JOIN users u ON u.id = c.seller_id`
+    ];
+
+    const movements = await query(
+      `
+      SELECT
+        m.customer_id,
+        m.customer_name,
+        m.seller_id,
+        m.seller_name,
+        m.fecha,
+        m.tipo,
+        m.comprobante,
+        m.order_id,
+        m.debe,
+        m.haber
+      FROM (
+        ${detalleUnionBranches.join('\n\n        UNION ALL\n\n')}
       ) m
       ${user.role === 'SELLER' ? 'WHERE m.seller_id = ?' : ''}
       ORDER BY m.customer_name ASC, m.fecha ASC, m.tipo ASC
@@ -2867,7 +2862,12 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         ? 'tango'
         : source === 'sistema' || source === 'solo-sistema'
           ? 'sistema'
-          : 'historial';
+          : source === 'historial'
+            ? 'historial'
+            : INCLUDE_TANGO_IMPORT_IN_SYSTEM
+              ? 'historial'
+              : 'sistema';
+    const includeTangoInHistorial = INCLUDE_TANGO_IMPORT_IN_SYSTEM;
 
     const sellerWhere = sellerIdFilter ? 'WHERE c.seller_id = ?' : '';
     const sellerParams: any[] = sellerIdFilter ? [sellerIdFilter] : [];
@@ -3328,7 +3328,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         branchNcExterna,
         branchReciboSistema,
         branchManualComprobante,
-        branchImportado
+        ...(includeTangoInHistorial ? [branchImportado] : [])
       ],
       sistema: [
         branchFacturaSistema,
@@ -3345,7 +3345,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         branchNcExternaOpening,
         branchReciboSistemaOpening,
         branchManualComprobanteOpening,
-        branchImportadoOpening
+        ...(includeTangoInHistorial ? [branchImportadoOpening] : [])
       ],
       sistema: [
         branchFacturaSistemaOpening,

@@ -1904,8 +1904,8 @@ export const api = {
     to?: string;
     sellerName?: string;
     /**
-     * historial: facturas/NC/recibos del sistema + importados Multimedia + externos por CUIT (default).
-     * sistema: solo tablas LupoHub (facturas AFIP, NC y recibos).
+     * historial: facturas/NC/recibos del sistema + externos por CUIT (sin import Tango salvo flag activo).
+     * sistema: solo tablas LupoHub (facturas AFIP, NC y recibos). Default si no se pasa source.
      * tango: solo importados Multimedia (Tango), sin dedupe contra payments.
      */
     source?: 'historial' | 'sistema' | 'tango';
