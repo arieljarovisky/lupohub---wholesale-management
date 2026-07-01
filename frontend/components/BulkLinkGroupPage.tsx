@@ -19,6 +19,7 @@ import {
   Trash2,
   GitMerge,
   X,
+  Unlink,
 } from 'lucide-react';
 import { api } from '../services/api';
 import VariantExtraPublicationsPanel from './VariantExtraPublicationsPanel';
@@ -283,6 +284,10 @@ function hasMlAssignment(a?: VariantAssignment): boolean {
   return !!a?.ml?.trim();
 }
 
+function variantHadTnLink(externalIds?: { tiendaNubeVariant?: string | number | null }): boolean {
+  return externalIds?.tiendaNubeVariant != null && String(externalIds.tiendaNubeVariant).trim() !== '';
+}
+
 function variantHadMlLink(externalIds?: {
   mercadoLibreVariant?: string | number | null;
   mercadoLibreItemId?: string | null;
@@ -433,6 +438,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
   const [assignments, setAssignments] = useState<Record<string, VariantAssignment>>({});
   const [skuEdits, setSkuEdits] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [unlinking, setUnlinking] = useState(false);
   const [mlSearch, setMlSearch] = useState('');
   const [tnSearch, setTnSearch] = useState('');
   const [showMlTip, setShowMlTip] = useState(false);
@@ -1143,6 +1149,71 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
   }, [duplicateMlByVariant, duplicateTnByVariant]);
 
   const assignmentConflictCount = conflictingVariantIds.size;
+
+  const hasSavedMlLinks = useMemo(
+    () => variants.some((v) => variantHadMlLink(v.externalIds)),
+    [variants]
+  );
+  const hasSavedTnLinks = useMemo(
+    () => variants.some((v) => variantHadTnLink(v.externalIds)),
+    [variants]
+  );
+
+  const handleUnlinkPlatforms = async (platform: 'mercadolibre' | 'tiendanube' | 'both') => {
+    if (!productId) return;
+    const label =
+      platform === 'both'
+        ? 'Mercado Libre y Tienda Nube'
+        : platform === 'mercadolibre'
+          ? 'Mercado Libre'
+          : 'Tienda Nube';
+    if (
+      !window.confirm(
+        `¿Desvincular este artículo de ${label}? Se quitarán los vínculos de todas las variantes en la base de datos.`
+      )
+    ) {
+      return;
+    }
+    setUnlinking(true);
+    try {
+      await api.unlinkProductPlatforms(productId, {
+        tiendaNube: platform === 'tiendanube' || platform === 'both',
+        mercadoLibre: platform === 'mercadolibre' || platform === 'both',
+        variants: true,
+      });
+      if (platform === 'mercadolibre' || platform === 'both') {
+        setMlSources([]);
+        setMlVariations([]);
+      }
+      if (platform === 'tiendanube' || platform === 'both') {
+        setTnSources([]);
+        setTnVariants([]);
+      }
+      setAssignments((prev) => {
+        const next = { ...prev };
+        variants.forEach((v) => {
+          const row = { ...next[v.variantId] };
+          if (platform === 'mercadolibre' || platform === 'both') {
+            row.ml = '';
+            row.mlItemId = undefined;
+          }
+          if (platform === 'tiendanube' || platform === 'both') {
+            row.tn = '';
+            row.tnProductId = undefined;
+          }
+          next[v.variantId] = row;
+        });
+        return next;
+      });
+      showToast('success', `Artículo desvinculado de ${label}.`);
+      onImportComplete?.();
+      void loadArticle();
+    } catch (e: any) {
+      showToast('error', e?.message || 'Error al desvincular');
+    } finally {
+      setUnlinking(false);
+    }
+  };
 
   const suggestedUnifyPair = useMemo((): { absorbId: string; keeperId: string } | null => {
     const uTokens = new Set(['U', '170']);
@@ -2497,7 +2568,45 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
             'Cargá las publicaciones y emparejá al menos una variante para guardar.'
           )}
         </div>
-        <div className="flex gap-2 sm:justify-end">
+        <div className="flex flex-col sm:flex-row gap-2 sm:justify-end sm:items-center">
+          {(hasSavedMlLinks || hasSavedTnLinks) && (
+            <div className="flex flex-wrap gap-2 sm:mr-auto">
+              {hasSavedMlLinks && (
+                <button
+                  type="button"
+                  onClick={() => void handleUnlinkPlatforms('mercadolibre')}
+                  disabled={unlinking || saving || !productId}
+                  className="px-3 py-2 rounded-xl text-xs font-semibold text-amber-200 bg-amber-950/30 border border-amber-800/50 hover:bg-amber-900/40 disabled:opacity-50 flex items-center gap-1.5 transition-colors"
+                >
+                  {unlinking ? <Loader2 size={14} className="animate-spin" /> : <Unlink size={14} />}
+                  Desvincular ML
+                </button>
+              )}
+              {hasSavedTnLinks && (
+                <button
+                  type="button"
+                  onClick={() => void handleUnlinkPlatforms('tiendanube')}
+                  disabled={unlinking || saving || !productId}
+                  className="px-3 py-2 rounded-xl text-xs font-semibold text-cyan-200 bg-cyan-950/30 border border-cyan-800/50 hover:bg-cyan-900/40 disabled:opacity-50 flex items-center gap-1.5 transition-colors"
+                >
+                  {unlinking ? <Loader2 size={14} className="animate-spin" /> : <Unlink size={14} />}
+                  Desvincular TN
+                </button>
+              )}
+              {hasSavedMlLinks && hasSavedTnLinks && (
+                <button
+                  type="button"
+                  onClick={() => void handleUnlinkPlatforms('both')}
+                  disabled={unlinking || saving || !productId}
+                  className="px-3 py-2 rounded-xl text-xs font-semibold text-rose-200 bg-rose-950/30 border border-rose-800/50 hover:bg-rose-900/40 disabled:opacity-50 flex items-center gap-1.5 transition-colors"
+                >
+                  {unlinking ? <Loader2 size={14} className="animate-spin" /> : <Unlink size={14} />}
+                  Desvincular todo
+                </button>
+              )}
+            </div>
+          )}
+          <div className="flex gap-2">
           <button
             type="button"
             onClick={goBack}
@@ -2508,7 +2617,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
           <button
             type="button"
             onClick={handleSave}
-            disabled={saving || !productId || variants.length === 0 || assignmentConflictCount > 0}
+            disabled={saving || unlinking || !productId || variants.length === 0 || assignmentConflictCount > 0}
             className="px-6 py-2.5 rounded-xl font-bold bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50 text-sm shadow-lg shadow-indigo-900/25 flex items-center justify-center gap-2 min-w-[180px] transition-colors"
             title={assignmentConflictCount > 0 ? 'Corregí las asignaciones duplicadas antes de guardar' : undefined}
           >
@@ -2524,6 +2633,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
               </>
             )}
           </button>
+          </div>
         </div>
       </footer>
 
