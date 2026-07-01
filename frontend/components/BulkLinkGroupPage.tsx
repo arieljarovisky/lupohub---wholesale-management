@@ -1150,14 +1150,20 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
 
   const assignmentConflictCount = conflictingVariantIds.size;
 
-  const hasSavedMlLinks = useMemo(
-    () => variants.some((v) => variantHadMlLink(v.externalIds)),
-    [variants]
-  );
-  const hasSavedTnLinks = useMemo(
-    () => variants.some((v) => variantHadTnLink(v.externalIds)),
-    [variants]
-  );
+  const hasAnyMlLinks = useMemo(() => {
+    if (linkStats.ml > 0) return true;
+    if (mlSources.length > 0) return true;
+    return variants.some(
+      (v) => variantHadMlLink(v.externalIds) || hasMlAssignment(assignments[v.variantId])
+    );
+  }, [variants, assignments, linkStats.ml, mlSources.length]);
+  const hasAnyTnLinks = useMemo(() => {
+    if (linkStats.tn > 0) return true;
+    if (tnSources.length > 0) return true;
+    return variants.some(
+      (v) => variantHadTnLink(v.externalIds) || !!assignments[v.variantId]?.tn?.trim()
+    );
+  }, [variants, assignments, linkStats.tn, tnSources.length]);
 
   const handleUnlinkPlatforms = async (platform: 'mercadolibre' | 'tiendanube' | 'both') => {
     if (!productId) return;
@@ -1417,11 +1423,6 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
         });
         if (errors.length) {
           showToast('error', errors.join(' '));
-        } else if (mlResult.rows.length > 0 || tnResult.rows.length > 0) {
-          showToast(
-            'success',
-            `Catálogos cargados: ${mlResult.rows.length} variaciones ML, ${tnResult.rows.length} variantes TN.`
-          );
         }
       } catch {
         showToast('error', 'No se pudieron cargar los catálogos ML/TN');
@@ -1786,14 +1787,53 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
             <span>{linkStats.total} variantes</span>
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => onNavigate('stock_history')}
-          className="shrink-0 px-3 py-2 rounded-xl bg-slate-800 hover:bg-violet-600/80 border border-slate-700 text-slate-300 hover:text-white text-sm font-medium flex items-center gap-2 transition-colors"
-        >
-          <History size={16} />
-          Historial
-        </button>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {(hasAnyMlLinks || hasAnyTnLinks) && (
+            <>
+              {hasAnyMlLinks && (
+                <button
+                  type="button"
+                  onClick={() => void handleUnlinkPlatforms('mercadolibre')}
+                  disabled={unlinking || saving || !productId}
+                  className="px-3 py-2 rounded-xl text-xs font-semibold text-amber-200 bg-amber-950/40 border border-amber-800/50 hover:bg-amber-900/50 disabled:opacity-50 flex items-center gap-1.5 transition-colors"
+                >
+                  {unlinking ? <Loader2 size={14} className="animate-spin" /> : <Unlink size={14} />}
+                  Desvincular ML
+                </button>
+              )}
+              {hasAnyTnLinks && (
+                <button
+                  type="button"
+                  onClick={() => void handleUnlinkPlatforms('tiendanube')}
+                  disabled={unlinking || saving || !productId}
+                  className="px-3 py-2 rounded-xl text-xs font-semibold text-cyan-200 bg-cyan-950/40 border border-cyan-800/50 hover:bg-cyan-900/50 disabled:opacity-50 flex items-center gap-1.5 transition-colors"
+                >
+                  {unlinking ? <Loader2 size={14} className="animate-spin" /> : <Unlink size={14} />}
+                  Desvincular TN
+                </button>
+              )}
+              {hasAnyMlLinks && hasAnyTnLinks && (
+                <button
+                  type="button"
+                  onClick={() => void handleUnlinkPlatforms('both')}
+                  disabled={unlinking || saving || !productId}
+                  className="px-3 py-2 rounded-xl text-xs font-semibold text-rose-200 bg-rose-950/40 border border-rose-800/50 hover:bg-rose-900/50 disabled:opacity-50 flex items-center gap-1.5 transition-colors"
+                >
+                  {unlinking ? <Loader2 size={14} className="animate-spin" /> : <Unlink size={14} />}
+                  Desvincular todo
+                </button>
+              )}
+            </>
+          )}
+          <button
+            type="button"
+            onClick={() => onNavigate('stock_history')}
+            className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-violet-600/80 border border-slate-700 text-slate-300 hover:text-white text-sm font-medium flex items-center gap-2 transition-colors"
+          >
+            <History size={16} />
+            Historial
+          </button>
+        </div>
       </header>
 
       {/* Pasos */}
@@ -2569,44 +2609,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
           )}
         </div>
         <div className="flex flex-col sm:flex-row gap-2 sm:justify-end sm:items-center">
-          {(hasSavedMlLinks || hasSavedTnLinks) && (
-            <div className="flex flex-wrap gap-2 sm:mr-auto">
-              {hasSavedMlLinks && (
-                <button
-                  type="button"
-                  onClick={() => void handleUnlinkPlatforms('mercadolibre')}
-                  disabled={unlinking || saving || !productId}
-                  className="px-3 py-2 rounded-xl text-xs font-semibold text-amber-200 bg-amber-950/30 border border-amber-800/50 hover:bg-amber-900/40 disabled:opacity-50 flex items-center gap-1.5 transition-colors"
-                >
-                  {unlinking ? <Loader2 size={14} className="animate-spin" /> : <Unlink size={14} />}
-                  Desvincular ML
-                </button>
-              )}
-              {hasSavedTnLinks && (
-                <button
-                  type="button"
-                  onClick={() => void handleUnlinkPlatforms('tiendanube')}
-                  disabled={unlinking || saving || !productId}
-                  className="px-3 py-2 rounded-xl text-xs font-semibold text-cyan-200 bg-cyan-950/30 border border-cyan-800/50 hover:bg-cyan-900/40 disabled:opacity-50 flex items-center gap-1.5 transition-colors"
-                >
-                  {unlinking ? <Loader2 size={14} className="animate-spin" /> : <Unlink size={14} />}
-                  Desvincular TN
-                </button>
-              )}
-              {hasSavedMlLinks && hasSavedTnLinks && (
-                <button
-                  type="button"
-                  onClick={() => void handleUnlinkPlatforms('both')}
-                  disabled={unlinking || saving || !productId}
-                  className="px-3 py-2 rounded-xl text-xs font-semibold text-rose-200 bg-rose-950/30 border border-rose-800/50 hover:bg-rose-900/40 disabled:opacity-50 flex items-center gap-1.5 transition-colors"
-                >
-                  {unlinking ? <Loader2 size={14} className="animate-spin" /> : <Unlink size={14} />}
-                  Desvincular todo
-                </button>
-              )}
-            </div>
-          )}
-          <div className="flex gap-2">
+          <div className="flex gap-2 sm:ml-auto">
           <button
             type="button"
             onClick={goBack}

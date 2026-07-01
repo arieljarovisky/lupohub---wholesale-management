@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, startTransition } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical, Eye, EyeOff, Copy, History, GitMerge } from 'lucide-react';
+import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical, Eye, EyeOff, Copy, History, GitMerge, Unlink } from 'lucide-react';
 import { Product, Role, Attribute } from '../types';
 import { api } from '../services/api';
 import { labelTalle, codigoTalleParaSku, nombreTalleDesdeCodigo } from '../utils/tallesTango';
@@ -1494,6 +1494,98 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     showToast('info', 'No se pudo abrir la página de vinculación grupal');
   };
 
+  const [unlinkingGroupKey, setUnlinkingGroupKey] = useState<string | null>(null);
+
+  const groupHasPlatformLinks = useCallback(
+    (groupKey: string, groupVariants: Product[], platform: 'ml' | 'tn') => {
+      const loaded = loadedVariants[groupKey];
+      const list = loaded?.length ? loaded : groupVariants;
+      if (platform === 'ml') {
+        return list.some(
+          (p) => p.integrations?.mercadoLibre || isVariantLinkedToMercadoLibre((p as Product).externalIds)
+        );
+      }
+      return list.some(
+        (p) => p.integrations?.tiendaNube || isVariantLinkedToTiendaNube((p as Product).externalIds)
+      );
+    },
+    [loadedVariants]
+  );
+
+  const handleUnlinkGroupPlatforms = useCallback(
+    (
+      groupKey: string,
+      productId: string,
+      groupVariants: Product[],
+      platform: 'mercadolibre' | 'tiendanube' | 'both'
+    ) => {
+      const label =
+        platform === 'both'
+          ? 'Mercado Libre y Tienda Nube'
+          : platform === 'mercadolibre'
+            ? 'Mercado Libre'
+            : 'Tienda Nube';
+      showConfirm({
+        title: 'Desvincular publicaciones',
+        message: `¿Desvincular el artículo ${groupKey} de ${label}? Se quitarán los vínculos de todas las variantes.`,
+        confirmLabel: 'Desvincular',
+        onConfirm: () => {
+          void (async () => {
+            setUnlinkingGroupKey(groupKey);
+            try {
+              await api.unlinkProductPlatforms(productId, {
+                tiendaNube: platform === 'tiendanube' || platform === 'both',
+                mercadoLibre: platform === 'mercadolibre' || platform === 'both',
+                variants: true,
+              });
+              showToast('success', `Artículo desvinculado de ${label}.`);
+              const variantIds = (loadedVariants[groupKey] || groupVariants).map((p) => p.id);
+              setLoadedVariants((prev) => {
+                const next = { ...prev };
+                delete next[groupKey];
+                return next;
+              });
+              setVariantExternalStocks((prev) => {
+                const next = { ...prev };
+                variantIds.forEach((id) => delete next[id]);
+                return next;
+              });
+              onImportComplete?.();
+              if (expandedGroups.includes(groupKey)) {
+                setLoadingVariantsByGroup((prev) => ({ ...prev, [groupKey]: true }));
+                try {
+                  const variants = await api.getVariantsBySku(groupKey, INVENTORY_PRODUCT_FETCH_OPTS);
+                  const mapped = mapInventoryVariantsFromApi(groupKey, variants, {
+                    name: groupVariants[0]?.name || '',
+                    category: groupVariants[0]?.category || 'General',
+                    price: groupVariants[0]?.price || 0,
+                  });
+                  setLoadedVariants((prev) => ({ ...prev, [groupKey]: mapped }));
+                  const vIds = mapped.map((p) => p.id);
+                  if (vIds.length > 0) {
+                    const res = await api.getVariantExternalStocks(vIds);
+                    if (res?.stocks) {
+                      setVariantExternalStocks((prev) => ({ ...prev, ...res.stocks }));
+                    }
+                  }
+                } catch {
+                  /* ignore */
+                } finally {
+                  setLoadingVariantsByGroup((prev) => ({ ...prev, [groupKey]: false }));
+                }
+              }
+            } catch (e: unknown) {
+              showToast('error', (e as Error)?.message || 'Error al desvincular');
+            } finally {
+              setUnlinkingGroupKey(null);
+            }
+          })();
+        },
+      });
+    },
+    [showConfirm, showToast, onImportComplete, expandedGroups, loadedVariants]
+  );
+
   const openMergeManualModal = useCallback(() => {
     setShowMergeManualModal(true);
     setMergePickSearch('');
@@ -2722,7 +2814,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                   <div className="p-2 sm:p-4 space-y-2">
                     {isAdminOrWarehouse && !loadingVariantsByGroup[groupKey] && variantsToShow.length > 0 && (
                       <>
-                      <div className="flex flex-col sm:flex-row justify-end gap-2">
+                      <div className="flex flex-col sm:flex-row justify-end gap-2 flex-wrap">
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); openMergeManualModalFromGroup(groupKey, groupVariants); }}
@@ -2731,6 +2823,34 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                           <GitMerge size={16} />
                           Unificar con otro artículo
                         </button>
+                        {articleProductId && groupHasPlatformLinks(groupKey, groupVariants, 'ml') && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleUnlinkGroupPlatforms(groupKey, articleProductId, groupVariants, 'mercadolibre');
+                            }}
+                            disabled={unlinkingGroupKey === groupKey}
+                            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-amber-950/50 hover:bg-amber-900/60 text-amber-100 text-sm font-semibold transition-colors min-h-[44px] touch-manipulation border border-amber-700/50 disabled:opacity-50"
+                          >
+                            {unlinkingGroupKey === groupKey ? <Loader2 size={16} className="animate-spin" /> : <Unlink size={16} />}
+                            Desvincular ML
+                          </button>
+                        )}
+                        {articleProductId && groupHasPlatformLinks(groupKey, groupVariants, 'tn') && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleUnlinkGroupPlatforms(groupKey, articleProductId, groupVariants, 'tiendanube');
+                            }}
+                            disabled={unlinkingGroupKey === groupKey}
+                            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-cyan-950/50 hover:bg-cyan-900/60 text-cyan-100 text-sm font-semibold transition-colors min-h-[44px] touch-manipulation border border-cyan-700/50 disabled:opacity-50"
+                          >
+                            {unlinkingGroupKey === groupKey ? <Loader2 size={16} className="animate-spin" /> : <Unlink size={16} />}
+                            Desvincular TN
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); openBulkLinkGroupPage(groupKey); }}
