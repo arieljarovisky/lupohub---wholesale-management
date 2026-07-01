@@ -82,7 +82,12 @@ type MlVariationRow = {
   sku: string;
   color: string;
   size: string;
+  stock?: number;
 };
+
+function variantHasStock(v: { stock?: number }): boolean {
+  return Number(v.stock ?? 0) > 0;
+}
 
 type TnVariantRow = {
   productId: string;
@@ -281,7 +286,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
   const [productId, setProductId] = useState<string | null>(null);
   const [productName, setProductName] = useState('');
   const [variants, setVariants] = useState<
-    Array<{ variantId: string; sku: string; size: string; color: string; externalIds?: any }>
+    Array<{ variantId: string; sku: string; size: string; color: string; stock: number; externalIds?: any }>
   >([]);
   const [mlSources, setMlSources] = useState<PublicationSource[]>([]);
   const [tnSources, setTnSources] = useState<PublicationSource[]>([]);
@@ -308,10 +313,11 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
   const [unifyKeeperId, setUnifyKeeperId] = useState<string | null>(null);
   const [unifySaving, setUnifySaving] = useState(false);
   const [pendingCatalogFetch, setPendingCatalogFetch] = useState<{
+    loadId: number;
     assignments: Record<string, VariantAssignment>;
-    variants: Array<{ variantId: string; sku: string; size: string; color: string; externalIds?: any }>;
+    variants: Array<{ variantId: string; sku: string; size: string; color: string; stock: number; externalIds?: any }>;
   } | null>(null);
-  const catalogFetchStartedRef = useRef(false);
+  const catalogFetchStartedRef = useRef<number | null>(null);
   const dismissedSourcesRef = useRef<DismissedSources>({ ml: [], tn: [] });
 
   const goBack = () => onNavigate('inventory');
@@ -358,8 +364,11 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
 
   const loadArticle = useCallback(async () => {
     if (!groupKey) return;
-    catalogFetchStartedRef.current = false;
+    catalogFetchStartedRef.current = null;
     dismissedSourcesRef.current = readDismissedSources(groupKey);
+    setPendingCatalogFetch(null);
+    setMlVariations([]);
+    setTnVariants([]);
     setLoading(true);
     try {
       const p: any = await api.getProductBySku(groupKey, INVENTORY_PRODUCT_FETCH_OPTS);
@@ -390,6 +399,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
           sku,
           size: v.size_code,
           color: v.color_name,
+          stock: Number(v.stock ?? 0),
           externalIds: v.externalIds,
         };
       });
@@ -430,9 +440,6 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
           tnSet.add(pub.external_product_id);
         }
       });
-      applyDismissedSources(groupKey, mlSet, tnSet);
-      setMlSources([...mlSet].map((id) => ({ id, autoLoaded: true })));
-      setTnSources([...tnSet].map((id) => ({ id, autoLoaded: true })));
       const nextAssign: Record<string, VariantAssignment> = {};
       list.forEach((v: any, idx: number) => {
         const pubs = pubResults[idx] || [];
@@ -474,13 +481,43 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
           (tnPub as { external_product_id?: string } | undefined)?.external_product_id ||
           parentTn ||
           undefined;
+        const hasStock = variantHasStock({ stock: Number(v.stock ?? 0) });
         nextAssign[v.variantId] = {
-          ml: mlVal,
-          mlItemId,
+          ml: hasStock ? mlVal : '',
+          mlItemId: hasStock ? mlItemId : undefined,
           tn: tnVal,
           tnProductId,
         };
       });
+      for (const a of Object.values(nextAssign)) {
+        const ml = (a.ml || '').trim();
+        if (!ml || /^ML[A-Z]{1,5}\d+$/i.test(ml)) {
+          const item = primaryMlItemIdFromAssignment(a);
+          if (item) {
+            const norm = normalizeMercadoLibreItemId(item) || item;
+            if (norm) mlSet.add(norm);
+          }
+          continue;
+        }
+        const item = (a.mlItemId || '').trim();
+        if (item) {
+          const norm = normalizeMercadoLibreItemId(item) || item;
+          if (norm) mlSet.add(norm);
+        }
+      }
+      list.forEach((v: { externalIds?: { mercadoLibreVariant?: unknown; mercadoLibreItemId?: unknown } }) => {
+        const itemId = v.externalIds?.mercadoLibreItemId;
+        if (itemId != null && String(itemId).trim() !== '') {
+          const norm = normalizeMercadoLibreItemId(String(itemId).trim());
+          if (norm) mlSet.add(norm);
+        }
+      });
+      if (list.some((v: { externalIds?: { mercadoLibreVariant?: unknown } }) => v.externalIds?.mercadoLibreVariant != null && String(v.externalIds.mercadoLibreVariant).trim() !== '') && parentMl) {
+        mlSet.add(parentMl);
+      }
+      applyDismissedSources(groupKey, mlSet, tnSet);
+      setMlSources([...mlSet].map((id) => ({ id, autoLoaded: true })));
+      setTnSources([...tnSet].map((id) => ({ id, autoLoaded: true })));
       setAssignments(nextAssign);
       const skuMap: Record<string, string> = {};
       list.forEach((v: any) => {
@@ -489,7 +526,9 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       setSkuEdits(skuMap);
       setSelectedUnifyIds((prev) => prev.filter((id) => list.some((v: { variantId: string }) => v.variantId === id)));
       if (mlSet.size > 0 || tnSet.size > 0) {
+        const loadId = Date.now();
         setPendingCatalogFetch({
+          loadId,
           assignments: nextAssign,
           variants: list,
         });
@@ -534,6 +573,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       }
     });
     localVariants.forEach((local) => {
+      if (!variantHasStock(local)) return;
       const skuN = norm(local.sku);
       const sizeN = norm(local.size);
       const colorN = norm(local.color);
@@ -1019,6 +1059,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
               sku: v.sku,
               color: v.color,
               size: v.size,
+              stock: Number(v.stock ?? 0),
             };
           });
           allRows.push(...rows);
@@ -1083,10 +1124,11 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
   };
 
   useEffect(() => {
-    if (!pendingCatalogFetch || catalogFetchStartedRef.current) return;
+    if (!pendingCatalogFetch) return;
+    if (catalogFetchStartedRef.current === pendingCatalogFetch.loadId) return;
     if (mlSources.length === 0 && tnSources.length === 0) return;
 
-    catalogFetchStartedRef.current = true;
+    catalogFetchStartedRef.current = pendingCatalogFetch.loadId;
     const { assignments: baseAssign, variants: localVariants } = pendingCatalogFetch;
     setPendingCatalogFetch(null);
     const mlSrc = mlSources;
@@ -2118,6 +2160,14 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                           )}
                           {mlVariations.length > 0 &&
                             !mlVal &&
+                            !variantHasStock(v) && (
+                              <p className="text-[10px] text-slate-500 pl-0.5">
+                                Sin stock local: la variación ML queda vacía.
+                              </p>
+                            )}
+                          {mlVariations.length > 0 &&
+                            !mlVal &&
+                            variantHasStock(v) &&
                             getVisibleMlOptions(v.variantId, mlVal, assignments[v.variantId]?.mlItemId).length ===
                               0 && (
                               <p className="text-[10px] text-amber-400/90 pl-0.5">
