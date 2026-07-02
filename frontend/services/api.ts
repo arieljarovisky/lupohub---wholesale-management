@@ -2098,16 +2098,39 @@ export const api = {
     pendingOrders: number;
     stillPending: number;
     scanned: number;
-    details: Array<{ orderId: string; cbteTipo: number; cbteDesde: number; cae: string }>;
+    details: Array<{
+      orderId: string;
+      cbteTipo: number;
+      cbteDesde: number;
+      puntoVenta: number;
+      cae: string;
+      source: string;
+    }>;
     message?: string;
   }> => {
     return await request(
-      `/customers/${encodeURIComponent(customerId)}/restore-afip-invoices`,
+      `/customers/${encodeURIComponent(customerId)}/restore-lupohub-invoices`,
       'POST',
       params ?? {},
       undefined,
       180000
     );
+  },
+
+  restoreAllLupohubInvoices: async (params?: { maxScan?: number }): Promise<{
+    ok: boolean;
+    customersProcessed: number;
+    totalRestored: number;
+    results: Array<{
+      customerId: string;
+      customerName: string;
+      restored: number;
+      pendingOrders: number;
+      stillPending: number;
+      scanned: number;
+    }>;
+  }> => {
+    return await request('/customers/restore-lupohub-invoices', 'POST', params ?? {}, undefined, 600000);
   },
 
   exportCustomerDetail: async (customerId: string, params?: { from?: string; to?: string }): Promise<void> => {

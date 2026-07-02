@@ -4506,88 +4506,265 @@ function voucherDocNro(r: Record<string, unknown>): string {
   return normalizeCuitDigits(String(r.DocNro ?? r.docNro ?? ''));
 }
 
-/**
- * Re-vincula pedidos sin factura en LupoHub consultando comprobantes existentes en AFIP (mismo CUIT del cliente).
- */
-export const restoreCustomerAfipInvoices = async (req: Request, res: Response) => {
-  try {
-    const authUser = (req as any).user;
-    if (!authUser || authUser.role !== 'ADMIN') {
-      return res.status(403).json({ message: 'Solo administradores pueden restaurar facturas' });
+/** Punto de venta 21 es el usado en cartera LupoHub; se suma el configurado en AFIP_PTO_VTA. */
+function lupohubPuntosDeVenta(): number[] {
+  const fromEnv = getAfipPuntoVenta();
+  return Array.from(new Set([21, fromEnv].filter((n) => Number.isFinite(n) && n > 0)));
+}
+
+function preferCbteTipoForCustomer(condicionIva: string | null | undefined): 1 | 6 {
+  const c = String(condicionIva || '').toUpperCase();
+  if (c.includes('RESPONSABLE') && c.includes('INSCRIPT')) return 1;
+  if (/\bRI\b/.test(c) || c.includes('INSCRIPTO')) return 1;
+  return 6;
+}
+
+function parseComprobanteRef(ref: string): { puntoVta: number; cbteDesde: number; cbteTipo?: number } | null {
+  const raw = String(ref || '').trim().toUpperCase();
+  if (!raw) return null;
+  let cbteTipo: number | undefined;
+  if (raw.startsWith('NC A') || raw.startsWith('A ')) cbteTipo = 1;
+  else if (raw.startsWith('NC B') || raw.startsWith('B ')) cbteTipo = 6;
+  const m = raw.match(/(\d{4,5})\s*[-/]\s*(\d{1,8})/);
+  if (!m) return null;
+  const puntoVta = Number(m[1]);
+  const cbteDesde = Number(m[2]);
+  if (!Number.isFinite(puntoVta) || !Number.isFinite(cbteDesde) || cbteDesde <= 0) return null;
+  return { puntoVta, cbteDesde, cbteTipo };
+}
+
+type PendingLupohubOrder = {
+  id: string;
+  dateYmd: string | null;
+  orderNeto: number;
+};
+
+type RestoredInvoiceRow = {
+  orderId: string;
+  cbteTipo: number;
+  cbteDesde: number;
+  puntoVenta: number;
+  cae: string;
+  source: 'credit_note_snapshot' | 'payment_ref' | 'afip';
+};
+
+async function invoiceComprobanteExists(
+  puntoVta: number,
+  cbteTipo: number,
+  cbteDesde: number
+): Promise<{ id: string; order_id: string } | undefined> {
+  return (await get(
+    `SELECT id, order_id FROM invoices
+     WHERE punto_venta = ? AND cbte_tipo = ? AND cbte_desde = ?
+     LIMIT 1`,
+    [puntoVta, cbteTipo, cbteDesde]
+  )) as { id: string; order_id: string } | undefined;
+}
+
+async function insertRestoredLupohubInvoice(params: {
+  orderId: string;
+  cae: string;
+  caeFchVto: string | null;
+  puntoVta: number;
+  cbteTipo: number;
+  cbteDesde: number;
+  cbteHasta: number;
+  agipRetPer: number;
+  agipAlicuota?: number;
+}): Promise<void> {
+  const existing = await get(`SELECT id FROM invoices WHERE order_id = ? LIMIT 1`, [params.orderId]);
+  if (existing) return;
+  const invoiceId = uuidv4();
+  await execute(
+    `INSERT INTO invoices (id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, agip_alicuota, agip_ret_per)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      invoiceId,
+      params.orderId,
+      params.cae,
+      params.caeFchVto,
+      params.puntoVta,
+      params.cbteTipo,
+      params.cbteDesde,
+      params.cbteHasta,
+      params.agipAlicuota ?? 0,
+      params.agipRetPer
+    ]
+  );
+  await syncOrderPaymentStatus(params.orderId);
+}
+
+async function restoreLupohubInvoiceFromAfipVoucher(
+  orderId: string,
+  puntoVta: number,
+  cbteTipo: number,
+  cbteDesde: number,
+  knownCae?: string | null
+): Promise<RestoredInvoiceRow | null> {
+  const linked = await invoiceComprobanteExists(puntoVta, cbteTipo, cbteDesde);
+  if (linked) return null;
+  if (await get(`SELECT id FROM invoices WHERE order_id = ? LIMIT 1`, [orderId])) return null;
+
+  let cae = String(knownCae || '').trim();
+  let caeFchVto: string | null = null;
+  let cbteHasta = cbteDesde;
+  let agip = 0;
+
+  if (isAfipConfigured()) {
+    try {
+      const consulta = await consultarComprobanteAfip(puntoVta, cbteTipo, cbteDesde);
+      if (consulta.existe && consulta.resultado) {
+        const r = consulta.resultado as Record<string, unknown>;
+        cae = String(r.CodAutorizacion ?? r.codAutorizacion ?? cae).trim();
+        const caeFchVtoRaw = r.FchVto ?? r.fchVto ?? r.CaeFchVto ?? r.caeFchVto ?? null;
+        caeFchVto =
+          caeFchVtoRaw != null && String(caeFchVtoRaw).trim() !== ''
+            ? String(caeFchVtoRaw).trim()
+            : null;
+        cbteHasta = Number(r.CbteHasta ?? r.cbteHasta ?? cbteDesde) || cbteDesde;
+        agip = extractAgipFromAfipVoucher(r);
+      }
+    } catch {
+      // Si AFIP no responde pero tenemos CAE del snapshot interno, igual insertamos.
     }
-    if (!isAfipConfigured()) {
-      return res.status(503).json({ message: 'AFIP no está configurado en el servidor' });
-    }
+  }
 
-    const customerId = String(req.params?.id || '').trim();
-    if (!customerId) return res.status(400).json({ message: 'ID de cliente requerido' });
+  if (!cae) return null;
 
-    const customer = (await get(`SELECT id, cuit, business_name, name FROM customers WHERE id = ?`, [
-      customerId
-    ])) as { id: string; cuit?: string | null; business_name?: string | null; name?: string | null } | undefined;
-    if (!customer) return res.status(404).json({ message: 'Cliente no encontrado' });
+  await insertRestoredLupohubInvoice({
+    orderId,
+    cae,
+    caeFchVto,
+    puntoVta,
+    cbteTipo,
+    cbteDesde,
+    cbteHasta,
+    agipRetPer: agip
+  });
 
-    const customerCuit = normalizeCuitDigits(customer.cuit || '');
-    if (!customerCuit) {
-      return res.status(400).json({ message: 'El cliente no tiene CUIT cargado; no se puede buscar en AFIP' });
-    }
+  return { orderId, cbteTipo, cbteDesde, puntoVenta: puntoVta, cae, source: knownCae ? 'credit_note_snapshot' : 'afip' };
+}
 
-    const maxScan = Math.min(
-      800,
-      Math.max(50, Number((req.body as { maxScan?: unknown })?.maxScan) || 400)
+async function fetchPendingLupohubOrders(customerId: string): Promise<PendingLupohubOrder[]> {
+  const rows = (await query(
+    `SELECT o.id, o.date, ROUND((${SQL_ORDER_NETO_GRAVADO}), 2) AS order_neto
+     FROM orders o
+     WHERE o.customer_id = ?
+       AND o.status NOT IN ('Cancelado', 'Borrador')
+       AND (o.archived = 0 OR o.archived IS NULL)
+       AND o.status IN ('Falta controlar', 'Controlado', 'Despachado', 'En camino', 'Entregado')
+       AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
+     ORDER BY o.date ASC, o.id ASC`,
+    [customerId]
+  )) as Array<{ id: string; date: string | Date; order_neto: number | string }>;
+
+  return rows.map((o) => ({
+    id: o.id,
+    dateYmd: orderDateToYmd(o.date),
+    orderNeto: Number(o.order_neto || 0)
+  }));
+}
+
+async function restoreFromCreditNoteSnapshots(customerId: string): Promise<RestoredInvoiceRow[]> {
+  const rows = (await query(
+    `SELECT
+       cn.order_id,
+       cn.voided_invoice_cae,
+       cn.voided_invoice_punto_venta,
+       cn.voided_invoice_cbte_tipo,
+       cn.voided_invoice_cbte_desde
+     FROM credit_notes cn
+     INNER JOIN orders o ON o.id = cn.order_id
+     WHERE o.customer_id = ?
+       AND cn.voided_invoice_cae IS NOT NULL
+       AND TRIM(cn.voided_invoice_cae) <> ''
+       AND cn.voided_invoice_cbte_desde IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = cn.order_id)
+     GROUP BY cn.order_id, cn.voided_invoice_cae, cn.voided_invoice_punto_venta,
+              cn.voided_invoice_cbte_tipo, cn.voided_invoice_cbte_desde`,
+    [customerId]
+  )) as Array<{
+    order_id: string;
+    voided_invoice_cae: string;
+    voided_invoice_punto_venta: number | null;
+    voided_invoice_cbte_tipo: number | null;
+    voided_invoice_cbte_desde: number | null;
+  }>;
+
+  const restored: RestoredInvoiceRow[] = [];
+  for (const row of rows) {
+    const puntoVta = Number(row.voided_invoice_punto_venta) || 21;
+    const cbteTipo = Number(row.voided_invoice_cbte_tipo) || 6;
+    const cbteDesde = Number(row.voided_invoice_cbte_desde);
+    if (!Number.isFinite(cbteDesde) || cbteDesde <= 0) continue;
+    const hit = await restoreLupohubInvoiceFromAfipVoucher(
+      row.order_id,
+      puntoVta,
+      cbteTipo,
+      cbteDesde,
+      row.voided_invoice_cae
     );
-    const puntoVta = getAfipPuntoVenta();
+    if (hit) restored.push({ ...hit, source: 'credit_note_snapshot' });
+  }
+  return restored;
+}
 
-    const pendingOrders = (await query(
-      `SELECT o.id, o.date, o.total
-       FROM orders o
-       WHERE o.customer_id = ?
-         AND o.status NOT IN ('Cancelado', 'Borrador')
-         AND (o.archived = 0 OR o.archived IS NULL)
-         AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
-       ORDER BY o.date ASC, o.id ASC`,
-      [customerId]
-    )) as Array<{ id: string; date: string | Date; total: number | string }>;
+async function restoreFromPaymentInvoiceRefs(
+  customerId: string,
+  unmatched: Map<string, PendingLupohubOrder>
+): Promise<RestoredInvoiceRow[]> {
+  const rows = (await query(
+    `SELECT p.order_id, pir.invoice_ref
+     FROM payments p
+     INNER JOIN payment_invoice_refs pir ON pir.payment_id = p.id
+     WHERE p.customer_id = ?
+       AND TRIM(COALESCE(pir.invoice_ref, '')) <> ''`,
+    [customerId]
+  )) as Array<{ order_id: string | null; invoice_ref: string }>;
 
-    if (pendingOrders.length === 0) {
-      return res.json({
-        ok: true,
-        customerId,
-        restored: 0,
-        pendingOrders: 0,
-        scanned: 0,
-        message: 'No hay pedidos sin factura para restaurar'
-      });
+  const restored: RestoredInvoiceRow[] = [];
+  for (const row of rows) {
+    const parsed = parseComprobanteRef(row.invoice_ref);
+    if (!parsed) continue;
+    const cbteTipo = parsed.cbteTipo ?? 6;
+    let orderId = row.order_id ? String(row.order_id) : '';
+    if (!orderId || !unmatched.has(orderId)) {
+      // Sin pedido explícito: no adivinamos comprobante solo por ref de cobro importado.
+      continue;
     }
-
-    const unmatched = new Map(
-      pendingOrders.map((o) => [
-        o.id,
-        {
-          id: o.id,
-          dateYmd: orderDateToYmd(o.date),
-          orderTotal: Number(o.total || 0)
-        }
-      ])
+    const hit = await restoreLupohubInvoiceFromAfipVoucher(
+      orderId,
+      parsed.puntoVta,
+      cbteTipo,
+      parsed.cbteDesde
     );
+    if (hit) {
+      restored.push({ ...hit, source: 'payment_ref' });
+      unmatched.delete(orderId);
+    }
+  }
+  return restored;
+}
 
-    const restored: Array<{
-      orderId: string;
-      cbteTipo: number;
-      cbteDesde: number;
-      cae: string;
-    }> = [];
-    let scanned = 0;
+async function restoreFromAfipScan(
+  customerCuit: string,
+  unmatched: Map<string, PendingLupohubOrder>,
+  opts: { maxScan: number; cbteTipos: Array<1 | 6> }
+): Promise<{ restored: RestoredInvoiceRow[]; scanned: number }> {
+  const restored: RestoredInvoiceRow[] = [];
+  let scanned = 0;
+  const puntosVenta = lupohubPuntosDeVenta();
 
-    for (const cbteTipo of [1, 6] as const) {
+  for (const puntoVta of puntosVenta) {
+    for (const cbteTipo of opts.cbteTipos) {
       let last = 0;
       try {
         last = await getLastAfipVoucherNumber(puntoVta, cbteTipo);
       } catch (err: any) {
-        console.warn('restoreCustomerAfipInvoices getLastVoucher:', err?.message || err);
+        console.warn(`restoreFromAfipScan getLastVoucher ${puntoVta}/${cbteTipo}:`, err?.message || err);
         continue;
       }
-      const minNro = Math.max(1, last - maxScan + 1);
+      const minNro = Math.max(1, last - opts.maxScan + 1);
       for (let cbteNro = last; cbteNro >= minNro; cbteNro -= 1) {
         if (unmatched.size === 0) break;
         scanned += 1;
@@ -4602,13 +4779,7 @@ export const restoreCustomerAfipInvoices = async (req: Request, res: Response) =
         const r = consulta.resultado as Record<string, unknown>;
         if (voucherDocNro(r) !== customerCuit) continue;
 
-        const linked = (await get(
-          `SELECT i.id, i.order_id
-           FROM invoices i
-           WHERE i.punto_venta = ? AND i.cbte_tipo = ? AND i.cbte_desde = ?
-           LIMIT 1`,
-          [puntoVta, cbteTipo, cbteNro]
-        )) as { id: string; order_id: string } | undefined;
+        const linked = await invoiceComprobanteExists(puntoVta, cbteTipo, cbteNro);
         if (linked) {
           unmatched.delete(linked.order_id);
           continue;
@@ -4623,10 +4794,10 @@ export const restoreCustomerAfipInvoices = async (req: Request, res: Response) =
         for (const [orderId, ord] of unmatched) {
           if (!ord.dateYmd || !cbteFch) continue;
           const dayDiff = daysBetweenYmd(ord.dateYmd, cbteFch);
-          if (dayDiff > 14) continue;
-          const expected = invoiceLedgerImporte(ord.orderTotal, agip);
+          if (dayDiff > 60) continue;
+          const expected = invoiceLedgerImporte(ord.orderNeto, agip);
           const amountDiff = Math.abs(expected - impTotal);
-          if (amountDiff > 2.5) continue;
+          if (amountDiff > 5) continue;
           const score = dayDiff * 100 + amountDiff;
           if (score < bestScore) {
             bestScore = score;
@@ -4645,31 +4816,180 @@ export const restoreCustomerAfipInvoices = async (req: Request, res: Response) =
             : null;
         const cbteHasta = Number(r.CbteHasta ?? r.cbteHasta ?? cbteNro) || cbteNro;
 
-        const invoiceId = uuidv4();
-        await execute(
-          `INSERT INTO invoices (id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, agip_alicuota, agip_ret_per)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [invoiceId, bestOrderId, cae, caeFchVto, puntoVta, cbteTipo, cbteNro, cbteHasta, 0, agip]
-        );
-        await syncOrderPaymentStatus(bestOrderId);
+        await insertRestoredLupohubInvoice({
+          orderId: bestOrderId,
+          cae,
+          caeFchVto,
+          puntoVta,
+          cbteTipo,
+          cbteDesde: cbteNro,
+          cbteHasta,
+          agipRetPer: agip
+        });
         unmatched.delete(bestOrderId);
-        restored.push({ orderId: bestOrderId, cbteTipo, cbteDesde: cbteNro, cae });
+        restored.push({
+          orderId: bestOrderId,
+          cbteTipo,
+          cbteDesde: cbteNro,
+          puntoVenta: puntoVta,
+          cae,
+          source: 'afip'
+        });
       }
+    }
+  }
+
+  return { restored, scanned };
+}
+
+async function restoreLupohubInvoicesForCustomerId(
+  customerId: string,
+  opts?: { maxScan?: number }
+): Promise<{
+  customerId: string;
+  customerName: string;
+  restored: number;
+  pendingOrders: number;
+  stillPending: number;
+  scanned: number;
+  details: RestoredInvoiceRow[];
+  message?: string;
+}> {
+  const customer = (await get(
+    `SELECT id, cuit, business_name, name, condicion_iva FROM customers WHERE id = ?`,
+    [customerId]
+  )) as
+    | {
+        id: string;
+        cuit?: string | null;
+        business_name?: string | null;
+        name?: string | null;
+        condicion_iva?: string | null;
+      }
+    | undefined;
+  if (!customer) {
+    throw Object.assign(new Error('Cliente no encontrado'), { status: 404 });
+  }
+
+  const customerCuit = normalizeCuitDigits(customer.cuit || '');
+  if (!customerCuit) {
+    throw Object.assign(new Error('El cliente no tiene CUIT cargado'), { status: 400 });
+  }
+
+  const maxScan = Math.min(2500, Math.max(100, Number(opts?.maxScan) || 1200));
+  const pendingOrders = await fetchPendingLupohubOrders(customerId);
+  if (pendingOrders.length === 0) {
+    return {
+      customerId,
+      customerName: customer.business_name || customer.name || customerId,
+      restored: 0,
+      pendingOrders: 0,
+      stillPending: 0,
+      scanned: 0,
+      details: [],
+      message: 'No hay pedidos LupoHub sin factura para restaurar'
+    };
+  }
+
+  const unmatched = new Map(pendingOrders.map((o) => [o.id, o]));
+  const details: RestoredInvoiceRow[] = [];
+
+  for (const row of await restoreFromCreditNoteSnapshots(customerId)) {
+    details.push(row);
+    unmatched.delete(row.orderId);
+  }
+
+  for (const row of await restoreFromPaymentInvoiceRefs(customerId, unmatched)) {
+    details.push(row);
+  }
+
+  let scanned = 0;
+  if (unmatched.size > 0 && isAfipConfigured()) {
+    const preferred = preferCbteTipoForCustomer(customer.condicion_iva);
+    const cbteTipos: Array<1 | 6> = preferred === 1 ? [1, 6] : [6, 1];
+    const afip = await restoreFromAfipScan(customerCuit, unmatched, { maxScan, cbteTipos });
+    details.push(...afip.restored);
+    scanned = afip.scanned;
+  }
+
+  return {
+    customerId,
+    customerName: customer.business_name || customer.name || customerId,
+    restored: details.length,
+    pendingOrders: pendingOrders.length,
+    stillPending: unmatched.size,
+    scanned,
+    details
+  };
+}
+
+/**
+ * Restaura facturas emitidas en LupoHub (pedidos sin registro en `invoices`) desde datos internos y AFIP.
+ */
+export const restoreCustomerAfipInvoices = async (req: Request, res: Response) => {
+  try {
+    const authUser = (req as any).user;
+    if (!authUser || authUser.role !== 'ADMIN') {
+      return res.status(403).json({ message: 'Solo administradores pueden restaurar facturas' });
+    }
+
+    const customerId = String(req.params?.id || '').trim();
+    if (!customerId) return res.status(400).json({ message: 'ID de cliente requerido' });
+
+    const maxScan = Number((req.body as { maxScan?: unknown })?.maxScan) || undefined;
+    const result = await restoreLupohubInvoicesForCustomerId(customerId, { maxScan });
+    return res.json({ ok: true, ...result });
+  } catch (error: any) {
+    const status = Number(error?.status) || 500;
+    if (status !== 500) {
+      return res.status(status).json({ message: error?.message || 'No se pudieron restaurar las facturas' });
+    }
+    console.error('restoreCustomerAfipInvoices:', error);
+    return res.status(500).json({ message: error?.message || 'Error restaurando facturas LupoHub' });
+  }
+};
+
+/** Restaura facturas LupoHub para todos los clientes con pedidos facturables sin registro en `invoices`. */
+export const restoreAllLupohubInvoices = async (req: Request, res: Response) => {
+  try {
+    const authUser = (req as any).user;
+    if (!authUser || authUser.role !== 'ADMIN') {
+      return res.status(403).json({ message: 'Solo administradores pueden restaurar facturas' });
+    }
+    if (!isAfipConfigured()) {
+      return res.status(503).json({ message: 'AFIP no está configurado en el servidor' });
+    }
+
+    const maxScan = Math.min(2500, Math.max(100, Number((req.body as { maxScan?: unknown })?.maxScan) || 800));
+    const customerRows = (await query(
+      `SELECT DISTINCT o.customer_id AS customerId
+       FROM orders o
+       INNER JOIN customers c ON c.id = o.customer_id
+       WHERE o.status NOT IN ('Cancelado', 'Borrador')
+         AND (o.archived = 0 OR o.archived IS NULL)
+         AND o.status IN ('Falta controlar', 'Controlado', 'Despachado', 'En camino', 'Entregado')
+         AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
+         AND TRIM(COALESCE(c.cuit, '')) <> ''
+       ORDER BY o.customer_id ASC`
+    )) as Array<{ customerId: string }>;
+
+    const results: Array<Awaited<ReturnType<typeof restoreLupohubInvoicesForCustomerId>>> = [];
+    let totalRestored = 0;
+    for (const row of customerRows) {
+      const r = await restoreLupohubInvoicesForCustomerId(row.customerId, { maxScan });
+      results.push(r);
+      totalRestored += r.restored;
     }
 
     return res.json({
       ok: true,
-      customerId,
-      customerName: customer.business_name || customer.name || customerId,
-      restored: restored.length,
-      pendingOrders: pendingOrders.length,
-      stillPending: unmatched.size,
-      scanned,
-      details: restored
+      customersProcessed: results.length,
+      totalRestored,
+      results
     });
   } catch (error: any) {
-    console.error('restoreCustomerAfipInvoices:', error);
-    return res.status(500).json({ message: error?.message || 'Error restaurando facturas desde AFIP' });
+    console.error('restoreAllLupohubInvoices:', error);
+    return res.status(500).json({ message: error?.message || 'Error restaurando facturas LupoHub' });
   }
 };
 

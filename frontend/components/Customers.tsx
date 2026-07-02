@@ -262,6 +262,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [multimediaExporting, setMultimediaExporting] = useState(false);
   const [multimediaImporting, setMultimediaImporting] = useState(false);
   const [saldosMultimediasExporting, setSaldosMultimediasExporting] = useState(false);
+  const [restoringAllLupohubInvoices, setRestoringAllLupohubInvoices] = useState(false);
   const [wholesaleMetricsExporting, setWholesaleMetricsExporting] = useState(false);
   const [exportingCustomersWithLocation, setExportingCustomersWithLocation] = useState(false);
   const [customerToolsOpen, setCustomerToolsOpen] = useState(false);
@@ -1090,6 +1091,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     exportingCustomersWithLocation ||
     wholesaleMetricsExporting ||
     saldosMultimediasExporting ||
+    restoringAllLupohubInvoices ||
     multimediaExporting ||
     multimediaImporting ||
     assigningSellersResumen ||
@@ -2270,9 +2272,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                       disabled={restoringAfipInvoices || saldosLoading}
                       onClick={() => {
                         showConfirm({
-                          title: 'Restaurar facturas desde AFIP',
-                          message: `¿Buscar en AFIP las facturas de ${selectedCustomer.businessName || selectedCustomer.name} y volver a vincularlas a los pedidos? Puede tardar unos minutos.`,
-                          confirmLabel: 'Restaurar',
+                          title: 'Restaurar facturas LupoHub',
+                          message: `¿Buscar y restaurar las facturas AFIP emitidas desde LupoHub para ${selectedCustomer.businessName || selectedCustomer.name}? Se revisan pedidos despachados/controlados sin factura y se consulta AFIP (PV 21). Puede tardar varios minutos.`,
+                          confirmLabel: 'Restaurar facturas',
                           onConfirm: async () => {
                             setRestoringAfipInvoices(true);
                             try {
@@ -2306,7 +2308,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                       className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-sky-600/40 text-sky-100 text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50 touch-manipulation"
                     >
                       {restoringAfipInvoices ? <Loader2 size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />}
-                      Restaurar facturas AFIP
+                      Restaurar facturas LupoHub
                     </button>
                   )}
                   {role === Role.ADMIN && (
@@ -3159,6 +3161,48 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                       {saldosMultimediasExporting ? <Loader2 size={16} className="animate-spin shrink-0" /> : <FileSpreadsheet size={16} className="text-amber-400 shrink-0" />}
                       <span className="leading-snug">Excel saldos pendientes (Resumen)</span>
                     </button>
+                    {role === Role.ADMIN && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          closeCustomerTools();
+                          showConfirm({
+                            title: 'Restaurar facturas LupoHub (todos los clientes)',
+                            message:
+                              '¿Buscar y restaurar facturas AFIP de todos los clientes con pedidos LupoHub sin factura? Consulta AFIP (PV 21) y puede tardar varios minutos.',
+                            confirmLabel: 'Restaurar todas',
+                            onConfirm: async () => {
+                              setRestoringAllLupohubInvoices(true);
+                              try {
+                                const res = await api.restoreAllLupohubInvoices();
+                                showToast(
+                                  'success',
+                                  `Restauración global: ${res.totalRestored} factura(s) en ${res.customersProcessed} cliente(s).`
+                                );
+                                onRefreshData?.();
+                              } catch (err: any) {
+                                showToast(
+                                  'error',
+                                  err?.response?.data?.message || err?.message || 'No se pudieron restaurar las facturas'
+                                );
+                              } finally {
+                                setRestoringAllLupohubInvoices(false);
+                              }
+                            }
+                          });
+                        }}
+                        disabled={restoringAllLupohubInvoices}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-sky-100 hover:bg-sky-500/10 disabled:opacity-50"
+                      >
+                        {restoringAllLupohubInvoices ? (
+                          <Loader2 size={16} className="animate-spin shrink-0" />
+                        ) : (
+                          <FileSpreadsheet size={16} className="text-sky-400 shrink-0" />
+                        )}
+                        <span className="leading-snug">Restaurar facturas LupoHub (global)</span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       role="menuitem"
