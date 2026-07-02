@@ -2071,6 +2071,27 @@ export const api = {
     return await request(`/customers/${encodeURIComponent(customerId)}/clear-dispatched-pendings`, 'POST');
   },
 
+  adjustCustomerSaldo: async (
+    customerId: string,
+    targetSaldo: number
+  ): Promise<{
+    ok: boolean;
+    customerId: string;
+    targetSaldo: number;
+    previousSaldo: number;
+    newSaldo: number;
+    newOpeningBalance: number;
+    clearedInvoices: boolean;
+    invoicesRemoved: number;
+    invoicesSkippedWithPayments: number;
+    manualRemoved: number;
+    ordersUpdated: number;
+  }> => {
+    return await request(`/customers/${encodeURIComponent(customerId)}/adjust-saldo`, 'POST', {
+      targetSaldo
+    });
+  },
+
   exportCustomerDetail: async (customerId: string, params?: { from?: string; to?: string }): Promise<void> => {
     const q = new URLSearchParams();
     if (params?.from) q.set('from', params.from);

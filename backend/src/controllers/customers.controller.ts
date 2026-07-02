@@ -13,14 +13,15 @@ import {
   SQL_ORDER_NETO_AFIP,
   SQL_ORDER_SALDO_RESIDUAL,
   SQL_PAYMENT_SALDO_CONTRIBUTION_AMOUNT,
+  syncAllOrderPaymentStatusForCustomer,
+  syncOrderPaymentStatus,
 } from '../services/orderPaymentBalance.service';
 import {
   IVA_MULTIPLIER,
   ORDER_PRICES_INCLUDE_IVA,
   sqlAmountWithIvaFromOrderLines,
   sqlInvoiceAmountFromOrderTotal,
-  sqlNetoAfipToAmountWithIva,
-  sqlOrderTotalWithIvaExpr
+  sqlNetoAfipToAmountWithIva
 } from '../config/orderPricing';
 import {
   INCLUDE_TANGO_IMPORT_IN_SYSTEM,
@@ -489,7 +490,7 @@ export const exportCustomersBySheetsXlsx = async (req: Request, res: Response) =
                LPAD(COALESCE(i.cbte_desde, 0), 8, '0')
              ) AS comprobante,
              o.id AS order_id,
-             ${sqlOrderTotalWithIvaExpr()} AS importe
+             ${sqlInvoiceAmountFromOrderTotal()} AS importe
            FROM invoices i
            JOIN orders o ON o.id = i.order_id
            WHERE o.customer_id = ?
@@ -2387,7 +2388,7 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
             LPAD(COALESCE(i.cbte_desde, 0), 8, '0')
           ) AS comprobante,
           o.id AS order_id,
-          ${sqlOrderTotalWithIvaExpr()} AS debe,
+          ${sqlInvoiceAmountFromOrderTotal()} AS debe,
           0 AS haber
         FROM invoices i
         JOIN orders o ON o.id = i.order_id
@@ -2657,7 +2658,7 @@ export const exportSaldosMovimientosSistemaXlsx = async (req: Request, res: Resp
             LPAD(COALESCE(i.cbte_desde, 0), 8, '0')
           ) AS comprobante,
           o.id AS order_id,
-          ${sqlOrderTotalWithIvaExpr()} AS debe,
+          ${sqlInvoiceAmountFromOrderTotal()} AS debe,
           0 AS haber
         FROM invoices i
         JOIN orders o ON o.id = i.order_id
@@ -2913,7 +2914,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
             LPAD(COALESCE(i.cbte_desde, 0), 8, '0')
           ) AS comprobante,
           o.id AS order_id,
-          ${sqlOrderTotalWithIvaExpr()} AS debe,
+          ${sqlInvoiceAmountFromOrderTotal()} AS debe,
           0 AS haber
         FROM invoices i
         JOIN orders o ON o.id = i.order_id
@@ -2940,7 +2941,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
             LPAD(COALESCE(i.cbte_desde, 0), 8, '0')
           ) AS comprobante,
           o.id AS order_id,
-          ${sqlOrderTotalWithIvaExpr()} AS debe,
+          ${sqlInvoiceAmountFromOrderTotal()} AS debe,
           0 AS haber
         FROM invoices i
         JOIN orders o ON o.id = i.order_id
@@ -4397,6 +4398,155 @@ export const assignCustomerSellersFromResumen = async (req: Request, res: Respon
  *  - No toca pedidos ya facturados en AFIP
  *  - Recalcula total del pedido
  */
+/** Elimina facturas y comprobantes manuales del saldo cuando el objetivo es cero. */
+async function clearCustomerInvoiceDebtForSaldoZero(customerId: string): Promise<{
+  invoicesRemoved: number;
+  invoicesSkippedWithPayments: number;
+  manualRemoved: number;
+  ordersUpdated: number;
+}> {
+  let invoicesRemoved = 0;
+  let invoicesSkippedWithPayments = 0;
+  const ordersTouched = new Set<string>();
+
+  const invoices = (await query(
+    `SELECT i.id, i.order_id
+     FROM invoices i
+     INNER JOIN orders o ON o.id = i.order_id
+     WHERE o.customer_id = ?`,
+    [customerId]
+  )) as Array<{ id: string; order_id: string }>;
+
+  for (const inv of invoices) {
+    const linked = (await get(`SELECT 1 AS x FROM payment_invoices WHERE invoice_id = ? LIMIT 1`, [
+      inv.id
+    ])) as { x?: number } | undefined;
+    if (linked?.x) {
+      invoicesSkippedWithPayments++;
+      await execute(`UPDATE orders SET payment_status = 'pagado', include_in_saldo = 0 WHERE id = ?`, [
+        inv.order_id
+      ]);
+      ordersTouched.add(inv.order_id);
+    } else {
+      await execute(`DELETE FROM invoices WHERE id = ?`, [inv.id]);
+      await syncOrderPaymentStatus(inv.order_id);
+      invoicesRemoved++;
+      ordersTouched.add(inv.order_id);
+    }
+  }
+
+  const ordersInSaldo = (await query(
+    `SELECT o.id
+     FROM orders o
+     WHERE o.customer_id = ?
+       AND o.status NOT IN ('Cancelado', 'Borrador')
+       AND (o.archived = 0 OR o.archived IS NULL)
+       AND (${SQL_ORDER_IN_SALDO_SCOPE})`,
+    [customerId]
+  )) as Array<{ id: string }>;
+
+  for (const row of ordersInSaldo) {
+    if (ordersTouched.has(row.id)) continue;
+    await execute(`UPDATE orders SET payment_status = 'pagado', include_in_saldo = 0 WHERE id = ?`, [
+      row.id
+    ]);
+    ordersTouched.add(row.id);
+  }
+
+  const manualBefore = (await get(
+    `SELECT COUNT(*) AS cnt FROM customer_manual_comprobantes WHERE customer_id = ? AND tipo IN ('FACTURA', 'NC')`,
+    [customerId]
+  )) as { cnt?: number } | undefined;
+  await execute(
+    `DELETE FROM customer_manual_comprobantes WHERE customer_id = ? AND tipo IN ('FACTURA', 'NC')`,
+    [customerId]
+  );
+  const manualRemoved = Number(manualBefore?.cnt || 0);
+
+  await syncAllOrderPaymentStatusForCustomer(customerId);
+
+  return {
+    invoicesRemoved,
+    invoicesSkippedWithPayments,
+    manualRemoved,
+    ordersUpdated: ordersTouched.size
+  };
+}
+
+/**
+ * Ajusta el saldo pendiente unificado de un cliente.
+ * Si el objetivo es 0, elimina facturas sin recibos imputados y comprobantes manuales del saldo.
+ */
+export const adjustCustomerSaldo = async (req: Request, res: Response) => {
+  try {
+    const authUser = (req as any).user;
+    if (!authUser || authUser.role !== 'ADMIN') {
+      return res.status(403).json({ message: 'Solo administradores pueden ajustar saldos' });
+    }
+
+    const { id: customerId } = req.params;
+    if (!customerId) return res.status(400).json({ message: 'ID de cliente requerido' });
+
+    const customer = await get('SELECT id FROM customers WHERE id = ?', [customerId]);
+    if (!customer) return res.status(404).json({ message: 'Cliente no encontrado' });
+
+    const rawTarget = (req.body as { targetSaldo?: unknown })?.targetSaldo;
+    if (rawTarget === undefined || rawTarget === null || String(rawTarget).trim() === '') {
+      return res.status(400).json({ message: 'Indicá targetSaldo (importe objetivo)' });
+    }
+    const parsedTarget = parseOpeningBalanceInput(rawTarget);
+    if (parsedTarget === null) {
+      return res.status(400).json({ message: 'targetSaldo debe ser un importe válido' });
+    }
+    const targetSaldo = Math.round(parsedTarget * 100) / 100;
+
+    const before = await queryCarteraTotalsForCustomer(customerId, authUser);
+    if (!before) return res.status(404).json({ message: 'Cliente no encontrado' });
+
+    let clearStats = {
+      invoicesRemoved: 0,
+      invoicesSkippedWithPayments: 0,
+      manualRemoved: 0,
+      ordersUpdated: 0
+    };
+
+    if (Math.abs(targetSaldo) <= 0.005) {
+      clearStats = await clearCustomerInvoiceDebtForSaldoZero(customerId);
+      await execute(`UPDATE customers SET opening_balance_date = NULL WHERE id = ?`, [customerId]);
+    }
+
+    const afterClear = await queryCarteraTotalsForCustomer(customerId, authUser);
+    if (!afterClear) return res.status(500).json({ message: 'No se pudo recalcular el saldo' });
+
+    const movementSaldo =
+      Math.round(
+        (afterClear.orderCargosPendientes - afterClear.totalNotasCredito - afterClear.totalPagos) * 100
+      ) / 100;
+    const newOpeningBalance = Math.round((targetSaldo - movementSaldo) * 100) / 100;
+
+    await execute(`UPDATE customers SET opening_balance = ? WHERE id = ?`, [
+      newOpeningBalance,
+      customerId
+    ]);
+
+    const after = await queryCarteraTotalsForCustomer(customerId, authUser);
+
+    return res.json({
+      ok: true,
+      customerId,
+      targetSaldo,
+      previousSaldo: before.saldoPendienteUnificado,
+      newSaldo: after?.saldoPendienteUnificado ?? targetSaldo,
+      newOpeningBalance,
+      clearedInvoices: Math.abs(targetSaldo) <= 0.005,
+      ...clearStats
+    });
+  } catch (error: any) {
+    console.error('adjustCustomerSaldo:', error);
+    return res.status(500).json({ message: 'Error ajustando saldo del cliente' });
+  }
+};
+
 export const clearDispatchedPendingsForCustomer = async (req: Request, res: Response) => {
   try {
     const authUser = (req as any).user;

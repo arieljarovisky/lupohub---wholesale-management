@@ -279,9 +279,14 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [exportingCustomerDetail, setExportingCustomerDetail] = useState(false);
   const [exportingFinancialSummary, setExportingFinancialSummary] = useState(false);
   const [showFinancialExportModal, setShowFinancialExportModal] = useState(false);
+  const [showAdjustSaldoModal, setShowAdjustSaldoModal] = useState(false);
+  const [adjustSaldoInput, setAdjustSaldoInput] = useState('');
+  const [adjustingSaldo, setAdjustingSaldo] = useState(false);
 
   useEffect(() => {
     setShowFinancialExportModal(false);
+    setShowAdjustSaldoModal(false);
+    setAdjustSaldoInput('');
   }, [selectedCustomer?.id]);
   const [multimediaLedger, setMultimediaLedger] = useState<Awaited<ReturnType<typeof api.getCustomerMultimediaLedger>> | null>(null);
   const [multimediaLedgerLoading, setMultimediaLedgerLoading] = useState(false);
@@ -819,6 +824,75 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
           await reloadSelectedCustomerLedger();
         } catch (err: any) {
           showToast('error', err?.response?.data?.message || err?.message || 'No se pudo eliminar');
+        }
+      }
+    });
+  };
+
+  const parseAdjustSaldoInput = (raw: string): number | null => {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    const normalized = trimmed.replace(/\./g, '').replace(',', '.');
+    const n = Number(normalized);
+    return Number.isFinite(n) ? Math.round(n * 100) / 100 : null;
+  };
+
+  const handleAdjustSaldo = () => {
+    if (!selectedCustomer?.id) return;
+    const target = parseAdjustSaldoInput(adjustSaldoInput);
+    if (target === null) {
+      showToast('error', 'Ingresá un importe válido para el saldo objetivo.');
+      return;
+    }
+    const isZero = Math.abs(target) <= 0.005;
+    const current = getSaldoPendienteTotal(selectedCustomer);
+    showConfirm({
+      title: isZero ? 'Poner saldo en cero' : 'Ajustar saldo del cliente',
+      message: isZero
+        ? `¿Poner el saldo de ${selectedCustomer.businessName || selectedCustomer.name} en $0,00? Se eliminarán las facturas sin recibos imputados y los comprobantes manuales del saldo. Las facturas con cobros asociados quedarán marcadas como pagadas. Saldo actual: $${current.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`
+        : `¿Ajustar el saldo de ${selectedCustomer.businessName || selectedCustomer.name} a $${target.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}? Se modificará el saldo inicial para alcanzar ese valor. Saldo actual: $${current.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`,
+      confirmLabel: isZero ? 'Poner en cero' : 'Ajustar saldo',
+      onConfirm: async () => {
+        setAdjustingSaldo(true);
+        try {
+          const res = await api.adjustCustomerSaldo(selectedCustomer.id, target);
+          const parts: string[] = [
+            `Saldo actualizado a $${Number(res.newSaldo).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`
+          ];
+          if (res.clearedInvoices) {
+            if (res.invoicesRemoved > 0) parts.push(`${res.invoicesRemoved} factura(s) eliminada(s).`);
+            if (res.manualRemoved > 0) parts.push(`${res.manualRemoved} comprobante(s) manual(es) eliminado(s).`);
+            if (res.ordersUpdated > 0) parts.push(`${res.ordersUpdated} pedido(s) marcado(s) como pagados.`);
+            if (res.invoicesSkippedWithPayments > 0) {
+              parts.push(`${res.invoicesSkippedWithPayments} factura(s) con cobros quedaron marcadas como pagadas.`);
+            }
+          }
+          showToast('success', parts.join(' '));
+          setShowAdjustSaldoModal(false);
+          setAdjustSaldoInput('');
+          if (onUpdateCustomer && res.newOpeningBalance != null) {
+            await Promise.resolve(
+              onUpdateCustomer(selectedCustomer.id, {
+                openingBalance: res.newOpeningBalance,
+                ...(isZero ? { openingBalanceDate: undefined } : {})
+              })
+            );
+            setSelectedCustomer((prev) =>
+              prev && prev.id === selectedCustomer.id
+                ? {
+                    ...prev,
+                    openingBalance: res.newOpeningBalance,
+                    ...(isZero ? { openingBalanceDate: undefined } : {})
+                  }
+                : prev
+            );
+          }
+          await reloadSelectedCustomerLedger();
+          onRefreshData?.();
+        } catch (err: any) {
+          showToast('error', err?.response?.data?.message || err?.message || 'No se pudo ajustar el saldo');
+        } finally {
+          setAdjustingSaldo(false);
         }
       }
     });
@@ -1569,6 +1643,82 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
           </div>
         )}
 
+        {showAdjustSaldoModal && selectedCustomer && role === Role.ADMIN && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+            <div className="w-full max-w-md bg-slate-900 border border-amber-700/50 rounded-2xl shadow-2xl overflow-hidden">
+              <div className="p-4 border-b border-slate-800 flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-white font-bold">Editar saldo pendiente</h3>
+                  <p className="text-xs text-slate-400 mt-0.5 truncate">{selectedCustomer.businessName}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAdjustSaldoModal(false);
+                    setAdjustSaldoInput('');
+                  }}
+                  className="text-slate-400 hover:text-white shrink-0"
+                  disabled={adjustingSaldo}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="p-4 space-y-4">
+                <p className="text-sm text-slate-400 leading-relaxed">
+                  Saldo actual:{' '}
+                  <span className="text-white font-mono font-bold tabular-nums">
+                    ${getSaldoPendienteTotal(selectedCustomer).toLocaleString('es-AR', {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2
+                    })}
+                  </span>
+                </p>
+                <div>
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">
+                    Saldo objetivo ($)
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all font-mono text-sm"
+                    value={adjustSaldoInput}
+                    onChange={(e) => setAdjustSaldoInput(e.target.value)}
+                    placeholder="Ej: 0 o 150000"
+                    autoFocus
+                  />
+                </div>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Si ponés <span className="text-amber-300">0</span>, se eliminan las facturas sin recibos imputados y
+                  los comprobantes manuales del saldo. Para otro importe, se ajusta el saldo inicial para alcanzar el
+                  valor indicado.
+                </p>
+              </div>
+              <div className="p-4 border-t border-slate-800 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAdjustSaldoModal(false);
+                    setAdjustSaldoInput('');
+                  }}
+                  disabled={adjustingSaldo}
+                  className="flex-1 bg-slate-700 hover:bg-slate-600 text-white px-4 py-2.5 rounded-xl font-semibold disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAdjustSaldo}
+                  disabled={adjustingSaldo || !adjustSaldoInput.trim()}
+                  className="flex-1 bg-amber-700 hover:bg-amber-600 text-white px-4 py-2.5 rounded-xl font-bold disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {adjustingSaldo ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                  Guardar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {showFinancialExportModal && selectedCustomer && (
           <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
             <div className="w-full max-w-md bg-slate-900 border border-amber-700/50 rounded-2xl shadow-2xl overflow-hidden">
@@ -2121,19 +2271,35 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                     </>
                   )}
                 </p>
-                <button
-                  type="button"
-                  disabled={exportingFinancialSummary}
-                  onClick={() => setShowFinancialExportModal(true)}
-                  className="px-4 py-2.5 rounded-xl bg-amber-700 hover:bg-amber-600 text-white text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50 touch-manipulation"
-                >
-                  {exportingFinancialSummary ? (
-                    <Loader2 size={16} className="animate-spin" />
-                  ) : (
-                    <Download size={16} />
+                <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                  {role === Role.ADMIN && (
+                    <button
+                      type="button"
+                      disabled={adjustingSaldo || saldosLoading}
+                      onClick={() => {
+                        setAdjustSaldoInput(String(getSaldoPendienteTotal(selectedCustomer)));
+                        setShowAdjustSaldoModal(true);
+                      }}
+                      className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-amber-600/40 text-amber-100 text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50 touch-manipulation"
+                    >
+                      {adjustingSaldo ? <Loader2 size={16} className="animate-spin" /> : <Pencil size={16} />}
+                      Editar saldo
+                    </button>
                   )}
-                  Exportar Excel
-                </button>
+                  <button
+                    type="button"
+                    disabled={exportingFinancialSummary}
+                    onClick={() => setShowFinancialExportModal(true)}
+                    className="px-4 py-2.5 rounded-xl bg-amber-700 hover:bg-amber-600 text-white text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50 touch-manipulation"
+                  >
+                    {exportingFinancialSummary ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : (
+                      <Download size={16} />
+                    )}
+                    Exportar Excel
+                  </button>
+                </div>
               </div>
             </div>
 

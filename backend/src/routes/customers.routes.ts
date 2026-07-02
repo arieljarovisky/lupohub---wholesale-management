@@ -19,6 +19,7 @@ import {
   exportSaldosMovimientosSistemaXlsx,
   exportSaldosPendientesByCustomerSheetsXlsx,
   exportSaldosPendientesMultimediasXlsx,
+  adjustCustomerSaldo,
   clearDispatchedPendingsForCustomer,
   assignCustomerSellersFromResumen,
   exportCustomerDetailXlsx,
@@ -64,6 +65,7 @@ router.post('/import', authMiddleware as any, importCustomers as any);
 router.post('/bulk-update-cuit', authMiddleware as any, bulkUpdateCuit as any);
 router.post('/bulk-update-fields', authMiddleware as any, bulkUpdateCustomerFields as any);
 router.post('/:id/attach-user', authMiddleware as any, attachUserToCustomer as any);
+router.post('/:id/adjust-saldo', authMiddleware as any, adjustCustomerSaldo as any);
 router.post('/:id/clear-dispatched-pendings', authMiddleware as any, clearDispatchedPendingsForCustomer as any);
 router.get('/:id/financial-summary', authMiddleware as any, getCustomerFinancialSummary as any);
 router.get('/:id/financial-summary/export', authMiddleware as any, exportCustomerFinancialSummaryXlsx as any);
