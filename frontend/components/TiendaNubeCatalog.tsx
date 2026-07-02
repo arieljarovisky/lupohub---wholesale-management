@@ -710,6 +710,14 @@ function catalogVisibleColorVariants(variants: ColorVariant[]): ColorVariant[] {
   return variants.filter((cv) => cv.included !== false);
 }
 
+function findCatalogProduct(catalog: TnCatalog, productId: number): TiendaNubeCatalogProduct | null {
+  for (const section of catalog.sections) {
+    const p = section.products.find((x) => x.id === productId);
+    if (p) return p;
+  }
+  return null;
+}
+
 function resolveColorVariants(ov: ProductOverride | undefined, p: TiendaNubeCatalogProduct): ColorVariant[] {
   const fromTn = tnColorVariants(p);
   const tnByName = new Map(fromTn.map((c) => [c.name, c]));
@@ -1732,6 +1740,70 @@ const CatalogColorThumb: React.FC<{
   );
 };
 
+const EditableCatalogColorThumb: React.FC<{
+  cv: ColorVariant;
+  colorLabel: string;
+  hex: string;
+  onCrop: () => void;
+  onToggleVisible: () => void;
+  onUpload: (file: File) => void;
+}> = ({ cv, colorLabel, hex, onCrop, onToggleVisible, onUpload }) => {
+  const hidden = cv.included === false;
+  const hasImage = !!(cv.image || cv.sourceImage);
+  const uploadRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <div className={`tn-noprint flex flex-col items-start gap-1.5 ${hidden ? 'opacity-40' : ''}`}>
+      <div className="relative">
+        <div className="tn-color-thumb w-11 h-11 rounded-sm overflow-hidden bg-white border-2 border-emerald-400/60">
+          <CatalogColorThumb cv={cv} colorLabel={colorLabel} hex={hex} />
+        </div>
+        <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 flex items-center gap-0.5 bg-white rounded shadow border border-stone-200 px-0.5 py-0.5">
+          <button
+            type="button"
+            onClick={onCrop}
+            disabled={!hasImage}
+            className="w-5 h-5 rounded text-stone-700 flex items-center justify-center disabled:opacity-40 hover:bg-stone-100"
+            title={hasImage ? 'Recortar miniatura' : 'Sin foto para recortar'}
+          >
+            <Crop size={11} />
+          </button>
+          <button
+            type="button"
+            onClick={() => uploadRef.current?.click()}
+            className="w-5 h-5 rounded text-stone-700 flex items-center justify-center hover:bg-stone-100"
+            title="Subir imagen"
+          >
+            <Upload size={11} />
+          </button>
+          <button
+            type="button"
+            onClick={onToggleVisible}
+            className="w-5 h-5 rounded text-stone-700 flex items-center justify-center hover:bg-stone-100"
+            title={hidden ? 'Mostrar en catálogo' : 'Ocultar del catálogo'}
+          >
+            {hidden ? <Eye size={11} /> : <EyeOff size={11} />}
+          </button>
+        </div>
+        <input
+          ref={uploadRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) onUpload(file);
+            e.target.value = '';
+          }}
+        />
+      </div>
+      <span className="tn-color-name text-[8px] uppercase tracking-[0.14em] text-stone-500 font-light leading-tight max-w-[52px] truncate mt-2">
+        {colorLabel}
+      </span>
+    </div>
+  );
+};
+
 const ProductDisplay: React.FC<{
   product: DisplayProduct;
   flip: boolean;
@@ -1745,12 +1817,16 @@ const ProductDisplay: React.FC<{
   onEdit: () => void;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
-}> = ({ product, flip, showPrice, editMode, pickMode = false, headingFont, bodyFont, colors, onToggleInclude, onEdit, onMoveUp, onMoveDown }) => {
+  onColorCrop?: (cv: ColorVariant) => void;
+  onColorToggleVisible?: (cv: ColorVariant) => void;
+  onColorUpload?: (cv: ColorVariant, file: File) => void;
+}> = ({ product, flip, showPrice, editMode, pickMode = false, headingFont, bodyFont, colors, onToggleInclude, onEdit, onMoveUp, onMoveDown, onColorCrop, onColorToggleVisible, onColorUpload }) => {
   const img = resolveCatalogImageSrc(product.images[product.imageIndex] || product.images[0] || '');
   const selectionMode = editMode || pickMode;
   const dimmed = selectionMode && !product.included;
   const blurb = catalogBlurb(product.description, product.features);
   const visibleColors = catalogVisibleColorVariants(product.colorVariants);
+  const colorsToShow = editMode ? product.colorVariants : visibleColors;
   const fontStack = "'Montserrat', sans-serif";
   const iconProps = { size: 15, strokeWidth: 1.5 as const };
 
@@ -1858,12 +1934,30 @@ const ProductDisplay: React.FC<{
                 </CatalogDetailSection>
               )}
 
-              {visibleColors.length > 0 && (
+              {colorsToShow.length > 0 && (
                 <CatalogDetailSection icon={<Palette {...iconProps} />} label="Colores">
+                  {editMode && (
+                    <p className="tn-noprint text-[9px] text-stone-400 mb-2 leading-snug">
+                      Usá los botones debajo de cada miniatura para recortar, subir imagen u ocultar el color.
+                    </p>
+                  )}
                   <div className="flex flex-wrap justify-start gap-x-5 gap-y-3">
-                    {visibleColors.map((cv, i) => {
+                    {colorsToShow.map((cv, i) => {
                       const hex = colorToHex(cv.name);
                       const colorLabel = cv.name.replace(/^\d+\s*[·\-]?\s*/, '').trim() || cv.name;
+                      if (editMode && onColorCrop && onColorToggleVisible && onColorUpload) {
+                        return (
+                          <EditableCatalogColorThumb
+                            key={`${cv.name}-${i}`}
+                            cv={cv}
+                            colorLabel={colorLabel}
+                            hex={hex}
+                            onCrop={() => onColorCrop(cv)}
+                            onToggleVisible={() => onColorToggleVisible(cv)}
+                            onUpload={(file) => onColorUpload(cv, file)}
+                          />
+                        );
+                      }
                       return (
                         <div key={`${cv.name}-${i}`} className="flex flex-col items-start gap-1.5">
                           <div className="tn-color-thumb w-11 h-11 rounded-sm overflow-hidden bg-white border border-stone-200/90">
@@ -1941,6 +2035,11 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [autoCroppingColors, setAutoCroppingColors] = useState(false);
   const [configHydrated, setConfigHydrated] = useState(false);
+  const [inlineColorCrop, setInlineColorCrop] = useState<{
+    productId: number;
+    colorName: string;
+    sourceImage: string;
+  } | null>(null);
   const [selectedPriceListId, setSelectedPriceListId] = useState<string>(() => {
     try {
       return sessionStorage.getItem(SELLER_PRICE_LIST_KEY) || '';
@@ -2270,6 +2369,72 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
       products: { ...prev.products, [id]: { ...prev.products[id], ...patch } },
     }));
   };
+
+  const patchProductColorVariant = useCallback(
+    (productId: number, colorName: string, patch: Partial<ColorVariant>) => {
+      if (!catalog) return;
+      const tnProduct = findCatalogProduct(catalog, productId);
+      if (!tnProduct) return;
+      setConfig((prev) => {
+        const ov = prev.products[productId] || {};
+        const variants = resolveColorVariants(ov, tnProduct);
+        const updated = variants.map((cv) => (cv.name === colorName ? { ...cv, ...patch } : cv));
+        return {
+          ...prev,
+          products: {
+            ...prev.products,
+            [productId]: { ...ov, colorVariants: updated },
+          },
+        };
+      });
+    },
+    [catalog]
+  );
+
+  const handleInlineColorCrop = useCallback((productId: number, cv: ColorVariant) => {
+    const src = cv.sourceImage || cv.image;
+    if (!src) {
+      setError('Este color no tiene foto asignada en Tienda Nube.');
+      return;
+    }
+    setError('');
+    setInlineColorCrop({ productId, colorName: cv.name, sourceImage: src });
+  }, []);
+
+  const applyInlineColorCrop = useCallback(
+    async (blob: Blob) => {
+      if (!inlineColorCrop) return;
+      const file = new File([blob], `color-crop-${Date.now()}.jpg`, { type: 'image/jpeg' });
+      const url = await api.uploadCatalogImage(file);
+      patchProductColorVariant(inlineColorCrop.productId, inlineColorCrop.colorName, { image: url });
+      setInlineColorCrop(null);
+    },
+    [inlineColorCrop, patchProductColorVariant]
+  );
+
+  const handleInlineColorUpload = useCallback(
+    async (productId: number, cv: ColorVariant, file: File) => {
+      setError('');
+      try {
+        const url = await api.uploadCatalogImage(file);
+        patchProductColorVariant(productId, cv.name, {
+          image: url,
+          sourceImage: cv.sourceImage || url,
+        });
+      } catch (e: any) {
+        setError(e?.message || 'No se pudo subir la imagen del color');
+      }
+    },
+    [patchProductColorVariant]
+  );
+
+  const handleInlineColorToggle = useCallback(
+    (productId: number, cv: ColorVariant) => {
+      const visible = cv.included !== false;
+      patchProductColorVariant(productId, cv.name, { included: visible ? false : true });
+    },
+    [patchProductColorVariant]
+  );
 
   const toggleProduct = (id: number) => {
     setConfig((prev) => {
@@ -2644,7 +2809,7 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
             {isAdmin && editMode && (
               <p className="text-xs text-indigo-300 bg-indigo-950/40 border border-indigo-800/50 rounded-lg px-3 py-2">
                 Modo edición: usá el ojo para incluir/quitar productos, el lápiz para editar textos, colores e imágenes, y las flechas para reordenar.
-                En cada color podés ocultar variantes descontinuadas. Acordate de <strong>Guardar</strong> al terminar.
+                En cada miniatura de color podés recortar, subir imagen u ocultar variantes. Acordate de <strong>Guardar</strong> al terminar.
               </p>
             )}
             {isSeller && pickMode && (
@@ -2835,6 +3000,9 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
                           onEdit={() => setEditingProduct({ section, product: p })}
                           onMoveUp={editMode ? () => moveProduct(section.id, baseProdIds, p.id, -1) : undefined}
                           onMoveDown={editMode ? () => moveProduct(section.id, baseProdIds, p.id, 1) : undefined}
+                          onColorCrop={editMode ? (cv) => handleInlineColorCrop(p.id, cv) : undefined}
+                          onColorToggleVisible={editMode ? (cv) => handleInlineColorToggle(p.id, cv) : undefined}
+                          onColorUpload={editMode ? (cv, file) => void handleInlineColorUpload(p.id, cv, file) : undefined}
                         />
                       );
                     })}
@@ -2900,6 +3068,17 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
           colors={colors}
           onSave={(c) => setConfig((prev) => ({ ...prev, colors: c }))}
           onClose={() => setEditingColors(false)}
+        />
+      )}
+      {isAdmin && inlineColorCrop && (
+        <ImageCropModal
+          src={inlineColorCrop.sourceImage}
+          title={`Recortar color — ${inlineColorCrop.colorName.replace(/^\d+\s*[·\-]?\s*/, '').trim() || inlineColorCrop.colorName}`}
+          defaultAspect="1:1"
+          lockAspect
+          outputSize={COLOR_THUMB_SIZE}
+          onClose={() => setInlineColorCrop(null)}
+          onApply={applyInlineColorCrop}
         />
       )}
     </div>
