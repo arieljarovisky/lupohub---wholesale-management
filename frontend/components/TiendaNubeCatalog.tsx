@@ -390,6 +390,7 @@ interface CatalogConfig {
   cover: CoverConfig;
   colors: ColorsConfig;
   showPrice: boolean;
+  priceListId?: string;
   fontHeading: string;
   fontBody: string;
   sections: Record<string, SectionOverride>;
@@ -2012,7 +2013,7 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
     return () => clearTimeout(t);
   }, [isSeller, userId, selectedPriceListId, sellerOverrides]);
 
-  const effectiveShowPrice = isSeller ? !!selectedPriceListId : config.showPrice;
+  const effectiveShowPrice = isSeller ? !!selectedPriceListId : config.showPrice && !!selectedPriceListId;
   const selectedPriceListName = useMemo(
     () => priceLists.find((pl) => pl.id === selectedPriceListId)?.name || catalog?.priceListName || '',
     [priceLists, selectedPriceListId, catalog?.priceListName]
@@ -2031,7 +2032,7 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
   const dirty = useMemo(() => JSON.stringify(config) !== savedSnapshot, [config, savedSnapshot]);
 
   const load = useCallback(async (overridePriceListId?: string) => {
-    const priceListId = isSeller ? (overridePriceListId ?? selectedPriceListId) : '';
+    const priceListId = overridePriceListId ?? selectedPriceListId;
     if (isSeller && !priceListId) {
       setError('Elegí una lista de precios antes de generar el catálogo.');
       return;
@@ -2041,7 +2042,7 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
     try {
       const [data, cfgRes] = await Promise.all([
         api.getTiendaNubeCatalog(
-          isSeller && priceListId ? { priceListId } : undefined
+          priceListId ? { priceListId } : undefined
         ),
         api.getTiendaNubeCatalogConfig().catch(() => ({ config: null, updatedAt: null })),
       ]);
@@ -2061,6 +2062,9 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
       const isDirty = isAdmin && JSON.stringify(configRef.current) !== savedSnapshotRef.current;
       if (!isDirty) {
         setConfig(merged);
+        if (isAdmin && merged.priceListId) {
+          setSelectedPriceListId(merged.priceListId);
+        }
         const snap = JSON.stringify(merged);
         setSavedSnapshot(snap);
         savedSnapshotRef.current = snap;
@@ -2095,6 +2099,9 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
         const serverCfg = buildConfigFromResponse(res?.config, base);
         const merged = isAdmin ? mergeCatalogConfig(serverCfg, readCachedConfig()) : serverCfg;
         setConfig(merged);
+        if (isAdmin && merged.priceListId) {
+          setSelectedPriceListId(merged.priceListId);
+        }
         const snap = JSON.stringify(merged);
         setSavedSnapshot(snap);
         savedSnapshotRef.current = snap;
@@ -2107,6 +2114,9 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
           if (cached) {
             const merged = mergeCatalogConfig(defaultConfig(), cached);
             setConfig(merged);
+            if (merged.priceListId) {
+              setSelectedPriceListId(merged.priceListId);
+            }
             const snap = JSON.stringify(merged);
             setSavedSnapshot(snap);
             savedSnapshotRef.current = snap;
@@ -2211,10 +2221,19 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
 
   const handlePriceListChange = (id: string) => {
     setSelectedPriceListId(id);
-    try {
-      sessionStorage.setItem(SELLER_PRICE_LIST_KEY, id);
-    } catch {
-      /* ignore */
+    if (isSeller) {
+      try {
+        sessionStorage.setItem(SELLER_PRICE_LIST_KEY, id);
+      } catch {
+        /* ignore */
+      }
+    }
+    if (isAdmin) {
+      setConfig((p) => ({
+        ...p,
+        priceListId: id || undefined,
+        showPrice: id ? p.showPrice : false,
+      }));
     }
     setError('');
     if (id && catalog) {
@@ -2448,13 +2467,13 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
               {isAdmin && savedAt && (
                 <span className="ml-1 text-slate-500">· Guardado {new Date(savedAt).toLocaleString('es-AR')}</span>
               )}
-              {isSeller && selectedPriceListName && catalog && (
+              {(isSeller || isAdmin) && selectedPriceListName && catalog && (
                 <span className="ml-1 text-emerald-400">· Lista: {selectedPriceListName}</span>
               )}
             </p>
           </div>
           <div className="flex flex-wrap gap-2 lg:ml-auto">
-            {isSeller && (
+            {(isSeller || isAdmin) && priceLists.length > 0 && (
               <select
                 value={selectedPriceListId}
                 onChange={(e) => handlePriceListChange(e.target.value)}
@@ -2533,16 +2552,18 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
           </div>
         </div>
 
-        {(catalog || isSeller) && (
+        {(catalog || isSeller || isAdmin) && (
           <div className="mt-4 flex flex-col gap-3">
-            {isSeller && priceLists.length === 0 && (
+            {(isSeller || isAdmin) && priceLists.length === 0 && (
               <p className="text-xs text-amber-300 bg-amber-950/40 border border-amber-800/50 rounded-lg px-3 py-2">
-                No hay listas de precios disponibles. Pedile al administrador que las configure.
+                No hay listas de precios disponibles. Configuralas en Ajustes → Listas de precios.
               </p>
             )}
-            {isSeller && priceLists.length > 0 && !selectedPriceListId && (
+            {(isSeller || isAdmin) && priceLists.length > 0 && !selectedPriceListId && (
               <p className="text-xs text-amber-300 bg-amber-950/40 border border-amber-800/50 rounded-lg px-3 py-2">
-                Seleccioná una lista de precios para generar el catálogo con tus precios mayoristas.
+                {isSeller
+                  ? 'Seleccioná una lista de precios para generar el catálogo con tus precios mayoristas.'
+                  : 'Seleccioná una lista de precios para cargar precios en el catálogo. Sin lista, el botón «Con precios» no mostrará valores.'}
               </p>
             )}
             {catalog && (
@@ -2560,12 +2581,20 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
               </div>
               {isAdmin && (
               <button
-                onClick={() => setConfig((p) => ({ ...p, showPrice: !p.showPrice }))}
-                className={`min-h-[44px] px-3 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 border ${
-                  config.showPrice ? 'bg-amber-600 border-amber-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-200 hover:bg-slate-600'
+                onClick={() => {
+                  if (!selectedPriceListId) {
+                    setError('Elegí una lista de precios antes de activar la visualización de precios.');
+                    return;
+                  }
+                  setConfig((p) => ({ ...p, showPrice: !p.showPrice }));
+                }}
+                disabled={!selectedPriceListId}
+                title={selectedPriceListId ? undefined : 'Elegí una lista de precios primero'}
+                className={`min-h-[44px] px-3 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 border disabled:opacity-40 disabled:cursor-not-allowed ${
+                  config.showPrice && selectedPriceListId ? 'bg-amber-600 border-amber-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-200 hover:bg-slate-600'
                 }`}
               >
-                <DollarSign size={18} /> {config.showPrice ? 'Con precios' : 'Sin precios'}
+                <DollarSign size={18} /> {config.showPrice && selectedPriceListId ? 'Con precios' : 'Sin precios'}
               </button>
               )}
               {isAdmin && editMode && (
