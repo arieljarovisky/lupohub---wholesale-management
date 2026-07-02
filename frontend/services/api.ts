@@ -2081,15 +2081,33 @@ export const api = {
     previousSaldo: number;
     newSaldo: number;
     newOpeningBalance: number;
-    clearedInvoices: boolean;
-    invoicesRemoved: number;
-    invoicesSkippedWithPayments: number;
-    manualRemoved: number;
-    ordersUpdated: number;
   }> => {
     return await request(`/customers/${encodeURIComponent(customerId)}/adjust-saldo`, 'POST', {
       targetSaldo
     });
+  },
+
+  restoreCustomerAfipInvoices: async (
+    customerId: string,
+    params?: { maxScan?: number }
+  ): Promise<{
+    ok: boolean;
+    customerId: string;
+    customerName?: string;
+    restored: number;
+    pendingOrders: number;
+    stillPending: number;
+    scanned: number;
+    details: Array<{ orderId: string; cbteTipo: number; cbteDesde: number; cae: string }>;
+    message?: string;
+  }> => {
+    return await request(
+      `/customers/${encodeURIComponent(customerId)}/restore-afip-invoices`,
+      'POST',
+      params ?? {},
+      undefined,
+      180000
+    );
   },
 
   exportCustomerDetail: async (customerId: string, params?: { from?: string; to?: string }): Promise<void> => {

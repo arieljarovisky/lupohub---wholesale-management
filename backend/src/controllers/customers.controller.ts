@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 import { query, execute, get } from '../database/db';
 import { v4 as uuidv4 } from 'uuid';
-import { padLegacyCode } from '../utils/multimediaHistorialExcel';
+import { padLegacyCode, normalizeCuitDigits } from '../utils/multimediaHistorialExcel';
 import { canonicalizeCityInput } from '../utils/cityNormalize';
 import {
   backfillPaymentOrdersFromLegacy,
@@ -13,12 +13,18 @@ import {
   SQL_ORDER_NETO_AFIP,
   SQL_ORDER_SALDO_RESIDUAL,
   SQL_PAYMENT_SALDO_CONTRIBUTION_AMOUNT,
-  syncAllOrderPaymentStatusForCustomer,
   syncOrderPaymentStatus,
 } from '../services/orderPaymentBalance.service';
 import {
+  consultarComprobanteAfip,
+  getAfipPuntoVenta,
+  getLastAfipVoucherNumber,
+  isAfipConfigured
+} from '../services/afip.service';
+import {
   IVA_MULTIPLIER,
   ORDER_PRICES_INCLUDE_IVA,
+  invoiceLedgerImporte,
   sqlAmountWithIvaFromOrderLines,
   sqlInvoiceAmountFromOrderTotal,
   sqlNetoAfipToAmountWithIva
@@ -4398,84 +4404,9 @@ export const assignCustomerSellersFromResumen = async (req: Request, res: Respon
  *  - No toca pedidos ya facturados en AFIP
  *  - Recalcula total del pedido
  */
-/** Elimina facturas y comprobantes manuales del saldo cuando el objetivo es cero. */
-async function clearCustomerInvoiceDebtForSaldoZero(customerId: string): Promise<{
-  invoicesRemoved: number;
-  invoicesSkippedWithPayments: number;
-  manualRemoved: number;
-  ordersUpdated: number;
-}> {
-  let invoicesRemoved = 0;
-  let invoicesSkippedWithPayments = 0;
-  const ordersTouched = new Set<string>();
-
-  const invoices = (await query(
-    `SELECT i.id, i.order_id
-     FROM invoices i
-     INNER JOIN orders o ON o.id = i.order_id
-     WHERE o.customer_id = ?`,
-    [customerId]
-  )) as Array<{ id: string; order_id: string }>;
-
-  for (const inv of invoices) {
-    const linked = (await get(`SELECT 1 AS x FROM payment_invoices WHERE invoice_id = ? LIMIT 1`, [
-      inv.id
-    ])) as { x?: number } | undefined;
-    if (linked?.x) {
-      invoicesSkippedWithPayments++;
-      await execute(`UPDATE orders SET payment_status = 'pagado', include_in_saldo = 0 WHERE id = ?`, [
-        inv.order_id
-      ]);
-      ordersTouched.add(inv.order_id);
-    } else {
-      await execute(`DELETE FROM invoices WHERE id = ?`, [inv.id]);
-      await syncOrderPaymentStatus(inv.order_id);
-      invoicesRemoved++;
-      ordersTouched.add(inv.order_id);
-    }
-  }
-
-  const ordersInSaldo = (await query(
-    `SELECT o.id
-     FROM orders o
-     LEFT JOIN (${SQL_CN_TOTAL_SUBQUERY}) cn ON cn.order_id = o.id
-     WHERE o.customer_id = ?
-       AND ${SQL_ORDER_ACTIVE_COND}
-       AND (${SQL_ORDER_IN_SALDO_SCOPE})`,
-    [customerId]
-  )) as Array<{ id: string }>;
-
-  for (const row of ordersInSaldo) {
-    if (ordersTouched.has(row.id)) continue;
-    await execute(`UPDATE orders SET payment_status = 'pagado', include_in_saldo = 0 WHERE id = ?`, [
-      row.id
-    ]);
-    ordersTouched.add(row.id);
-  }
-
-  const manualBefore = (await get(
-    `SELECT COUNT(*) AS cnt FROM customer_manual_comprobantes WHERE customer_id = ? AND tipo IN ('FACTURA', 'NC')`,
-    [customerId]
-  )) as { cnt?: number } | undefined;
-  await execute(
-    `DELETE FROM customer_manual_comprobantes WHERE customer_id = ? AND tipo IN ('FACTURA', 'NC')`,
-    [customerId]
-  );
-  const manualRemoved = Number(manualBefore?.cnt || 0);
-
-  await syncAllOrderPaymentStatusForCustomer(customerId);
-
-  return {
-    invoicesRemoved,
-    invoicesSkippedWithPayments,
-    manualRemoved,
-    ordersUpdated: ordersTouched.size
-  };
-}
-
 /**
- * Ajusta el saldo pendiente unificado de un cliente.
- * Si el objetivo es 0, elimina facturas sin recibos imputados y comprobantes manuales del saldo.
+ * Ajusta el saldo pendiente unificado de un cliente modificando solo el saldo inicial.
+ * No elimina facturas ni comprobantes: el historial queda intacto.
  */
 export const adjustCustomerSaldo = async (req: Request, res: Response) => {
   try {
@@ -4503,24 +4434,13 @@ export const adjustCustomerSaldo = async (req: Request, res: Response) => {
     const before = await queryCarteraTotalsForCustomer(customerId, authUser);
     if (!before) return res.status(404).json({ message: 'Cliente no encontrado' });
 
-    let clearStats = {
-      invoicesRemoved: 0,
-      invoicesSkippedWithPayments: 0,
-      manualRemoved: 0,
-      ordersUpdated: 0
-    };
-
     if (Math.abs(targetSaldo) <= 0.005) {
-      clearStats = await clearCustomerInvoiceDebtForSaldoZero(customerId);
       await execute(`UPDATE customers SET opening_balance_date = NULL WHERE id = ?`, [customerId]);
     }
 
-    const afterClear = await queryCarteraTotalsForCustomer(customerId, authUser);
-    if (!afterClear) return res.status(500).json({ message: 'No se pudo recalcular el saldo' });
-
     const movementSaldo =
       Math.round(
-        (afterClear.orderCargosPendientes - afterClear.totalNotasCredito - afterClear.totalPagos) * 100
+        (before.orderCargosPendientes - before.totalNotasCredito - before.totalPagos) * 100
       ) / 100;
     const newOpeningBalance = Math.round((targetSaldo - movementSaldo) * 100) / 100;
 
@@ -4537,13 +4457,219 @@ export const adjustCustomerSaldo = async (req: Request, res: Response) => {
       targetSaldo,
       previousSaldo: before.saldoPendienteUnificado,
       newSaldo: after?.saldoPendienteUnificado ?? targetSaldo,
-      newOpeningBalance,
-      clearedInvoices: Math.abs(targetSaldo) <= 0.005,
-      ...clearStats
+      newOpeningBalance
     });
   } catch (error: any) {
     console.error('adjustCustomerSaldo:', error);
     return res.status(500).json({ message: 'Error ajustando saldo del cliente' });
+  }
+};
+
+function parseAfipCbteFchToYmd(v: unknown): string | null {
+  const s = String(v ?? '').replace(/\D/g, '');
+  if (s.length !== 8) return null;
+  return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+}
+
+function orderDateToYmd(v: unknown): string | null {
+  if (!v) return null;
+  if (v instanceof Date && !Number.isNaN(v.getTime())) return v.toISOString().slice(0, 10);
+  const s = String(v).trim();
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const ar = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (ar) return `${ar[3]}-${ar[2].padStart(2, '0')}-${ar[1].padStart(2, '0')}`;
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}
+
+function daysBetweenYmd(a: string, b: string): number {
+  const ta = new Date(`${a}T12:00:00Z`).getTime();
+  const tb = new Date(`${b}T12:00:00Z`).getTime();
+  return Math.round(Math.abs(ta - tb) / 86_400_000);
+}
+
+function extractAgipFromAfipVoucher(r: Record<string, unknown>): number {
+  const impTrib = Number(r.ImpTrib ?? r.impTrib ?? 0);
+  if (impTrib > 0.005) return Math.round(impTrib * 100) / 100;
+  const raw = (r.Tributos as { Tributo?: unknown } | undefined)?.Tributo ?? r.tributos;
+  const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
+  let sum = 0;
+  for (const t of list) {
+    const row = t as Record<string, unknown>;
+    sum += Number(row.Importe ?? row.importe ?? 0);
+  }
+  return Math.round(sum * 100) / 100;
+}
+
+function voucherDocNro(r: Record<string, unknown>): string {
+  return normalizeCuitDigits(String(r.DocNro ?? r.docNro ?? ''));
+}
+
+/**
+ * Re-vincula pedidos sin factura en LupoHub consultando comprobantes existentes en AFIP (mismo CUIT del cliente).
+ */
+export const restoreCustomerAfipInvoices = async (req: Request, res: Response) => {
+  try {
+    const authUser = (req as any).user;
+    if (!authUser || authUser.role !== 'ADMIN') {
+      return res.status(403).json({ message: 'Solo administradores pueden restaurar facturas' });
+    }
+    if (!isAfipConfigured()) {
+      return res.status(503).json({ message: 'AFIP no está configurado en el servidor' });
+    }
+
+    const customerId = String(req.params?.id || '').trim();
+    if (!customerId) return res.status(400).json({ message: 'ID de cliente requerido' });
+
+    const customer = (await get(`SELECT id, cuit, business_name, name FROM customers WHERE id = ?`, [
+      customerId
+    ])) as { id: string; cuit?: string | null; business_name?: string | null; name?: string | null } | undefined;
+    if (!customer) return res.status(404).json({ message: 'Cliente no encontrado' });
+
+    const customerCuit = normalizeCuitDigits(customer.cuit || '');
+    if (!customerCuit) {
+      return res.status(400).json({ message: 'El cliente no tiene CUIT cargado; no se puede buscar en AFIP' });
+    }
+
+    const maxScan = Math.min(
+      800,
+      Math.max(50, Number((req.body as { maxScan?: unknown })?.maxScan) || 400)
+    );
+    const puntoVta = getAfipPuntoVenta();
+
+    const pendingOrders = (await query(
+      `SELECT o.id, o.date, o.total
+       FROM orders o
+       WHERE o.customer_id = ?
+         AND o.status NOT IN ('Cancelado', 'Borrador')
+         AND (o.archived = 0 OR o.archived IS NULL)
+         AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
+       ORDER BY o.date ASC, o.id ASC`,
+      [customerId]
+    )) as Array<{ id: string; date: string | Date; total: number | string }>;
+
+    if (pendingOrders.length === 0) {
+      return res.json({
+        ok: true,
+        customerId,
+        restored: 0,
+        pendingOrders: 0,
+        scanned: 0,
+        message: 'No hay pedidos sin factura para restaurar'
+      });
+    }
+
+    const unmatched = new Map(
+      pendingOrders.map((o) => [
+        o.id,
+        {
+          id: o.id,
+          dateYmd: orderDateToYmd(o.date),
+          orderTotal: Number(o.total || 0)
+        }
+      ])
+    );
+
+    const restored: Array<{
+      orderId: string;
+      cbteTipo: number;
+      cbteDesde: number;
+      cae: string;
+    }> = [];
+    let scanned = 0;
+
+    for (const cbteTipo of [1, 6] as const) {
+      let last = 0;
+      try {
+        last = await getLastAfipVoucherNumber(puntoVta, cbteTipo);
+      } catch (err: any) {
+        console.warn('restoreCustomerAfipInvoices getLastVoucher:', err?.message || err);
+        continue;
+      }
+      const minNro = Math.max(1, last - maxScan + 1);
+      for (let cbteNro = last; cbteNro >= minNro; cbteNro -= 1) {
+        if (unmatched.size === 0) break;
+        scanned += 1;
+        let consulta: Awaited<ReturnType<typeof consultarComprobanteAfip>>;
+        try {
+          consulta = await consultarComprobanteAfip(puntoVta, cbteTipo, cbteNro);
+        } catch {
+          continue;
+        }
+        if (!consulta.existe || !consulta.resultado) continue;
+
+        const r = consulta.resultado as Record<string, unknown>;
+        if (voucherDocNro(r) !== customerCuit) continue;
+
+        const linked = (await get(
+          `SELECT i.id, i.order_id
+           FROM invoices i
+           WHERE i.punto_venta = ? AND i.cbte_tipo = ? AND i.cbte_desde = ?
+           LIMIT 1`,
+          [puntoVta, cbteTipo, cbteNro]
+        )) as { id: string; order_id: string } | undefined;
+        if (linked) {
+          unmatched.delete(linked.order_id);
+          continue;
+        }
+
+        const cbteFch = parseAfipCbteFchToYmd(r.CbteFch ?? r.cbteFch);
+        const impTotal = Math.round(Number(r.ImpTotal ?? r.impTotal ?? 0) * 100) / 100;
+        const agip = extractAgipFromAfipVoucher(r);
+
+        let bestOrderId: string | null = null;
+        let bestScore = Number.POSITIVE_INFINITY;
+        for (const [orderId, ord] of unmatched) {
+          if (!ord.dateYmd || !cbteFch) continue;
+          const dayDiff = daysBetweenYmd(ord.dateYmd, cbteFch);
+          if (dayDiff > 14) continue;
+          const expected = invoiceLedgerImporte(ord.orderTotal, agip);
+          const amountDiff = Math.abs(expected - impTotal);
+          if (amountDiff > 2.5) continue;
+          const score = dayDiff * 100 + amountDiff;
+          if (score < bestScore) {
+            bestScore = score;
+            bestOrderId = orderId;
+          }
+        }
+        if (!bestOrderId) continue;
+
+        const cae = String(r.CodAutorizacion ?? r.codAutorizacion ?? '').trim();
+        if (!cae) continue;
+
+        const caeFchVtoRaw = r.FchVto ?? r.fchVto ?? r.CaeFchVto ?? r.caeFchVto ?? null;
+        const caeFchVto =
+          caeFchVtoRaw != null && String(caeFchVtoRaw).trim() !== ''
+            ? String(caeFchVtoRaw).trim()
+            : null;
+        const cbteHasta = Number(r.CbteHasta ?? r.cbteHasta ?? cbteNro) || cbteNro;
+
+        const invoiceId = uuidv4();
+        await execute(
+          `INSERT INTO invoices (id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, agip_alicuota, agip_ret_per)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [invoiceId, bestOrderId, cae, caeFchVto, puntoVta, cbteTipo, cbteNro, cbteHasta, 0, agip]
+        );
+        await syncOrderPaymentStatus(bestOrderId);
+        unmatched.delete(bestOrderId);
+        restored.push({ orderId: bestOrderId, cbteTipo, cbteDesde: cbteNro, cae });
+      }
+    }
+
+    return res.json({
+      ok: true,
+      customerId,
+      customerName: customer.business_name || customer.name || customerId,
+      restored: restored.length,
+      pendingOrders: pendingOrders.length,
+      stillPending: unmatched.size,
+      scanned,
+      details: restored
+    });
+  } catch (error: any) {
+    console.error('restoreCustomerAfipInvoices:', error);
+    return res.status(500).json({ message: error?.message || 'Error restaurando facturas desde AFIP' });
   }
 };
 

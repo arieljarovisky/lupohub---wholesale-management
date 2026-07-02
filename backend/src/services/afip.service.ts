@@ -919,6 +919,34 @@ export async function getCondicionIvaByCuit(cuit: string): Promise<CondicionIvaR
  * Si AFIP responde con datos del comprobante → la factura está registrada.
  * @returns Objeto con existe, datos del comprobante (si existe) y posible error de AFIP.
  */
+export function getAfipPuntoVenta(): number {
+  return getConfig().puntoVta;
+}
+
+/** Último comprobante autorizado en AFIP para punto de venta y tipo. */
+export async function getLastAfipVoucherNumber(puntoVta: number, cbteTipo: number): Promise<number> {
+  let Afip: any;
+  try {
+    Afip = (await import('@afipsdk/afip.js')).default;
+  } catch {
+    throw new Error('Paquete AFIP no instalado. Ejecutá: npm install @afipsdk/afip.js');
+  }
+  const config = getConfig();
+  const afipOptions: Record<string, unknown> = {
+    CUIT: config.cuit,
+    production: config.production
+  };
+  if (config.accessToken) afipOptions.access_token = config.accessToken;
+  if (config.cert && config.key) {
+    afipOptions.cert = config.cert;
+    afipOptions.key = config.key;
+  }
+  const afip = new Afip(afipOptions);
+  return withAfipRetry(`getLastVoucher ${puntoVta}/${cbteTipo}`, () =>
+    afip.ElectronicBilling.getLastVoucher(puntoVta, cbteTipo) as Promise<number>
+  );
+}
+
 export async function consultarComprobanteAfip(
   puntoVta: number,
   cbteTipo: number,

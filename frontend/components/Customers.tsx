@@ -282,6 +282,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [showAdjustSaldoModal, setShowAdjustSaldoModal] = useState(false);
   const [adjustSaldoInput, setAdjustSaldoInput] = useState('');
   const [adjustingSaldo, setAdjustingSaldo] = useState(false);
+  const [restoringAfipInvoices, setRestoringAfipInvoices] = useState(false);
 
   useEffect(() => {
     setShowFinancialExportModal(false);
@@ -849,25 +850,17 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     showConfirm({
       title: isZero ? 'Poner saldo en cero' : 'Ajustar saldo del cliente',
       message: isZero
-        ? `¿Poner el saldo de ${selectedCustomer.businessName || selectedCustomer.name} en $0,00? Se eliminarán las facturas sin recibos imputados y los comprobantes manuales del saldo. Las facturas con cobros asociados quedarán marcadas como pagadas. Saldo actual: $${current.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`
+        ? `¿Poner el saldo de ${selectedCustomer.businessName || selectedCustomer.name} en $0,00? Se ajustará el saldo inicial sin borrar facturas ni comprobantes. Saldo actual: $${current.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`
         : `¿Ajustar el saldo de ${selectedCustomer.businessName || selectedCustomer.name} a $${target.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}? Se modificará el saldo inicial para alcanzar ese valor. Saldo actual: $${current.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`,
       confirmLabel: isZero ? 'Poner en cero' : 'Ajustar saldo',
       onConfirm: async () => {
         setAdjustingSaldo(true);
         try {
           const res = await api.adjustCustomerSaldo(selectedCustomer.id, target);
-          const parts: string[] = [
+          showToast(
+            'success',
             `Saldo actualizado a $${Number(res.newSaldo).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`
-          ];
-          if (res.clearedInvoices) {
-            if (res.invoicesRemoved > 0) parts.push(`${res.invoicesRemoved} factura(s) eliminada(s).`);
-            if (res.manualRemoved > 0) parts.push(`${res.manualRemoved} comprobante(s) manual(es) eliminado(s).`);
-            if (res.ordersUpdated > 0) parts.push(`${res.ordersUpdated} pedido(s) marcado(s) como pagados.`);
-            if (res.invoicesSkippedWithPayments > 0) {
-              parts.push(`${res.invoicesSkippedWithPayments} factura(s) con cobros quedaron marcadas como pagadas.`);
-            }
-          }
-          showToast('success', parts.join(' '));
+          );
           setShowAdjustSaldoModal(false);
           setAdjustSaldoInput('');
           if (onUpdateCustomer && res.newOpeningBalance != null) {
@@ -1688,9 +1681,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   />
                 </div>
                 <p className="text-xs text-slate-500 leading-relaxed">
-                  Si ponés <span className="text-amber-300">0</span>, se eliminan las facturas sin recibos imputados y
-                  los comprobantes manuales del saldo. Para otro importe, se ajusta el saldo inicial para alcanzar el
-                  valor indicado.
+                  Si ponés <span className="text-amber-300">0</span>, se ajusta el saldo inicial para llegar a cero.
+                  Las facturas y comprobantes no se eliminan.
                 </p>
               </div>
               <div className="p-4 border-t border-slate-800 flex gap-3">
@@ -2272,6 +2264,51 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   )}
                 </p>
                 <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                  {role === Role.ADMIN && (
+                    <button
+                      type="button"
+                      disabled={restoringAfipInvoices || saldosLoading}
+                      onClick={() => {
+                        showConfirm({
+                          title: 'Restaurar facturas desde AFIP',
+                          message: `¿Buscar en AFIP las facturas de ${selectedCustomer.businessName || selectedCustomer.name} y volver a vincularlas a los pedidos? Puede tardar unos minutos.`,
+                          confirmLabel: 'Restaurar',
+                          onConfirm: async () => {
+                            setRestoringAfipInvoices(true);
+                            try {
+                              const res = await api.restoreCustomerAfipInvoices(selectedCustomer.id);
+                              if (res.restored > 0) {
+                                showToast(
+                                  'success',
+                                  `${res.restored} factura(s) restaurada(s). Quedan ${res.stillPending} pedido(s) sin factura.`
+                                );
+                              } else if (res.pendingOrders === 0) {
+                                showToast('success', res.message || 'No hay pedidos sin factura.');
+                              } else {
+                                showToast(
+                                  'warning',
+                                  `No se encontraron comprobantes en AFIP para los ${res.pendingOrders} pedido(s) pendientes (se consultaron ${res.scanned} números).`
+                                );
+                              }
+                              await reloadSelectedCustomerLedger();
+                              onRefreshData?.();
+                            } catch (err: any) {
+                              showToast(
+                                'error',
+                                err?.response?.data?.message || err?.message || 'No se pudieron restaurar las facturas'
+                              );
+                            } finally {
+                              setRestoringAfipInvoices(false);
+                            }
+                          }
+                        });
+                      }}
+                      className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-sky-600/40 text-sky-100 text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50 touch-manipulation"
+                    >
+                      {restoringAfipInvoices ? <Loader2 size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />}
+                      Restaurar facturas AFIP
+                    </button>
+                  )}
                   {role === Role.ADMIN && (
                     <button
                       type="button"
