@@ -4434,10 +4434,6 @@ export const adjustCustomerSaldo = async (req: Request, res: Response) => {
     const before = await queryCarteraTotalsForCustomer(customerId, authUser);
     if (!before) return res.status(404).json({ message: 'Cliente no encontrado' });
 
-    if (Math.abs(targetSaldo) <= 0.005) {
-      await execute(`UPDATE customers SET opening_balance_date = NULL WHERE id = ?`, [customerId]);
-    }
-
     const movementSaldo =
       Math.round(
         (before.orderCargosPendientes - before.totalNotasCredito - before.totalPagos) * 100
@@ -4456,6 +4452,7 @@ export const adjustCustomerSaldo = async (req: Request, res: Response) => {
       customerId,
       targetSaldo,
       previousSaldo: before.saldoPendienteUnificado,
+      previousOpeningBalance: before.openingBalance,
       newSaldo: after?.saldoPendienteUnificado ?? targetSaldo,
       newOpeningBalance
     });
@@ -4481,6 +4478,11 @@ function orderDateToYmd(v: unknown): string | null {
   if (ar) return `${ar[3]}-${ar[2].padStart(2, '0')}-${ar[1].padStart(2, '0')}`;
   const d = new Date(s);
   return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}
+
+function ymdToMysqlDatetime(ymd: string | null | undefined): string | null {
+  if (!ymd) return null;
+  return `${ymd} 12:00:00`;
 }
 
 function daysBetweenYmd(a: string, b: string): number {
@@ -4571,13 +4573,19 @@ async function insertRestoredLupohubInvoice(params: {
   cbteHasta: number;
   agipRetPer: number;
   agipAlicuota?: number;
+  /** Fecha real del comprobante (AFIP o pedido) para el historial; evita agrupar todo en la fecha de restauración. */
+  invoiceCreatedAt?: string | null;
 }): Promise<void> {
   const existing = await get(`SELECT id FROM invoices WHERE order_id = ? LIMIT 1`, [params.orderId]);
   if (existing) return;
   const invoiceId = uuidv4();
+  const createdAt =
+    params.invoiceCreatedAt && String(params.invoiceCreatedAt).trim()
+      ? String(params.invoiceCreatedAt).trim()
+      : null;
   await execute(
-    `INSERT INTO invoices (id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, agip_alicuota, agip_ret_per)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO invoices (id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, agip_alicuota, agip_ret_per${createdAt ? ', created_at' : ''})
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?${createdAt ? ', ?' : ''})`,
     [
       invoiceId,
       params.orderId,
@@ -4588,10 +4596,25 @@ async function insertRestoredLupohubInvoice(params: {
       params.cbteDesde,
       params.cbteHasta,
       params.agipAlicuota ?? 0,
-      params.agipRetPer
+      params.agipRetPer,
+      ...(createdAt ? [createdAt] : [])
     ]
   );
   await syncOrderPaymentStatus(params.orderId);
+}
+
+/** Corrige facturas restauradas cuya created_at quedó en la fecha de restauración en lugar de la del pedido. */
+async function fixRestoredInvoiceDatesForCustomer(customerId: string): Promise<number> {
+  const result = await execute(
+    `UPDATE invoices i
+     INNER JOIN orders o ON o.id = i.order_id
+     SET i.created_at = o.date
+     WHERE o.customer_id = ?
+       AND o.date IS NOT NULL
+       AND i.created_at > DATE_ADD(o.date, INTERVAL 3 DAY)`,
+    [customerId]
+  );
+  return Number((result as { affectedRows?: number })?.affectedRows ?? 0);
 }
 
 async function restoreLupohubInvoiceFromAfipVoucher(
@@ -4609,6 +4632,12 @@ async function restoreLupohubInvoiceFromAfipVoucher(
   let caeFchVto: string | null = null;
   let cbteHasta = cbteDesde;
   let agip = 0;
+  let invoiceDateYmd: string | null = null;
+
+  const orderRow = (await get(`SELECT date FROM orders WHERE id = ?`, [orderId])) as
+    | { date?: string | Date | null }
+    | undefined;
+  invoiceDateYmd = orderDateToYmd(orderRow?.date);
 
   if (isAfipConfigured()) {
     try {
@@ -4623,6 +4652,8 @@ async function restoreLupohubInvoiceFromAfipVoucher(
             : null;
         cbteHasta = Number(r.CbteHasta ?? r.cbteHasta ?? cbteDesde) || cbteDesde;
         agip = extractAgipFromAfipVoucher(r);
+        const cbteFch = parseAfipCbteFchToYmd(r.CbteFch ?? r.cbteFch);
+        if (cbteFch) invoiceDateYmd = cbteFch;
       }
     } catch {
       // Si AFIP no responde pero tenemos CAE del snapshot interno, igual insertamos.
@@ -4639,7 +4670,8 @@ async function restoreLupohubInvoiceFromAfipVoucher(
     cbteTipo,
     cbteDesde,
     cbteHasta,
-    agipRetPer: agip
+    agipRetPer: agip,
+    invoiceCreatedAt: ymdToMysqlDatetime(invoiceDateYmd)
   });
 
   return { orderId, cbteTipo, cbteDesde, puntoVenta: puntoVta, cae, source: knownCae ? 'credit_note_snapshot' : 'afip' };
@@ -4824,7 +4856,8 @@ async function restoreFromAfipScan(
           cbteTipo,
           cbteDesde: cbteNro,
           cbteHasta,
-          agipRetPer: agip
+          agipRetPer: agip,
+          invoiceCreatedAt: ymdToMysqlDatetime(cbteFch)
         });
         unmatched.delete(bestOrderId);
         restored.push({
@@ -4853,6 +4886,7 @@ async function restoreLupohubInvoicesForCustomerId(
   stillPending: number;
   scanned: number;
   details: RestoredInvoiceRow[];
+  invoiceDatesFixed?: number;
   message?: string;
 }> {
   const customer = (await get(
@@ -4878,7 +4912,9 @@ async function restoreLupohubInvoicesForCustomerId(
 
   const maxScan = Math.min(2500, Math.max(100, Number(opts?.maxScan) || 1200));
   const pendingOrders = await fetchPendingLupohubOrders(customerId);
+
   if (pendingOrders.length === 0) {
+    const invoiceDatesFixed = await fixRestoredInvoiceDatesForCustomer(customerId);
     return {
       customerId,
       customerName: customer.business_name || customer.name || customerId,
@@ -4887,7 +4923,11 @@ async function restoreLupohubInvoicesForCustomerId(
       stillPending: 0,
       scanned: 0,
       details: [],
-      message: 'No hay pedidos LupoHub sin factura para restaurar'
+      invoiceDatesFixed,
+      message:
+        invoiceDatesFixed > 0
+          ? `Se corrigieron ${invoiceDatesFixed} fecha(s) de factura restaurada(s)`
+          : 'No hay pedidos LupoHub sin factura para restaurar'
     };
   }
 
@@ -4912,6 +4952,8 @@ async function restoreLupohubInvoicesForCustomerId(
     scanned = afip.scanned;
   }
 
+  const invoiceDatesFixed = await fixRestoredInvoiceDatesForCustomer(customerId);
+
   return {
     customerId,
     customerName: customer.business_name || customer.name || customerId,
@@ -4919,7 +4961,8 @@ async function restoreLupohubInvoicesForCustomerId(
     pendingOrders: pendingOrders.length,
     stillPending: unmatched.size,
     scanned,
-    details
+    details,
+    invoiceDatesFixed
   };
 }
 

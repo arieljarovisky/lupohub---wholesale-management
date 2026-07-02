@@ -848,11 +848,15 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     }
     const isZero = Math.abs(target) <= 0.005;
     const current = getSaldoPendienteTotal(selectedCustomer);
+    const currentOpening =
+      selectedCustomer.openingBalance != null && Number.isFinite(Number(selectedCustomer.openingBalance))
+        ? Number(selectedCustomer.openingBalance)
+        : 0;
     showConfirm({
       title: isZero ? 'Poner saldo en cero' : 'Ajustar saldo del cliente',
       message: isZero
-        ? `¿Poner el saldo de ${selectedCustomer.businessName || selectedCustomer.name} en $0,00? Se ajustará el saldo inicial sin borrar facturas ni comprobantes. Saldo actual: $${current.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`
-        : `¿Ajustar el saldo de ${selectedCustomer.businessName || selectedCustomer.name} a $${target.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}? Se modificará el saldo inicial para alcanzar ese valor. Saldo actual: $${current.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`,
+        ? `¿Poner el saldo de ${selectedCustomer.businessName || selectedCustomer.name} en $0,00? Se modificará el saldo inicial manual (actual: $${currentOpening.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) para compensar facturas y recibos. No se borran comprobantes. Saldo pendiente actual: $${current.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`
+        : `¿Ajustar el saldo de ${selectedCustomer.businessName || selectedCustomer.name} a $${target.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}? Se modificará el saldo inicial manual (actual: $${currentOpening.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) para alcanzar ese valor. Saldo pendiente actual: $${current.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`,
       confirmLabel: isZero ? 'Poner en cero' : 'Ajustar saldo',
       onConfirm: async () => {
         setAdjustingSaldo(true);
@@ -860,23 +864,21 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
           const res = await api.adjustCustomerSaldo(selectedCustomer.id, target);
           showToast(
             'success',
-            `Saldo actualizado a $${Number(res.newSaldo).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`
+            `Saldo actualizado a $${Number(res.newSaldo).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. Saldo inicial: $${Number(res.newOpeningBalance).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`
           );
           setShowAdjustSaldoModal(false);
           setAdjustSaldoInput('');
           if (onUpdateCustomer && res.newOpeningBalance != null) {
             await Promise.resolve(
               onUpdateCustomer(selectedCustomer.id, {
-                openingBalance: res.newOpeningBalance,
-                ...(isZero ? { openingBalanceDate: undefined } : {})
+                openingBalance: res.newOpeningBalance
               })
             );
             setSelectedCustomer((prev) =>
               prev && prev.id === selectedCustomer.id
                 ? {
                     ...prev,
-                    openingBalance: res.newOpeningBalance,
-                    ...(isZero ? { openingBalanceDate: undefined } : {})
+                    openingBalance: res.newOpeningBalance
                   }
                 : prev
             );
@@ -2208,11 +2210,12 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                         : '';
                       return (
                         <span className="text-amber-300/90">
-                          + Saldo inicial{dateLabel}: $
-                          {ob.toLocaleString('es-AR', {
+                          {ob >= 0 ? '+' : '−'} Saldo inicial{dateLabel}: $
+                          {Math.abs(ob).toLocaleString('es-AR', {
                             minimumFractionDigits: 2,
                             maximumFractionDigits: 2
                           })}
+                          {ob < 0 ? ' (a favor del cliente)' : ''}
                         </span>
                       );
                     })()}
