@@ -360,6 +360,9 @@ interface ProductOverride {
   imageIndex?: number;
   /** Si está presente, reemplaza por completo la lista de imágenes (TN + propias). */
   images?: string[];
+  /** Precio manual para el catálogo (reemplaza el de la lista al mostrar). */
+  price?: number | null;
+  promotionalPrice?: number | null;
 }
 
 interface SectionOverride {
@@ -678,6 +681,13 @@ function formatPrice(n: number | null): string {
   }
 }
 
+function parsePriceInput(value: string): number | null {
+  const trimmed = value.trim().replace(/\./g, '').replace(',', '.');
+  if (!trimmed) return null;
+  const n = Number(trimmed);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : null;
+}
+
 /* ===================== Modelo de producto para mostrar ===================== */
 
 interface DisplayProduct {
@@ -765,8 +775,8 @@ function mergeProduct(p: TiendaNubeCatalogProduct, ov: ProductOverride | undefin
     articleCode: ov?.articleCode ?? p.articleCode,
     images,
     imageIndex,
-    price: p.price,
-    promotionalPrice: p.promotionalPrice,
+    price: ov?.price !== undefined ? ov.price : p.price,
+    promotionalPrice: ov?.promotionalPrice !== undefined ? ov.promotionalPrice : p.promotionalPrice,
     included: ov?.included !== false,
   };
 }
@@ -806,6 +816,7 @@ const ProductEditorModal: React.FC<{
   const [sizesText, setSizesText] = useState(merged.sizesText);
   const [colorVariants, setColorVariants] = useState<ColorVariant[]>(merged.colorVariants);
   const [articleCode, setArticleCode] = useState(merged.articleCode);
+  const [price, setPrice] = useState(merged.price != null ? String(merged.price) : '');
   const [images, setImages] = useState<string[]>(merged.images);
   const [imageIndex, setImageIndex] = useState(merged.imageIndex);
   const [uploading, setUploading] = useState(false);
@@ -864,7 +875,8 @@ const ProductEditorModal: React.FC<{
   };
 
   const save = () => {
-    onSave({
+    const parsedPrice = parsePriceInput(price);
+    const next: ProductOverride = {
       ...override,
       included: override?.included,
       name: name.trim(),
@@ -876,7 +888,13 @@ const ProductEditorModal: React.FC<{
       articleCode: articleCode.trim(),
       images,
       imageIndex: Math.min(imageIndex, Math.max(0, images.length - 1)),
-    });
+    };
+    if (parsedPrice !== null) {
+      next.price = parsedPrice;
+    } else {
+      delete next.price;
+    }
+    onSave(next);
     onClose();
   };
 
@@ -889,6 +907,7 @@ const ProductEditorModal: React.FC<{
     setSizesText(product.sizes.join('  ·  '));
     setColorVariants(tnColorVariants(product));
     setArticleCode(product.articleCode);
+    setPrice(product.price != null ? String(product.price) : '');
     setImages(product.images);
     setImageIndex(0);
   };
@@ -977,6 +996,20 @@ const ProductEditorModal: React.FC<{
             <div>
               <label className={labelCls}>Código de artículo</label>
               <input className={inputCls} value={articleCode} onChange={(e) => setArticleCode(e.target.value)} />
+            </div>
+            <div>
+              <label className={labelCls}>Precio en catálogo</label>
+              <input
+                className={inputCls}
+                type="text"
+                inputMode="numeric"
+                placeholder={product.price != null ? String(product.price) : 'Sin precio'}
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+              />
+              <p className="text-[10px] text-slate-500 mt-1">
+                Dejá vacío para usar el precio de la lista al actualizar el catálogo.
+              </p>
             </div>
           </div>
 
@@ -1934,7 +1967,10 @@ const ProductDisplay: React.FC<{
   onColorCrop?: (cv: ColorVariant) => void;
   onColorToggleVisible?: (cv: ColorVariant) => void;
   onColorUpload?: (cv: ColorVariant, file: File) => void;
-}> = ({ product, flip, showPrice, editMode, pickMode = false, headingFont, bodyFont, colors, onToggleInclude, onEdit, onMoveUp, onMoveDown, onColorCrop, onColorToggleVisible, onColorUpload }) => {
+  onPriceChange?: (price: number | null) => void;
+  onPriceReset?: () => void;
+  priceOverridden?: boolean;
+}> = ({ product, flip, showPrice, editMode, pickMode = false, headingFont, bodyFont, colors, onToggleInclude, onEdit, onMoveUp, onMoveDown, onColorCrop, onColorToggleVisible, onColorUpload, onPriceChange, onPriceReset, priceOverridden = false }) => {
   const img = resolveCatalogImageSrc(product.images[product.imageIndex] || product.images[0] || '');
   const selectionMode = editMode || pickMode;
   const dimmed = selectionMode && !product.included;
@@ -2002,7 +2038,31 @@ const ProductDisplay: React.FC<{
                 {product.name}
               </h3>
 
-              {showPrice && product.price != null && (
+              {editMode && onPriceChange ? (
+                <div className="tn-noprint mb-4 max-w-[200px]">
+                  <label className="text-[9px] uppercase tracking-[0.22em] text-stone-400 block mb-1.5">Precio</label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-stone-500 text-sm">$</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={product.price != null ? String(product.price) : ''}
+                      placeholder="Sin precio"
+                      onChange={(e) => onPriceChange(parsePriceInput(e.target.value))}
+                      className="flex-1 min-w-0 bg-white border border-emerald-400/70 rounded-lg px-2.5 py-1.5 text-stone-800 text-sm font-medium outline-none focus:ring-2 focus:ring-emerald-400"
+                    />
+                  </div>
+                  {priceOverridden && onPriceReset && (
+                    <button
+                      type="button"
+                      onClick={onPriceReset}
+                      className="mt-1.5 text-[10px] text-sky-600 hover:text-sky-800 font-semibold"
+                    >
+                      Restaurar precio de lista
+                    </button>
+                  )}
+                </div>
+              ) : showPrice && product.price != null ? (
                 <p className="text-[12px] text-stone-700 mb-4 font-medium">
                   {product.promotionalPrice != null ? (
                     <>
@@ -2013,7 +2073,7 @@ const ProductDisplay: React.FC<{
                     formatPrice(product.price)
                   )}
                 </p>
-              )}
+              ) : null}
 
               {(blurb || product.features.length > 0) && (
                 <div className="tn-product-copy space-y-3 max-w-[94%]">
@@ -2550,6 +2610,35 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
     [patchProductColorVariant]
   );
 
+  const handleProductPriceChange = useCallback((productId: number, price: number | null) => {
+    setConfig((prev) => {
+      const ov = prev.products[productId] || {};
+      const next = { ...ov };
+      if (price !== null) {
+        next.price = price;
+      } else {
+        delete next.price;
+      }
+      return {
+        ...prev,
+        products: { ...prev.products, [productId]: next },
+      };
+    });
+  }, []);
+
+  const resetProductPrice = useCallback((productId: number) => {
+    setConfig((prev) => {
+      const ov = prev.products[productId];
+      if (!ov || ov.price === undefined) return prev;
+      const next = { ...ov };
+      delete next.price;
+      return {
+        ...prev,
+        products: { ...prev.products, [productId]: next },
+      };
+    });
+  }, []);
+
   const toggleProduct = (id: number) => {
     setConfig((prev) => {
       const cur = prev.products[id]?.included !== false;
@@ -2923,7 +3012,7 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
             {isAdmin && editMode && (
               <p className="text-xs text-indigo-300 bg-indigo-950/40 border border-indigo-800/50 rounded-lg px-3 py-2">
                 Modo edición: usá el ojo para incluir/quitar productos, el lápiz para editar textos, colores e imágenes, y las flechas para reordenar.
-                En cada miniatura de color podés recortar, subir imagen u ocultar variantes. Acordate de <strong>Guardar</strong> al terminar.
+                En cada miniatura de color podés recortar, subir imagen u ocultar variantes. El precio se edita directo en la ficha del producto. Acordate de <strong>Guardar</strong> al terminar.
               </p>
             )}
             {isSeller && pickMode && (
@@ -3117,6 +3206,9 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
                           onColorCrop={editMode ? (cv) => handleInlineColorCrop(p.id, cv) : undefined}
                           onColorToggleVisible={editMode ? (cv) => handleInlineColorToggle(p.id, cv) : undefined}
                           onColorUpload={editMode ? (cv, file) => void handleInlineColorUpload(p.id, cv, file) : undefined}
+                          onPriceChange={editMode ? (price) => handleProductPriceChange(p.id, price) : undefined}
+                          onPriceReset={editMode ? () => resetProductPrice(p.id) : undefined}
+                          priceOverridden={config.products[p.id]?.price !== undefined}
                         />
                       );
                     })}
