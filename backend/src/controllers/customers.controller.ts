@@ -4438,9 +4438,9 @@ async function clearCustomerInvoiceDebtForSaldoZero(customerId: string): Promise
   const ordersInSaldo = (await query(
     `SELECT o.id
      FROM orders o
+     LEFT JOIN (${SQL_CN_TOTAL_SUBQUERY}) cn ON cn.order_id = o.id
      WHERE o.customer_id = ?
-       AND o.status NOT IN ('Cancelado', 'Borrador')
-       AND (o.archived = 0 OR o.archived IS NULL)
+       AND ${SQL_ORDER_ACTIVE_COND}
        AND (${SQL_ORDER_IN_SALDO_SCOPE})`,
     [customerId]
   )) as Array<{ id: string }>;
