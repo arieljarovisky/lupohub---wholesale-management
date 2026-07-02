@@ -808,6 +808,7 @@ const ProductEditorModal: React.FC<{
   const [images, setImages] = useState<string[]>(merged.images);
   const [imageIndex, setImageIndex] = useState(merged.imageIndex);
   const [uploading, setUploading] = useState(false);
+  const [uploadingColorIdx, setUploadingColorIdx] = useState<number | null>(null);
   const [uploadError, setUploadError] = useState('');
   const [croppingIndex, setCroppingIndex] = useState<number | null>(null);
   const [croppingColorIdx, setCroppingColorIdx] = useState<number | null>(null);
@@ -903,13 +904,26 @@ const ProductEditorModal: React.FC<{
   };
 
   const startColorCrop = (colorIdx: number) => {
-    const src = colorVariants[colorIdx]?.sourceImage;
+    const src = colorVariants[colorIdx]?.image || colorVariants[colorIdx]?.sourceImage;
     if (!src) {
-      setUploadError('Este color no tiene foto asignada en Tienda Nube.');
+      setUploadError('Subí una foto o elegí un color con imagen en Tienda Nube.');
       return;
     }
     setUploadError('');
     setCroppingColorIdx(colorIdx);
+  };
+
+  const handleColorImageUpload = async (colorIdx: number, file: File) => {
+    setUploadError('');
+    setUploadingColorIdx(colorIdx);
+    try {
+      const url = await api.uploadCatalogImage(file);
+      updateColorVariant(colorIdx, { image: url, sourceImage: url });
+    } catch (err: any) {
+      setUploadError(err?.message || 'No se pudo subir la imagen del color');
+    } finally {
+      setUploadingColorIdx(null);
+    }
   };
 
   const applyCroppedColorImage = async (colorIdx: number, blob: Blob) => {
@@ -1000,8 +1014,9 @@ const ProductEditorModal: React.FC<{
                   </button>
                 </div>
                 <p className="text-[10px] text-slate-500 mb-2">
-                  Las miniaturas se recortan solas al producto. Usá el ojo para ocultar colores descontinuados.
+                  Tocá la miniatura o usá «Cambiar foto» para reemplazar la imagen de cada color. También podés recortarla.
                 </p>
+                {uploadError && <p className="text-red-400 text-xs mb-2">{uploadError}</p>}
                 {colorVariants.some((cv) => (cv.stock ?? 0) <= 0) && (
                   <button
                     type="button"
@@ -1022,6 +1037,7 @@ const ProductEditorModal: React.FC<{
                   {colorVariants.map((cv, idx) => {
                     const preview = cv.image || cv.sourceImage;
                     const colorVisible = cv.included !== false;
+                    const cropSource = cv.image || cv.sourceImage;
                     return (
                       <div
                         key={idx}
@@ -1029,16 +1045,37 @@ const ProductEditorModal: React.FC<{
                           colorVisible ? '' : 'opacity-45'
                         }`}
                       >
-                        <div className="w-12 h-12 rounded-md overflow-hidden border border-slate-600 shrink-0 bg-slate-800 flex items-center justify-center">
-                          {preview ? (
-                            <img src={preview} alt="" className="w-full h-full object-cover" />
+                        <label
+                          className="w-12 h-12 rounded-md overflow-hidden border border-slate-600 shrink-0 bg-slate-800 flex items-center justify-center cursor-pointer relative group"
+                          title="Cambiar foto del color"
+                        >
+                          {uploadingColorIdx === idx ? (
+                            <Loader2 size={18} className="animate-spin text-emerald-400" />
+                          ) : preview ? (
+                            <>
+                              <img src={preview} alt="" className="w-full h-full object-cover" />
+                              <span className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                <Upload size={14} className="text-white" />
+                              </span>
+                            </>
                           ) : (
                             <span
                               className="w-6 h-6 rounded-full border border-slate-500"
                               style={{ backgroundColor: colorToHex(cv.name) || '#64748b' }}
                             />
                           )}
-                        </div>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            disabled={uploadingColorIdx !== null}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) void handleColorImageUpload(idx, file);
+                              e.target.value = '';
+                            }}
+                          />
+                        </label>
                         <div className="flex-1 min-w-0">
                           <input
                             className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-white text-xs outline-none focus:ring-2 focus:ring-emerald-500"
@@ -1065,10 +1102,29 @@ const ProductEditorModal: React.FC<{
                         >
                           {colorVisible ? <Eye size={13} /> : <EyeOff size={13} />}
                         </button>
-                        <div className="flex flex-col gap-0.5 shrink-0">
+                        <div className="flex flex-col gap-0.5 shrink-0 min-w-[72px]">
+                          <label className="cursor-pointer text-[10px] font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1">
+                            {uploadingColorIdx === idx ? (
+                              <Loader2 size={11} className="animate-spin" />
+                            ) : (
+                              <Upload size={11} />
+                            )}
+                            Cambiar foto
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              disabled={uploadingColorIdx !== null}
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) void handleColorImageUpload(idx, file);
+                                e.target.value = '';
+                              }}
+                            />
+                          </label>
                           <button
                             type="button"
-                            disabled={!cv.sourceImage}
+                            disabled={!cropSource}
                             onClick={() => startColorCrop(idx)}
                             className="text-[10px] font-bold text-emerald-400 hover:text-emerald-300 disabled:text-slate-600 flex items-center gap-1 text-left"
                           >
@@ -1188,9 +1244,9 @@ const ProductEditorModal: React.FC<{
           onApply={(blob) => applyCroppedImage(croppingIndex, blob)}
         />
       )}
-      {croppingColorIdx !== null && colorVariants[croppingColorIdx]?.sourceImage && (
+      {croppingColorIdx !== null && (colorVariants[croppingColorIdx]?.image || colorVariants[croppingColorIdx]?.sourceImage) && (
         <ImageCropModal
-          src={colorVariants[croppingColorIdx].sourceImage!}
+          src={(colorVariants[croppingColorIdx].image || colorVariants[croppingColorIdx].sourceImage)!}
           title={`Recortar color — ${colorVariants[croppingColorIdx]?.name || 'sin nombre'}`}
           defaultAspect="1:1"
           lockAspect
