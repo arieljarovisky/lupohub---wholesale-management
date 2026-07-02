@@ -24,6 +24,7 @@ import {
   Plus,
   Ruler,
   Tag,
+  Images,
 } from 'lucide-react';
 import {
   api,
@@ -809,6 +810,7 @@ const ProductEditorModal: React.FC<{
   const [imageIndex, setImageIndex] = useState(merged.imageIndex);
   const [uploading, setUploading] = useState(false);
   const [uploadingColorIdx, setUploadingColorIdx] = useState<number | null>(null);
+  const [pickingImageForColorIdx, setPickingImageForColorIdx] = useState<number | null>(null);
   const [uploadError, setUploadError] = useState('');
   const [croppingIndex, setCroppingIndex] = useState<number | null>(null);
   const [croppingColorIdx, setCroppingColorIdx] = useState<number | null>(null);
@@ -926,6 +928,12 @@ const ProductEditorModal: React.FC<{
     }
   };
 
+  const assignGalleryImageToColor = (colorIdx: number, imageUrl: string) => {
+    updateColorVariant(colorIdx, { sourceImage: imageUrl, image: undefined });
+    setPickingImageForColorIdx(null);
+    setUploadError('');
+  };
+
   const applyCroppedColorImage = async (colorIdx: number, blob: Blob) => {
     setUploadError('');
     try {
@@ -1014,7 +1022,7 @@ const ProductEditorModal: React.FC<{
                   </button>
                 </div>
                 <p className="text-[10px] text-slate-500 mb-2">
-                  Tocá la miniatura o usá «Cambiar foto» para reemplazar la imagen de cada color. También podés recortarla.
+                  Tocá la miniatura, usá «Cambiar foto» para subir una nueva, o «Elegir existente» para tomar una de las fotos del producto.
                 </p>
                 {uploadError && <p className="text-red-400 text-xs mb-2">{uploadError}</p>}
                 {colorVariants.some((cv) => (cv.stock ?? 0) <= 0) && (
@@ -1102,7 +1110,19 @@ const ProductEditorModal: React.FC<{
                         >
                           {colorVisible ? <Eye size={13} /> : <EyeOff size={13} />}
                         </button>
-                        <div className="flex flex-col gap-0.5 shrink-0 min-w-[72px]">
+                        <div className="flex flex-col gap-0.5 shrink-0 min-w-[84px]">
+                          <button
+                            type="button"
+                            disabled={images.length === 0}
+                            onClick={() => setPickingImageForColorIdx(pickingImageForColorIdx === idx ? null : idx)}
+                            className={`text-[10px] font-bold flex items-center gap-1 text-left ${
+                              pickingImageForColorIdx === idx
+                                ? 'text-amber-300'
+                                : 'text-sky-400 hover:text-sky-300 disabled:text-slate-600'
+                            }`}
+                          >
+                            <Images size={11} /> {pickingImageForColorIdx === idx ? 'Elegí abajo…' : 'Elegir existente'}
+                          </button>
                           <label className="cursor-pointer text-[10px] font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1">
                             {uploadingColorIdx === idx ? (
                               <Loader2 size={11} className="animate-spin" />
@@ -1166,8 +1186,24 @@ const ProductEditorModal: React.FC<{
               </label>
             </div>
             <p className="text-[10px] text-slate-500 mb-2">
-              Elegí con el check cuál foto grande se muestra en la ficha. Las demás son de Tienda Nube.
+              {pickingImageForColorIdx !== null
+                ? `Elegí una foto de abajo para el color «${colorVariants[pickingImageForColorIdx]?.name || 'sin nombre'}».`
+                : 'Elegí con el check cuál foto grande se muestra en la ficha. Las demás son de Tienda Nube.'}
             </p>
+            {pickingImageForColorIdx !== null && (
+              <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-amber-700/50 bg-amber-950/30 px-3 py-2">
+                <p className="text-[11px] text-amber-200">
+                  Modo selección: hacé clic en una imagen para asignarla al color.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setPickingImageForColorIdx(null)}
+                  className="text-[10px] font-bold text-amber-300 hover:text-white shrink-0"
+                >
+                  Cancelar
+                </button>
+              </div>
+            )}
             {uploadError && <p className="text-red-400 text-xs mb-2">{uploadError}</p>}
             {images.length === 0 ? (
               <div className="rounded-lg border border-dashed border-slate-600 p-4 text-center text-slate-500 text-xs">
@@ -1179,40 +1215,62 @@ const ProductEditorModal: React.FC<{
                   <div
                     key={`${src}-${i}`}
                     className={`relative w-20 h-24 rounded-lg overflow-hidden border-2 group ${
-                      i === imageIndex ? 'border-emerald-500' : 'border-slate-700'
+                      pickingImageForColorIdx !== null
+                        ? 'border-amber-500 cursor-pointer hover:ring-2 hover:ring-amber-400/60'
+                        : i === imageIndex
+                          ? 'border-emerald-500'
+                          : 'border-slate-700'
                     }`}
                   >
-                    <button onClick={() => setImageIndex(i)} className="w-full h-full" title="Usar como foto principal">
+                    <button
+                      onClick={() => {
+                        if (pickingImageForColorIdx !== null) {
+                          assignGalleryImageToColor(pickingImageForColorIdx, src);
+                          return;
+                        }
+                        setImageIndex(i);
+                      }}
+                      className="w-full h-full"
+                      title={
+                        pickingImageForColorIdx !== null
+                          ? 'Usar esta foto para el color'
+                          : 'Usar como foto principal'
+                      }
+                    >
                       <img src={src} alt="" className="w-full h-full object-cover" />
                     </button>
-                    {i === imageIndex && (
+                    {pickingImageForColorIdx === null && i === imageIndex && (
                       <span className="absolute top-0.5 left-0.5 bg-emerald-500 text-white text-[8px] font-bold px-1 py-0.5 rounded">
                         Principal
                       </span>
                     )}
-                    {isUploaded(src) && (
+                    {pickingImageForColorIdx === null && isUploaded(src) && (
                       <span className="absolute bottom-0.5 left-0.5 bg-indigo-600 text-white text-[8px] px-1 rounded">propia</span>
                     )}
-                    <div className="absolute top-0.5 right-0.5 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition">
-                      <button
-                        onClick={() => setCroppingIndex(i)}
-                        className="w-5 h-5 rounded bg-emerald-600/95 text-white flex items-center justify-center"
-                        title="Recortar"
-                      >
-                        <Crop size={11} />
-                      </button>
-                      <button onClick={() => removeImage(i)} className="w-5 h-5 rounded bg-red-600/90 text-white flex items-center justify-center" title="Quitar">
-                        <X size={11} />
-                      </button>
-                    </div>
-                    <div className="absolute bottom-0.5 right-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100 transition">
-                      <button onClick={() => moveImage(i, -1)} className="w-5 h-5 rounded bg-black/60 text-white flex items-center justify-center" title="Mover izquierda">
-                        <ChevronUp size={11} className="-rotate-90" />
-                      </button>
-                      <button onClick={() => moveImage(i, 1)} className="w-5 h-5 rounded bg-black/60 text-white flex items-center justify-center" title="Mover derecha">
-                        <ChevronDown size={11} className="-rotate-90" />
-                      </button>
-                    </div>
+                    {pickingImageForColorIdx === null && (
+                      <>
+                        <div className="absolute top-0.5 right-0.5 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition">
+                          <button
+                            onClick={() => setCroppingIndex(i)}
+                            className="w-5 h-5 rounded bg-emerald-600/95 text-white flex items-center justify-center"
+                            title="Recortar"
+                          >
+                            <Crop size={11} />
+                          </button>
+                          <button onClick={() => removeImage(i)} className="w-5 h-5 rounded bg-red-600/90 text-white flex items-center justify-center" title="Quitar">
+                            <X size={11} />
+                          </button>
+                        </div>
+                        <div className="absolute bottom-0.5 right-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100 transition">
+                          <button onClick={() => moveImage(i, -1)} className="w-5 h-5 rounded bg-black/60 text-white flex items-center justify-center" title="Mover izquierda">
+                            <ChevronUp size={11} className="-rotate-90" />
+                          </button>
+                          <button onClick={() => moveImage(i, 1)} className="w-5 h-5 rounded bg-black/60 text-white flex items-center justify-center" title="Mover derecha">
+                            <ChevronDown size={11} className="-rotate-90" />
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
