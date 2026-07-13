@@ -445,6 +445,15 @@ export const api = {
     invoicedNet: number;
     invoicedIva: number;
     invoicedCount: number;
+    invoicedWholesaleTotal: number;
+    invoicedWholesaleNet: number;
+    invoicedWholesaleCount: number;
+    invoicedMlTotal: number;
+    invoicedMlNet: number;
+    invoicedMlCount: number;
+    invoicedTnTotal: number;
+    invoicedTnNet: number;
+    invoicedTnCount: number;
     pendingInvoicesTotal: number;
     pendingInvoicesCount: number;
     pendingInvoices: Array<{
@@ -1904,8 +1913,8 @@ export const api = {
     to?: string;
     sellerName?: string;
     /**
-     * historial: facturas/NC/recibos del sistema + importados Multimedia + externos por CUIT (default).
-     * sistema: solo tablas LupoHub (facturas AFIP, NC y recibos).
+     * historial: facturas/NC/recibos del sistema + externos por CUIT (sin import Tango salvo flag activo).
+     * sistema: solo tablas LupoHub (facturas AFIP, NC y recibos). Default si no se pasa source.
      * tango: solo importados Multimedia (Tango), sin dedupe contra payments.
      */
     source?: 'historial' | 'sistema' | 'tango';
@@ -1973,6 +1982,8 @@ export const api = {
       /** Factura anulada por NC de reemisión: visible pero no modifica saldo corrido. */
       excluirDeSaldo?: boolean;
       voidedForReinvoice?: boolean;
+      /** NC de reemisión IIBB: visible pero no modifica saldo corrido. */
+      supersededByReinvoice?: boolean;
       /** Recibo del cargo anterior a reemisión IIBB: visible pero no modifica saldo corrido. */
       supersededReinvoicePayment?: boolean;
       orderId?: string | null;
@@ -2060,6 +2071,68 @@ export const api = {
     return await request(`/customers/${encodeURIComponent(customerId)}/clear-dispatched-pendings`, 'POST');
   },
 
+  adjustCustomerSaldo: async (
+    customerId: string,
+    targetSaldo: number
+  ): Promise<{
+    ok: boolean;
+    customerId: string;
+    targetSaldo: number;
+    previousSaldo: number;
+    newSaldo: number;
+    newOpeningBalance: number;
+  }> => {
+    return await request(`/customers/${encodeURIComponent(customerId)}/adjust-saldo`, 'POST', {
+      targetSaldo
+    });
+  },
+
+  restoreCustomerAfipInvoices: async (
+    customerId: string,
+    params?: { maxScan?: number }
+  ): Promise<{
+    ok: boolean;
+    customerId: string;
+    customerName?: string;
+    restored: number;
+    pendingOrders: number;
+    stillPending: number;
+    scanned: number;
+    details: Array<{
+      orderId: string;
+      cbteTipo: number;
+      cbteDesde: number;
+      puntoVenta: number;
+      cae: string;
+      source: string;
+    }>;
+    message?: string;
+  }> => {
+    return await request(
+      `/customers/${encodeURIComponent(customerId)}/restore-lupohub-invoices`,
+      'POST',
+      params ?? {},
+      undefined,
+      180000
+    );
+  },
+
+  restoreAllLupohubInvoices: async (params?: { maxScan?: number }): Promise<{
+    ok: boolean;
+    customersProcessed: number;
+    totalRestored: number;
+    results: Array<{
+      customerId: string;
+      customerName: string;
+      restored: number;
+      pendingOrders: number;
+      stillPending: number;
+      scanned: number;
+    }>;
+  }> => {
+    return await request('/customers/restore-lupohub-invoices', 'POST', params ?? {}, undefined, 600000);
+  },
+
   exportCustomerDetail: async (customerId: string, params?: { from?: string; to?: string }): Promise<void> => {
     const q = new URLSearchParams();
     if (params?.from) q.set('from', params.from);
@@ -2127,12 +2200,19 @@ export const api = {
     return await request(`/customers/${encodeURIComponent(customerId)}/financial-summary`, 'GET');
   },
 
-  exportCustomerFinancialSummary: async (customerId: string): Promise<void> => {
-    const blob = await getBlob(`/customers/${encodeURIComponent(customerId)}/financial-summary/export`, 120000);
+  exportCustomerFinancialSummary: async (
+    customerId: string,
+    opts?: { includeTango?: boolean }
+  ): Promise<void> => {
+    const q = opts?.includeTango ? '?includeTango=1' : '';
+    const blob = await getBlob(
+      `/customers/${encodeURIComponent(customerId)}/financial-summary/export${q}`,
+      120000
+    );
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `saldo_facturas_recibos_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.download = `saldo_facturas_recibos_${opts?.includeTango ? 'con_tango_' : ''}${new Date().toISOString().slice(0, 10)}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -3154,8 +3234,14 @@ export const api = {
     }, { totalProducts: 0, totalStock: 0, lowStockCount: 0, noStockCount: 0 }, 'getMercadoLibreStockTotals');
   },
 
-  getMercadoLibreItemVariations: async (itemId: string): Promise<{ variations: { variationId: number | string; sku: string; color: string; size: string; stock: number }[]; singleProduct?: boolean; itemId: string }> => {
-    return request<{ variations: { variationId: number | string; sku: string; color: string; size: string; stock: number }[]; singleProduct?: boolean; itemId: string }>(`/integrations/mercadolibre/items/${encodeURIComponent(itemId)}/variations`, 'GET');
+  getMercadoLibreItemVariations: async (itemId: string): Promise<{ variations: { variationId: number | string; itemId?: string; sku: string; color: string; size: string; stock: number }[]; singleProduct?: boolean; itemId: string; resolvedItemId?: string }> => {
+    return request<{ variations: { variationId: number | string; itemId?: string; sku: string; color: string; size: string; stock: number }[]; singleProduct?: boolean; itemId: string; resolvedItemId?: string }>(
+      `/integrations/mercadolibre/items/${encodeURIComponent(itemId)}/variations?_=${Date.now()}`,
+      'GET',
+      undefined,
+      undefined,
+      120000
+    );
   },
 
   /** Mercado Ads — Product Ads: anunciantes, campañas y métricas por publicación (API oficial). */
@@ -3475,7 +3561,10 @@ export const api = {
   },
 
   getTiendaNubeProductVariants: async (productId: string): Promise<{ variants: { variantId: number | string; sku: string; color: string; size: string; stock: number }[]; productId: number | string }> => {
-    return request<{ variants: { variantId: number | string; sku: string; color: string; size: string; stock: number }[]; productId: number | string }>(`/integrations/tiendanube/products/${encodeURIComponent(productId)}/variants`, 'GET');
+    return request<{ variants: { variantId: number | string; sku: string; color: string; size: string; stock: number }[]; productId: number | string }>(
+      `/integrations/tiendanube/products/${encodeURIComponent(productId)}/variants?_=${Date.now()}`,
+      'GET'
+    );
   },
 
   // Configuración de mensaje automático de ML

@@ -79,3 +79,21 @@ export function codigoTalleParaSku(nameOrCode: string | undefined | null): strin
   if (/^\d{1,3}$/.test(s)) return s;
   return TALLE_NOMBRE_A_CODIGO[s] ?? s;
 }
+
+/** Códigos alternativos para matchear un talle en DB (SKU suele usar 180, la tabla puede tener XG). */
+export function sizeCodeLookupCandidates(sizeCode: string | undefined | null): string[] {
+  const raw = String(sizeCode ?? '').trim();
+  if (!raw) return [];
+  const upper = raw.toUpperCase();
+  const out = new Set<string>([raw, upper]);
+  const numeric = codigoTalleParaSku(raw);
+  if (numeric) out.add(numeric);
+  const letter = nombreTalleDesdeCodigo(raw);
+  if (letter && letter !== raw) {
+    out.add(letter);
+    out.add(letter.toUpperCase());
+  }
+  const equiv = TALLE_LETRAS_EQUIVALENTES[numeric || raw];
+  if (equiv) equiv.forEach((e) => out.add(e.toUpperCase()));
+  return [...out].filter(Boolean);
+}

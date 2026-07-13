@@ -12,7 +12,13 @@ import { formatMoneyAr } from '../utils/moneyFormat';
 import { formatOrderDate } from '../utils/formatDate';
 import { canonicalizeCityInput, cityDisplayLabel, isCabaCity, normalizeCityKey } from '../utils/cityNormalize';
 import { CityInput } from './CityInput';
-import { isVoidedReinvoiceLedgerEntry, ledgerTipoDisplay, normalizeLedgerDocType } from '../utils/ledgerDocType';
+import {
+  isInformationalLedgerEntry,
+  isSupersededReinvoiceNcLedgerEntry,
+  isVoidedReinvoiceLedgerEntry,
+  ledgerTipoDisplay,
+  normalizeLedgerDocType
+} from '../utils/ledgerDocType';
 
 interface CustomersProps {
   customers: Customer[];
@@ -256,6 +262,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [multimediaExporting, setMultimediaExporting] = useState(false);
   const [multimediaImporting, setMultimediaImporting] = useState(false);
   const [saldosMultimediasExporting, setSaldosMultimediasExporting] = useState(false);
+  const [restoringAllLupohubInvoices, setRestoringAllLupohubInvoices] = useState(false);
   const [wholesaleMetricsExporting, setWholesaleMetricsExporting] = useState(false);
   const [exportingCustomersWithLocation, setExportingCustomersWithLocation] = useState(false);
   const [customerToolsOpen, setCustomerToolsOpen] = useState(false);
@@ -272,6 +279,17 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [customerDetailExportTo, setCustomerDetailExportTo] = useState('');
   const [exportingCustomerDetail, setExportingCustomerDetail] = useState(false);
   const [exportingFinancialSummary, setExportingFinancialSummary] = useState(false);
+  const [showFinancialExportModal, setShowFinancialExportModal] = useState(false);
+  const [showAdjustSaldoModal, setShowAdjustSaldoModal] = useState(false);
+  const [adjustSaldoInput, setAdjustSaldoInput] = useState('');
+  const [adjustingSaldo, setAdjustingSaldo] = useState(false);
+  const [restoringAfipInvoices, setRestoringAfipInvoices] = useState(false);
+
+  useEffect(() => {
+    setShowFinancialExportModal(false);
+    setShowAdjustSaldoModal(false);
+    setAdjustSaldoInput('');
+  }, [selectedCustomer?.id]);
   const [multimediaLedger, setMultimediaLedger] = useState<Awaited<ReturnType<typeof api.getCustomerMultimediaLedger>> | null>(null);
   const [multimediaLedgerLoading, setMultimediaLedgerLoading] = useState(false);
   const [selectedLedgerEntry, setSelectedLedgerEntry] = useState<
@@ -813,6 +831,69 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     });
   };
 
+  const parseAdjustSaldoInput = (raw: string): number | null => {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    const normalized = trimmed.replace(/\./g, '').replace(',', '.');
+    const n = Number(normalized);
+    return Number.isFinite(n) ? Math.round(n * 100) / 100 : null;
+  };
+
+  const handleAdjustSaldo = () => {
+    if (!selectedCustomer?.id) return;
+    const target = parseAdjustSaldoInput(adjustSaldoInput);
+    if (target === null) {
+      showToast('error', 'Ingresá un importe válido para el saldo objetivo.');
+      return;
+    }
+    const isZero = Math.abs(target) <= 0.005;
+    const current = getSaldoPendienteTotal(selectedCustomer);
+    const currentOpening =
+      selectedCustomer.openingBalance != null && Number.isFinite(Number(selectedCustomer.openingBalance))
+        ? Number(selectedCustomer.openingBalance)
+        : 0;
+    showConfirm({
+      title: isZero ? 'Poner saldo en cero' : 'Ajustar saldo del cliente',
+      message: isZero
+        ? `¿Poner el saldo de ${selectedCustomer.businessName || selectedCustomer.name} en $0,00? Se modificará el saldo inicial manual (actual: $${currentOpening.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) para compensar facturas y recibos. No se borran comprobantes. Saldo pendiente actual: $${current.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`
+        : `¿Ajustar el saldo de ${selectedCustomer.businessName || selectedCustomer.name} a $${target.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}? Se modificará el saldo inicial manual (actual: $${currentOpening.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) para alcanzar ese valor. Saldo pendiente actual: $${current.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`,
+      confirmLabel: isZero ? 'Poner en cero' : 'Ajustar saldo',
+      onConfirm: async () => {
+        setAdjustingSaldo(true);
+        try {
+          const res = await api.adjustCustomerSaldo(selectedCustomer.id, target);
+          showToast(
+            'success',
+            `Saldo actualizado a $${Number(res.newSaldo).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. Saldo inicial: $${Number(res.newOpeningBalance).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`
+          );
+          setShowAdjustSaldoModal(false);
+          setAdjustSaldoInput('');
+          if (onUpdateCustomer && res.newOpeningBalance != null) {
+            await Promise.resolve(
+              onUpdateCustomer(selectedCustomer.id, {
+                openingBalance: res.newOpeningBalance
+              })
+            );
+            setSelectedCustomer((prev) =>
+              prev && prev.id === selectedCustomer.id
+                ? {
+                    ...prev,
+                    openingBalance: res.newOpeningBalance
+                  }
+                : prev
+            );
+          }
+          await reloadSelectedCustomerLedger();
+          onRefreshData?.();
+        } catch (err: any) {
+          showToast('error', err?.response?.data?.message || err?.message || 'No se pudo ajustar el saldo');
+        } finally {
+          setAdjustingSaldo(false);
+        }
+      }
+    });
+  };
+
   const renderLedgerTable = (
     title: string,
     icon: React.ReactNode,
@@ -856,6 +937,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
             <tbody className="text-slate-300 divide-y divide-slate-800/80">
               {shown.map((e, idx) => {
                 const voidedReinvoice = isVoidedReinvoiceLedgerEntry(e);
+                const supersededNc = isSupersededReinvoiceNcLedgerEntry(e);
+                const informational = isInformationalLedgerEntry(e);
                 const ledgerNorm = normalizeLedgerDocType(e.tipo, e.detalle);
                 const isFac = ledgerNorm === 'FAC';
                 const isPed = ledgerNorm === 'PED';
@@ -878,7 +961,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                       : undefined
                   }
                   className={
-                    voidedReinvoice
+                    informational
                       ? 'bg-violet-950/20 text-slate-500 hover:bg-violet-950/30 cursor-pointer'
                       : ledgerClickable
                         ? isPed
@@ -895,7 +978,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                     title={
                       voidedReinvoice
                         ? 'Factura anulada — tocá para ver pedido y factura nueva'
-                        : ledgerClickable
+                        : supersededNc
+                          ? 'NC de reemisión IIBB — informativa; no resta del saldo (la factura nueva ya suma)'
+                          : ledgerClickable
                           ? isPed
                             ? 'Tocá para ver el pedido'
                             : isFac
@@ -906,7 +991,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   >
                     <span
                       className={
-                        voidedReinvoice
+                        informational
                           ? 'inline-flex items-center gap-1 rounded-md bg-violet-900/40 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-300/90'
                           : ledgerClickable
                             ? `inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
@@ -923,6 +1008,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                         detalle: e.detalle,
                         excluirDeSaldo: e.excluirDeSaldo,
                         voidedForReinvoice: e.voidedForReinvoice,
+                        supersededByReinvoice: e.supersededByReinvoice,
                         supersededReinvoicePayment: e.supersededReinvoicePayment,
                       })}
                       {ledgerClickable ? <ChevronRight size={12} className="opacity-70" aria-hidden /> : null}
@@ -935,19 +1021,31 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                     {e.numero ?? '—'}
                   </td>
                   <td
-                    className={`px-3 py-1.5 text-right tabular-nums ${voidedReinvoice ? 'line-through decoration-violet-400/50' : ''}`}
-                    title={voidedReinvoice ? 'Importe histórico; no suma al saldo' : undefined}
+                    className={`px-3 py-1.5 text-right tabular-nums ${informational ? 'line-through decoration-violet-400/50' : ''}`}
+                    title={
+                      voidedReinvoice
+                        ? 'Importe histórico; no suma al saldo'
+                        : supersededNc
+                          ? 'NC informativa; no resta del saldo'
+                          : undefined
+                    }
                   >
                     {e.importe != null ? `$${Number(e.importe).toLocaleString('es-AR')}` : '—'}
                   </td>
                   <td
                     className="px-3 py-1.5 text-right tabular-nums text-slate-500"
-                    title={voidedReinvoice ? 'Sin cambio: la factura fue anulada y reemitida' : undefined}
+                    title={
+                      voidedReinvoice
+                        ? 'Sin cambio: la factura fue anulada y reemitida'
+                        : supersededNc
+                          ? 'Sin cambio: la NC anuló la factura anterior ya reemplazada'
+                          : undefined
+                    }
                   >
                     {e.saldo != null ? `$${Number(e.saldo).toLocaleString('es-AR')}` : '—'}
                   </td>
                   <td
-                    className={`px-3 py-1.5 max-w-[240px] truncate italic ${voidedReinvoice ? 'text-violet-300/70' : 'text-slate-400'}`}
+                    className={`px-3 py-1.5 max-w-[240px] truncate italic ${informational ? 'text-violet-300/70' : 'text-slate-400'}`}
                     title={e.detalle || ''}
                   >
                     {e.detalle || '—'}
@@ -995,6 +1093,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
     exportingCustomersWithLocation ||
     wholesaleMetricsExporting ||
     saldosMultimediasExporting ||
+    restoringAllLupohubInvoices ||
     multimediaExporting ||
     multimediaImporting ||
     assigningSellersResumen ||
@@ -1541,6 +1640,162 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
           </div>
         )}
 
+        {showAdjustSaldoModal && selectedCustomer && role === Role.ADMIN && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+            <div className="w-full max-w-md bg-slate-900 border border-amber-700/50 rounded-2xl shadow-2xl overflow-hidden">
+              <div className="p-4 border-b border-slate-800 flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-white font-bold">Editar saldo pendiente</h3>
+                  <p className="text-xs text-slate-400 mt-0.5 truncate">{selectedCustomer.businessName}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAdjustSaldoModal(false);
+                    setAdjustSaldoInput('');
+                  }}
+                  className="text-slate-400 hover:text-white shrink-0"
+                  disabled={adjustingSaldo}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="p-4 space-y-4">
+                <p className="text-sm text-slate-400 leading-relaxed">
+                  Saldo actual:{' '}
+                  <span className="text-white font-mono font-bold tabular-nums">
+                    ${getSaldoPendienteTotal(selectedCustomer).toLocaleString('es-AR', {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2
+                    })}
+                  </span>
+                </p>
+                <div>
+                  <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">
+                    Saldo objetivo ($)
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all font-mono text-sm"
+                    value={adjustSaldoInput}
+                    onChange={(e) => setAdjustSaldoInput(e.target.value)}
+                    placeholder="Ej: 0 o 150000"
+                    autoFocus
+                  />
+                </div>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Si ponés <span className="text-amber-300">0</span>, se ajusta el saldo inicial para llegar a cero.
+                  Las facturas y comprobantes no se eliminan.
+                </p>
+              </div>
+              <div className="p-4 border-t border-slate-800 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAdjustSaldoModal(false);
+                    setAdjustSaldoInput('');
+                  }}
+                  disabled={adjustingSaldo}
+                  className="flex-1 bg-slate-700 hover:bg-slate-600 text-white px-4 py-2.5 rounded-xl font-semibold disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAdjustSaldo}
+                  disabled={adjustingSaldo || !adjustSaldoInput.trim()}
+                  className="flex-1 bg-amber-700 hover:bg-amber-600 text-white px-4 py-2.5 rounded-xl font-bold disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {adjustingSaldo ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                  Guardar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showFinancialExportModal && selectedCustomer && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+            <div className="w-full max-w-md bg-slate-900 border border-amber-700/50 rounded-2xl shadow-2xl overflow-hidden">
+              <div className="p-4 border-b border-slate-800 flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-white font-bold">Exportar saldo del cliente</h3>
+                  <p className="text-xs text-slate-400 mt-0.5 truncate">{selectedCustomer.businessName}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowFinancialExportModal(false)}
+                  className="text-slate-400 hover:text-white shrink-0"
+                  disabled={exportingFinancialSummary}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="p-4 space-y-3">
+                <p className="text-sm text-slate-400 leading-relaxed">
+                  Elegí si el Excel incluye los movimientos importados de Tango (Multimedia) o solo lo cargado en LupoHub.
+                </p>
+                <button
+                  type="button"
+                  disabled={exportingFinancialSummary}
+                  onClick={async () => {
+                    try {
+                      setExportingFinancialSummary(true);
+                      await api.exportCustomerFinancialSummary(selectedCustomer.id, { includeTango: false });
+                      showToast('success', 'Excel descargado (solo LupoHub)');
+                      setShowFinancialExportModal(false);
+                    } catch (err: any) {
+                      showToast('error', err?.message || 'No se pudo exportar');
+                    } finally {
+                      setExportingFinancialSummary(false);
+                    }
+                  }}
+                  className="w-full text-left rounded-xl border border-emerald-700/50 bg-emerald-950/30 hover:bg-emerald-950/50 px-4 py-3.5 transition disabled:opacity-50"
+                >
+                  <span className="font-bold text-emerald-200 block">Sin Tango (recomendado)</span>
+                  <span className="text-xs text-slate-400 mt-1 block">
+                    Facturas AFIP, notas de crédito y recibos cargados en LupoHub
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  disabled={exportingFinancialSummary}
+                  onClick={async () => {
+                    try {
+                      setExportingFinancialSummary(true);
+                      await api.exportCustomerFinancialSummary(selectedCustomer.id, { includeTango: true });
+                      showToast('success', 'Excel descargado (con import Tango)');
+                      setShowFinancialExportModal(false);
+                    } catch (err: any) {
+                      showToast('error', err?.message || 'No se pudo exportar');
+                    } finally {
+                      setExportingFinancialSummary(false);
+                    }
+                  }}
+                  className="w-full text-left rounded-xl border border-amber-700/50 bg-amber-950/20 hover:bg-amber-950/40 px-4 py-3.5 transition disabled:opacity-50"
+                >
+                  <span className="font-bold text-amber-200 block">Con import Tango (legacy)</span>
+                  <span className="text-xs text-slate-400 mt-1 block">
+                    Incluye facturas, NC y recibos del Excel importado
+                    {multimediaLedger?.legacyCode ? ` · código ${multimediaLedger.legacyCode}` : ''}
+                  </span>
+                </button>
+              </div>
+              <div className="p-4 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowFinancialExportModal(false)}
+                  disabled={exportingFinancialSummary}
+                  className="w-full bg-slate-700 hover:bg-slate-600 text-white px-4 py-2.5 rounded-xl font-semibold disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {selectedLedgerEntry && (() => {
           const entry = selectedLedgerEntry;
           const kind = normalizeLedgerDocType(entry.tipo, entry.detalle);
@@ -1955,11 +2210,12 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                         : '';
                       return (
                         <span className="text-amber-300/90">
-                          + Saldo inicial{dateLabel}: $
-                          {ob.toLocaleString('es-AR', {
+                          {ob >= 0 ? '+' : '−'} Saldo inicial{dateLabel}: $
+                          {Math.abs(ob).toLocaleString('es-AR', {
                             minimumFractionDigits: 2,
                             maximumFractionDigits: 2
                           })}
+                          {ob < 0 ? ' (a favor del cliente)' : ''}
                         </span>
                       );
                     })()}
@@ -2012,25 +2268,80 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                     </>
                   )}
                 </p>
-                <button
-                  type="button"
-                  disabled={exportingFinancialSummary}
-                  onClick={async () => {
-                    try {
-                      setExportingFinancialSummary(true);
-                      await api.exportCustomerFinancialSummary(selectedCustomer.id);
-                      showToast('success', 'Excel descargado');
-                    } catch (err: any) {
-                      showToast('error', err?.message || 'No se pudo exportar');
-                    } finally {
-                      setExportingFinancialSummary(false);
-                    }
-                  }}
-                  className="px-4 py-2.5 rounded-xl bg-amber-700 hover:bg-amber-600 text-white text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50 touch-manipulation"
-                >
-                  {exportingFinancialSummary ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-                  Exportar Excel
-                </button>
+                <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                  {role === Role.ADMIN && (
+                    <button
+                      type="button"
+                      disabled={restoringAfipInvoices || saldosLoading}
+                      onClick={() => {
+                        showConfirm({
+                          title: 'Restaurar facturas LupoHub',
+                          message: `¿Buscar y restaurar las facturas AFIP emitidas desde LupoHub para ${selectedCustomer.businessName || selectedCustomer.name}? Se revisan pedidos despachados/controlados sin factura y se consulta AFIP (PV 21). Puede tardar varios minutos.`,
+                          confirmLabel: 'Restaurar facturas',
+                          onConfirm: async () => {
+                            setRestoringAfipInvoices(true);
+                            try {
+                              const res = await api.restoreCustomerAfipInvoices(selectedCustomer.id);
+                              if (res.restored > 0) {
+                                showToast(
+                                  'success',
+                                  `${res.restored} factura(s) restaurada(s). Quedan ${res.stillPending} pedido(s) sin factura.`
+                                );
+                              } else if (res.pendingOrders === 0) {
+                                showToast('success', res.message || 'No hay pedidos sin factura.');
+                              } else {
+                                showToast(
+                                  'warning',
+                                  `No se encontraron comprobantes en AFIP para los ${res.pendingOrders} pedido(s) pendientes (se consultaron ${res.scanned} números).`
+                                );
+                              }
+                              await reloadSelectedCustomerLedger();
+                              onRefreshData?.();
+                            } catch (err: any) {
+                              showToast(
+                                'error',
+                                err?.response?.data?.message || err?.message || 'No se pudieron restaurar las facturas'
+                              );
+                            } finally {
+                              setRestoringAfipInvoices(false);
+                            }
+                          }
+                        });
+                      }}
+                      className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-sky-600/40 text-sky-100 text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50 touch-manipulation"
+                    >
+                      {restoringAfipInvoices ? <Loader2 size={16} className="animate-spin" /> : <FileSpreadsheet size={16} />}
+                      Restaurar facturas LupoHub
+                    </button>
+                  )}
+                  {role === Role.ADMIN && (
+                    <button
+                      type="button"
+                      disabled={adjustingSaldo || saldosLoading}
+                      onClick={() => {
+                        setAdjustSaldoInput(String(getSaldoPendienteTotal(selectedCustomer)));
+                        setShowAdjustSaldoModal(true);
+                      }}
+                      className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-amber-600/40 text-amber-100 text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50 touch-manipulation"
+                    >
+                      {adjustingSaldo ? <Loader2 size={16} className="animate-spin" /> : <Pencil size={16} />}
+                      Editar saldo
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={exportingFinancialSummary}
+                    onClick={() => setShowFinancialExportModal(true)}
+                    className="px-4 py-2.5 rounded-xl bg-amber-700 hover:bg-amber-600 text-white text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50 touch-manipulation"
+                  >
+                    {exportingFinancialSummary ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : (
+                      <Download size={16} />
+                    )}
+                    Exportar Excel
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -2853,6 +3164,48 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                       {saldosMultimediasExporting ? <Loader2 size={16} className="animate-spin shrink-0" /> : <FileSpreadsheet size={16} className="text-amber-400 shrink-0" />}
                       <span className="leading-snug">Excel saldos pendientes (Resumen)</span>
                     </button>
+                    {role === Role.ADMIN && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          closeCustomerTools();
+                          showConfirm({
+                            title: 'Restaurar facturas LupoHub (todos los clientes)',
+                            message:
+                              '¿Buscar y restaurar facturas AFIP de todos los clientes con pedidos LupoHub sin factura? Consulta AFIP (PV 21) y puede tardar varios minutos.',
+                            confirmLabel: 'Restaurar todas',
+                            onConfirm: async () => {
+                              setRestoringAllLupohubInvoices(true);
+                              try {
+                                const res = await api.restoreAllLupohubInvoices();
+                                showToast(
+                                  'success',
+                                  `Restauración global: ${res.totalRestored} factura(s) en ${res.customersProcessed} cliente(s).`
+                                );
+                                onRefreshData?.();
+                              } catch (err: any) {
+                                showToast(
+                                  'error',
+                                  err?.response?.data?.message || err?.message || 'No se pudieron restaurar las facturas'
+                                );
+                              } finally {
+                                setRestoringAllLupohubInvoices(false);
+                              }
+                            }
+                          });
+                        }}
+                        disabled={restoringAllLupohubInvoices}
+                        className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-sky-100 hover:bg-sky-500/10 disabled:opacity-50"
+                      >
+                        {restoringAllLupohubInvoices ? (
+                          <Loader2 size={16} className="animate-spin shrink-0" />
+                        ) : (
+                          <FileSpreadsheet size={16} className="text-sky-400 shrink-0" />
+                        )}
+                        <span className="leading-snug">Restaurar facturas LupoHub (global)</span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       role="menuitem"

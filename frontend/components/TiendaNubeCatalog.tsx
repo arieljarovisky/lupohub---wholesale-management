@@ -24,6 +24,7 @@ import {
   Plus,
   Ruler,
   Tag,
+  Images,
 } from 'lucide-react';
 import {
   api,
@@ -359,6 +360,9 @@ interface ProductOverride {
   imageIndex?: number;
   /** Si está presente, reemplaza por completo la lista de imágenes (TN + propias). */
   images?: string[];
+  /** Precio manual para el catálogo (reemplaza el de la lista al mostrar). */
+  price?: number | null;
+  promotionalPrice?: number | null;
 }
 
 interface SectionOverride {
@@ -390,6 +394,7 @@ interface CatalogConfig {
   cover: CoverConfig;
   colors: ColorsConfig;
   showPrice: boolean;
+  priceListId?: string;
   fontHeading: string;
   fontBody: string;
   sections: Record<string, SectionOverride>;
@@ -676,6 +681,13 @@ function formatPrice(n: number | null): string {
   }
 }
 
+function parsePriceInput(value: string): number | null {
+  const trimmed = value.trim().replace(/\./g, '').replace(',', '.');
+  if (!trimmed) return null;
+  const n = Number(trimmed);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : null;
+}
+
 /* ===================== Modelo de producto para mostrar ===================== */
 
 interface DisplayProduct {
@@ -707,6 +719,14 @@ function tnColorVariants(p: TiendaNubeCatalogProduct): ColorVariant[] {
 
 function catalogVisibleColorVariants(variants: ColorVariant[]): ColorVariant[] {
   return variants.filter((cv) => cv.included !== false);
+}
+
+function findCatalogProduct(catalog: TnCatalog, productId: number): TiendaNubeCatalogProduct | null {
+  for (const section of catalog.sections) {
+    const p = section.products.find((x) => x.id === productId);
+    if (p) return p;
+  }
+  return null;
 }
 
 function resolveColorVariants(ov: ProductOverride | undefined, p: TiendaNubeCatalogProduct): ColorVariant[] {
@@ -755,8 +775,8 @@ function mergeProduct(p: TiendaNubeCatalogProduct, ov: ProductOverride | undefin
     articleCode: ov?.articleCode ?? p.articleCode,
     images,
     imageIndex,
-    price: p.price,
-    promotionalPrice: p.promotionalPrice,
+    price: ov?.price !== undefined ? ov.price : p.price,
+    promotionalPrice: ov?.promotionalPrice !== undefined ? ov.promotionalPrice : p.promotionalPrice,
     included: ov?.included !== false,
   };
 }
@@ -796,9 +816,12 @@ const ProductEditorModal: React.FC<{
   const [sizesText, setSizesText] = useState(merged.sizesText);
   const [colorVariants, setColorVariants] = useState<ColorVariant[]>(merged.colorVariants);
   const [articleCode, setArticleCode] = useState(merged.articleCode);
+  const [price, setPrice] = useState(merged.price != null ? String(merged.price) : '');
   const [images, setImages] = useState<string[]>(merged.images);
   const [imageIndex, setImageIndex] = useState(merged.imageIndex);
   const [uploading, setUploading] = useState(false);
+  const [uploadingColorIdx, setUploadingColorIdx] = useState<number | null>(null);
+  const [pickingImageForColorIdx, setPickingImageForColorIdx] = useState<number | null>(null);
   const [uploadError, setUploadError] = useState('');
   const [croppingIndex, setCroppingIndex] = useState<number | null>(null);
   const [croppingColorIdx, setCroppingColorIdx] = useState<number | null>(null);
@@ -852,7 +875,8 @@ const ProductEditorModal: React.FC<{
   };
 
   const save = () => {
-    onSave({
+    const parsedPrice = parsePriceInput(price);
+    const next: ProductOverride = {
       ...override,
       included: override?.included,
       name: name.trim(),
@@ -864,7 +888,13 @@ const ProductEditorModal: React.FC<{
       articleCode: articleCode.trim(),
       images,
       imageIndex: Math.min(imageIndex, Math.max(0, images.length - 1)),
-    });
+    };
+    if (parsedPrice !== null) {
+      next.price = parsedPrice;
+    } else {
+      delete next.price;
+    }
+    onSave(next);
     onClose();
   };
 
@@ -877,6 +907,7 @@ const ProductEditorModal: React.FC<{
     setSizesText(product.sizes.join('  ·  '));
     setColorVariants(tnColorVariants(product));
     setArticleCode(product.articleCode);
+    setPrice(product.price != null ? String(product.price) : '');
     setImages(product.images);
     setImageIndex(0);
   };
@@ -894,13 +925,32 @@ const ProductEditorModal: React.FC<{
   };
 
   const startColorCrop = (colorIdx: number) => {
-    const src = colorVariants[colorIdx]?.sourceImage;
+    const src = colorVariants[colorIdx]?.image || colorVariants[colorIdx]?.sourceImage;
     if (!src) {
-      setUploadError('Este color no tiene foto asignada en Tienda Nube.');
+      setUploadError('Subí una foto o elegí un color con imagen en Tienda Nube.');
       return;
     }
     setUploadError('');
     setCroppingColorIdx(colorIdx);
+  };
+
+  const handleColorImageUpload = async (colorIdx: number, file: File) => {
+    setUploadError('');
+    setUploadingColorIdx(colorIdx);
+    try {
+      const url = await api.uploadCatalogImage(file);
+      updateColorVariant(colorIdx, { image: url, sourceImage: url });
+    } catch (err: any) {
+      setUploadError(err?.message || 'No se pudo subir la imagen del color');
+    } finally {
+      setUploadingColorIdx(null);
+    }
+  };
+
+  const assignGalleryImageToColor = (colorIdx: number, imageUrl: string) => {
+    updateColorVariant(colorIdx, { sourceImage: imageUrl, image: undefined });
+    setPickingImageForColorIdx(null);
+    setUploadError('');
   };
 
   const applyCroppedColorImage = async (colorIdx: number, blob: Blob) => {
@@ -947,6 +997,20 @@ const ProductEditorModal: React.FC<{
               <label className={labelCls}>Código de artículo</label>
               <input className={inputCls} value={articleCode} onChange={(e) => setArticleCode(e.target.value)} />
             </div>
+            <div>
+              <label className={labelCls}>Precio en catálogo</label>
+              <input
+                className={inputCls}
+                type="text"
+                inputMode="numeric"
+                placeholder={product.price != null ? String(product.price) : 'Sin precio'}
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+              />
+              <p className="text-[10px] text-slate-500 mt-1">
+                Dejá vacío para usar el precio de la lista al actualizar el catálogo.
+              </p>
+            </div>
           </div>
 
           <div>
@@ -991,8 +1055,9 @@ const ProductEditorModal: React.FC<{
                   </button>
                 </div>
                 <p className="text-[10px] text-slate-500 mb-2">
-                  Las miniaturas se recortan solas al producto. Usá el ojo para ocultar colores descontinuados.
+                  Tocá la miniatura, usá «Cambiar foto» para subir una nueva, o «Elegir existente» para tomar una de las fotos del producto.
                 </p>
+                {uploadError && <p className="text-red-400 text-xs mb-2">{uploadError}</p>}
                 {colorVariants.some((cv) => (cv.stock ?? 0) <= 0) && (
                   <button
                     type="button"
@@ -1013,6 +1078,7 @@ const ProductEditorModal: React.FC<{
                   {colorVariants.map((cv, idx) => {
                     const preview = cv.image || cv.sourceImage;
                     const colorVisible = cv.included !== false;
+                    const cropSource = cv.image || cv.sourceImage;
                     return (
                       <div
                         key={idx}
@@ -1020,16 +1086,37 @@ const ProductEditorModal: React.FC<{
                           colorVisible ? '' : 'opacity-45'
                         }`}
                       >
-                        <div className="w-12 h-12 rounded-md overflow-hidden border border-slate-600 shrink-0 bg-slate-800 flex items-center justify-center">
-                          {preview ? (
-                            <img src={preview} alt="" className="w-full h-full object-cover" />
+                        <label
+                          className="w-12 h-12 rounded-md overflow-hidden border border-slate-600 shrink-0 bg-slate-800 flex items-center justify-center cursor-pointer relative group"
+                          title="Cambiar foto del color"
+                        >
+                          {uploadingColorIdx === idx ? (
+                            <Loader2 size={18} className="animate-spin text-emerald-400" />
+                          ) : preview ? (
+                            <>
+                              <img src={preview} alt="" className="w-full h-full object-cover" />
+                              <span className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                <Upload size={14} className="text-white" />
+                              </span>
+                            </>
                           ) : (
                             <span
                               className="w-6 h-6 rounded-full border border-slate-500"
                               style={{ backgroundColor: colorToHex(cv.name) || '#64748b' }}
                             />
                           )}
-                        </div>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            disabled={uploadingColorIdx !== null}
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) void handleColorImageUpload(idx, file);
+                              e.target.value = '';
+                            }}
+                          />
+                        </label>
                         <div className="flex-1 min-w-0">
                           <input
                             className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-white text-xs outline-none focus:ring-2 focus:ring-emerald-500"
@@ -1056,10 +1143,41 @@ const ProductEditorModal: React.FC<{
                         >
                           {colorVisible ? <Eye size={13} /> : <EyeOff size={13} />}
                         </button>
-                        <div className="flex flex-col gap-0.5 shrink-0">
+                        <div className="flex flex-col gap-0.5 shrink-0 min-w-[84px]">
                           <button
                             type="button"
-                            disabled={!cv.sourceImage}
+                            disabled={images.length === 0}
+                            onClick={() => setPickingImageForColorIdx(pickingImageForColorIdx === idx ? null : idx)}
+                            className={`text-[10px] font-bold flex items-center gap-1 text-left ${
+                              pickingImageForColorIdx === idx
+                                ? 'text-amber-300'
+                                : 'text-sky-400 hover:text-sky-300 disabled:text-slate-600'
+                            }`}
+                          >
+                            <Images size={11} /> {pickingImageForColorIdx === idx ? 'Elegí abajo…' : 'Elegir existente'}
+                          </button>
+                          <label className="cursor-pointer text-[10px] font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1">
+                            {uploadingColorIdx === idx ? (
+                              <Loader2 size={11} className="animate-spin" />
+                            ) : (
+                              <Upload size={11} />
+                            )}
+                            Cambiar foto
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              disabled={uploadingColorIdx !== null}
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) void handleColorImageUpload(idx, file);
+                                e.target.value = '';
+                              }}
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            disabled={!cropSource}
                             onClick={() => startColorCrop(idx)}
                             className="text-[10px] font-bold text-emerald-400 hover:text-emerald-300 disabled:text-slate-600 flex items-center gap-1 text-left"
                           >
@@ -1101,8 +1219,24 @@ const ProductEditorModal: React.FC<{
               </label>
             </div>
             <p className="text-[10px] text-slate-500 mb-2">
-              Elegí con el check cuál foto grande se muestra en la ficha. Las demás son de Tienda Nube.
+              {pickingImageForColorIdx !== null
+                ? `Elegí una foto de abajo para el color «${colorVariants[pickingImageForColorIdx]?.name || 'sin nombre'}».`
+                : 'Elegí con el check cuál foto grande se muestra en la ficha. Las demás son de Tienda Nube.'}
             </p>
+            {pickingImageForColorIdx !== null && (
+              <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-amber-700/50 bg-amber-950/30 px-3 py-2">
+                <p className="text-[11px] text-amber-200">
+                  Modo selección: hacé clic en una imagen para asignarla al color.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setPickingImageForColorIdx(null)}
+                  className="text-[10px] font-bold text-amber-300 hover:text-white shrink-0"
+                >
+                  Cancelar
+                </button>
+              </div>
+            )}
             {uploadError && <p className="text-red-400 text-xs mb-2">{uploadError}</p>}
             {images.length === 0 ? (
               <div className="rounded-lg border border-dashed border-slate-600 p-4 text-center text-slate-500 text-xs">
@@ -1114,40 +1248,62 @@ const ProductEditorModal: React.FC<{
                   <div
                     key={`${src}-${i}`}
                     className={`relative w-20 h-24 rounded-lg overflow-hidden border-2 group ${
-                      i === imageIndex ? 'border-emerald-500' : 'border-slate-700'
+                      pickingImageForColorIdx !== null
+                        ? 'border-amber-500 cursor-pointer hover:ring-2 hover:ring-amber-400/60'
+                        : i === imageIndex
+                          ? 'border-emerald-500'
+                          : 'border-slate-700'
                     }`}
                   >
-                    <button onClick={() => setImageIndex(i)} className="w-full h-full" title="Usar como foto principal">
+                    <button
+                      onClick={() => {
+                        if (pickingImageForColorIdx !== null) {
+                          assignGalleryImageToColor(pickingImageForColorIdx, src);
+                          return;
+                        }
+                        setImageIndex(i);
+                      }}
+                      className="w-full h-full"
+                      title={
+                        pickingImageForColorIdx !== null
+                          ? 'Usar esta foto para el color'
+                          : 'Usar como foto principal'
+                      }
+                    >
                       <img src={src} alt="" className="w-full h-full object-cover" />
                     </button>
-                    {i === imageIndex && (
+                    {pickingImageForColorIdx === null && i === imageIndex && (
                       <span className="absolute top-0.5 left-0.5 bg-emerald-500 text-white text-[8px] font-bold px-1 py-0.5 rounded">
                         Principal
                       </span>
                     )}
-                    {isUploaded(src) && (
+                    {pickingImageForColorIdx === null && isUploaded(src) && (
                       <span className="absolute bottom-0.5 left-0.5 bg-indigo-600 text-white text-[8px] px-1 rounded">propia</span>
                     )}
-                    <div className="absolute top-0.5 right-0.5 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition">
-                      <button
-                        onClick={() => setCroppingIndex(i)}
-                        className="w-5 h-5 rounded bg-emerald-600/95 text-white flex items-center justify-center"
-                        title="Recortar"
-                      >
-                        <Crop size={11} />
-                      </button>
-                      <button onClick={() => removeImage(i)} className="w-5 h-5 rounded bg-red-600/90 text-white flex items-center justify-center" title="Quitar">
-                        <X size={11} />
-                      </button>
-                    </div>
-                    <div className="absolute bottom-0.5 right-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100 transition">
-                      <button onClick={() => moveImage(i, -1)} className="w-5 h-5 rounded bg-black/60 text-white flex items-center justify-center" title="Mover izquierda">
-                        <ChevronUp size={11} className="-rotate-90" />
-                      </button>
-                      <button onClick={() => moveImage(i, 1)} className="w-5 h-5 rounded bg-black/60 text-white flex items-center justify-center" title="Mover derecha">
-                        <ChevronDown size={11} className="-rotate-90" />
-                      </button>
-                    </div>
+                    {pickingImageForColorIdx === null && (
+                      <>
+                        <div className="absolute top-0.5 right-0.5 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition">
+                          <button
+                            onClick={() => setCroppingIndex(i)}
+                            className="w-5 h-5 rounded bg-emerald-600/95 text-white flex items-center justify-center"
+                            title="Recortar"
+                          >
+                            <Crop size={11} />
+                          </button>
+                          <button onClick={() => removeImage(i)} className="w-5 h-5 rounded bg-red-600/90 text-white flex items-center justify-center" title="Quitar">
+                            <X size={11} />
+                          </button>
+                        </div>
+                        <div className="absolute bottom-0.5 right-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100 transition">
+                          <button onClick={() => moveImage(i, -1)} className="w-5 h-5 rounded bg-black/60 text-white flex items-center justify-center" title="Mover izquierda">
+                            <ChevronUp size={11} className="-rotate-90" />
+                          </button>
+                          <button onClick={() => moveImage(i, 1)} className="w-5 h-5 rounded bg-black/60 text-white flex items-center justify-center" title="Mover derecha">
+                            <ChevronDown size={11} className="-rotate-90" />
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1179,9 +1335,9 @@ const ProductEditorModal: React.FC<{
           onApply={(blob) => applyCroppedImage(croppingIndex, blob)}
         />
       )}
-      {croppingColorIdx !== null && colorVariants[croppingColorIdx]?.sourceImage && (
+      {croppingColorIdx !== null && (colorVariants[croppingColorIdx]?.image || colorVariants[croppingColorIdx]?.sourceImage) && (
         <ImageCropModal
-          src={colorVariants[croppingColorIdx].sourceImage!}
+          src={(colorVariants[croppingColorIdx].image || colorVariants[croppingColorIdx].sourceImage)!}
           title={`Recortar color — ${colorVariants[croppingColorIdx]?.name || 'sin nombre'}`}
           defaultAspect="1:1"
           lockAspect
@@ -1731,6 +1887,70 @@ const CatalogColorThumb: React.FC<{
   );
 };
 
+const EditableCatalogColorThumb: React.FC<{
+  cv: ColorVariant;
+  colorLabel: string;
+  hex: string;
+  onCrop: () => void;
+  onToggleVisible: () => void;
+  onUpload: (file: File) => void;
+}> = ({ cv, colorLabel, hex, onCrop, onToggleVisible, onUpload }) => {
+  const hidden = cv.included === false;
+  const hasImage = !!(cv.image || cv.sourceImage);
+  const uploadRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <div className={`tn-noprint flex flex-col items-start gap-1.5 ${hidden ? 'opacity-40' : ''}`}>
+      <div className="relative">
+        <div className="tn-color-thumb w-11 h-11 rounded-sm overflow-hidden bg-white border-2 border-emerald-400/60">
+          <CatalogColorThumb cv={cv} colorLabel={colorLabel} hex={hex} />
+        </div>
+        <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 flex items-center gap-0.5 bg-white rounded shadow border border-stone-200 px-0.5 py-0.5">
+          <button
+            type="button"
+            onClick={onCrop}
+            disabled={!hasImage}
+            className="w-5 h-5 rounded text-stone-700 flex items-center justify-center disabled:opacity-40 hover:bg-stone-100"
+            title={hasImage ? 'Recortar miniatura' : 'Sin foto para recortar'}
+          >
+            <Crop size={11} />
+          </button>
+          <button
+            type="button"
+            onClick={() => uploadRef.current?.click()}
+            className="w-5 h-5 rounded text-stone-700 flex items-center justify-center hover:bg-stone-100"
+            title="Subir imagen"
+          >
+            <Upload size={11} />
+          </button>
+          <button
+            type="button"
+            onClick={onToggleVisible}
+            className="w-5 h-5 rounded text-stone-700 flex items-center justify-center hover:bg-stone-100"
+            title={hidden ? 'Mostrar en catálogo' : 'Ocultar del catálogo'}
+          >
+            {hidden ? <Eye size={11} /> : <EyeOff size={11} />}
+          </button>
+        </div>
+        <input
+          ref={uploadRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) onUpload(file);
+            e.target.value = '';
+          }}
+        />
+      </div>
+      <span className="tn-color-name text-[8px] uppercase tracking-[0.14em] text-stone-500 font-light leading-tight max-w-[52px] truncate mt-2">
+        {colorLabel}
+      </span>
+    </div>
+  );
+};
+
 const ProductDisplay: React.FC<{
   product: DisplayProduct;
   flip: boolean;
@@ -1744,12 +1964,19 @@ const ProductDisplay: React.FC<{
   onEdit: () => void;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
-}> = ({ product, flip, showPrice, editMode, pickMode = false, headingFont, bodyFont, colors, onToggleInclude, onEdit, onMoveUp, onMoveDown }) => {
+  onColorCrop?: (cv: ColorVariant) => void;
+  onColorToggleVisible?: (cv: ColorVariant) => void;
+  onColorUpload?: (cv: ColorVariant, file: File) => void;
+  onPriceChange?: (price: number | null) => void;
+  onPriceReset?: () => void;
+  priceOverridden?: boolean;
+}> = ({ product, flip, showPrice, editMode, pickMode = false, headingFont, bodyFont, colors, onToggleInclude, onEdit, onMoveUp, onMoveDown, onColorCrop, onColorToggleVisible, onColorUpload, onPriceChange, onPriceReset, priceOverridden = false }) => {
   const img = resolveCatalogImageSrc(product.images[product.imageIndex] || product.images[0] || '');
   const selectionMode = editMode || pickMode;
   const dimmed = selectionMode && !product.included;
   const blurb = catalogBlurb(product.description, product.features);
   const visibleColors = catalogVisibleColorVariants(product.colorVariants);
+  const colorsToShow = editMode ? product.colorVariants : visibleColors;
   const fontStack = "'Montserrat', sans-serif";
   const iconProps = { size: 15, strokeWidth: 1.5 as const };
 
@@ -1811,7 +2038,31 @@ const ProductDisplay: React.FC<{
                 {product.name}
               </h3>
 
-              {showPrice && product.price != null && (
+              {editMode && onPriceChange ? (
+                <div className="tn-noprint mb-4 max-w-[200px]">
+                  <label className="text-[9px] uppercase tracking-[0.22em] text-stone-400 block mb-1.5">Precio</label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-stone-500 text-sm">$</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={product.price != null ? String(product.price) : ''}
+                      placeholder="Sin precio"
+                      onChange={(e) => onPriceChange(parsePriceInput(e.target.value))}
+                      className="flex-1 min-w-0 bg-white border border-emerald-400/70 rounded-lg px-2.5 py-1.5 text-stone-800 text-sm font-medium outline-none focus:ring-2 focus:ring-emerald-400"
+                    />
+                  </div>
+                  {priceOverridden && onPriceReset && (
+                    <button
+                      type="button"
+                      onClick={onPriceReset}
+                      className="mt-1.5 text-[10px] text-sky-600 hover:text-sky-800 font-semibold"
+                    >
+                      Restaurar precio de lista
+                    </button>
+                  )}
+                </div>
+              ) : showPrice && product.price != null ? (
                 <p className="text-[12px] text-stone-700 mb-4 font-medium">
                   {product.promotionalPrice != null ? (
                     <>
@@ -1822,7 +2073,7 @@ const ProductDisplay: React.FC<{
                     formatPrice(product.price)
                   )}
                 </p>
-              )}
+              ) : null}
 
               {(blurb || product.features.length > 0) && (
                 <div className="tn-product-copy space-y-3 max-w-[94%]">
@@ -1857,12 +2108,30 @@ const ProductDisplay: React.FC<{
                 </CatalogDetailSection>
               )}
 
-              {visibleColors.length > 0 && (
+              {colorsToShow.length > 0 && (
                 <CatalogDetailSection icon={<Palette {...iconProps} />} label="Colores">
+                  {editMode && (
+                    <p className="tn-noprint text-[9px] text-stone-400 mb-2 leading-snug">
+                      Usá los botones debajo de cada miniatura para recortar, subir imagen u ocultar el color.
+                    </p>
+                  )}
                   <div className="flex flex-wrap justify-start gap-x-5 gap-y-3">
-                    {visibleColors.map((cv, i) => {
+                    {colorsToShow.map((cv, i) => {
                       const hex = colorToHex(cv.name);
                       const colorLabel = cv.name.replace(/^\d+\s*[·\-]?\s*/, '').trim() || cv.name;
+                      if (editMode && onColorCrop && onColorToggleVisible && onColorUpload) {
+                        return (
+                          <EditableCatalogColorThumb
+                            key={`${cv.name}-${i}`}
+                            cv={cv}
+                            colorLabel={colorLabel}
+                            hex={hex}
+                            onCrop={() => onColorCrop(cv)}
+                            onToggleVisible={() => onColorToggleVisible(cv)}
+                            onUpload={(file) => onColorUpload(cv, file)}
+                          />
+                        );
+                      }
                       return (
                         <div key={`${cv.name}-${i}`} className="flex flex-col items-start gap-1.5">
                           <div className="tn-color-thumb w-11 h-11 rounded-sm overflow-hidden bg-white border border-stone-200/90">
@@ -1940,6 +2209,11 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [autoCroppingColors, setAutoCroppingColors] = useState(false);
   const [configHydrated, setConfigHydrated] = useState(false);
+  const [inlineColorCrop, setInlineColorCrop] = useState<{
+    productId: number;
+    colorName: string;
+    sourceImage: string;
+  } | null>(null);
   const [selectedPriceListId, setSelectedPriceListId] = useState<string>(() => {
     try {
       return sessionStorage.getItem(SELLER_PRICE_LIST_KEY) || '';
@@ -2012,7 +2286,7 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
     return () => clearTimeout(t);
   }, [isSeller, userId, selectedPriceListId, sellerOverrides]);
 
-  const effectiveShowPrice = isSeller ? !!selectedPriceListId : config.showPrice;
+  const effectiveShowPrice = isSeller ? !!selectedPriceListId : config.showPrice && !!selectedPriceListId;
   const selectedPriceListName = useMemo(
     () => priceLists.find((pl) => pl.id === selectedPriceListId)?.name || catalog?.priceListName || '',
     [priceLists, selectedPriceListId, catalog?.priceListName]
@@ -2031,7 +2305,7 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
   const dirty = useMemo(() => JSON.stringify(config) !== savedSnapshot, [config, savedSnapshot]);
 
   const load = useCallback(async (overridePriceListId?: string) => {
-    const priceListId = isSeller ? (overridePriceListId ?? selectedPriceListId) : '';
+    const priceListId = overridePriceListId ?? selectedPriceListId;
     if (isSeller && !priceListId) {
       setError('Elegí una lista de precios antes de generar el catálogo.');
       return;
@@ -2041,7 +2315,7 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
     try {
       const [data, cfgRes] = await Promise.all([
         api.getTiendaNubeCatalog(
-          isSeller && priceListId ? { priceListId } : undefined
+          priceListId ? { priceListId } : undefined
         ),
         api.getTiendaNubeCatalogConfig().catch(() => ({ config: null, updatedAt: null })),
       ]);
@@ -2061,6 +2335,9 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
       const isDirty = isAdmin && JSON.stringify(configRef.current) !== savedSnapshotRef.current;
       if (!isDirty) {
         setConfig(merged);
+        if (isAdmin && merged.priceListId) {
+          setSelectedPriceListId(merged.priceListId);
+        }
         const snap = JSON.stringify(merged);
         setSavedSnapshot(snap);
         savedSnapshotRef.current = snap;
@@ -2095,6 +2372,9 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
         const serverCfg = buildConfigFromResponse(res?.config, base);
         const merged = isAdmin ? mergeCatalogConfig(serverCfg, readCachedConfig()) : serverCfg;
         setConfig(merged);
+        if (isAdmin && merged.priceListId) {
+          setSelectedPriceListId(merged.priceListId);
+        }
         const snap = JSON.stringify(merged);
         setSavedSnapshot(snap);
         savedSnapshotRef.current = snap;
@@ -2107,6 +2387,9 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
           if (cached) {
             const merged = mergeCatalogConfig(defaultConfig(), cached);
             setConfig(merged);
+            if (merged.priceListId) {
+              setSelectedPriceListId(merged.priceListId);
+            }
             const snap = JSON.stringify(merged);
             setSavedSnapshot(snap);
             savedSnapshotRef.current = snap;
@@ -2211,10 +2494,19 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
 
   const handlePriceListChange = (id: string) => {
     setSelectedPriceListId(id);
-    try {
-      sessionStorage.setItem(SELLER_PRICE_LIST_KEY, id);
-    } catch {
-      /* ignore */
+    if (isSeller) {
+      try {
+        sessionStorage.setItem(SELLER_PRICE_LIST_KEY, id);
+      } catch {
+        /* ignore */
+      }
+    }
+    if (isAdmin) {
+      setConfig((p) => ({
+        ...p,
+        priceListId: id || undefined,
+        showPrice: id ? p.showPrice : false,
+      }));
     }
     setError('');
     if (id && catalog) {
@@ -2251,6 +2543,101 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
       products: { ...prev.products, [id]: { ...prev.products[id], ...patch } },
     }));
   };
+
+  const patchProductColorVariant = useCallback(
+    (productId: number, colorName: string, patch: Partial<ColorVariant>) => {
+      if (!catalog) return;
+      const tnProduct = findCatalogProduct(catalog, productId);
+      if (!tnProduct) return;
+      setConfig((prev) => {
+        const ov = prev.products[productId] || {};
+        const variants = resolveColorVariants(ov, tnProduct);
+        const updated = variants.map((cv) => (cv.name === colorName ? { ...cv, ...patch } : cv));
+        return {
+          ...prev,
+          products: {
+            ...prev.products,
+            [productId]: { ...ov, colorVariants: updated },
+          },
+        };
+      });
+    },
+    [catalog]
+  );
+
+  const handleInlineColorCrop = useCallback((productId: number, cv: ColorVariant) => {
+    const src = cv.sourceImage || cv.image;
+    if (!src) {
+      setError('Este color no tiene foto asignada en Tienda Nube.');
+      return;
+    }
+    setError('');
+    setInlineColorCrop({ productId, colorName: cv.name, sourceImage: src });
+  }, []);
+
+  const applyInlineColorCrop = useCallback(
+    async (blob: Blob) => {
+      if (!inlineColorCrop) return;
+      const file = new File([blob], `color-crop-${Date.now()}.jpg`, { type: 'image/jpeg' });
+      const url = await api.uploadCatalogImage(file);
+      patchProductColorVariant(inlineColorCrop.productId, inlineColorCrop.colorName, { image: url });
+      setInlineColorCrop(null);
+    },
+    [inlineColorCrop, patchProductColorVariant]
+  );
+
+  const handleInlineColorUpload = useCallback(
+    async (productId: number, cv: ColorVariant, file: File) => {
+      setError('');
+      try {
+        const url = await api.uploadCatalogImage(file);
+        patchProductColorVariant(productId, cv.name, {
+          image: url,
+          sourceImage: cv.sourceImage || url,
+        });
+      } catch (e: any) {
+        setError(e?.message || 'No se pudo subir la imagen del color');
+      }
+    },
+    [patchProductColorVariant]
+  );
+
+  const handleInlineColorToggle = useCallback(
+    (productId: number, cv: ColorVariant) => {
+      const visible = cv.included !== false;
+      patchProductColorVariant(productId, cv.name, { included: visible ? false : true });
+    },
+    [patchProductColorVariant]
+  );
+
+  const handleProductPriceChange = useCallback((productId: number, price: number | null) => {
+    setConfig((prev) => {
+      const ov = prev.products[productId] || {};
+      const next = { ...ov };
+      if (price !== null) {
+        next.price = price;
+      } else {
+        delete next.price;
+      }
+      return {
+        ...prev,
+        products: { ...prev.products, [productId]: next },
+      };
+    });
+  }, []);
+
+  const resetProductPrice = useCallback((productId: number) => {
+    setConfig((prev) => {
+      const ov = prev.products[productId];
+      if (!ov || ov.price === undefined) return prev;
+      const next = { ...ov };
+      delete next.price;
+      return {
+        ...prev,
+        products: { ...prev.products, [productId]: next },
+      };
+    });
+  }, []);
 
   const toggleProduct = (id: number) => {
     setConfig((prev) => {
@@ -2448,13 +2835,13 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
               {isAdmin && savedAt && (
                 <span className="ml-1 text-slate-500">· Guardado {new Date(savedAt).toLocaleString('es-AR')}</span>
               )}
-              {isSeller && selectedPriceListName && catalog && (
+              {(isSeller || isAdmin) && selectedPriceListName && catalog && (
                 <span className="ml-1 text-emerald-400">· Lista: {selectedPriceListName}</span>
               )}
             </p>
           </div>
           <div className="flex flex-wrap gap-2 lg:ml-auto">
-            {isSeller && (
+            {(isSeller || isAdmin) && priceLists.length > 0 && (
               <select
                 value={selectedPriceListId}
                 onChange={(e) => handlePriceListChange(e.target.value)}
@@ -2533,16 +2920,18 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
           </div>
         </div>
 
-        {(catalog || isSeller) && (
+        {(catalog || isSeller || isAdmin) && (
           <div className="mt-4 flex flex-col gap-3">
-            {isSeller && priceLists.length === 0 && (
+            {(isSeller || isAdmin) && priceLists.length === 0 && (
               <p className="text-xs text-amber-300 bg-amber-950/40 border border-amber-800/50 rounded-lg px-3 py-2">
-                No hay listas de precios disponibles. Pedile al administrador que las configure.
+                No hay listas de precios disponibles. Configuralas en Ajustes → Listas de precios.
               </p>
             )}
-            {isSeller && priceLists.length > 0 && !selectedPriceListId && (
+            {(isSeller || isAdmin) && priceLists.length > 0 && !selectedPriceListId && (
               <p className="text-xs text-amber-300 bg-amber-950/40 border border-amber-800/50 rounded-lg px-3 py-2">
-                Seleccioná una lista de precios para generar el catálogo con tus precios mayoristas.
+                {isSeller
+                  ? 'Seleccioná una lista de precios para generar el catálogo con tus precios mayoristas.'
+                  : 'Seleccioná una lista de precios para cargar precios en el catálogo. Sin lista, el botón «Con precios» no mostrará valores.'}
               </p>
             )}
             {catalog && (
@@ -2560,12 +2949,20 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
               </div>
               {isAdmin && (
               <button
-                onClick={() => setConfig((p) => ({ ...p, showPrice: !p.showPrice }))}
-                className={`min-h-[44px] px-3 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 border ${
-                  config.showPrice ? 'bg-amber-600 border-amber-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-200 hover:bg-slate-600'
+                onClick={() => {
+                  if (!selectedPriceListId) {
+                    setError('Elegí una lista de precios antes de activar la visualización de precios.');
+                    return;
+                  }
+                  setConfig((p) => ({ ...p, showPrice: !p.showPrice }));
+                }}
+                disabled={!selectedPriceListId}
+                title={selectedPriceListId ? undefined : 'Elegí una lista de precios primero'}
+                className={`min-h-[44px] px-3 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 border disabled:opacity-40 disabled:cursor-not-allowed ${
+                  config.showPrice && selectedPriceListId ? 'bg-amber-600 border-amber-500 text-white' : 'bg-slate-700 border-slate-600 text-slate-200 hover:bg-slate-600'
                 }`}
               >
-                <DollarSign size={18} /> {config.showPrice ? 'Con precios' : 'Sin precios'}
+                <DollarSign size={18} /> {config.showPrice && selectedPriceListId ? 'Con precios' : 'Sin precios'}
               </button>
               )}
               {isAdmin && editMode && (
@@ -2615,7 +3012,7 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
             {isAdmin && editMode && (
               <p className="text-xs text-indigo-300 bg-indigo-950/40 border border-indigo-800/50 rounded-lg px-3 py-2">
                 Modo edición: usá el ojo para incluir/quitar productos, el lápiz para editar textos, colores e imágenes, y las flechas para reordenar.
-                En cada color podés ocultar variantes descontinuadas. Acordate de <strong>Guardar</strong> al terminar.
+                En cada miniatura de color podés recortar, subir imagen u ocultar variantes. El precio se edita directo en la ficha del producto. Acordate de <strong>Guardar</strong> al terminar.
               </p>
             )}
             {isSeller && pickMode && (
@@ -2806,6 +3203,12 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
                           onEdit={() => setEditingProduct({ section, product: p })}
                           onMoveUp={editMode ? () => moveProduct(section.id, baseProdIds, p.id, -1) : undefined}
                           onMoveDown={editMode ? () => moveProduct(section.id, baseProdIds, p.id, 1) : undefined}
+                          onColorCrop={editMode ? (cv) => handleInlineColorCrop(p.id, cv) : undefined}
+                          onColorToggleVisible={editMode ? (cv) => handleInlineColorToggle(p.id, cv) : undefined}
+                          onColorUpload={editMode ? (cv, file) => void handleInlineColorUpload(p.id, cv, file) : undefined}
+                          onPriceChange={editMode ? (price) => handleProductPriceChange(p.id, price) : undefined}
+                          onPriceReset={editMode ? () => resetProductPrice(p.id) : undefined}
+                          priceOverridden={config.products[p.id]?.price !== undefined}
                         />
                       );
                     })}
@@ -2871,6 +3274,17 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
           colors={colors}
           onSave={(c) => setConfig((prev) => ({ ...prev, colors: c }))}
           onClose={() => setEditingColors(false)}
+        />
+      )}
+      {isAdmin && inlineColorCrop && (
+        <ImageCropModal
+          src={inlineColorCrop.sourceImage}
+          title={`Recortar color — ${inlineColorCrop.colorName.replace(/^\d+\s*[·\-]?\s*/, '').trim() || inlineColorCrop.colorName}`}
+          defaultAspect="1:1"
+          lockAspect
+          outputSize={COLOR_THUMB_SIZE}
+          onClose={() => setInlineColorCrop(null)}
+          onApply={applyInlineColorCrop}
         />
       )}
     </div>

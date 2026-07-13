@@ -3,7 +3,7 @@ import * as XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
 import { query, execute, get } from '../database/db';
 import { v4 as uuidv4 } from 'uuid';
-import { padLegacyCode } from '../utils/multimediaHistorialExcel';
+import { padLegacyCode, normalizeCuitDigits } from '../utils/multimediaHistorialExcel';
 import { canonicalizeCityInput } from '../utils/cityNormalize';
 import {
   backfillPaymentOrdersFromLegacy,
@@ -13,14 +13,21 @@ import {
   SQL_ORDER_NETO_AFIP,
   SQL_ORDER_SALDO_RESIDUAL,
   SQL_PAYMENT_SALDO_CONTRIBUTION_AMOUNT,
+  syncOrderPaymentStatus,
 } from '../services/orderPaymentBalance.service';
+import {
+  consultarComprobanteAfip,
+  getAfipPuntoVenta,
+  getLastAfipVoucherNumber,
+  isAfipConfigured
+} from '../services/afip.service';
 import {
   IVA_MULTIPLIER,
   ORDER_PRICES_INCLUDE_IVA,
+  invoiceLedgerImporte,
   sqlAmountWithIvaFromOrderLines,
   sqlInvoiceAmountFromOrderTotal,
-  sqlNetoAfipToAmountWithIva,
-  sqlOrderTotalWithIvaExpr
+  sqlNetoAfipToAmountWithIva
 } from '../config/orderPricing';
 import {
   INCLUDE_TANGO_IMPORT_IN_SYSTEM,
@@ -28,7 +35,8 @@ import {
   SQL_CARTERA_IMPORT_JOIN,
   SQL_CARTERA_IMPORT_NC_EXPR,
   SQL_CARTERA_IMPORT_REC_EXPR,
-  SQL_CARTERA_MULTIMEDIA_SALDO_EXPR
+  SQL_CARTERA_MULTIMEDIA_SALDO_EXPR,
+  SQL_WHERE_PAYMENT_SOLO_LUPOHUB
 } from '../sql/carteraImportedSql';
 import {
   SQL_CUSTOMER_OPENING_BALANCE_EXPR,
@@ -488,7 +496,7 @@ export const exportCustomersBySheetsXlsx = async (req: Request, res: Response) =
                LPAD(COALESCE(i.cbte_desde, 0), 8, '0')
              ) AS comprobante,
              o.id AS order_id,
-             ${sqlOrderTotalWithIvaExpr()} AS importe
+             ${sqlInvoiceAmountFromOrderTotal()} AS importe
            FROM invoices i
            JOIN orders o ON o.id = i.order_id
            WHERE o.customer_id = ?
@@ -1511,7 +1519,8 @@ const SQL_CARTERA_AFIP_INVOICES_SUBQUERY = `
 
 /**
  * NC AFIP (× IVA) que restan del saldo. Solo punto de venta 21.
- * Incluye NC de reemisión con IIBB: anulan la factura anterior y la nueva factura suma por separado.
+ * Excluye NC de reemisión IIBB (superseded_by_reinvoice): la factura anterior no figura en cartera
+ * porque se actualiza en el mismo registro; solo cuenta la factura nueva.
  */
 const SQL_CARTERA_AFIP_NC_SUBQUERY = `
   SELECT
@@ -1521,6 +1530,7 @@ const SQL_CARTERA_AFIP_NC_SUBQUERY = `
   INNER JOIN orders o ON o.id = cn.order_id
   INNER JOIN customers co ON co.id = o.customer_id
   WHERE cn.punto_venta = 21
+    AND COALESCE(cn.superseded_by_reinvoice, 0) = 0
     AND ${SQL_OPENING_AFIP_CN_DATE_WHERE}
   GROUP BY o.customer_id
 `;
@@ -1784,6 +1794,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
             END
            WHERE (p.seller_id = ? OR c2.seller_id = ?)
              AND me_rec.customer_id IS NULL
+             AND ${SQL_WHERE_PAYMENT_SOLO_LUPOHUB}
              AND ${sqlOpeningPaymentDateWhere('c2')}
              AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
            GROUP BY
@@ -1841,6 +1852,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
               )
             END
            WHERE me_rec.customer_id IS NULL
+             AND ${SQL_WHERE_PAYMENT_SOLO_LUPOHUB}
              AND ${sqlOpeningPaymentDateWhere('cp')}
              AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
            GROUP BY
@@ -1965,6 +1977,7 @@ export async function queryCarteraTotalsForCustomer(
              AND me_rec.receipt_norm = CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
              ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END
            WHERE (p.seller_id = ? OR c2.seller_id = ?) AND me_rec.customer_id IS NULL
+             AND ${SQL_WHERE_PAYMENT_SOLO_LUPOHUB}
              AND ${sqlOpeningPaymentDateWhere('c2')} AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
            GROUP BY p.customer_id, DATE(p.date), ROUND(COALESCE(p.amount, 0), 2),
              CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
@@ -1988,7 +2001,7 @@ export async function queryCarteraTotalsForCustomer(
              AND me_rec.amount = ROUND(COALESCE(p.amount, 0), 2)
              AND me_rec.receipt_norm = CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
              ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END
-           WHERE me_rec.customer_id IS NULL AND ${sqlOpeningPaymentDateWhere('cp')} AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
+           WHERE me_rec.customer_id IS NULL AND ${SQL_WHERE_PAYMENT_SOLO_LUPOHUB} AND ${sqlOpeningPaymentDateWhere('cp')} AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
            GROUP BY p.customer_id, DATE(p.date), ROUND(COALESCE(p.amount, 0), 2),
              CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
              ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END
@@ -2066,6 +2079,7 @@ async function fetchCarteraSaldoUnificadoMap(
              AND me_rec.receipt_norm = CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
              ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END
            WHERE (p.seller_id = ? OR c2.seller_id = ?) AND me_rec.customer_id IS NULL
+             AND ${SQL_WHERE_PAYMENT_SOLO_LUPOHUB}
              AND ${sqlOpeningPaymentDateWhere('c2')}
              AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
            GROUP BY p.customer_id, DATE(p.date), ROUND(COALESCE(p.amount, 0), 2),
@@ -2091,6 +2105,7 @@ async function fetchCarteraSaldoUnificadoMap(
              AND me_rec.receipt_norm = CASE WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
              ELSE UPPER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')) END
            WHERE me_rec.customer_id IS NULL
+             AND ${SQL_WHERE_PAYMENT_SOLO_LUPOHUB}
              AND ${sqlOpeningPaymentDateWhere('cp')}
              AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
            GROUP BY p.customer_id, DATE(p.date), ROUND(COALESCE(p.amount, 0), 2),
@@ -2338,21 +2353,30 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
     const sellerWhere = user.role === 'SELLER' ? 'WHERE c.seller_id = ?' : '';
     const sellerParams: any[] = user.role === 'SELLER' ? [user.id] : [];
 
-    const movements = await query(
-      `
-      SELECT
-        m.customer_id,
-        m.customer_name,
-        m.seller_id,
-        m.seller_name,
-        m.fecha,
-        m.tipo,
-        m.comprobante,
-        m.order_id,
-        m.debe,
-        m.haber
-      FROM (
+    const branchNcImportadaTango = `
         SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
+          e.line_date AS fecha,
+          'NOTA_CREDITO_IMPORTADA' AS tipo,
+          COALESCE(NULLIF(TRIM(e.numero), ''), 'NC importada') AS comprobante,
+          NULL AS order_id,
+          0 AS debe,
+          ROUND(ABS(COALESCE(e.importe, 0)), 2) AS haber
+        FROM customer_multimedia_entries e
+        JOIN customers c ON c.id = e.customer_id
+        LEFT JOIN users u ON u.id = c.seller_id
+        WHERE (
+          UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'NOTA DE CRÉDITO')
+          OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
+          OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CRÉDITO%'
+          OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
+        )`;
+
+    const detalleUnionBranches = [
+      `SELECT
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
           c.seller_id AS seller_id,
@@ -2370,16 +2394,13 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
             LPAD(COALESCE(i.cbte_desde, 0), 8, '0')
           ) AS comprobante,
           o.id AS order_id,
-          ${sqlOrderTotalWithIvaExpr()} AS debe,
+          ${sqlInvoiceAmountFromOrderTotal()} AS debe,
           0 AS haber
         FROM invoices i
         JOIN orders o ON o.id = i.order_id
         JOIN customers c ON c.id = o.customer_id
-        LEFT JOIN users u ON u.id = c.seller_id
-
-        UNION ALL
-
-        SELECT
+        LEFT JOIN users u ON u.id = c.seller_id`,
+      `SELECT
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
           c.seller_id AS seller_id,
@@ -2404,11 +2425,8 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
         JOIN orders o ON o.id = cn.order_id
         LEFT JOIN invoices inv ON inv.id = cn.invoice_id
         JOIN customers c ON c.id = o.customer_id
-        LEFT JOIN users u ON u.id = c.seller_id
-
-        UNION ALL
-
-        SELECT
+        LEFT JOIN users u ON u.id = c.seller_id`,
+      `SELECT
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
           c.seller_id AS seller_id,
@@ -2435,34 +2453,9 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
           ON REPLACE(REPLACE(REPLACE(COALESCE(c.cuit, ''), '-', ''), '.', ''), ' ', '') =
              REPLACE(REPLACE(REPLACE(COALESCE(ei.customer_cuit, ''), '-', ''), '.', ''), ' ', '')
         LEFT JOIN users u ON u.id = c.seller_id
-        WHERE REPLACE(REPLACE(REPLACE(COALESCE(ei.customer_cuit, ''), '-', ''), '.', ''), ' ', '') <> ''
-
-        UNION ALL
-
-        SELECT
-          c.id AS customer_id,
-          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
-          c.seller_id AS seller_id,
-          u.name AS seller_name,
-          e.line_date AS fecha,
-          'NOTA_CREDITO_IMPORTADA' AS tipo,
-          COALESCE(NULLIF(TRIM(e.numero), ''), 'NC importada') AS comprobante,
-          NULL AS order_id,
-          0 AS debe,
-          ROUND(ABS(COALESCE(e.importe, 0)), 2) AS haber
-        FROM customer_multimedia_entries e
-        JOIN customers c ON c.id = e.customer_id
-        LEFT JOIN users u ON u.id = c.seller_id
-        WHERE (
-          UPPER(TRIM(COALESCE(e.tipo, ''))) IN ('NC', 'N/C', 'NOTA CREDITO', 'NOTA DE CREDITO', 'NOTA DE CRÉDITO')
-          OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CREDITO%'
-          OR UPPER(COALESCE(e.detalle, '')) LIKE '%NOTA%CRÉDITO%'
-          OR UPPER(COALESCE(e.detalle, '')) LIKE '%N/C%'
-        )
-
-        UNION ALL
-
-        SELECT
+        WHERE REPLACE(REPLACE(REPLACE(COALESCE(ei.customer_cuit, ''), '-', ''), '.', ''), ' ', '') <> ''`,
+      ...(INCLUDE_TANGO_IMPORT_IN_SYSTEM ? [branchNcImportadaTango] : []),
+      `SELECT
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
           c.seller_id AS seller_id,
@@ -2475,7 +2468,24 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
           ROUND(COALESCE(p.amount, 0), 2) AS haber
         FROM payments p
         JOIN customers c ON c.id = p.customer_id
-        LEFT JOIN users u ON u.id = c.seller_id
+        LEFT JOIN users u ON u.id = c.seller_id`
+    ];
+
+    const movements = await query(
+      `
+      SELECT
+        m.customer_id,
+        m.customer_name,
+        m.seller_id,
+        m.seller_name,
+        m.fecha,
+        m.tipo,
+        m.comprobante,
+        m.order_id,
+        m.debe,
+        m.haber
+      FROM (
+        ${detalleUnionBranches.join('\n\n        UNION ALL\n\n')}
       ) m
       ${user.role === 'SELLER' ? 'WHERE m.seller_id = ?' : ''}
       ORDER BY m.customer_name ASC, m.fecha ASC, m.tipo ASC
@@ -2654,7 +2664,7 @@ export const exportSaldosMovimientosSistemaXlsx = async (req: Request, res: Resp
             LPAD(COALESCE(i.cbte_desde, 0), 8, '0')
           ) AS comprobante,
           o.id AS order_id,
-          ${sqlOrderTotalWithIvaExpr()} AS debe,
+          ${sqlInvoiceAmountFromOrderTotal()} AS debe,
           0 AS haber
         FROM invoices i
         JOIN orders o ON o.id = i.order_id
@@ -2865,7 +2875,12 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         ? 'tango'
         : source === 'sistema' || source === 'solo-sistema'
           ? 'sistema'
-          : 'historial';
+          : source === 'historial'
+            ? 'historial'
+            : INCLUDE_TANGO_IMPORT_IN_SYSTEM
+              ? 'historial'
+              : 'sistema';
+    const includeTangoInHistorial = INCLUDE_TANGO_IMPORT_IN_SYSTEM;
 
     const sellerWhere = sellerIdFilter ? 'WHERE c.seller_id = ?' : '';
     const sellerParams: any[] = sellerIdFilter ? [sellerIdFilter] : [];
@@ -2905,7 +2920,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
             LPAD(COALESCE(i.cbte_desde, 0), 8, '0')
           ) AS comprobante,
           o.id AS order_id,
-          ${sqlOrderTotalWithIvaExpr()} AS debe,
+          ${sqlInvoiceAmountFromOrderTotal()} AS debe,
           0 AS haber
         FROM invoices i
         JOIN orders o ON o.id = i.order_id
@@ -2932,7 +2947,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
             LPAD(COALESCE(i.cbte_desde, 0), 8, '0')
           ) AS comprobante,
           o.id AS order_id,
-          ${sqlOrderTotalWithIvaExpr()} AS debe,
+          ${sqlInvoiceAmountFromOrderTotal()} AS debe,
           0 AS haber
         FROM invoices i
         JOIN orders o ON o.id = i.order_id
@@ -3326,7 +3341,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         branchNcExterna,
         branchReciboSistema,
         branchManualComprobante,
-        branchImportado
+        ...(includeTangoInHistorial ? [branchImportado] : [])
       ],
       sistema: [
         branchFacturaSistema,
@@ -3343,7 +3358,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         branchNcExternaOpening,
         branchReciboSistemaOpening,
         branchManualComprobanteOpening,
-        branchImportadoOpening
+        ...(includeTangoInHistorial ? [branchImportadoOpening] : [])
       ],
       sistema: [
         branchFacturaSistemaOpening,
@@ -4389,6 +4404,638 @@ export const assignCustomerSellersFromResumen = async (req: Request, res: Respon
  *  - No toca pedidos ya facturados en AFIP
  *  - Recalcula total del pedido
  */
+/**
+ * Ajusta el saldo pendiente unificado de un cliente modificando solo el saldo inicial.
+ * No elimina facturas ni comprobantes: el historial queda intacto.
+ */
+export const adjustCustomerSaldo = async (req: Request, res: Response) => {
+  try {
+    const authUser = (req as any).user;
+    if (!authUser || authUser.role !== 'ADMIN') {
+      return res.status(403).json({ message: 'Solo administradores pueden ajustar saldos' });
+    }
+
+    const { id: customerId } = req.params;
+    if (!customerId) return res.status(400).json({ message: 'ID de cliente requerido' });
+
+    const customer = await get('SELECT id FROM customers WHERE id = ?', [customerId]);
+    if (!customer) return res.status(404).json({ message: 'Cliente no encontrado' });
+
+    const rawTarget = (req.body as { targetSaldo?: unknown })?.targetSaldo;
+    if (rawTarget === undefined || rawTarget === null || String(rawTarget).trim() === '') {
+      return res.status(400).json({ message: 'Indicá targetSaldo (importe objetivo)' });
+    }
+    const parsedTarget = parseOpeningBalanceInput(rawTarget);
+    if (parsedTarget === null) {
+      return res.status(400).json({ message: 'targetSaldo debe ser un importe válido' });
+    }
+    const targetSaldo = Math.round(parsedTarget * 100) / 100;
+
+    const before = await queryCarteraTotalsForCustomer(customerId, authUser);
+    if (!before) return res.status(404).json({ message: 'Cliente no encontrado' });
+
+    const movementSaldo =
+      Math.round(
+        (before.orderCargosPendientes - before.totalNotasCredito - before.totalPagos) * 100
+      ) / 100;
+    const newOpeningBalance = Math.round((targetSaldo - movementSaldo) * 100) / 100;
+
+    await execute(`UPDATE customers SET opening_balance = ? WHERE id = ?`, [
+      newOpeningBalance,
+      customerId
+    ]);
+
+    const after = await queryCarteraTotalsForCustomer(customerId, authUser);
+
+    return res.json({
+      ok: true,
+      customerId,
+      targetSaldo,
+      previousSaldo: before.saldoPendienteUnificado,
+      previousOpeningBalance: before.openingBalance,
+      newSaldo: after?.saldoPendienteUnificado ?? targetSaldo,
+      newOpeningBalance
+    });
+  } catch (error: any) {
+    console.error('adjustCustomerSaldo:', error);
+    return res.status(500).json({ message: 'Error ajustando saldo del cliente' });
+  }
+};
+
+function parseAfipCbteFchToYmd(v: unknown): string | null {
+  const s = String(v ?? '').replace(/\D/g, '');
+  if (s.length !== 8) return null;
+  return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+}
+
+function orderDateToYmd(v: unknown): string | null {
+  if (!v) return null;
+  if (v instanceof Date && !Number.isNaN(v.getTime())) return v.toISOString().slice(0, 10);
+  const s = String(v).trim();
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const ar = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (ar) return `${ar[3]}-${ar[2].padStart(2, '0')}-${ar[1].padStart(2, '0')}`;
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}
+
+function ymdToMysqlDatetime(ymd: string | null | undefined): string | null {
+  if (!ymd) return null;
+  return `${ymd} 12:00:00`;
+}
+
+function daysBetweenYmd(a: string, b: string): number {
+  const ta = new Date(`${a}T12:00:00Z`).getTime();
+  const tb = new Date(`${b}T12:00:00Z`).getTime();
+  return Math.round(Math.abs(ta - tb) / 86_400_000);
+}
+
+function extractAgipFromAfipVoucher(r: Record<string, unknown>): number {
+  const impTrib = Number(r.ImpTrib ?? r.impTrib ?? 0);
+  if (impTrib > 0.005) return Math.round(impTrib * 100) / 100;
+  const raw = (r.Tributos as { Tributo?: unknown } | undefined)?.Tributo ?? r.tributos;
+  const list = Array.isArray(raw) ? raw : raw ? [raw] : [];
+  let sum = 0;
+  for (const t of list) {
+    const row = t as Record<string, unknown>;
+    sum += Number(row.Importe ?? row.importe ?? 0);
+  }
+  return Math.round(sum * 100) / 100;
+}
+
+function voucherDocNro(r: Record<string, unknown>): string {
+  return normalizeCuitDigits(String(r.DocNro ?? r.docNro ?? ''));
+}
+
+/** Punto de venta 21 es el usado en cartera LupoHub; se suma el configurado en AFIP_PTO_VTA. */
+function lupohubPuntosDeVenta(): number[] {
+  const fromEnv = getAfipPuntoVenta();
+  return Array.from(new Set([21, fromEnv].filter((n) => Number.isFinite(n) && n > 0)));
+}
+
+function preferCbteTipoForCustomer(condicionIva: string | null | undefined): 1 | 6 {
+  const c = String(condicionIva || '').toUpperCase();
+  if (c.includes('RESPONSABLE') && c.includes('INSCRIPT')) return 1;
+  if (/\bRI\b/.test(c) || c.includes('INSCRIPTO')) return 1;
+  return 6;
+}
+
+function parseComprobanteRef(ref: string): { puntoVta: number; cbteDesde: number; cbteTipo?: number } | null {
+  const raw = String(ref || '').trim().toUpperCase();
+  if (!raw) return null;
+  let cbteTipo: number | undefined;
+  if (raw.startsWith('NC A') || raw.startsWith('A ')) cbteTipo = 1;
+  else if (raw.startsWith('NC B') || raw.startsWith('B ')) cbteTipo = 6;
+  const m = raw.match(/(\d{4,5})\s*[-/]\s*(\d{1,8})/);
+  if (!m) return null;
+  const puntoVta = Number(m[1]);
+  const cbteDesde = Number(m[2]);
+  if (!Number.isFinite(puntoVta) || !Number.isFinite(cbteDesde) || cbteDesde <= 0) return null;
+  return { puntoVta, cbteDesde, cbteTipo };
+}
+
+type PendingLupohubOrder = {
+  id: string;
+  dateYmd: string | null;
+  orderNeto: number;
+};
+
+type RestoredInvoiceRow = {
+  orderId: string;
+  cbteTipo: number;
+  cbteDesde: number;
+  puntoVenta: number;
+  cae: string;
+  source: 'credit_note_snapshot' | 'payment_ref' | 'afip';
+};
+
+async function invoiceComprobanteExists(
+  puntoVta: number,
+  cbteTipo: number,
+  cbteDesde: number
+): Promise<{ id: string; order_id: string } | undefined> {
+  return (await get(
+    `SELECT id, order_id FROM invoices
+     WHERE punto_venta = ? AND cbte_tipo = ? AND cbte_desde = ?
+     LIMIT 1`,
+    [puntoVta, cbteTipo, cbteDesde]
+  )) as { id: string; order_id: string } | undefined;
+}
+
+async function insertRestoredLupohubInvoice(params: {
+  orderId: string;
+  cae: string;
+  caeFchVto: string | null;
+  puntoVta: number;
+  cbteTipo: number;
+  cbteDesde: number;
+  cbteHasta: number;
+  agipRetPer: number;
+  agipAlicuota?: number;
+  /** Fecha real del comprobante (AFIP o pedido) para el historial; evita agrupar todo en la fecha de restauración. */
+  invoiceCreatedAt?: string | null;
+}): Promise<void> {
+  const existing = await get(`SELECT id FROM invoices WHERE order_id = ? LIMIT 1`, [params.orderId]);
+  if (existing) return;
+  const invoiceId = uuidv4();
+  const createdAt =
+    params.invoiceCreatedAt && String(params.invoiceCreatedAt).trim()
+      ? String(params.invoiceCreatedAt).trim()
+      : null;
+  await execute(
+    `INSERT INTO invoices (id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, agip_alicuota, agip_ret_per${createdAt ? ', created_at' : ''})
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?${createdAt ? ', ?' : ''})`,
+    [
+      invoiceId,
+      params.orderId,
+      params.cae,
+      params.caeFchVto,
+      params.puntoVta,
+      params.cbteTipo,
+      params.cbteDesde,
+      params.cbteHasta,
+      params.agipAlicuota ?? 0,
+      params.agipRetPer,
+      ...(createdAt ? [createdAt] : [])
+    ]
+  );
+  await syncOrderPaymentStatus(params.orderId);
+}
+
+/** Corrige facturas restauradas cuya created_at quedó en la fecha de restauración en lugar de la del pedido. */
+async function fixRestoredInvoiceDatesForCustomer(customerId: string): Promise<number> {
+  const result = await execute(
+    `UPDATE invoices i
+     INNER JOIN orders o ON o.id = i.order_id
+     SET i.created_at = o.date
+     WHERE o.customer_id = ?
+       AND o.date IS NOT NULL
+       AND i.created_at > DATE_ADD(o.date, INTERVAL 3 DAY)`,
+    [customerId]
+  );
+  return Number((result as { affectedRows?: number })?.affectedRows ?? 0);
+}
+
+async function restoreLupohubInvoiceFromAfipVoucher(
+  orderId: string,
+  puntoVta: number,
+  cbteTipo: number,
+  cbteDesde: number,
+  knownCae?: string | null
+): Promise<RestoredInvoiceRow | null> {
+  const linked = await invoiceComprobanteExists(puntoVta, cbteTipo, cbteDesde);
+  if (linked) return null;
+  if (await get(`SELECT id FROM invoices WHERE order_id = ? LIMIT 1`, [orderId])) return null;
+
+  let cae = String(knownCae || '').trim();
+  let caeFchVto: string | null = null;
+  let cbteHasta = cbteDesde;
+  let agip = 0;
+  let invoiceDateYmd: string | null = null;
+
+  const orderRow = (await get(`SELECT date FROM orders WHERE id = ?`, [orderId])) as
+    | { date?: string | Date | null }
+    | undefined;
+  invoiceDateYmd = orderDateToYmd(orderRow?.date);
+
+  if (isAfipConfigured()) {
+    try {
+      const consulta = await consultarComprobanteAfip(puntoVta, cbteTipo, cbteDesde);
+      if (consulta.existe && consulta.resultado) {
+        const r = consulta.resultado as Record<string, unknown>;
+        cae = String(r.CodAutorizacion ?? r.codAutorizacion ?? cae).trim();
+        const caeFchVtoRaw = r.FchVto ?? r.fchVto ?? r.CaeFchVto ?? r.caeFchVto ?? null;
+        caeFchVto =
+          caeFchVtoRaw != null && String(caeFchVtoRaw).trim() !== ''
+            ? String(caeFchVtoRaw).trim()
+            : null;
+        cbteHasta = Number(r.CbteHasta ?? r.cbteHasta ?? cbteDesde) || cbteDesde;
+        agip = extractAgipFromAfipVoucher(r);
+        const cbteFch = parseAfipCbteFchToYmd(r.CbteFch ?? r.cbteFch);
+        if (cbteFch) invoiceDateYmd = cbteFch;
+      }
+    } catch {
+      // Si AFIP no responde pero tenemos CAE del snapshot interno, igual insertamos.
+    }
+  }
+
+  if (!cae) return null;
+
+  await insertRestoredLupohubInvoice({
+    orderId,
+    cae,
+    caeFchVto,
+    puntoVta,
+    cbteTipo,
+    cbteDesde,
+    cbteHasta,
+    agipRetPer: agip,
+    invoiceCreatedAt: ymdToMysqlDatetime(invoiceDateYmd)
+  });
+
+  return { orderId, cbteTipo, cbteDesde, puntoVenta: puntoVta, cae, source: knownCae ? 'credit_note_snapshot' : 'afip' };
+}
+
+async function fetchPendingLupohubOrders(customerId: string): Promise<PendingLupohubOrder[]> {
+  const rows = (await query(
+    `SELECT o.id, o.date, ROUND((${SQL_ORDER_NETO_GRAVADO}), 2) AS order_neto
+     FROM orders o
+     WHERE o.customer_id = ?
+       AND o.status NOT IN ('Cancelado', 'Borrador')
+       AND (o.archived = 0 OR o.archived IS NULL)
+       AND o.status IN ('Falta controlar', 'Controlado', 'Despachado', 'En camino', 'Entregado')
+       AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
+     ORDER BY o.date ASC, o.id ASC`,
+    [customerId]
+  )) as Array<{ id: string; date: string | Date; order_neto: number | string }>;
+
+  return rows.map((o) => ({
+    id: o.id,
+    dateYmd: orderDateToYmd(o.date),
+    orderNeto: Number(o.order_neto || 0)
+  }));
+}
+
+async function restoreFromCreditNoteSnapshots(customerId: string): Promise<RestoredInvoiceRow[]> {
+  const rows = (await query(
+    `SELECT
+       cn.order_id,
+       cn.voided_invoice_cae,
+       cn.voided_invoice_punto_venta,
+       cn.voided_invoice_cbte_tipo,
+       cn.voided_invoice_cbte_desde
+     FROM credit_notes cn
+     INNER JOIN orders o ON o.id = cn.order_id
+     WHERE o.customer_id = ?
+       AND cn.voided_invoice_cae IS NOT NULL
+       AND TRIM(cn.voided_invoice_cae) <> ''
+       AND cn.voided_invoice_cbte_desde IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = cn.order_id)
+     GROUP BY cn.order_id, cn.voided_invoice_cae, cn.voided_invoice_punto_venta,
+              cn.voided_invoice_cbte_tipo, cn.voided_invoice_cbte_desde`,
+    [customerId]
+  )) as Array<{
+    order_id: string;
+    voided_invoice_cae: string;
+    voided_invoice_punto_venta: number | null;
+    voided_invoice_cbte_tipo: number | null;
+    voided_invoice_cbte_desde: number | null;
+  }>;
+
+  const restored: RestoredInvoiceRow[] = [];
+  for (const row of rows) {
+    const puntoVta = Number(row.voided_invoice_punto_venta) || 21;
+    const cbteTipo = Number(row.voided_invoice_cbte_tipo) || 6;
+    const cbteDesde = Number(row.voided_invoice_cbte_desde);
+    if (!Number.isFinite(cbteDesde) || cbteDesde <= 0) continue;
+    const hit = await restoreLupohubInvoiceFromAfipVoucher(
+      row.order_id,
+      puntoVta,
+      cbteTipo,
+      cbteDesde,
+      row.voided_invoice_cae
+    );
+    if (hit) restored.push({ ...hit, source: 'credit_note_snapshot' });
+  }
+  return restored;
+}
+
+async function restoreFromPaymentInvoiceRefs(
+  customerId: string,
+  unmatched: Map<string, PendingLupohubOrder>
+): Promise<RestoredInvoiceRow[]> {
+  const rows = (await query(
+    `SELECT p.order_id, pir.invoice_ref
+     FROM payments p
+     INNER JOIN payment_invoice_refs pir ON pir.payment_id = p.id
+     WHERE p.customer_id = ?
+       AND TRIM(COALESCE(pir.invoice_ref, '')) <> ''`,
+    [customerId]
+  )) as Array<{ order_id: string | null; invoice_ref: string }>;
+
+  const restored: RestoredInvoiceRow[] = [];
+  for (const row of rows) {
+    const parsed = parseComprobanteRef(row.invoice_ref);
+    if (!parsed) continue;
+    const cbteTipo = parsed.cbteTipo ?? 6;
+    let orderId = row.order_id ? String(row.order_id) : '';
+    if (!orderId || !unmatched.has(orderId)) {
+      // Sin pedido explícito: no adivinamos comprobante solo por ref de cobro importado.
+      continue;
+    }
+    const hit = await restoreLupohubInvoiceFromAfipVoucher(
+      orderId,
+      parsed.puntoVta,
+      cbteTipo,
+      parsed.cbteDesde
+    );
+    if (hit) {
+      restored.push({ ...hit, source: 'payment_ref' });
+      unmatched.delete(orderId);
+    }
+  }
+  return restored;
+}
+
+async function restoreFromAfipScan(
+  customerCuit: string,
+  unmatched: Map<string, PendingLupohubOrder>,
+  opts: { maxScan: number; cbteTipos: Array<1 | 6> }
+): Promise<{ restored: RestoredInvoiceRow[]; scanned: number }> {
+  const restored: RestoredInvoiceRow[] = [];
+  let scanned = 0;
+  const puntosVenta = lupohubPuntosDeVenta();
+
+  for (const puntoVta of puntosVenta) {
+    for (const cbteTipo of opts.cbteTipos) {
+      let last = 0;
+      try {
+        last = await getLastAfipVoucherNumber(puntoVta, cbteTipo);
+      } catch (err: any) {
+        console.warn(`restoreFromAfipScan getLastVoucher ${puntoVta}/${cbteTipo}:`, err?.message || err);
+        continue;
+      }
+      const minNro = Math.max(1, last - opts.maxScan + 1);
+      for (let cbteNro = last; cbteNro >= minNro; cbteNro -= 1) {
+        if (unmatched.size === 0) break;
+        scanned += 1;
+        let consulta: Awaited<ReturnType<typeof consultarComprobanteAfip>>;
+        try {
+          consulta = await consultarComprobanteAfip(puntoVta, cbteTipo, cbteNro);
+        } catch {
+          continue;
+        }
+        if (!consulta.existe || !consulta.resultado) continue;
+
+        const r = consulta.resultado as Record<string, unknown>;
+        if (voucherDocNro(r) !== customerCuit) continue;
+
+        const linked = await invoiceComprobanteExists(puntoVta, cbteTipo, cbteNro);
+        if (linked) {
+          unmatched.delete(linked.order_id);
+          continue;
+        }
+
+        const cbteFch = parseAfipCbteFchToYmd(r.CbteFch ?? r.cbteFch);
+        const impTotal = Math.round(Number(r.ImpTotal ?? r.impTotal ?? 0) * 100) / 100;
+        const agip = extractAgipFromAfipVoucher(r);
+
+        let bestOrderId: string | null = null;
+        let bestScore = Number.POSITIVE_INFINITY;
+        for (const [orderId, ord] of unmatched) {
+          if (!ord.dateYmd || !cbteFch) continue;
+          const dayDiff = daysBetweenYmd(ord.dateYmd, cbteFch);
+          if (dayDiff > 60) continue;
+          const expected = invoiceLedgerImporte(ord.orderNeto, agip);
+          const amountDiff = Math.abs(expected - impTotal);
+          if (amountDiff > 5) continue;
+          const score = dayDiff * 100 + amountDiff;
+          if (score < bestScore) {
+            bestScore = score;
+            bestOrderId = orderId;
+          }
+        }
+        if (!bestOrderId) continue;
+
+        const cae = String(r.CodAutorizacion ?? r.codAutorizacion ?? '').trim();
+        if (!cae) continue;
+
+        const caeFchVtoRaw = r.FchVto ?? r.fchVto ?? r.CaeFchVto ?? r.caeFchVto ?? null;
+        const caeFchVto =
+          caeFchVtoRaw != null && String(caeFchVtoRaw).trim() !== ''
+            ? String(caeFchVtoRaw).trim()
+            : null;
+        const cbteHasta = Number(r.CbteHasta ?? r.cbteHasta ?? cbteNro) || cbteNro;
+
+        await insertRestoredLupohubInvoice({
+          orderId: bestOrderId,
+          cae,
+          caeFchVto,
+          puntoVta,
+          cbteTipo,
+          cbteDesde: cbteNro,
+          cbteHasta,
+          agipRetPer: agip,
+          invoiceCreatedAt: ymdToMysqlDatetime(cbteFch)
+        });
+        unmatched.delete(bestOrderId);
+        restored.push({
+          orderId: bestOrderId,
+          cbteTipo,
+          cbteDesde: cbteNro,
+          puntoVenta: puntoVta,
+          cae,
+          source: 'afip'
+        });
+      }
+    }
+  }
+
+  return { restored, scanned };
+}
+
+async function restoreLupohubInvoicesForCustomerId(
+  customerId: string,
+  opts?: { maxScan?: number }
+): Promise<{
+  customerId: string;
+  customerName: string;
+  restored: number;
+  pendingOrders: number;
+  stillPending: number;
+  scanned: number;
+  details: RestoredInvoiceRow[];
+  invoiceDatesFixed?: number;
+  message?: string;
+}> {
+  const customer = (await get(
+    `SELECT id, cuit, business_name, name, condicion_iva FROM customers WHERE id = ?`,
+    [customerId]
+  )) as
+    | {
+        id: string;
+        cuit?: string | null;
+        business_name?: string | null;
+        name?: string | null;
+        condicion_iva?: string | null;
+      }
+    | undefined;
+  if (!customer) {
+    throw Object.assign(new Error('Cliente no encontrado'), { status: 404 });
+  }
+
+  const customerCuit = normalizeCuitDigits(customer.cuit || '');
+  if (!customerCuit) {
+    throw Object.assign(new Error('El cliente no tiene CUIT cargado'), { status: 400 });
+  }
+
+  const maxScan = Math.min(2500, Math.max(100, Number(opts?.maxScan) || 1200));
+  const pendingOrders = await fetchPendingLupohubOrders(customerId);
+
+  if (pendingOrders.length === 0) {
+    const invoiceDatesFixed = await fixRestoredInvoiceDatesForCustomer(customerId);
+    return {
+      customerId,
+      customerName: customer.business_name || customer.name || customerId,
+      restored: 0,
+      pendingOrders: 0,
+      stillPending: 0,
+      scanned: 0,
+      details: [],
+      invoiceDatesFixed,
+      message:
+        invoiceDatesFixed > 0
+          ? `Se corrigieron ${invoiceDatesFixed} fecha(s) de factura restaurada(s)`
+          : 'No hay pedidos LupoHub sin factura para restaurar'
+    };
+  }
+
+  const unmatched = new Map(pendingOrders.map((o) => [o.id, o]));
+  const details: RestoredInvoiceRow[] = [];
+
+  for (const row of await restoreFromCreditNoteSnapshots(customerId)) {
+    details.push(row);
+    unmatched.delete(row.orderId);
+  }
+
+  for (const row of await restoreFromPaymentInvoiceRefs(customerId, unmatched)) {
+    details.push(row);
+  }
+
+  let scanned = 0;
+  if (unmatched.size > 0 && isAfipConfigured()) {
+    const preferred = preferCbteTipoForCustomer(customer.condicion_iva);
+    const cbteTipos: Array<1 | 6> = preferred === 1 ? [1, 6] : [6, 1];
+    const afip = await restoreFromAfipScan(customerCuit, unmatched, { maxScan, cbteTipos });
+    details.push(...afip.restored);
+    scanned = afip.scanned;
+  }
+
+  const invoiceDatesFixed = await fixRestoredInvoiceDatesForCustomer(customerId);
+
+  return {
+    customerId,
+    customerName: customer.business_name || customer.name || customerId,
+    restored: details.length,
+    pendingOrders: pendingOrders.length,
+    stillPending: unmatched.size,
+    scanned,
+    details,
+    invoiceDatesFixed
+  };
+}
+
+/**
+ * Restaura facturas emitidas en LupoHub (pedidos sin registro en `invoices`) desde datos internos y AFIP.
+ */
+export const restoreCustomerAfipInvoices = async (req: Request, res: Response) => {
+  try {
+    const authUser = (req as any).user;
+    if (!authUser || authUser.role !== 'ADMIN') {
+      return res.status(403).json({ message: 'Solo administradores pueden restaurar facturas' });
+    }
+
+    const customerId = String(req.params?.id || '').trim();
+    if (!customerId) return res.status(400).json({ message: 'ID de cliente requerido' });
+
+    const maxScan = Number((req.body as { maxScan?: unknown })?.maxScan) || undefined;
+    const result = await restoreLupohubInvoicesForCustomerId(customerId, { maxScan });
+    return res.json({ ok: true, ...result });
+  } catch (error: any) {
+    const status = Number(error?.status) || 500;
+    if (status !== 500) {
+      return res.status(status).json({ message: error?.message || 'No se pudieron restaurar las facturas' });
+    }
+    console.error('restoreCustomerAfipInvoices:', error);
+    return res.status(500).json({ message: error?.message || 'Error restaurando facturas LupoHub' });
+  }
+};
+
+/** Restaura facturas LupoHub para todos los clientes con pedidos facturables sin registro en `invoices`. */
+export const restoreAllLupohubInvoices = async (req: Request, res: Response) => {
+  try {
+    const authUser = (req as any).user;
+    if (!authUser || authUser.role !== 'ADMIN') {
+      return res.status(403).json({ message: 'Solo administradores pueden restaurar facturas' });
+    }
+    if (!isAfipConfigured()) {
+      return res.status(503).json({ message: 'AFIP no está configurado en el servidor' });
+    }
+
+    const maxScan = Math.min(2500, Math.max(100, Number((req.body as { maxScan?: unknown })?.maxScan) || 800));
+    const customerRows = (await query(
+      `SELECT DISTINCT o.customer_id AS customerId
+       FROM orders o
+       INNER JOIN customers c ON c.id = o.customer_id
+       WHERE o.status NOT IN ('Cancelado', 'Borrador')
+         AND (o.archived = 0 OR o.archived IS NULL)
+         AND o.status IN ('Falta controlar', 'Controlado', 'Despachado', 'En camino', 'Entregado')
+         AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
+         AND TRIM(COALESCE(c.cuit, '')) <> ''
+       ORDER BY o.customer_id ASC`
+    )) as Array<{ customerId: string }>;
+
+    const results: Array<Awaited<ReturnType<typeof restoreLupohubInvoicesForCustomerId>>> = [];
+    let totalRestored = 0;
+    for (const row of customerRows) {
+      const r = await restoreLupohubInvoicesForCustomerId(row.customerId, { maxScan });
+      results.push(r);
+      totalRestored += r.restored;
+    }
+
+    return res.json({
+      ok: true,
+      customersProcessed: results.length,
+      totalRestored,
+      results
+    });
+  } catch (error: any) {
+    console.error('restoreAllLupohubInvoices:', error);
+    return res.status(500).json({ message: error?.message || 'Error restaurando facturas LupoHub' });
+  }
+};
+
 export const clearDispatchedPendingsForCustomer = async (req: Request, res: Response) => {
   try {
     const authUser = (req as any).user;
@@ -4493,15 +5140,21 @@ type CustomerFinancialMovement = {
   debe: number;
   haber: number;
   detalle: string;
+  /** NC de reemisión IIBB: visible en historial pero no resta del saldo (la factura nueva ya suma). */
+  supersededByReinvoice?: boolean;
 };
 
-async function buildCustomerFinancialSummary(customerId: string): Promise<{
+async function buildCustomerFinancialSummary(
+  customerId: string,
+  opts?: { includeTangoImport?: boolean }
+): Promise<{
   totalFacturas: number;
   totalNc: number;
   totalRecibos: number;
   saldoPendiente: number;
   movements: CustomerFinancialMovement[];
 }> {
+  const includeTangoImport = opts?.includeTangoImport ?? INCLUDE_TANGO_IMPORT_IN_SYSTEM;
   const custOpening = (await get(
     `SELECT opening_balance, opening_balance_date FROM customers WHERE id = ?`,
     [customerId]
@@ -4521,7 +5174,8 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
       m.order_id AS orderId,
       m.debe,
       m.haber,
-      m.detalle
+      m.detalle,
+      m.superseded_by_reinvoice
     FROM (
       SELECT
         COALESCE(i.created_at, o.date) AS fecha,
@@ -4539,7 +5193,8 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
         o.id AS order_id,
         ${sqlInvoiceAmountFromOrderTotal()} AS debe,
         0 AS haber,
-        CONCAT('Pedido ', COALESCE(o.id, '')) AS detalle
+        CONCAT('Pedido ', COALESCE(o.id, '')) AS detalle,
+        0 AS superseded_by_reinvoice
       FROM invoices i
       JOIN orders o ON o.id = i.order_id
       WHERE o.customer_id = ?
@@ -4562,7 +5217,8 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
         cn.order_id AS order_id,
         0 AS debe,
         ROUND(COALESCE(cn.amount_credited, 0) * 1.21, 2) AS haber,
-        CONCAT('NC sobre pedido ', COALESCE(cn.order_id, '')) AS detalle
+        CONCAT('NC sobre pedido ', COALESCE(cn.order_id, '')) AS detalle,
+        COALESCE(cn.superseded_by_reinvoice, 0) AS superseded_by_reinvoice
       FROM credit_notes cn
       JOIN orders o ON o.id = cn.order_id
       WHERE o.customer_id = ?
@@ -4585,7 +5241,8 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
         m.ref_order_id AS order_id,
         CASE WHEN m.tipo = 'FACTURA' THEN ROUND(m.importe_neto + COALESCE(m.agip_ret_per, 0), 2) ELSE 0 END AS debe,
         CASE WHEN m.tipo = 'NC' THEN ROUND(m.importe_neto, 2) ELSE 0 END AS haber,
-        CONCAT('Comprobante manual', COALESCE(CONCAT(' · ', m.notes), '')) AS detalle
+        CONCAT('Comprobante manual', COALESCE(CONCAT(' · ', m.notes), '')) AS detalle,
+        0 AS superseded_by_reinvoice
       FROM customer_manual_comprobantes m
       WHERE m.customer_id = ?
 
@@ -4598,7 +5255,8 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
         o.id AS order_id,
         (${SQL_ORDER_SALDO_RESIDUAL}) AS debe,
         0 AS haber,
-        'Saldo pendiente del pedido' AS detalle
+        'Saldo pendiente del pedido' AS detalle,
+        0 AS superseded_by_reinvoice
       FROM orders o
       LEFT JOIN (
         SELECT order_id, SUM(amount_credited) AS cn_total
@@ -4621,7 +5279,8 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
         p.order_id AS order_id,
         0 AS debe,
         ${SQL_PAYMENT_SALDO_CONTRIBUTION_AMOUNT} AS haber,
-        COALESCE(p.notes, '') AS detalle
+        COALESCE(p.notes, '') AS detalle,
+        0 AS superseded_by_reinvoice
       FROM payments p
       LEFT JOIN (
         SELECT
@@ -4653,6 +5312,7 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
        END
       WHERE p.customer_id = ?
         AND me_rec.customer_id IS NULL
+        AND ${SQL_WHERE_PAYMENT_SOLO_LUPOHUB}
         AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
     ) m
     ORDER BY m.fecha ASC, m.tipo ASC, m.comprobante ASC
@@ -4660,7 +5320,7 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
     [customerId, customerId, customerId, customerId, customerId]
   )) as any[];
 
-  const importedEntries = INCLUDE_TANGO_IMPORT_IN_SYSTEM
+  const importedEntries = includeTangoImport
     ? ((await query(
         `
     SELECT
@@ -4737,7 +5397,7 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
     existingKeys.add(toKey(tipo, m.fecha, m.comprobante, Number(m.debe || 0), Number(m.haber || 0)));
   }
 
-  if (INCLUDE_TANGO_IMPORT_IN_SYSTEM) {
+  if (includeTangoImport) {
     for (const e of importedEntries) {
       const tipo = classifyImportedEntry(String(e.tipo_raw || ''), String(e.detalle || ''));
       if (!tipo) continue;
@@ -4763,6 +5423,7 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
   const mapped: CustomerFinancialMovement[] = movements.map((m) => {
     const debe = Number(m.debe || 0);
     const haber = Number(m.haber || 0);
+    const supersededByReinvoice = Number(m.superseded_by_reinvoice || 0) === 1;
     return {
       fecha: m.fecha ?? null,
       tipo: m.tipo,
@@ -4770,7 +5431,8 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
       orderId: m.orderId ?? null,
       debe,
       haber,
-      detalle: m.detalle ?? ''
+      detalle: m.detalle ?? '',
+      supersededByReinvoice: supersededByReinvoice || undefined
     };
   });
   mapped.sort((a, b) => {
@@ -4787,7 +5449,7 @@ async function buildCustomerFinancialSummary(customerId: string): Promise<{
   let totalRecibos = 0;
   for (const m of periodMovements) {
     if (m.tipo === 'FACTURA' || m.tipo === 'PEDIDO') totalFacturas += m.debe;
-    if (m.tipo === 'NC') totalNc += m.haber;
+    if (m.tipo === 'NC' && !m.supersededByReinvoice) totalNc += m.haber;
     if (m.tipo === 'RECIBO') totalRecibos += m.haber;
   }
   totalFacturas = Math.round(totalFacturas * 100) / 100;
@@ -4876,7 +5538,16 @@ export const exportCustomerFinancialSummaryXlsx = async (req: Request, res: Resp
       return res.status(403).json({ message: 'Solo podés exportar clientes asignados a tu usuario' });
     }
 
-    const summary = await buildCustomerFinancialSummary(customerId);
+    const includeTango =
+      String(req.query.includeTango || '')
+        .trim()
+        .toLowerCase() === '1' ||
+      ['true', 'yes', 'si', 'sí'].includes(
+        String(req.query.includeTango || '')
+          .trim()
+          .toLowerCase()
+      );
+    const summary = await buildCustomerFinancialSummary(customerId, { includeTangoImport: includeTango });
 
     const wb = new ExcelJS.Workbook();
     wb.creator = 'LupoHub';
@@ -4907,7 +5578,7 @@ export const exportCustomerFinancialSummaryXlsx = async (req: Request, res: Resp
       debe: summary.totalFacturas,
       haber: summary.totalNc + summary.totalRecibos,
       saldo: summary.saldoPendiente,
-      detalle: `Facturas: ${summary.totalFacturas.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | NC: ${summary.totalNc.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | Recibos: ${summary.totalRecibos.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      detalle: `Facturas: ${summary.totalFacturas.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | NC: ${summary.totalNc.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} | Recibos: ${summary.totalRecibos.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${includeTango ? ' | Incluye import Tango' : ' | Solo LupoHub'}`
     });
     ws.addRow({});
 
@@ -4934,7 +5605,7 @@ export const exportCustomerFinancialSummaryXlsx = async (req: Request, res: Resp
 
     const out = await wb.xlsx.writeBuffer();
     const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out as ArrayBufferLike));
-    const filename = `saldo_facturas_recibos_${(customer.business_name || customer.name || customer.id).toString().replace(/[^\w\-]+/g, '_').slice(0, 40)}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const filename = `saldo_facturas_recibos_${includeTango ? 'con_tango_' : ''}${(customer.business_name || customer.name || customer.id).toString().replace(/[^\w\-]+/g, '_').slice(0, 40)}_${new Date().toISOString().slice(0, 10)}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     return res.send(buf);
@@ -5099,6 +5770,7 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
           END
          WHERE p.customer_id = ?
            AND me_rec.customer_id IS NULL
+             AND ${SQL_WHERE_PAYMENT_SOLO_LUPOHUB}
            AND ${SQL_PAYMENT_UNALLOCATED_COND}
            AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}
          GROUP BY

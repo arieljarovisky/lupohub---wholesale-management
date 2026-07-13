@@ -422,6 +422,10 @@ const CompanyFinance: React.FC = () => {
                 {summary.invoicedCount ?? 0} factura(s) · neto {fmt(summary.invoicedNet ?? 0)} · IVA{' '}
                 {fmt(summary.invoicedIva ?? 0)}
               </p>
+              <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                Mayorista {fmt(summary.invoicedWholesaleTotal ?? 0)} · ML {fmt(summary.invoicedMlTotal ?? 0)} · TN{' '}
+                {fmt(summary.invoicedTnTotal ?? 0)}
+              </p>
             </div>
             <div className="rounded-xl border border-red-800/40 bg-red-950/30 p-4">
               <p className="text-xs text-slate-500 uppercase font-bold">Gastos totales</p>
@@ -472,7 +476,7 @@ const CompanyFinance: React.FC = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="rounded-xl border border-emerald-800/30 bg-slate-900/40 overflow-hidden">
               <div className="px-4 py-3 bg-emerald-950/40 border-b border-emerald-900/40 text-sm font-bold text-emerald-300 flex items-center gap-2">
                 <ArrowUpCircle size={16} /> Ganancias del período
@@ -519,6 +523,38 @@ const CompanyFinance: React.FC = () => {
                   {summary.tnNote}
                 </p>
               )}
+            </div>
+
+            <div className="rounded-xl border border-sky-800/30 bg-slate-900/40 overflow-hidden">
+              <div className="px-4 py-3 bg-sky-950/40 border-b border-sky-900/40 text-sm font-bold text-sky-300 flex items-center gap-2">
+                <FileText size={16} /> Facturado AFIP del período
+              </div>
+              <ul className="divide-y divide-slate-800/80 text-sm">
+                <li className="flex justify-between items-center p-3">
+                  <span className="text-slate-300 flex items-center gap-2">
+                    <Receipt size={14} className="text-sky-400" />
+                    Mayorista / LupoHub ({summary.invoicedWholesaleCount ?? 0})
+                  </span>
+                  <span className="font-mono text-sky-300">{fmt(summary.invoicedWholesaleTotal ?? 0)}</span>
+                </li>
+                <li className="flex justify-between items-center p-3">
+                  <span className="text-slate-300 flex items-center gap-2">
+                    <ShoppingBag size={14} className="text-yellow-500" />
+                    Mercado Libre ({summary.invoicedMlCount ?? 0})
+                  </span>
+                  <span className="font-mono text-sky-300">{fmt(summary.invoicedMlTotal ?? 0)}</span>
+                </li>
+                <li className="flex justify-between items-center p-3">
+                  <span className="text-slate-300 flex items-center gap-2">
+                    <Store size={14} className="text-violet-400" />
+                    Tienda Nube ({summary.invoicedTnCount ?? 0})
+                  </span>
+                  <span className="font-mono text-sky-300">{fmt(summary.invoicedTnTotal ?? 0)}</span>
+                </li>
+              </ul>
+              <p className="px-4 pb-3 text-[10px] text-slate-600 leading-relaxed">
+                Comprobantes con CAE emitidos en el período (mayorista + facturación masiva ML/TN). Neto con IVA 21%.
+              </p>
             </div>
 
             <div className="rounded-xl border border-red-800/30 bg-slate-900/40 overflow-hidden">

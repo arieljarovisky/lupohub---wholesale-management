@@ -127,7 +127,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
   const [massExportFrom, setMassExportFrom] = useState<string>('');
   const [massExportTo, setMassExportTo] = useState<string>('');
   const [massExportError, setMassExportError] = useState<string>('');
-  const [massExportSaldosSource, setMassExportSaldosSource] = useState<'historial' | 'sistema' | 'tango'>('historial');
+  const [massExportSaldosSource, setMassExportSaldosSource] = useState<'historial' | 'sistema' | 'tango'>('sistema');
   const [massExportSellerIds, setMassExportSellerIds] = useState<string[]>([]);
 
   const sellers = useMemo(() => users.filter((u) => u.role === Role.SELLER), [users]);
@@ -806,20 +806,20 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
                       type="radio"
                       name="massExportSaldosSource"
                       className="accent-emerald-500"
-                      checked={massExportSaldosSource === 'historial'}
-                      onChange={() => setMassExportSaldosSource('historial')}
+                      checked={massExportSaldosSource === 'sistema'}
+                      onChange={() => setMassExportSaldosSource('sistema')}
                     />
-                    Historial completo (importados, externos y sistema)
+                    Solo cargado en LupoHub (facturas, NC y recibos AFIP)
                   </label>
                   <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
                     <input
                       type="radio"
                       name="massExportSaldosSource"
                       className="accent-emerald-500"
-                      checked={massExportSaldosSource === 'sistema'}
-                      onChange={() => setMassExportSaldosSource('sistema')}
+                      checked={massExportSaldosSource === 'historial'}
+                      onChange={() => setMassExportSaldosSource('historial')}
                     />
-                    Solo cargado en LupoHub (facturas, NC y recibos AFIP)
+                    Historial completo (sistema + externos por CUIT; sin import Tango)
                   </label>
                   <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
                     <input
@@ -975,31 +975,6 @@ function SellerDetailView({
           type="button"
           disabled={exportSaldosLoading !== 'idle'}
           onClick={async () => {
-            setExportSaldosLoading('historial');
-            try {
-              await api.exportSaldosPendientesPorCliente({
-                sellerId: seller.id,
-                sellerName: seller.name,
-                from: exportFrom || undefined,
-                to: exportTo || undefined,
-                source: 'historial'
-              });
-            } catch {
-              window.alert('No se pudo exportar el historial. Probá de nuevo o revisá la conexión.');
-            } finally {
-              setExportSaldosLoading('idle');
-            }
-          }}
-          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-emerald-700/60 text-emerald-300 hover:text-white hover:bg-emerald-700/20 text-sm font-semibold transition disabled:opacity-50"
-          title="Facturas, notas de crédito y recibos del sistema más importados (Multimedia) y comprobantes externos por CUIT"
-        >
-          {exportSaldosLoading === 'historial' ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-          Excel por cliente · historial
-        </button>
-        <button
-          type="button"
-          disabled={exportSaldosLoading !== 'idle'}
-          onClick={async () => {
             setExportSaldosLoading('sistema');
             try {
               await api.exportSaldosPendientesPorCliente({
@@ -1015,11 +990,36 @@ function SellerDetailView({
               setExportSaldosLoading('idle');
             }
           }}
-          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-600 text-slate-200 hover:text-white hover:bg-slate-800 text-sm font-semibold transition disabled:opacity-50"
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-emerald-700/60 text-emerald-300 hover:text-white hover:bg-emerald-700/20 text-sm font-semibold transition disabled:opacity-50"
           title="Solo facturas AFIP, notas de crédito y recibos cargados en LupoHub (sin import ni externos)"
         >
           {exportSaldosLoading === 'sistema' ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
           Excel por cliente · solo sistema
+        </button>
+        <button
+          type="button"
+          disabled={exportSaldosLoading !== 'idle'}
+          onClick={async () => {
+            setExportSaldosLoading('historial');
+            try {
+              await api.exportSaldosPendientesPorCliente({
+                sellerId: seller.id,
+                sellerName: seller.name,
+                from: exportFrom || undefined,
+                to: exportTo || undefined,
+                source: 'historial'
+              });
+            } catch {
+              window.alert('No se pudo exportar el historial. Probá de nuevo o revisá la conexión.');
+            } finally {
+              setExportSaldosLoading('idle');
+            }
+          }}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-600 text-slate-200 hover:text-white hover:bg-slate-800 text-sm font-semibold transition disabled:opacity-50"
+          title="Facturas, notas de crédito y recibos del sistema más comprobantes externos por CUIT (sin import Tango)"
+        >
+          {exportSaldosLoading === 'historial' ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+          Excel por cliente · historial
         </button>
         <button
           type="button"

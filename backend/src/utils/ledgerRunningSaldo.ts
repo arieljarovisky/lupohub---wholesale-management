@@ -87,14 +87,19 @@ export function applyLedgerRunningSaldoSimple(rows: LedgerRunningRow[]): number 
     }
     if (row.importe != null && Number.isFinite(Number(row.importe))) {
       const tipoNorm = normalizeLedgerDocType(row.tipo, row.detalle);
-      const amount = Math.abs(Number(row.importe)) || 0;
-      const side = ledgerDocTypeAffectsSaldo(tipoNorm);
-      if (side === 'haber') {
-        running = Math.round((running - amount) * 100) / 100;
+      if (tipoNorm === 'SALDO') {
+        running = Math.round((running + Number(row.importe)) * 100) / 100;
         hasRunning = true;
-      } else if (side === 'debe') {
-        running = Math.round((running + amount) * 100) / 100;
-        hasRunning = true;
+      } else {
+        const amount = Math.abs(Number(row.importe)) || 0;
+        const side = ledgerDocTypeAffectsSaldo(tipoNorm);
+        if (side === 'haber') {
+          running = Math.round((running - amount) * 100) / 100;
+          hasRunning = true;
+        } else if (side === 'debe') {
+          running = Math.round((running + amount) * 100) / 100;
+          hasRunning = true;
+        }
       }
     }
     row.saldoCorrido = hasRunning ? running : null;
@@ -138,14 +143,19 @@ export function applyLedgerRunningSaldo(rows: LedgerRunningRow[]): number {
 
     if (row.importe != null && Number.isFinite(Number(row.importe))) {
       const tipoNorm = normalizeLedgerDocType(row.tipo, row.detalle);
-      const amount = Math.abs(Number(row.importe)) || 0;
-      const side = ledgerDocTypeAffectsSaldo(tipoNorm);
-      if (side === 'haber') {
-        running = Math.round((running - amount) * 100) / 100;
+      if (tipoNorm === 'SALDO') {
+        running = Math.round((running + Number(row.importe)) * 100) / 100;
         hasRunning = true;
-      } else if (side === 'debe') {
-        running = Math.round((running + amount) * 100) / 100;
-        hasRunning = true;
+      } else {
+        const amount = Math.abs(Number(row.importe)) || 0;
+        const side = ledgerDocTypeAffectsSaldo(tipoNorm);
+        if (side === 'haber') {
+          running = Math.round((running - amount) * 100) / 100;
+          hasRunning = true;
+        } else if (side === 'debe') {
+          running = Math.round((running + amount) * 100) / 100;
+          hasRunning = true;
+        }
       }
     }
     row.saldoCorrido = hasRunning ? running : null;

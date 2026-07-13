@@ -121,3 +121,41 @@ export const SQL_CARTERA_IMPORT_REC_EXPR = INCLUDE_TANGO_IMPORT_IN_SYSTEM
 export const SQL_CARTERA_MULTIMEDIA_SALDO_EXPR = INCLUDE_TANGO_IMPORT_IN_SYSTEM
   ? `ROUND(${SQL_CARTERA_IMPORT_DEBE_EXPR} - ${SQL_CARTERA_IMPORT_NC_EXPR} - ${SQL_CARTERA_IMPORT_REC_EXPR}, 2)`
   : '0';
+
+/** Número de recibo normalizado para emparejar payments ↔ líneas REC importadas. */
+export const SQL_PAYMENT_RECEIPT_NORM_P = `CASE
+  WHEN TRIM(COALESCE(p.receipt_number, '')) = '' THEN CONCAT('__ID__', p.id)
+  ELSE UPPER(
+    REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(p.receipt_number), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+  )
+END`;
+
+/** Pago en \`payments\` que duplica un recibo del Excel Tango/Multimedia. */
+export const SQL_PAYMENT_MATCHES_MM_REC = `EXISTS (
+  SELECT 1
+  FROM customer_multimedia_entries e
+  WHERE e.customer_id = p.customer_id
+    AND (${SQL_MM_IS_RECIBO_IMPORTADO})
+    AND TRIM(COALESCE(e.numero, '')) <> ''
+    AND DATE(e.line_date) = DATE(p.date)
+    AND ROUND(COALESCE(e.importe, 0), 2) = ROUND(COALESCE(p.amount, 0), 2)
+    AND UPPER(
+      REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(e.numero, '')), '-', ''), ' ', ''), '/', ''), '.', ''), '_', '')
+    ) = ${SQL_PAYMENT_RECEIPT_NORM_P}
+)`;
+
+export const SQL_PAYMENT_NOTES_ARE_TANGO_IMPORT = `(
+  COALESCE(p.notes, '') LIKE 'Importado Tango%'
+  OR COALESCE(p.notes, '') LIKE 'Importado desde Excel%'
+)`;
+
+export const SQL_PAYMENT_RECEIPT_IS_TANGO_SYNTHETIC = `(
+  TRIM(COALESCE(p.receipt_number, '')) LIKE 'IMPORT-%'
+)`;
+
+/** Cuando INCLUDE_TANGO_IMPORT_IN_SYSTEM es false: solo recibos cargados en LupoHub. */
+export const SQL_WHERE_PAYMENT_SOLO_LUPOHUB = INCLUDE_TANGO_IMPORT_IN_SYSTEM
+  ? '1=1'
+  : `NOT (${SQL_PAYMENT_MATCHES_MM_REC})
+      AND NOT (${SQL_PAYMENT_NOTES_ARE_TANGO_IMPORT})
+      AND NOT (${SQL_PAYMENT_RECEIPT_IS_TANGO_SYNTHETIC})`;
