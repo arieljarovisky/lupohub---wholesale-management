@@ -58,8 +58,6 @@ import { addExternalCreditNotesTable } from './database/add_external_credit_note
 import { addCustomerMultimediaLedger } from './database/add_customer_multimedia_ledger';
 import { addCustomerManualComprobantesTable } from './database/add_customer_manual_comprobantes';
 import { addCustomerManualComprobantesPdfColumns } from './database/add_customer_manual_comprobantes_pdf';
-import { addLupoStockWebhookConfigTable } from './database/add_lupo_stock_webhook_config_table';
-import { addVariantLuposhopStockTable } from './database/add_variant_luposhop_stock_table';
 import { addOrderCreatedBy } from './database/add_order_created_by';
 import { addOrderMatrixImportLabel } from './database/add_order_matrix_import_label';
 import { addOrderNotes } from './database/add_order_notes';
@@ -258,8 +256,6 @@ async function initDatabase() {
       await addCustomerMultimediaLedger();
       await addCustomerManualComprobantesTable();
       await addCustomerManualComprobantesPdfColumns();
-      await addLupoStockWebhookConfigTable();
-      await addVariantLuposhopStockTable();
       await addOrderCreatedBy();
       await addOrderMatrixImportLabel();
       await addOrderNotes();

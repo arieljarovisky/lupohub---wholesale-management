@@ -6,7 +6,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { updateMercadoLibreStock } from './integrations.controller';
 import { tnPutWithRetry } from '../utils/tiendanubeClient';
 import { skuToCanonicalString } from '../utils/skuString';
-import { enqueueStockWebhookForVariant } from '../services/lupoStockWebhook.service';
 import { codigoTalleParaSku, nombreTalleDesdeCodigo, TALLE_CODIGO_A_NOMBRE } from '../talles-tango';
 import {
   canonicalNumericColorCode,
@@ -659,9 +658,6 @@ export const syncStockToExternalPlatforms = async (variantId: string, newStock: 
     }
   } catch (error) {
     console.error('Error syncing stock to external platforms:', error);
-  } finally {
-    // Lupo shop: siempre encolar evento firmado por variante (si hay config).
-    await enqueueStockWebhookForVariant(variantId, newStock);
   }
 };
 

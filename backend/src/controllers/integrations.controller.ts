@@ -3637,34 +3637,8 @@ export const getVariantExternalStocks = async (req: Request, res: Response) => {
       /* variant_publications opcional */
     }
 
-    const stocks: Record<string, { stockML?: number; stockTN?: number; stockLupoShop?: number }> = {};
+    const stocks: Record<string, { stockML?: number; stockTN?: number }> = {};
     for (const id of variantIds) stocks[id] = {};
-
-    try {
-      const snapRows = await query(
-        `SELECT variant_id, stock FROM variant_luposhop_stock WHERE variant_id IN (${placeholders})`,
-        variantIds
-      );
-      for (const r of snapRows || []) {
-        const vid = (r as any).variant_id;
-        if (vid && stocks[vid]) stocks[vid].stockLupoShop = Number((r as any).stock ?? 0);
-      }
-
-      // Valor inicial para no mostrar "Tienda: -" hasta el primer webhook exitoso.
-      const localRows = await query(
-        `SELECT variant_id, stock FROM stocks WHERE variant_id IN (${placeholders})`,
-        variantIds
-      );
-      for (const r of localRows || []) {
-        const vid = (r as any).variant_id;
-        if (!vid || !stocks[vid]) continue;
-        if (stocks[vid].stockLupoShop === undefined) {
-          stocks[vid].stockLupoShop = Number((r as any).stock ?? 0);
-        }
-      }
-    } catch {
-      // tabla aún no existe o error puntual: no rompe ML/TN
-    }
 
     const mlToken = await getValidMLToken();
     const tnIntegration = await get(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);

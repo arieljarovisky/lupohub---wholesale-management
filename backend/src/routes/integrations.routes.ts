@@ -86,12 +86,6 @@ import {
 } from '../controllers/tiendanubeExpressTrackingPage.controller';
 import { authMiddleware, marketingAdsAccessMiddleware } from '../middleware/auth';
 import {
-  getLupoWebhookConfigEndpoint,
-  saveLupoWebhookConfigEndpoint,
-  testLupoWebhookEndpoint,
-  syncLupoShopMlStockBulkEndpoint
-} from '../controllers/lupoWebhookSettings.controller';
-import {
   disconnectGoogleAdsEndpoint,
   disconnectMetaAdsEndpoint,
   getAdsIntegrationsStatus,
@@ -108,10 +102,6 @@ import {
 const router = Router();
 
 router.get('/status', getIntegrationStatus);
-router.get('/luposhop/webhook-config', authMiddleware, getLupoWebhookConfigEndpoint);
-router.post('/luposhop/webhook-config', authMiddleware, saveLupoWebhookConfigEndpoint);
-router.post('/luposhop/webhook-test', authMiddleware, testLupoWebhookEndpoint);
-router.post('/luposhop/sync-ml-stock-to-shop', authMiddleware, syncLupoShopMlStockBulkEndpoint);
 
 // Mercado Libre
 router.get('/mercadolibre/auth', getMercadoLibreAuthUrl);
