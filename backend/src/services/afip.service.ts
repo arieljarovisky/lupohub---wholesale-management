@@ -73,17 +73,132 @@ function isAfipTransientError(err: unknown): boolean {
   );
 }
 
+function pickAfipText(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  if (Array.isArray(value)) {
+    const parts = value.map(pickAfipText).filter((x): x is string => !!x);
+    return parts.length ? parts.join(' | ') : null;
+  }
+  if (value && typeof value === 'object') {
+    const o = value as Record<string, unknown>;
+    const code = o.Code ?? o.code ?? o.Codigo ?? o.codigo;
+    const msg = o.Msg ?? o.msg ?? o.Message ?? o.message;
+    if (msg != null || code != null) {
+      const msgText = pickAfipText(msg);
+      const codeText = pickAfipText(code);
+      if (msgText && codeText) return `[${codeText}] ${msgText}`;
+      if (msgText) return msgText;
+      if (codeText) return `código ${codeText}`;
+    }
+    for (const key of ['message', 'msg', 'Msg', 'error', 'Error', 'description', 'Description']) {
+      const t = pickAfipText(o[key]);
+      if (t) return t;
+    }
+  }
+  return null;
+}
+
+/** Extrae Observaciones / Errors de una respuesta FECAE completa. */
+export function formatAfipObservaciones(res: unknown): string | null {
+  if (!res || typeof res !== 'object') return null;
+  const r = res as Record<string, unknown>;
+  const det =
+    (r.FeDetResp as Record<string, unknown> | undefined)?.FECAEDetResponse ??
+    r.FECAEDetResponse ??
+    r;
+  const detObj = Array.isArray(det) ? det[0] : det;
+  const obsRoot =
+    detObj && typeof detObj === 'object'
+      ? (detObj as Record<string, unknown>).Observaciones
+      : undefined;
+  const obsList =
+    obsRoot && typeof obsRoot === 'object'
+      ? (obsRoot as Record<string, unknown>).Obs ?? obsRoot
+      : undefined;
+  const obsText = pickAfipText(obsList);
+  if (obsText) return obsText;
+
+  const errRoot = r.Errors ?? r.errors;
+  const errList =
+    errRoot && typeof errRoot === 'object'
+      ? (errRoot as Record<string, unknown>).Err ?? errRoot
+      : undefined;
+  return pickAfipText(errList);
+}
+
+function extractCaeFromAfipResponse(
+  res: Record<string, unknown>,
+  afip: { ElectronicBilling?: { formatDate?: (d: unknown) => string } }
+): { cae: string; caeFchVto: string } {
+  const simplifiedCae = res?.CAE ?? res?.cae;
+  if (simplifiedCae) {
+    return {
+      cae: String(simplifiedCae),
+      caeFchVto: String(res?.CAEFchVto ?? res?.CAE_FchVto ?? '')
+    };
+  }
+  const detRaw = (res?.FeDetResp as Record<string, unknown> | undefined)?.FECAEDetResponse;
+  const det = (Array.isArray(detRaw) ? detRaw[0] : detRaw) as Record<string, unknown> | undefined;
+  const cae = det?.CAE ?? det?.cae;
+  const rawVto = det?.CAEFchVto ?? det?.CAE_FchVto ?? '';
+  let caeFchVto = String(rawVto || '');
+  if (caeFchVto && /^\d{8}$/.test(caeFchVto) && typeof afip?.ElectronicBilling?.formatDate === 'function') {
+    try {
+      caeFchVto = afip.ElectronicBilling.formatDate(caeFchVto);
+    } catch {
+      /* keep raw */
+    }
+  }
+  return { cae: cae ? String(cae) : '', caeFchVto };
+}
+
 /** Mensaje legible para el usuario (ARCA congestionado, etc.). */
 export function formatAfipError(err: unknown): string {
-  const e = err as { data?: { message?: string }; message?: string };
-  const arcMsg = e?.data?.message;
-  if (typeof arcMsg === 'string' && arcMsg.trim()) return arcMsg.trim();
-  const msg = String(e?.message ?? '').trim();
-  if (!msg) return 'Error comunicándose con AFIP';
-  if (msg.includes('503') || msg.toLowerCase().includes('congestion') || msg.toLowerCase().includes('arca')) {
-    return 'Los servidores de ARCA están congestionados. Espere unos minutos e intente nuevamente.';
+  const e = err as {
+    data?: unknown;
+    message?: unknown;
+    status?: number;
+    statusText?: string;
+    response?: { data?: unknown; status?: number; statusText?: string };
+  };
+
+  const data = e?.data ?? e?.response?.data;
+  const fromData = pickAfipText(data);
+  if (fromData) {
+    if (
+      fromData.includes('503') ||
+      fromData.toLowerCase().includes('congestion') ||
+      fromData.toLowerCase().includes('arca')
+    ) {
+      return 'Los servidores de ARCA están congestionados. Espere unos minutos e intente nuevamente.';
+    }
+    return fromData;
   }
-  return msg;
+
+  const msg = pickAfipText(e?.message) || '';
+  if (msg && msg !== 'undefined' && msg !== '[object Object]') {
+    if (msg.includes('503') || msg.toLowerCase().includes('congestion') || msg.toLowerCase().includes('arca')) {
+      return 'Los servidores de ARCA están congestionados. Espere unos minutos e intente nuevamente.';
+    }
+    return msg;
+  }
+
+  const status = e?.status ?? e?.response?.status;
+  const statusText = e?.statusText ?? e?.response?.statusText;
+  if (status) {
+    return `Error comunicándose con AFIP (HTTP ${status}${statusText ? ` ${statusText}` : ''}). Reintentá en unos minutos; si persiste, revisá token/certificado AFIP en Railway.`;
+  }
+
+  try {
+    const raw = JSON.stringify(err);
+    if (raw && raw !== '{}' && raw !== 'null') {
+      return `Error comunicándose con AFIP: ${raw.slice(0, 280)}`;
+    }
+  } catch {
+    /* ignore */
+  }
+  return 'Error comunicándose con AFIP';
 }
 
 export function afipEmitHttpStatusFromMessage(msg: string): number {
@@ -421,13 +536,17 @@ export async function emitirFactura(order: OrderForAfip, customer: CustomerForAf
   }
 
   const res = (await withAfipRetry('createVoucher factura', () =>
-    afip.ElectronicBilling.createVoucher(data)
+    afip.ElectronicBilling.createVoucher(data, true)
   )) as Record<string, unknown>;
-  const cae = res?.CAE ?? res?.cae;
-  const caeFchVto = res?.CAEFchVto ?? res?.CAE_FchVto ?? '';
+  const { cae, caeFchVto } = extractCaeFromAfipResponse(res, afip);
 
   if (!cae) {
-    throw new Error('AFIP no devolvió CAE. Revisá los datos del comprobante y el estado del servicio.');
+    const obs = formatAfipObservaciones(res);
+    throw new Error(
+      obs
+        ? `AFIP rechazó el comprobante: ${obs}`
+        : 'AFIP no devolvió CAE. Revisá los datos del comprobante y el estado del servicio.'
+    );
   }
 
   return {
@@ -617,13 +736,17 @@ export async function emitirNotaCredito(
   }
 
   const res = (await withAfipRetry('createVoucher NC', () =>
-    afip.ElectronicBilling.createVoucher(data)
+    afip.ElectronicBilling.createVoucher(data, true)
   )) as Record<string, unknown>;
-  const cae = res?.CAE ?? res?.cae;
-  const caeFchVto = res?.CAEFchVto ?? res?.CAE_FchVto ?? '';
+  const { cae, caeFchVto } = extractCaeFromAfipResponse(res, afip);
 
   if (!cae) {
-    throw new Error('AFIP no devolvió CAE para la Nota de Crédito.');
+    const obs = formatAfipObservaciones(res);
+    throw new Error(
+      obs
+        ? `AFIP rechazó la Nota de Crédito: ${obs}`
+        : 'AFIP no devolvió CAE para la Nota de Crédito.'
+    );
   }
 
   return {
@@ -804,13 +927,17 @@ export async function emitirNotaDebito(
   }
 
   const res = (await withAfipRetry('createVoucher ND', () =>
-    afip.ElectronicBilling.createVoucher(data)
+    afip.ElectronicBilling.createVoucher(data, true)
   )) as Record<string, unknown>;
-  const cae = res?.CAE ?? res?.cae;
-  const caeFchVto = res?.CAEFchVto ?? res?.CAE_FchVto ?? '';
+  const { cae, caeFchVto } = extractCaeFromAfipResponse(res, afip);
 
   if (!cae) {
-    throw new Error('AFIP no devolvió CAE para la Nota de Débito.');
+    const obs = formatAfipObservaciones(res);
+    throw new Error(
+      obs
+        ? `AFIP rechazó la Nota de Débito: ${obs}`
+        : 'AFIP no devolvió CAE para la Nota de Débito.'
+    );
   }
 
   return {

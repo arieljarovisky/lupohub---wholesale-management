@@ -2284,6 +2284,14 @@ export const emitirFactura = async (req: any, res: any) => {
     res.status(201).json(payload);
   } catch (error: any) {
     console.error('emitirFactura:', error);
+    try {
+      console.error(
+        'emitirFactura raw:',
+        JSON.stringify(error, Object.getOwnPropertyNames(error || {}))
+      );
+    } catch {
+      /* ignore */
+    }
     const msg = error?.message || 'Error emitiendo factura AFIP';
     const { afipEmitHttpStatusFromMessage } = await import('../services/afip.service');
     const status =
