@@ -157,6 +157,17 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const groupCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   /** Stock al abrir el editor numérico (para no reenviar si no hubo cambio y para revertir si falla el API). */
   const baselineManualStockRef = useRef<Record<string, number>>({});
+  /** Último stock confirmado por el API (para no pisar un 0 con un PUT viejo a 1). */
+  const lastAckStockRef = useRef<Record<string, number>>({});
+  /** Generación por variante: ignora respuestas viejas si hubo otro ajuste más reciente. */
+  const stockSaveGenRef = useRef<Record<string, number>>({});
+  /** Cola latest-wins: mientras hay un PUT en vuelo, solo se recuerda el último valor. */
+  const stockSaveInFlightRef = useRef<Record<string, boolean>>({});
+  const stockSaveQueuedRef = useRef<Record<string, number | null>>({});
+  /** Evita que onBlur dispare un commit espurio justo después de +/- o Confirmar. */
+  const skipStockBlurRef = useRef(false);
+  /** Texto del input mientras se edita (no pisar stock con 0 al borrar el campo). */
+  const [stockEditDraft, setStockEditDraft] = useState('');
   const [cardDotsPosition, setCardDotsPosition] = useState<{ top: number; left: number } | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [editingStockId, setEditingStockId] = useState<string | null>(null);
@@ -1220,101 +1231,114 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     }
   };
 
+  const parseStockDraft = (value: string, fallback: number): number => {
+    const v = value.trim();
+    if (v === '') return fallback;
+    const n = parseInt(v, 10);
+    return isNaN(n) ? fallback : Math.max(0, n);
+  };
+
+  const applyLocalStock = (productId: string, newStock: number) => {
+    setLoadedVariants(prev => {
+      const next = { ...prev };
+      for (const gk of Object.keys(next)) {
+        const idx = next[gk].findIndex((p: any) => p.id === productId);
+        if (idx >= 0) {
+          next[gk] = [...next[gk]];
+          (next[gk][idx] as any).stock = newStock;
+          break;
+        }
+      }
+      return next;
+    });
+    patchServerItemStock(productId, newStock);
+  };
+
+  const flushStockSave = (productId: string) => {
+    if (!onUpdateStock) return;
+    if (stockSaveInFlightRef.current[productId]) return;
+    const queued = stockSaveQueuedRef.current[productId];
+    if (queued == null) return;
+
+    stockSaveQueuedRef.current[productId] = null;
+    stockSaveInFlightRef.current[productId] = true;
+    const genAtSend = stockSaveGenRef.current[productId] || 0;
+    const stockToSend = queued;
+
+    Promise.resolve(onUpdateStock(productId, stockToSend))
+      .then(() => {
+        if ((stockSaveGenRef.current[productId] || 0) === genAtSend) {
+          lastAckStockRef.current[productId] = stockToSend;
+          baselineManualStockRef.current[productId] = stockToSend;
+        }
+      })
+      .catch(() => {
+        if ((stockSaveGenRef.current[productId] || 0) !== genAtSend) return;
+        const ack = lastAckStockRef.current[productId] ?? baselineManualStockRef.current[productId] ?? 0;
+        baselineManualStockRef.current[productId] = ack;
+        applyLocalStock(productId, ack);
+        setStockEditDraft(String(ack));
+      })
+      .finally(() => {
+        stockSaveInFlightRef.current[productId] = false;
+        if (stockSaveQueuedRef.current[productId] != null) {
+          flushStockSave(productId);
+        } else if ((stockSaveGenRef.current[productId] || 0) === genAtSend) {
+          refreshExternalStocksAfterSync(productId);
+        }
+      });
+  };
+
+  /** Optimistic UI + cola latest-wins: un 0 posterior no puede ser pisado por un PUT viejo a 1. */
+  const persistManualStock = (productId: string, newStock: number) => {
+    if (!onUpdateStock) return;
+    const gen = (stockSaveGenRef.current[productId] || 0) + 1;
+    stockSaveGenRef.current[productId] = gen;
+    baselineManualStockRef.current[productId] = newStock;
+    applyLocalStock(productId, newStock);
+    setStockEditDraft(String(newStock));
+    stockSaveQueuedRef.current[productId] = newStock;
+    flushStockSave(productId);
+  };
+
   const adjustStock = (productId: string, currentStock: number, delta: number) => {
     if (!onUpdateStock) return;
     const newStock = Math.max(0, currentStock + delta);
-    setLoadedVariants(prev => {
-      const next = { ...prev };
-      for (const gk of Object.keys(next)) {
-        const idx = next[gk].findIndex((p: any) => p.id === productId);
-        if (idx >= 0) {
-          next[gk] = [...next[gk]];
-          (next[gk][idx] as any).stock = newStock;
-          break;
-        }
-      }
-      return next;
-    });
-    patchServerItemStock(productId, newStock);
-    Promise.resolve(onUpdateStock(productId, newStock)).catch(() => {
-      setLoadedVariants(prev => {
-        const next = { ...prev };
-        for (const gk of Object.keys(next)) {
-          const idx = next[gk].findIndex((p: any) => p.id === productId);
-          if (idx >= 0) {
-            next[gk] = [...next[gk]];
-            (next[gk][idx] as any).stock = currentStock;
-            break;
-          }
-        }
-        return next;
-      });
-      patchServerItemStock(productId, currentStock);
-    });
-    refreshExternalStocksAfterSync(productId);
+    if (newStock === currentStock) return;
+    persistManualStock(productId, newStock);
   };
 
-  /** Solo actualiza la UI mientras editás el número (sin API). */
-  const onManualStockInputChange = (productId: string, value: string) => {
-    const v = value.trim();
-    const n = parseInt(v, 10);
-    const newStock = v === '' ? 0 : (isNaN(n) ? 0 : Math.max(0, n));
-    setLoadedVariants(prev => {
-      const next = { ...prev };
-      for (const gk of Object.keys(next)) {
-        const idx = next[gk].findIndex((p: any) => p.id === productId);
-        if (idx >= 0) {
-          next[gk] = [...next[gk]];
-          (next[gk][idx] as any).stock = newStock;
-          break;
-        }
-      }
-      return next;
-    });
+  /** Solo actualiza el draft mientras editás (sin API ni stock=0 al borrar). */
+  const onManualStockInputChange = (_productId: string, value: string) => {
+    setStockEditDraft(value);
   };
 
-  /** Guarda stock manual al salir del input o al confirmar (evita doble envío). */
+  /** Guarda stock manual al salir del input o al confirmar (incluye 0 explícito). */
   const commitManualStock = (productId: string, value: string) => {
     if (!onUpdateStock) return;
+    if (skipStockBlurRef.current) return;
     const baseline = baselineManualStockRef.current[productId] ?? 0;
-    const v = value.trim();
-    const n = parseInt(v, 10);
-    const newStock = v === '' || isNaN(n) ? 0 : Math.max(0, n);
-    if (newStock === baseline) return;
+    const trimmed = value.trim();
+    // Campo vacío al salir = cancelar edición (volver al baseline), no forzar 0.
+    // Para dejar sin stock hay que escribir 0 o bajar con −.
+    if (trimmed === '') {
+      setStockEditDraft(String(baseline));
+      applyLocalStock(productId, baseline);
+      return;
+    }
+    const newStock = parseStockDraft(trimmed, baseline);
+    if (newStock === baseline) {
+      setStockEditDraft(String(baseline));
+      return;
+    }
+    persistManualStock(productId, newStock);
+  };
 
-    setLoadedVariants(prev => {
-      const next = { ...prev };
-      for (const gk of Object.keys(next)) {
-        const idx = next[gk].findIndex((p: any) => p.id === productId);
-        if (idx >= 0) {
-          next[gk] = [...next[gk]];
-          (next[gk][idx] as any).stock = newStock;
-          break;
-        }
-      }
-      return next;
-    });
-    patchServerItemStock(productId, newStock);
-    Promise.resolve(onUpdateStock(productId, newStock))
-      .then(() => {
-        baselineManualStockRef.current[productId] = newStock;
-      })
-      .catch(() => {
-        setLoadedVariants(prev => {
-          const next = { ...prev };
-          for (const gk of Object.keys(next)) {
-            const idx = next[gk].findIndex((p: any) => p.id === productId);
-            if (idx >= 0) {
-              next[gk] = [...next[gk]];
-              (next[gk][idx] as any).stock = baseline;
-              break;
-            }
-          }
-          return next;
-        });
-        patchServerItemStock(productId, baseline);
-      });
-    refreshExternalStocksAfterSync(productId);
+  const armSkipStockBlur = () => {
+    skipStockBlurRef.current = true;
+    window.setTimeout(() => {
+      skipStockBlurRef.current = false;
+    }, 300);
   };
 
   const [loadedVariants, setLoadedVariants] = useState<Record<string, Product[]>>({});
@@ -2965,8 +2989,16 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                 <div className="flex items-center gap-3">
                                   {isEditing ? (
                                     <div className="flex items-center gap-2 animate-fade-in bg-slate-900 p-2 sm:p-1.5 rounded-lg border border-slate-600">
-                                      <button 
-                                        onClick={() => adjustStock(product.id, product.stock, -1)}
+                                      <button
+                                        type="button"
+                                        onMouseDown={(e) => {
+                                          e.preventDefault();
+                                          armSkipStockBlur();
+                                        }}
+                                        onClick={() => {
+                                          const cur = parseStockDraft(stockEditDraft, product.stock);
+                                          adjustStock(product.id, cur, -1);
+                                        }}
                                         className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center bg-slate-800 rounded-lg sm:rounded hover:bg-slate-700 text-slate-300 active:scale-95 touch-manipulation"
                                       >
                                         <Minus size={18} className="sm:w-4 sm:h-4" />
@@ -2974,28 +3006,44 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                       <input 
                                         type="number" 
                                         autoFocus
-                                        value={product.stock}
+                                        value={stockEditDraft}
                                         onChange={(e) => onManualStockInputChange(product.id, e.target.value)}
                                         onBlur={(e) => commitManualStock(product.id, e.target.value)}
                                         onKeyDown={(e) => {
                                           if (e.key === 'Enter') {
-                                            (e.target as HTMLInputElement).blur();
+                                            e.preventDefault();
+                                            commitManualStock(product.id, (e.target as HTMLInputElement).value);
                                             setEditingStockId(null);
                                           }
                                         }}
                                         className="w-14 sm:w-12 bg-transparent text-center font-bold text-white text-lg outline-none"
                                       />
-                                      <button 
-                                        onClick={() => adjustStock(product.id, product.stock, 1)}
+                                      <button
+                                        type="button"
+                                        onMouseDown={(e) => {
+                                          e.preventDefault();
+                                          armSkipStockBlur();
+                                        }}
+                                        onClick={() => {
+                                          const cur = parseStockDraft(stockEditDraft, product.stock);
+                                          adjustStock(product.id, cur, 1);
+                                        }}
                                         className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center bg-blue-600 rounded-lg sm:rounded text-white hover:bg-blue-500 active:scale-95 touch-manipulation"
                                       >
                                         <Plus size={18} className="sm:w-4 sm:h-4" />
                                       </button>
                                       <button 
                                         type="button"
-                                        onClick={() => setEditingStockId(null)}
+                                        onMouseDown={(e) => {
+                                          e.preventDefault();
+                                          armSkipStockBlur();
+                                        }}
+                                        onClick={() => {
+                                          commitManualStock(product.id, stockEditDraft);
+                                          setEditingStockId(null);
+                                        }}
                                         className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center bg-green-600 rounded-lg sm:rounded text-white hover:bg-green-500 active:scale-95 ml-1 touch-manipulation"
-                                        title="Listo (el stock se guarda al salir del campo)"
+                                        title="Guardar y cerrar"
                                       >
                                         <Check size={18} className="sm:w-4 sm:h-4" />
                                       </button>
@@ -3081,7 +3129,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                       <button 
                                        type="button"
                                        onClick={() => {
-                                         baselineManualStockRef.current[product.id] = Number((product as any).stock ?? (product as any).stock_total ?? 0);
+                                         const current = Number((product as any).stock ?? (product as any).stock_total ?? 0);
+                                         baselineManualStockRef.current[product.id] = current;
+                                         lastAckStockRef.current[product.id] = current;
+                                         setStockEditDraft(String(current));
                                          setEditingStockId(product.id);
                                        }}
                                        className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-blue-400 border border-slate-700 transition-colors touch-manipulation"
