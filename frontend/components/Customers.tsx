@@ -1777,7 +1777,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 >
                   <span className="font-bold text-amber-200 block">Con import Tango (legacy)</span>
                   <span className="text-xs text-slate-400 mt-1 block">
-                    Incluye facturas, NC y recibos del Excel importado
+                    Incluye facturas, NC y recibos del Excel importado (sin saldo inicial de LupoHub)
                     {multimediaLedger?.legacyCode ? ` · código ${multimediaLedger.legacyCode}` : ''}
                   </span>
                 </button>

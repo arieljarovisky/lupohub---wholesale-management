@@ -49,7 +49,8 @@ import {
   normalizeYmdDate,
   parseOpeningBalanceDateInput,
   parseOpeningBalanceInput,
-  sqlOpeningPaymentDateWhere
+  sqlOpeningPaymentDateWhere,
+  ymdToExcelDate
 } from '../sql/customerOpeningBalance';
 
 export type CustomerDeliveryAddressDto = { id: string; label: string; address: string; city: string };
@@ -542,7 +543,7 @@ export const exportCustomersBySheetsXlsx = async (req: Request, res: Response) =
       rowCursor += 1;
       for (const o of customerOrders) {
         ws.getCell(`A${rowCursor}`).value = o.id ?? '';
-        ws.getCell(`B${rowCursor}`).value = o.date ? new Date(o.date) : null;
+        ws.getCell(`B${rowCursor}`).value = ymdToExcelDate(o.date);
         ws.getCell(`C${rowCursor}`).value = o.status ?? '';
         ws.getCell(`D${rowCursor}`).value = o.payment_status ?? '';
         ws.getCell(`E${rowCursor}`).value = Number(o.total || 0);
@@ -561,7 +562,7 @@ export const exportCustomersBySheetsXlsx = async (req: Request, res: Response) =
       ws.getRow(rowCursor).font = { bold: true };
       rowCursor += 1;
       for (const b of customerBilling) {
-        ws.getCell(`A${rowCursor}`).value = b.fecha ? new Date(b.fecha) : null;
+        ws.getCell(`A${rowCursor}`).value = ymdToExcelDate(b.fecha);
         ws.getCell(`B${rowCursor}`).value = b.tipo ?? '';
         ws.getCell(`C${rowCursor}`).value = b.comprobante ?? '';
         ws.getCell(`D${rowCursor}`).value = b.order_id ?? '';
@@ -580,7 +581,7 @@ export const exportCustomersBySheetsXlsx = async (req: Request, res: Response) =
       ws.getRow(rowCursor).font = { bold: true };
       rowCursor += 1;
       for (const p of customerPayments) {
-        ws.getCell(`A${rowCursor}`).value = p.date ? new Date(p.date) : null;
+        ws.getCell(`A${rowCursor}`).value = ymdToExcelDate(p.date);
         ws.getCell(`B${rowCursor}`).value = p.receipt_number ?? '';
         ws.getCell(`C${rowCursor}`).value = Number(p.amount || 0);
         ws.getCell(`D${rowCursor}`).value = p.notes ?? '';
@@ -2571,7 +2572,7 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
         wsDetail.addRow({
           cliente: c.customer_name,
           vendedor: c.seller_name ?? c.seller_id ?? '',
-          fecha: m.fecha ? new Date(m.fecha) : null,
+          fecha: ymdToExcelDate(m.fecha),
           tipo: labelTipoSaldoExporter(m),
           comprobante: m.comprobante,
           pedido: m.order_id ?? '',
@@ -2801,7 +2802,7 @@ export const exportSaldosMovimientosSistemaXlsx = async (req: Request, res: Resp
         wsDetail.addRow({
           cliente: c.customer_name,
           vendedor: c.seller_name ?? c.seller_id ?? '',
-          fecha: m.fecha ? new Date(m.fecha) : null,
+          fecha: ymdToExcelDate(m.fecha),
           tipo: labelTipoSaldoExporter(m),
           comprobante: m.comprobante,
           pedido: m.order_id ?? '',
@@ -3507,13 +3508,19 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       }
       const saldoPeriodo = Math.round(running * 100) / 100;
       const saldoCartera = carteraByCustomerId.get(c.id) ?? saldoPeriodo;
+      // Solo Tango: el saldo del Excel es el neto de movimientos importados (sin saldo inicial LupoHub).
+      const saldoExcel = mode === 'tango' && !from ? saldoPeriodo : saldoCartera;
 
-      if (Math.abs(saldoCartera) <= 0.005) continue;
+      if (mode === 'tango' && !from) {
+        if (movs.length === 0) continue;
+      } else if (Math.abs(saldoCartera) <= 0.005) {
+        continue;
+      }
 
       wsSummary.addRow({
         cliente: c.customer_name,
         vendedor: c.seller_name ?? c.seller_id ?? '',
-        saldo: saldoCartera
+        saldo: saldoExcel
       });
 
       // Bloque por cliente dentro de una sola hoja para ahorrar páginas al imprimir.
@@ -3568,13 +3575,19 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       }
 
       /** Saldo al empezar el período listado: cierra en saldo pendiente (cartera) al final de las filas. */
-      let saldoCorrido = Math.round((saldoCartera - netoTabla) * 100) / 100;
+      let saldoCorrido =
+        mode === 'tango' && !from
+          ? 0
+          : Math.round((saldoCartera - netoTabla) * 100) / 100;
 
+      // Con solo Tango no mostramos «Saldo inicial» (es el arranque manual de LupoHub / un puente sintético).
+      // Sí «Saldo al inicio del período» si hay filtro `from`.
       const showSaldoInicioPeriodo =
-        movsOrdenados.length > 0 && (from || Math.abs(saldoCorrido) > 0.005);
+        movsOrdenados.length > 0 &&
+        (Boolean(from) || (mode !== 'tango' && Math.abs(saldoCorrido) > 0.005));
       if (showSaldoInicioPeriodo) {
         const saldoIniRow = wsDetalle.addRow({
-          fecha: from ? new Date(from) : movsOrdenados[0].fecha ? new Date(movsOrdenados[0].fecha) : null,
+          fecha: from ? ymdToExcelDate(from) : ymdToExcelDate(movsOrdenados[0].fecha),
           tipo: from ? 'Saldo al inicio del período' : 'Saldo inicial',
           comprobante: '',
           pedido: '',
@@ -3590,11 +3603,12 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         const debe = Number(m.debe || 0);
         const haber = Number(m.haber || 0);
         saldoCorrido = Math.round((saldoCorrido + debe - haber) * 100) / 100;
-        if (i === movsOrdenados.length - 1) {
+        // Solo Tango: el corrido es la suma de movimientos importados (sin forzar cartera LupoHub).
+        if (i === movsOrdenados.length - 1 && !(mode === 'tango' && !from)) {
           saldoCorrido = Math.round(saldoCartera * 100) / 100;
         }
         wsDetalle.addRow({
-          fecha: m.fecha ? new Date(m.fecha) : null,
+          fecha: ymdToExcelDate(m.fecha),
           tipo: labelTipoSaldoExporter(m),
           comprobante: m.comprobante,
           pedido: m.order_id ?? '',
@@ -3604,8 +3618,10 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         });
       }
 
+      const saldoResumen = mode === 'tango' && !from ? saldoExcel : saldoCartera;
+
       const resumenLabelRow = wsDetalle.addRow(['RESUMEN', '', '', '', '', '', '']);
-      const mainSaldoRow = wsDetalle.addRow(['Saldo pendiente', '', '', '', '', '', saldoCartera]);
+      const mainSaldoRow = wsDetalle.addRow(['Saldo pendiente', '', '', '', '', '', saldoResumen]);
       resumenLabelRow.font = { bold: true };
       mainSaldoRow.getCell(1).font = { bold: true, size: 11 };
       mainSaldoRow.getCell(7).font = { bold: true, size: 12 };
@@ -5442,7 +5458,12 @@ async function buildCustomerFinancialSummary(
     return String(a.comprobante || '').localeCompare(String(b.comprobante || ''), 'es');
   });
 
-  const periodMovements = mapped.filter((m) => movementOnOrAfterOpeningDate(m.fecha, openingBalanceDate));
+  // Con Tango: historial completo importado, sin saldo inicial manual de LupoHub
+  // (evita mezclar ambas bases y fechas distintas).
+  const openingForLedger = includeTangoImport ? 0 : openingBalance;
+  const openingDateForLedger = includeTangoImport ? null : openingBalanceDate;
+
+  const periodMovements = mapped.filter((m) => movementOnOrAfterOpeningDate(m.fecha, openingDateForLedger));
 
   let totalFacturas = 0;
   let totalNc = 0;
@@ -5455,19 +5476,19 @@ async function buildCustomerFinancialSummary(
   totalFacturas = Math.round(totalFacturas * 100) / 100;
   totalNc = Math.round(totalNc * 100) / 100;
   totalRecibos = Math.round(totalRecibos * 100) / 100;
-  const saldoPendiente = Math.round((openingBalance + totalFacturas - totalNc - totalRecibos) * 100) / 100;
+  const saldoPendiente = Math.round((openingForLedger + totalFacturas - totalNc - totalRecibos) * 100) / 100;
 
   const outMovements: CustomerFinancialMovement[] = [...periodMovements];
-  if (Math.abs(openingBalance) > 0.005) {
+  if (Math.abs(openingForLedger) > 0.005) {
     outMovements.unshift({
-      fecha: openingBalanceDate,
+      fecha: openingDateForLedger,
       tipo: 'FACTURA',
       comprobante: 'SALDO INICIAL',
       orderId: null,
-      debe: openingBalance > 0 ? openingBalance : 0,
-      haber: openingBalance < 0 ? Math.abs(openingBalance) : 0,
-      detalle: openingBalanceDate
-        ? `Saldo inicial manual al ${openingBalanceDate.split('-').reverse().join('/')}`
+      debe: openingForLedger > 0 ? openingForLedger : 0,
+      haber: openingForLedger < 0 ? Math.abs(openingForLedger) : 0,
+      detalle: openingDateForLedger
+        ? `Saldo inicial manual al ${openingDateForLedger.split('-').reverse().join('/')}`
         : 'Saldo inicial manual'
     });
   }
@@ -5587,7 +5608,7 @@ export const exportCustomerFinancialSummaryXlsx = async (req: Request, res: Resp
       running = Math.round((running + m.debe - m.haber) * 100) / 100;
       ws.addRow({
         section: 'MOVIMIENTO',
-        fecha: m.fecha ? new Date(m.fecha) : null,
+        fecha: ymdToExcelDate(m.fecha),
         tipo: m.tipo,
         comprobante: m.comprobante,
         orderId: m.orderId ?? '',
@@ -5850,10 +5871,7 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
       sortNumero: string;
     }> = [];
 
-    const normalizeDateKey = (d: Date | null) => {
-      if (!d || Number.isNaN(d.getTime())) return '';
-      return d.toISOString().slice(0, 10);
-    };
+    const normalizeDateKey = (d: Date | null) => normalizeYmdDate(d) ?? '';
     const normalizeNumberKey = (v: any) => String(v || '').trim().toUpperCase();
     const normalizeAmountKey = (v: any) => Number(v || 0).toFixed(2);
     const normalizeUnifiedType = (tipo: any) => {
@@ -5865,7 +5883,7 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
     };
 
     for (const e of entries) {
-      const fecha = e.line_date ? new Date(e.line_date) : null;
+      const fecha = ymdToExcelDate(e.line_date);
       const ts = fecha && !Number.isNaN(fecha.getTime()) ? fecha.getTime() : Number.MAX_SAFE_INTEGER;
       timelineRows.push({
         section: 'SISTEMA',
@@ -5883,7 +5901,7 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
     }
 
     for (const o of ordersRows) {
-      const fecha = o.date ? new Date(o.date) : null;
+      const fecha = ymdToExcelDate(o.date);
       const ts = fecha && !Number.isNaN(fecha.getTime()) ? fecha.getTime() : Number.MAX_SAFE_INTEGER;
       timelineRows.push({
         section: 'SISTEMA',
@@ -5900,7 +5918,7 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
     }
 
     for (const p of paymentsRows) {
-      const fecha = p.date ? new Date(p.date) : null;
+      const fecha = ymdToExcelDate(p.date);
       const ts = fecha && !Number.isNaN(fecha.getTime()) ? fecha.getTime() : Number.MAX_SAFE_INTEGER;
       const caes = Array.from(
         new Set(String(p.invoice_caes || '').split(',').map((x: string) => x.trim()).filter(Boolean))

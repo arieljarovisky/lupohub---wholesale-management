@@ -56,7 +56,12 @@ export function sqlOpeningPaymentDateWhere(customerAlias: string): string {
 export function normalizeYmdDate(v: unknown): string | null {
   if (v === null || v === undefined || v === '') return null;
   if (v instanceof Date && !Number.isNaN(v.getTime())) {
-    return v.toISOString().slice(0, 10);
+    // Usar componentes UTC: MySQL DATE / strings ISO suelen venir como medianoche UTC.
+    // Con getDate() local en AR (UTC-3) el día baja uno.
+    const y = v.getUTCFullYear();
+    const m = String(v.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(v.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   }
   const s = String(v).trim();
   const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -67,11 +72,26 @@ export function normalizeYmdDate(v: unknown): string | null {
   }
   const d = new Date(s);
   if (Number.isNaN(d.getTime())) return null;
-  return d.toISOString().slice(0, 10);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 export function parseOpeningBalanceDateInput(v: unknown): string | null {
   return normalizeYmdDate(v);
+}
+
+/**
+ * Date para celdas ExcelJS: día civil en zona local (mediodía).
+ * Evita el desfase de un día de `new Date('YYYY-MM-DD')` (medianoche UTC) en AR.
+ */
+export function ymdToExcelDate(v: unknown): Date | null {
+  const ymd = normalizeYmdDate(v);
+  if (!ymd) return null;
+  const [y, m, d] = ymd.split('-').map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d, 12, 0, 0);
 }
 
 /** true si `lineDate` es el mismo día o posterior a `openingYmd` (ambos YYYY-MM-DD). */
