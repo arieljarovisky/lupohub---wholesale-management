@@ -76,6 +76,7 @@ import { addCustomerSellerCommission } from './database/add_customer_seller_comm
 import { addCustomerOpeningBalance } from './database/add_customer_opening_balance';
 import { addPublicationStockBundles } from './database/add_publication_stock_bundles';
 import { addOrdersPerformanceIndexes } from './database/add_orders_performance_indexes';
+import { addSellerPriceLists } from './database/add_seller_price_lists';
 import { initSchema } from './database/init_schema';
 import { ensureAdminUser } from './database/ensure_admin_user';
 import { testConnection } from './database/db';
@@ -271,6 +272,7 @@ async function initDatabase() {
       await addCustomerOpeningBalance();
       await addPublicationStockBundles();
       await addOrdersPerformanceIndexes();
+      await addSellerPriceLists();
       console.log('[DB] Tablas inicializadas correctamente');
       return;
     } catch (err: any) {

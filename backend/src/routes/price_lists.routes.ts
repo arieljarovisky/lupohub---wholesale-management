@@ -11,7 +11,10 @@ import {
   setPriceListItems,
   duplicatePriceList,
   fillPriceListFromBase,
-  setPriceListItemsBySku
+  setPriceListItemsBySku,
+  getSellerPriceLists,
+  setSellerPriceLists,
+  getAllSellersWithPriceLists
 } from '../controllers/price_lists.controller';
 
 const router = Router();
@@ -19,6 +22,9 @@ const router = Router();
 router.use(authMiddleware);
 
 router.get('/', listPriceLists);
+router.get('/sellers', getAllSellersWithPriceLists);
+router.get('/sellers/:sellerId', getSellerPriceLists);
+router.put('/sellers/:sellerId', setSellerPriceLists);
 router.post('/', createPriceList);
 router.post('/bulk', createPriceListsBulk);
 router.get('/:id', getPriceList);

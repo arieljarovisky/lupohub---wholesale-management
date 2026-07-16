@@ -679,6 +679,28 @@ export const api = {
     return request<any>(`/price-lists/${id}/items/by-sku`, 'PUT', { items });
   },
 
+  /** Obtener todos los vendedores con sus listas de precios asignadas. Solo ADMIN. */
+  getSellersWithPriceLists: async (): Promise<Array<{ id: string; name: string; email: string; priceLists: { id: string; name: string }[] }>> => {
+    return request<any>('/price-lists/sellers', 'GET');
+  },
+
+  /** Obtener listas de precios asignadas a un vendedor. Solo ADMIN. */
+  getSellerPriceLists: async (sellerId: string): Promise<import('../types').PriceList[]> => {
+    const rows = await request<any[]>(`/price-lists/sellers/${sellerId}`, 'GET');
+    return (Array.isArray(rows) ? rows : []).map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      description: r.description ?? undefined,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt
+    }));
+  },
+
+  /** Asignar listas de precios a un vendedor. Solo ADMIN. */
+  setSellerPriceLists: async (sellerId: string, priceListIds: string[]): Promise<{ sellerId: string; priceLists: { id: string; name: string }[] }> => {
+    return request<any>(`/price-lists/sellers/${sellerId}`, 'PUT', { priceListIds });
+  },
+
   // --- PRODUCTS ---
   /** Convierte una fila de la API a Product (uso interno). */
   mapProductRow: (r: any): Product => {
