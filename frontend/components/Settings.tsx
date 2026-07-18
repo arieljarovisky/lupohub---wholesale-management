@@ -677,8 +677,19 @@ const Settings: React.FC<SettingsProps> = ({
         showToast('info', 'Mercado Libre: no hubo variantes para sincronizar (revisá vínculos ML).');
       }
     } catch (e: any) {
-      setStockSyncResult({ platform: 'Mercado Libre', updated: 0, errors: 1, logs: [e.message || 'Error desconocido'] });
-      showToast('error', e?.message || 'Error al sincronizar stock a Mercado Libre');
+      const msg = e?.message || 'Error al sincronizar stock a Mercado Libre';
+      const timedOut = /timed?\s*out|timeout/i.test(String(msg));
+      setStockSyncResult({
+        platform: 'Mercado Libre',
+        updated: 0,
+        errors: 1,
+        logs: [
+          timedOut
+            ? 'Timeout en el navegador: el backend puede seguir sincronizando en segundo plano. Revisá los logs del servidor o reintentá en unos minutos y verificá un producto en Inventario.'
+            : msg,
+        ],
+      });
+      showToast('error', timedOut ? 'Timeout: el sync puede seguir en el servidor. Revisá logs o reintentá.' : msg);
     } finally {
       setMlStockSyncLoading(false);
     }

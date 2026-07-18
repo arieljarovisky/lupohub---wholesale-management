@@ -3519,12 +3519,14 @@ export const syncAllStockToMercadoLibre = async (req: Request, res: Response) =>
          OR (pv.mercado_libre_variant_id IS NOT NULL AND p.mercado_libre_id IS NOT NULL)
     `);
 
+    const list = (variants || []) as any[];
     let updated = 0;
     let errors = 0;
     const logs: string[] = [];
+    const concurrency = Math.max(1, Math.min(5, parseInt(process.env.ML_SYNC_STOCK_CONCURRENCY || '4', 10) || 4));
 
-    for (const v of variants) {
-      const pack = Math.max(1, Number((v as any).ml_pack) || 1);
+    const syncOne = async (v: any): Promise<{ ok: boolean; log: string }> => {
+      const pack = Math.max(1, Number(v.ml_pack) || 1);
       const stockToSend = Math.floor(Number(v.stock || 0) / pack);
       let ok = false;
       if (v.mercado_libre_item_id && v.mercado_libre_variant_id) {
@@ -3541,28 +3543,52 @@ export const syncAllStockToMercadoLibre = async (req: Request, res: Response) =>
         );
       } else if (v.mercado_libre_item_id) {
         ok = await updateMercadoLibreStockByItem(v.mercado_libre_item_id, stockToSend, {
-          sku: (v as any).sku,
-          color: (v as any).color_name,
-          size: (v as any).size_code,
+          sku: v.sku,
+          color: v.color_name,
+          size: v.size_code,
           variantId: String(v.id),
         });
       }
       if (ok) {
+        return { ok: true, log: `[OK] ${v.sku}: ${v.stock || 0} un. → ${stockToSend} (pack x${pack})` };
+      }
+      const mlRef = v.mercado_libre_item_id || (v.mercado_libre_id ? `${v.mercado_libre_id}/${v.mercado_libre_variant_id}` : 'sin vínculo');
+      console.warn(`[Sync→ML] Falló variante SKU=${v.sku} ML=${mlRef}`);
+      return { ok: false, log: `[ERROR] ${v.sku}: no se pudo actualizar ML ${mlRef}` };
+    };
+
+    const outcomes: Array<{ ok: boolean; log: string }> = new Array(list.length);
+    let next = 0;
+    const workers = Array.from({ length: Math.min(concurrency, Math.max(list.length, 1)) }, async () => {
+      while (true) {
+        const i = next++;
+        if (i >= list.length) break;
+        outcomes[i] = await syncOne(list[i]);
+      }
+    });
+    await Promise.all(workers);
+
+    let okLogged = 0;
+    for (const o of outcomes) {
+      if (!o) continue;
+      if (o.ok) {
         updated++;
-        logs.push(`[OK] ${v.sku}: ${v.stock || 0} un. → ${stockToSend} (pack x${pack})`);
+        if (okLogged < 200) {
+          logs.push(o.log);
+          okLogged++;
+        }
       } else {
         errors++;
-        const mlRef = v.mercado_libre_item_id || (v.mercado_libre_id ? `${v.mercado_libre_id}/${v.mercado_libre_variant_id}` : 'sin vínculo');
-        logs.push(`[ERROR] ${v.sku}: no se pudo actualizar ML ${mlRef}`);
-        console.warn(`[Sync→ML] Falló variante SKU=${v.sku} ML=${mlRef}`);
+        logs.push(o.log);
       }
     }
 
+    console.log(`[Sync→ML] Fin: ${updated} OK, ${errors} errores, total=${list.length}, concurrency=${concurrency}`);
     res.json({
       message: 'Stock sincronizado a Mercado Libre',
       updated,
       errors,
-      total: variants.length,
+      total: list.length,
       logs
     });
   } catch (error: any) {

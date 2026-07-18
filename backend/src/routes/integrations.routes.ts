@@ -84,6 +84,12 @@ import {
   getTiendaNubeExpressTrackingPageConfig,
   saveTiendaNubeExpressTrackingPageConfig,
 } from '../controllers/tiendanubeExpressTrackingPage.controller';
+import {
+  getLupoWebhookConfigEndpoint,
+  saveLupoWebhookConfigEndpoint,
+  testLupoWebhookEndpoint,
+  syncLupoShopMlStockToShopEndpoint,
+} from '../controllers/lupoWebhookSettings.controller';
 import { authMiddleware, marketingAdsAccessMiddleware } from '../middleware/auth';
 import {
   disconnectGoogleAdsEndpoint,
@@ -102,6 +108,12 @@ import {
 const router = Router();
 
 router.get('/status', getIntegrationStatus);
+
+// LupoShop (stubs: integración removida; evita 404 en Settings)
+router.get('/luposhop/webhook-config', authMiddleware, getLupoWebhookConfigEndpoint);
+router.post('/luposhop/webhook-config', authMiddleware, saveLupoWebhookConfigEndpoint);
+router.post('/luposhop/webhook-test', authMiddleware, testLupoWebhookEndpoint);
+router.post('/luposhop/sync-ml-stock-to-shop', authMiddleware, syncLupoShopMlStockToShopEndpoint);
 
 // Mercado Libre
 router.get('/mercadolibre/auth', getMercadoLibreAuthUrl);

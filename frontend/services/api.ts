@@ -2535,14 +2535,19 @@ export const api = {
   // Sincronizar stock a plataformas externas
   syncStockToTiendaNube: async (): Promise<{ message: string; updated: number; errors: number; logs: string[] }> => {
     return handleRequest(async () => {
-      return await request<{ message: string; updated: number; errors: number; logs: string[] }>('/integrations/tiendanube/sync-stock', 'POST', undefined, undefined, 180000);
+      return await request<{ message: string; updated: number; errors: number; logs: string[] }>('/integrations/tiendanube/sync-stock', 'POST', undefined, undefined, 600000);
     }, { message: 'Offline', updated: 0, errors: 0, logs: [] }, 'syncStockToTiendaNube');
   },
 
-  syncStockToMercadoLibre: async (): Promise<{ message: string; updated: number; errors: number; logs: string[] }> => {
-    return handleRequest(async () => {
-      return await request<{ message: string; updated: number; errors: number; logs: string[] }>('/integrations/mercadolibre/sync-stock', 'POST', undefined, undefined, 180000);
-    }, { message: 'Offline', updated: 0, errors: 0, logs: [] }, 'syncStockToMercadoLibre');
+  /** Hub → ML: catálogo completo; puede tardar varios minutos. No usar fallback offline (ocultaría timeouts reales). */
+  syncStockToMercadoLibre: async (): Promise<{ message: string; updated: number; errors: number; logs: string[]; total?: number }> => {
+    return await request<{ message: string; updated: number; errors: number; logs: string[]; total?: number }>(
+      '/integrations/mercadolibre/sync-stock',
+      'POST',
+      undefined,
+      undefined,
+      600000
+    );
   },
 
   /** Excel: reporte completo de Mercado Libre por período (requiere sesión). */
