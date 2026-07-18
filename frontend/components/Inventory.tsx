@@ -2466,9 +2466,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                     <Cloud size={17} className="text-slate-400 shrink-0" />
                     Enviar a Tienda Nube
                   </button>
-                  <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncStock(); }} disabled={!!syncLoading} className="w-full flex items-center gap-3 mx-1.5 px-3 py-2.5 text-left text-sm text-slate-300 hover:bg-white/5 hover:text-white rounded-xl disabled:opacity-50 max-w-[calc(100%-12px)]">
-                    <RefreshCw size={17} className="text-slate-400 shrink-0" />
-                    Enviar a TN + ML
+                  <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncStock(); }} disabled={!!syncLoading} className="w-full flex items-center gap-3 mx-1.5 px-3 py-2.5 text-left text-sm text-emerald-300 hover:bg-emerald-900/30 hover:text-emerald-200 rounded-xl disabled:opacity-50 max-w-[calc(100%-12px)] border border-emerald-700/40" title="Envía el stock de LupoHub de TODOS los artículos vinculados a Mercado Libre y Tienda Nube (incluye stock 0)">
+                    <RefreshCw size={17} className="text-emerald-400 shrink-0" />
+                    Enviar stock ML + TN (todos)
                   </button>
                   <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncFromMercadoLibre(); }} disabled={!!syncLoading} className="w-full flex items-center gap-3 mx-1.5 px-3 py-2.5 text-left text-sm text-slate-400 hover:bg-white/5 hover:text-slate-200 rounded-xl disabled:opacity-50 max-w-[calc(100%-12px)]">
                     <RefreshCw size={17} className="text-slate-500 shrink-0" />

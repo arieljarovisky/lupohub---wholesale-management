@@ -660,6 +660,57 @@ const Settings: React.FC<SettingsProps> = ({
     }
   };
 
+  /** Todos los artículos: LupoHub → Mercado Libre + Tienda Nube (incluye stock 0). */
+  const handleSyncStockToBothPlatforms = async () => {
+    setShowStockSyncModal(true);
+    setTnStockSyncLoading(true);
+    setMlStockSyncLoading(true);
+    setMlStockSyncIsImport(false);
+    setStockSyncResult(null);
+    try {
+      const [tnRes, mlRes] = await Promise.all([
+        api.syncStockToTiendaNube(),
+        api.syncStockToMercadoLibre(),
+      ]);
+      const updated = (tnRes.updated || 0) + (mlRes.updated || 0);
+      const errors = (tnRes.errors || 0) + (mlRes.errors || 0);
+      const logs = [
+        ...(tnRes.logs || []).map((l) => `[TN] ${l}`),
+        ...(mlRes.logs || []).map((l) => `[ML] ${l}`),
+      ];
+      setStockSyncResult({
+        platform: 'ML + Tienda Nube',
+        updated,
+        errors,
+        logs,
+      });
+      if (errors === 0 && updated > 0) {
+        showToast('success', `Todos los artículos: ML ${mlRes.updated} · TN ${tnRes.updated} (incluye stock 0).`);
+      } else if (errors > 0) {
+        showToast('warning', `ML ${mlRes.updated}/${mlRes.errors} · TN ${tnRes.updated}/${tnRes.errors}. Revisá el detalle.`);
+      } else {
+        showToast('info', 'No hubo variantes vinculadas para sincronizar.');
+      }
+    } catch (e: any) {
+      const msg = e?.message || 'Error al sincronizar stock a ML y TN';
+      const timedOut = /timed?\s*out|timeout/i.test(String(msg));
+      setStockSyncResult({
+        platform: 'ML + Tienda Nube',
+        updated: 0,
+        errors: 1,
+        logs: [
+          timedOut
+            ? 'Timeout en el navegador: el backend puede seguir sincronizando. Revisá logs o reintentá más tarde.'
+            : msg,
+        ],
+      });
+      showToast('error', timedOut ? 'Timeout: el sync puede seguir en el servidor.' : msg);
+    } finally {
+      setTnStockSyncLoading(false);
+      setMlStockSyncLoading(false);
+    }
+  };
+
   // Sincronizar stock de la app hacia Mercado Libre (app = fuente de verdad)
   const handleSyncStockToMercadoLibre = async () => {
     setShowStockSyncModal(true);
@@ -2410,11 +2461,32 @@ const Settings: React.FC<SettingsProps> = ({
               <li><strong className="text-slate-200">Tené tus productos en LupoHub.</strong> Importalos desde Tango (Inventario → Importar Tango) o cargalos a mano. El stock que cargues acá es el de tu depósito (fuente de verdad).</li>
               <li><strong className="text-slate-200">Vinculá cada variante con TN y ML.</strong> En <strong>Inventario → Mi inventario</strong>, en cada fila de producto tocá el ícono de <strong>cadena (Vincular)</strong>. Ahí cargá el <strong>ID de producto e ID de variante de Tienda Nube</strong> y el <strong>ID de publicación/variación de Mercado Libre</strong> que correspondan a esa variante. Sin este vínculo la app no sabe a qué listing enviar el stock.</li>
               <li><strong className="text-slate-200">SKU unificado.</strong> En Vincular producto podés usar el mismo código para inventario, ML y TN (botón &quot;Usar mismo código&quot;). Si en ML/TN usás otro código, ingresalo en ese campo. Packs (x2, x3): configurá en el mismo modal; el stock enviado = stock del depósito ÷ pack.</li>
-              <li><strong className="text-slate-200">Enviar stock a las plataformas.</strong> En esta pestaña (Integraciones) usá <strong>Sincronizar stock a Tienda Nube</strong> y <strong>Sincronizar stock a Mercado Libre</strong>. Se envía el stock actual de tu depósito (LupoHub) a cada variante que tengas vinculada.</li>
+              <li><strong className="text-slate-200">Enviar stock a las plataformas.</strong> Usá el botón verde <strong>ENVIAR STOCK A ML + TN (TODOS)</strong>: manda el stock de LupoHub (incluido 0) a Mercado Libre y Tienda Nube en un solo paso.</li>
             </ol>
             <p className="text-xs text-slate-500 mt-3">
               Los productos de TN y ML no se guardan en la base de datos; solo se usa el vínculo que vos cargás para enviar stock desde LupoHub hacia cada plataforma.
             </p>
+            {(integrations.mercadolibre || integrations.tiendanube) && (
+              <div className="mt-4 pt-4 border-t border-slate-600/60">
+                <button
+                  type="button"
+                  onClick={handleSyncStockToBothPlatforms}
+                  disabled={tnStockSyncLoading || mlStockSyncLoading}
+                  className="w-full sm:w-auto px-5 py-3 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-white text-sm font-black transition-all flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg shadow-emerald-900/30"
+                  title="Envía el stock de LupoHub de TODOS los artículos vinculados a Mercado Libre y Tienda Nube (incluye stock 0)"
+                >
+                  {(tnStockSyncLoading || mlStockSyncLoading) ? (
+                    <Loader2 size={18} className="animate-spin" />
+                  ) : (
+                    <RefreshCw size={18} />
+                  )}
+                  ENVIAR STOCK A ML + TN (TODOS)
+                </button>
+                <p className="text-[11px] text-slate-500 mt-2">
+                  Un toque: todos los artículos vinculados. Puede tardar varios minutos.
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="bg-slate-800 rounded-3xl border border-slate-700 overflow-hidden shadow-xl">
@@ -4552,7 +4624,17 @@ Body JSON:
       <Modal
         isOpen={showStockSyncModal}
         onClose={() => { if (!tnStockSyncLoading && !mlStockSyncLoading) setShowStockSyncModal(false); }}
-        title={mlStockSyncLoading || stockSyncResult?.platform === 'Mercado Libre' ? (mlStockSyncIsImport ? 'Importar stock desde Mercado Libre' : 'Sincronizar stock a Mercado Libre') : (tnStockSyncLoading || stockSyncResult?.platform === 'Tienda Nube') ? 'Sincronizar Stock a Tienda Nube' : 'Sincronizar Stock'}
+        title={
+          mlStockSyncLoading || stockSyncResult?.platform === 'Mercado Libre' || stockSyncResult?.platform === 'ML + Tienda Nube'
+            ? mlStockSyncIsImport
+              ? 'Importar stock desde Mercado Libre'
+              : stockSyncResult?.platform === 'ML + Tienda Nube' || (tnStockSyncLoading && mlStockSyncLoading)
+                ? 'Enviar stock a ML + Tienda Nube'
+                : 'Sincronizar stock a Mercado Libre'
+            : tnStockSyncLoading || stockSyncResult?.platform === 'Tienda Nube'
+              ? 'Sincronizar Stock a Tienda Nube'
+              : 'Sincronizar Stock'
+        }
         footer={
           !tnStockSyncLoading && !mlStockSyncLoading && (
             <button onClick={() => setShowStockSyncModal(false)} className="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg font-bold text-sm w-full">
