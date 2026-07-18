@@ -150,13 +150,14 @@ async function resolveReachableMlItemId(
   return null;
 }
 
-async function withRetry429409<T>(fn: () => Promise<T>, retries = 2): Promise<T> {
+async function withRetry429409<T>(fn: () => Promise<T>, retries = 5): Promise<T> {
   try {
     return await fn();
   } catch (e: any) {
     const status = e.response?.status;
     if (retries > 0 && (status === 429 || status === 409)) {
-      const delayMs = status === 429 ? 2500 : 1200;
+      const attempt = 6 - retries;
+      const delayMs = status === 429 ? Math.min(15000, 2000 * attempt) : 1200;
       await sleep(delayMs);
       return withRetry429409(fn, retries - 1);
     }
@@ -568,6 +569,7 @@ export const syncStockToExternalPlatforms = async (variantId: string, newStock: 
       color: variantMeta?.color_name != null ? String(variantMeta.color_name) : null,
       size: variantMeta?.size_code != null ? String(variantMeta.size_code) : null,
       variantId,
+      mlVariationId: null as string | null,
     };
 
     const publications = await query(
@@ -600,21 +602,17 @@ export const syncStockToExternalPlatforms = async (variantId: string, newStock: 
         } else if (pub.platform === 'mercadolibre') {
           const itemId = pub.external_product_id;
           const variationId = (pub.external_variant_id && String(pub.external_variant_id).trim()) || null;
-          if (variationId) {
-            const label = `ML item=${itemId} var=${variationId} variant=${variantId}`;
-            tasks.push(
-              runExternalSyncWithRetries(label, () =>
-                updateMercadoLibreStockByVariant(itemId, variationId, stockToSend)
-              )
-            );
-          } else {
-            const label = `ML item=${itemId} variant=${variantId}`;
-            tasks.push(
-              runExternalSyncWithRetries(label, () =>
-                updateMercadoLibreStockByItem(itemId, stockToSend, matchOpts)
-              )
-            );
-          }
+          const label = variationId
+            ? `ML item=${itemId} var=${variationId} variant=${variantId}`
+            : `ML item=${itemId} variant=${variantId}`;
+          tasks.push(
+            runExternalSyncWithRetries(label, () =>
+              updateMercadoLibreStockByItem(itemId, stockToSend, {
+                ...matchOpts,
+                mlVariationId: variationId,
+              })
+            )
+          );
         }
       }
       // Paralelo: ML y TN reciben el mismo stock casi a la vez (menos “ML ya actualizó y TN no”).
@@ -634,6 +632,11 @@ export const syncStockToExternalPlatforms = async (variantId: string, newStock: 
       );
       if (!variant) return;
 
+      matchOpts.mlVariationId =
+        variant.mercado_libre_variant_id != null && String(variant.mercado_libre_variant_id).trim() !== ''
+          ? String(variant.mercado_libre_variant_id).trim()
+          : null;
+
       const stockTN = stockForPlatform(newStock, variant.tn_pack);
       const stockML = stockForPlatform(newStock, variant.ml_pack);
 
@@ -650,29 +653,22 @@ export const syncStockToExternalPlatforms = async (variantId: string, newStock: 
         variant.mercado_libre_item_id != null && String(variant.mercado_libre_item_id).trim() !== ''
           ? String(variant.mercado_libre_item_id).trim()
           : null;
-      const ownMlVarId =
-        variant.mercado_libre_variant_id != null && String(variant.mercado_libre_variant_id).trim() !== ''
-          ? String(variant.mercado_libre_variant_id).trim()
+      const parentMlId =
+        variant.mercado_libre_id != null && String(variant.mercado_libre_id).trim() !== ''
+          ? String(variant.mercado_libre_id).trim()
           : null;
       if (ownMlItemId) {
-        if (ownMlVarId) {
-          await runExternalSyncWithRetries(
-            `ML legacy item=${ownMlItemId} var=${ownMlVarId} variant=${variantId}`,
-            () => updateMercadoLibreStockByVariant(ownMlItemId, ownMlVarId, stockML)
-          );
-        } else {
-          await runExternalSyncWithRetries(
-            `ML legacy item=${ownMlItemId} variant=${variantId}`,
-            () => updateMercadoLibreStockByItem(ownMlItemId, stockML, matchOpts)
-          );
-        }
-      } else if (variant.mercado_libre_id && ownMlVarId) {
         await runExternalSyncWithRetries(
-          `ML legacy=${variant.mercado_libre_id}/${ownMlVarId} variant=${variantId}`,
-          () => updateMercadoLibreStockByVariant(variant.mercado_libre_id, ownMlVarId, stockML)
+          `ML legacy item=${ownMlItemId} variant=${variantId}`,
+          () => updateMercadoLibreStockByItem(ownMlItemId, stockML, matchOpts)
+        );
+      } else if (parentMlId) {
+        await runExternalSyncWithRetries(
+          `ML legacy=${parentMlId} variant=${variantId}`,
+          () => updateMercadoLibreStockByItem(parentMlId, stockML, matchOpts)
         );
       }
-      // Sin vínculo ML explícito (ítem propio o variación del catálogo padre): no sincronizar por SKU.
+      // Sin vínculo ML explícito: no sincronizar.
     }
   } catch (error) {
     console.error('Error syncing stock to external platforms:', error);
@@ -726,6 +722,8 @@ export const updateMercadoLibreStockByItem = async (
     color?: string | null;
     size?: string | null;
     variantId?: string | null;
+    /** ID de variación ML guardado; se valida contra SKU antes de usarlo. */
+    mlVariationId?: string | null;
   }
 ): Promise<boolean> => {
   const integration = await get(
@@ -748,8 +746,8 @@ export const updateMercadoLibreStockByItem = async (
     const getRes = await withRetry429409(() =>
       axios.get(`https://api.mercadolibre.com/items/${resolvedItemId}?include_attributes=all`, { headers })
     );
-    const item = getRes.data;
-    const variations: any[] = item.variations || [];
+    let item = getRes.data;
+    let variations: any[] = item.variations || [];
     if (variations.length === 0) {
       await withRetry429409(() =>
         axios.put(`https://api.mercadolibre.com/items/${resolvedItemId}`, { available_quantity: stock }, { headers })
@@ -769,8 +767,23 @@ export const updateMercadoLibreStockByItem = async (
       return true;
     }
 
-    const { matchMlVariationForVariantLink } = await import('../utils/mlVariationMatch');
+    const {
+      matchMlVariationForVariantLink,
+      enrichMlItemVariationsForMatch,
+      mlVariationSkuFromApi,
+    } = await import('../utils/mlVariationMatch');
+
+    // Completar SKUs/atributos: el GET /items suele devolver variaciones incompletas.
+    const missingSku = variations.some((v: any) => !mlVariationSkuFromApi(v));
+    if (missingSku || opts?.color || opts?.size) {
+      item = await enrichMlItemVariationsForMatch(item, integration.access_token, (url, cfg) =>
+        withRetry429409(() => axios.get(url, cfg))
+      );
+      variations = item.variations || [];
+    }
+
     const matched = matchMlVariationForVariantLink(variations, {
+      variationId: opts?.mlVariationId,
       sku: opts?.sku,
       color: opts?.color,
       size: opts?.size,
@@ -788,7 +801,7 @@ export const updateMercadoLibreStockByItem = async (
         await execute(
           `UPDATE product_variants
            SET mercado_libre_variant_id = ?
-           WHERE id = ? AND (mercado_libre_variant_id IS NULL OR TRIM(mercado_libre_variant_id) = '')`,
+           WHERE id = ?`,
           [variationId, opts.variantId]
         );
       } catch {

@@ -28,6 +28,7 @@ import {
   normSkuForMlStockMatch,
   normTextForMlStockMatch,
   resolveMlStockForVariantLink,
+  enrichMlItemVariationsForMatch,
   type MlVariantMatchLink,
 } from '../utils/mlVariationMatch';
 const ML_AUTH_URL = 'https://auth.mercadolibre.com.ar/authorization';
@@ -3031,7 +3032,15 @@ export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: nu
         } else if (variations.length === 1) {
           mlQty = variations[0].available_quantity ?? 0;
         } else {
-          const matched = matchMlVariationForVariantLink(variations, {
+          let itemForMatch = item;
+          try {
+            itemForMatch = await enrichMlItemVariationsForMatch(item, mlToken.access_token, (url, cfg) =>
+              axios.get(url, cfg)
+            );
+          } catch {
+            /* best-effort */
+          }
+          const matched = matchMlVariationForVariantLink(itemForMatch.variations || variations, {
             variationId: r.ml_variant_id,
             sku: r.sku,
             color: r.color_name,
@@ -3048,13 +3057,13 @@ export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: nu
           if (
             r.variant_id &&
             matchedVarId &&
-            (!r.ml_variant_id || String(r.ml_variant_id).trim() === '')
+            (!r.ml_variant_id || String(r.ml_variant_id).trim() === '' || String(r.ml_variant_id) !== matchedVarId)
           ) {
             try {
               await execute(
                 `UPDATE product_variants
                  SET mercado_libre_variant_id = ?
-                 WHERE id = ? AND (mercado_libre_variant_id IS NULL OR TRIM(mercado_libre_variant_id) = '')`,
+                 WHERE id = ?`,
                 [matchedVarId, r.variant_id]
               );
             } catch {
@@ -3523,31 +3532,24 @@ export const syncAllStockToMercadoLibre = async (req: Request, res: Response) =>
     let updated = 0;
     let errors = 0;
     const logs: string[] = [];
-    const concurrency = Math.max(1, Math.min(5, parseInt(process.env.ML_SYNC_STOCK_CONCURRENCY || '4', 10) || 4));
+    const concurrency = Math.max(1, Math.min(3, parseInt(process.env.ML_SYNC_STOCK_CONCURRENCY || '2', 10) || 2));
 
     const syncOne = async (v: any): Promise<{ ok: boolean; log: string }> => {
       const pack = Math.max(1, Number(v.ml_pack) || 1);
       const stockToSend = Math.floor(Number(v.stock || 0) / pack);
+      const matchOpts = {
+        sku: v.sku,
+        color: v.color_name,
+        size: v.size_code,
+        variantId: String(v.id),
+        mlVariationId: v.mercado_libre_variant_id != null ? String(v.mercado_libre_variant_id) : null,
+      };
       let ok = false;
-      if (v.mercado_libre_item_id && v.mercado_libre_variant_id) {
-        ok = await updateMercadoLibreStockByVariant(
-          v.mercado_libre_item_id,
-          v.mercado_libre_variant_id,
-          stockToSend
-        );
+      // Preferir ítem + match por SKU/atributos (valida variation_id guardado; evita actualizar la variación equivocada).
+      if (v.mercado_libre_item_id) {
+        ok = await updateMercadoLibreStockByItem(v.mercado_libre_item_id, stockToSend, matchOpts);
       } else if (v.mercado_libre_id && v.mercado_libre_variant_id) {
-        ok = await updateMercadoLibreStockByVariant(
-          v.mercado_libre_id,
-          v.mercado_libre_variant_id,
-          stockToSend
-        );
-      } else if (v.mercado_libre_item_id) {
-        ok = await updateMercadoLibreStockByItem(v.mercado_libre_item_id, stockToSend, {
-          sku: v.sku,
-          color: v.color_name,
-          size: v.size_code,
-          variantId: String(v.id),
-        });
+        ok = await updateMercadoLibreStockByItem(v.mercado_libre_id, stockToSend, matchOpts);
       }
       if (ok) {
         return { ok: true, log: `[OK] ${v.sku}: ${v.stock || 0} un. → ${stockToSend} (pack x${pack})` };
@@ -3559,7 +3561,8 @@ export const syncAllStockToMercadoLibre = async (req: Request, res: Response) =>
 
     const outcomes: Array<{ ok: boolean; log: string }> = new Array(list.length);
     let next = 0;
-    const workers = Array.from({ length: Math.min(concurrency, Math.max(list.length, 1)) }, async () => {
+    const concurrencySafe = Math.max(1, Math.min(3, concurrency));
+    const workers = Array.from({ length: Math.min(concurrencySafe, Math.max(list.length, 1)) }, async () => {
       while (true) {
         const i = next++;
         if (i >= list.length) break;
@@ -3631,26 +3634,18 @@ export const syncSelectedStockToMercadoLibre = async (req: Request, res: Respons
     for (const v of variants) {
       const pack = Math.max(1, Number((v as any).ml_pack) || 1);
       const stockToSend = Math.floor(Number(v.stock || 0) / pack);
+      const matchOpts = {
+        sku: (v as any).sku,
+        color: (v as any).color_name,
+        size: (v as any).size_code,
+        variantId: String(v.id),
+        mlVariationId: v.mercado_libre_variant_id != null ? String(v.mercado_libre_variant_id) : null,
+      };
       let ok = false;
-      if (v.mercado_libre_item_id && v.mercado_libre_variant_id) {
-        ok = await updateMercadoLibreStockByVariant(
-          v.mercado_libre_item_id,
-          v.mercado_libre_variant_id,
-          stockToSend
-        );
-      } else if (v.mercado_libre_id && v.mercado_libre_variant_id) {
-        ok = await updateMercadoLibreStockByVariant(
-          v.mercado_libre_id,
-          v.mercado_libre_variant_id,
-          stockToSend
-        );
-      } else if (v.mercado_libre_item_id) {
-        ok = await updateMercadoLibreStockByItem(v.mercado_libre_item_id, stockToSend, {
-          sku: (v as any).sku,
-          color: (v as any).color_name,
-          size: (v as any).size_code,
-          variantId: String(v.id),
-        });
+      if (v.mercado_libre_item_id) {
+        ok = await updateMercadoLibreStockByItem(v.mercado_libre_item_id, stockToSend, matchOpts);
+      } else if (v.mercado_libre_id) {
+        ok = await updateMercadoLibreStockByItem(v.mercado_libre_id, stockToSend, matchOpts);
       }
       if (ok) {
         updated++;
