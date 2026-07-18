@@ -29,6 +29,7 @@ import {
   normTextForMlStockMatch,
   resolveMlStockForVariantLink,
   enrichMlItemVariationsForMatch,
+  skusCompatible,
   type MlVariantMatchLink,
 } from '../utils/mlVariationMatch';
 const ML_AUTH_URL = 'https://auth.mercadolibre.com.ar/authorization';
@@ -3054,16 +3055,12 @@ export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: nu
           }
           mlQty = matched.available_quantity ?? 0;
           const matchedVarId = String(matched.id);
-          if (
-            r.variant_id &&
-            matchedVarId &&
-            (!r.ml_variant_id || String(r.ml_variant_id).trim() === '' || String(r.ml_variant_id) !== matchedVarId)
-          ) {
+          const remoteSku = mlVariationSkuFromApi(matched).trim();
+          const skuExact = !!(r.sku && remoteSku && skusCompatible(String(r.sku), remoteSku));
+          if (r.variant_id && matchedVarId && skuExact) {
             try {
               await execute(
-                `UPDATE product_variants
-                 SET mercado_libre_variant_id = ?
-                 WHERE id = ?`,
+                `UPDATE product_variants SET mercado_libre_variant_id = ? WHERE id = ?`,
                 [matchedVarId, r.variant_id]
               );
             } catch {

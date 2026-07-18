@@ -174,7 +174,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
   const [selectedVariantIds, setSelectedVariantIds] = useState<string[]>([]);
   const [selectionModeEnabled, setSelectionModeEnabled] = useState(false);
-  const [syncSelectedLoading, setSyncSelectedLoading] = useState<'tn' | 'ml' | null>(null);
+  const [syncSelectedLoading, setSyncSelectedLoading] = useState<'tn' | 'ml' | 'both' | null>(null);
   
   // Creation Modal State
   const [isCreating, setIsCreating] = useState(false);
@@ -1111,6 +1111,37 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       }, 1200);
     } catch (e: any) {
       showToast('error', e?.message || 'Error al enviar a Mercado Libre');
+    } finally {
+      setSyncSelectedLoading(null);
+    }
+  };
+
+  /** Envía stock de la selección a ML y TN (incluye 0 = sin stock). */
+  const handleSyncSelectedToBoth = async () => {
+    if (selectedVariantIds.length === 0) return;
+    const ids = [...selectedVariantIds];
+    setSyncSelectedLoading('both');
+    try {
+      const [ml, tn] = await Promise.all([
+        api.syncSelectedStockToMercadoLibre(ids),
+        api.syncSelectedStockToTiendaNube(ids),
+      ]);
+      const errors = (ml.errors || 0) + (tn.errors || 0);
+      if (errors === 0 && ((ml.updated || 0) + (tn.updated || 0)) > 0) {
+        showToast('success', `ML ${ml.updated} y TN ${tn.updated} actualizadas (incluye stock 0).`);
+      } else if (errors > 0) {
+        showToast('warning', `ML ${ml.updated} OK/${ml.errors} err · TN ${tn.updated} OK/${tn.errors} err`);
+      } else {
+        showToast('info', 'Ninguna variante con vínculo ML/TN en la selección.');
+      }
+      setServerListRefreshKey(k => k + 1);
+      setTimeout(() => {
+        api.getVariantExternalStocks(ids).then((ext) => {
+          if (ext?.stocks) setVariantExternalStocks((prev) => ({ ...prev, ...ext.stocks }));
+        }).catch(() => {});
+      }, 1200);
+    } catch (e: any) {
+      showToast('error', e?.message || 'Error al enviar a ML y TN');
     } finally {
       setSyncSelectedLoading(null);
     }
@@ -2633,6 +2664,15 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           >
             {syncSelectedLoading === 'ml' ? <Loader2 size={16} className="animate-spin" /> : <Zap size={16} />}
             Mercado Libre
+          </button>
+          <button
+            onClick={handleSyncSelectedToBoth}
+            disabled={!!syncSelectedLoading}
+            title="Envía el stock de LupoHub (incluido 0) a Mercado Libre y Tienda Nube"
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-sm font-medium hover:bg-emerald-500/20 disabled:opacity-50 transition-colors"
+          >
+            {syncSelectedLoading === 'both' ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+            ML + TN
           </button>
           <button
             onClick={() => setSelectedVariantIds([])}

@@ -771,6 +771,7 @@ export const updateMercadoLibreStockByItem = async (
       matchMlVariationForVariantLink,
       enrichMlItemVariationsForMatch,
       mlVariationSkuFromApi,
+      skusCompatible,
     } = await import('../utils/mlVariationMatch');
 
     // Completar SKUs/atributos: el GET /items suele devolver variaciones incompletas.
@@ -793,23 +794,45 @@ export const updateMercadoLibreStockByItem = async (
         `[ML Stock] Item ${resolvedItemId} tiene ${variations.length} variaciones y no se pudo emparejar` +
           (opts?.sku ? ` por SKU ${opts.sku}` : ' (sin SKU/atributos)')
       );
+      // Si el ID guardado era dudoso, limpiarlo para no seguir pisando otra variación.
+      if (opts?.variantId && opts?.mlVariationId) {
+        try {
+          await execute(
+            `UPDATE product_variants SET mercado_libre_variant_id = NULL WHERE id = ? AND mercado_libre_variant_id = ?`,
+            [opts.variantId, String(opts.mlVariationId)]
+          );
+        } catch {
+          /* best-effort */
+        }
+      }
       return false;
     }
     const variationId = String(matched.id);
-    if (opts?.variantId) {
+    const remoteSku = mlVariationSkuFromApi(matched).trim();
+    const skuExact = !!opts?.sku && !!remoteSku && skusCompatible(String(opts.sku), remoteSku);
+    // Solo persistir variation_id si el match fue por SKU exacto (evita backfills cruzados 150↔180).
+    if (opts?.variantId && skuExact) {
       try {
         await execute(
-          `UPDATE product_variants
-           SET mercado_libre_variant_id = ?
-           WHERE id = ?`,
+          `UPDATE product_variants SET mercado_libre_variant_id = ? WHERE id = ?`,
           [variationId, opts.variantId]
         );
       } catch {
         /* backfill best-effort */
       }
+    } else if (opts?.variantId && opts?.mlVariationId && String(opts.mlVariationId) !== variationId) {
+      try {
+        await execute(
+          `UPDATE product_variants SET mercado_libre_variant_id = NULL WHERE id = ? AND mercado_libre_variant_id = ?`,
+          [opts.variantId, String(opts.mlVariationId)]
+        );
+      } catch {
+        /* best-effort */
+      }
     }
     console.log(
-      `[ML Stock] Ítem multi-variación ${resolvedItemId}: emparejado SKU=${opts?.sku || '-'} → var ${variationId}`
+      `[ML Stock] Ítem multi-variación ${resolvedItemId}: emparejado SKU=${opts?.sku || '-'} → var ${variationId}` +
+        (skuExact ? ' (SKU exacto)' : '')
     );
     return updateMercadoLibreStockByVariant(resolvedItemId, variationId, stock);
   } catch (e: any) {

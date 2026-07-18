@@ -55,7 +55,6 @@ export function sizeMatchKeys(size: string): Set<string> {
   const raw = String(size ?? '').trim();
   if (!raw) return keys;
   add(raw);
-  // "160 - GG" / "160-GG"
   for (const part of raw.split(/[-–|/,\s]+/)) {
     if (part.trim()) add(part.trim());
   }
@@ -83,22 +82,24 @@ export function sizesCompatible(a: string, b: string): boolean {
   return false;
 }
 
-function skusCompatible(localRaw: string, remoteRaw: string): boolean {
+/** Solo igualdad exacta del SKU normalizado (dígitos). Evita que 150-594 y 180-594 colisionen. */
+export function skusCompatible(localRaw: string, remoteRaw: string): boolean {
   const local = normSkuForMlStockMatch(localRaw);
   const remote = normSkuForMlStockMatch(remoteRaw);
   if (!local || !remote || local === '0' || remote === '0') return false;
-  if (local === remote) return true;
-  // Sufijo/prefijo solo si ambos son razonablemente largos (evita falsos positivos)
-  if (local.length >= 8 && remote.length >= 8) {
-    if (local.endsWith(remote) || remote.endsWith(local)) return true;
-    if (local.includes(remote) || remote.includes(local)) return true;
-  }
-  return false;
+  return local === remote;
+}
+
+function colorCompatible(localColor: string, remoteColor: string): boolean {
+  const a = normTextForMlStockMatch(localColor);
+  const b = normTextForMlStockMatch(remoteColor);
+  if (!a || !b) return false;
+  return a === b || a.includes(b) || b.includes(a);
 }
 
 /**
- * Empareja la variación ML correcta (evita usar el stock total del ítem cuando hay varias).
- * Si hay variationId + SKU y el SKU de esa variación no coincide, ignora el ID y busca por SKU.
+ * Empareja la variación ML correcta.
+ * Prioridad: SKU exacto → variationId solo si SKU vacío o coincide → color+talle si hay un único match.
  */
 export function matchMlVariationForVariantLink(variations: any[], link: MlVariantMatchLink): any | null {
   if (!Array.isArray(variations) || variations.length === 0) return null;
@@ -106,36 +107,65 @@ export function matchMlVariationForVariantLink(variations: any[], link: MlVarian
   const rawLocalSku = String(link.sku ?? '').trim();
   const varId = link.variationId != null ? String(link.variationId).trim() : '';
 
-  if (varId) {
-    const byId = variations.find((x: any) => String(x?.id) === varId);
-    if (byId) {
-      if (!rawLocalSku) return byId;
-      const remoteSku = mlVariationSkuFromApi(byId).trim();
-      // Si la variación no tiene SKU en API, confiar en el ID; si tiene y no coincide, re-matchear.
-      if (!remoteSku || skusCompatible(rawLocalSku, remoteSku)) return byId;
-    }
-  }
-
+  // 1) SKU exacto (fuente de verdad)
   if (rawLocalSku) {
-    const bySku = variations.find((v: any) => {
+    const bySku = variations.filter((v: any) => {
       const rawRemoteSku = mlVariationSkuFromApi(v).trim();
       return rawRemoteSku && skusCompatible(rawLocalSku, rawRemoteSku);
     });
-    if (bySku) return bySku;
+    if (bySku.length === 1) return bySku[0];
+    if (bySku.length > 1) {
+      // Desambiguar por color+talle si hay varios con el mismo SKU
+      const colorN = String(link.color ?? '').trim();
+      const sizeRaw = String(link.size ?? '').trim();
+      if (colorN || sizeRaw) {
+        const narrowed = bySku.filter((v: any) => {
+          const { color, size } = mlVariationColorSizeFromApi(v);
+          const colorOk = !colorN || colorCompatible(colorN, color);
+          const sizeOk = !sizeRaw || sizesCompatible(sizeRaw, size);
+          return colorOk && sizeOk;
+        });
+        if (narrowed.length === 1) return narrowed[0];
+      }
+      return null;
+    }
   }
 
-  const colorN = normTextForMlStockMatch(String(link.color ?? ''));
-  const sizeRaw = String(link.size ?? '').trim();
-  if (colorN || sizeRaw) {
-    const byAttrs = variations.find((v: any) => {
-      const { color, size } = mlVariationColorSizeFromApi(v);
-      const c = normTextForMlStockMatch(color);
-      const colorOk = !colorN || c === colorN || c.includes(colorN) || colorN.includes(c);
-      const sizeOk = !sizeRaw || sizesCompatible(sizeRaw, size);
-      return colorOk && sizeOk;
-    });
-    if (byAttrs) return byAttrs;
+  // 2) variationId solo si no contradice el SKU local
+  if (varId) {
+    const byId = variations.find((x: any) => String(x?.id) === varId);
+    if (byId) {
+      const remoteSku = mlVariationSkuFromApi(byId).trim();
+      if (!rawLocalSku) return byId;
+      if (!remoteSku) {
+        // Sin SKU remoto: exigir color+talle si los tenemos
+        const colorN = String(link.color ?? '').trim();
+        const sizeRaw = String(link.size ?? '').trim();
+        if (colorN || sizeRaw) {
+          const { color, size } = mlVariationColorSizeFromApi(byId);
+          const colorOk = !colorN || colorCompatible(colorN, color);
+          const sizeOk = !sizeRaw || sizesCompatible(sizeRaw, size);
+          if (colorOk && sizeOk) return byId;
+          return null;
+        }
+        return byId;
+      }
+      if (skusCompatible(rawLocalSku, remoteSku)) return byId;
+      // ID guardado apunta a otra variación (p.ej. backfill incorrecto): ignorar
+    }
   }
+
+  // 3) color + talle: solo si hay exactamente un match (evitar pisar otra talla del mismo color)
+  const colorN = String(link.color ?? '').trim();
+  const sizeRaw = String(link.size ?? '').trim();
+  if (colorN && sizeRaw) {
+    const byAttrs = variations.filter((v: any) => {
+      const { color, size } = mlVariationColorSizeFromApi(v);
+      return colorCompatible(colorN, color) && sizesCompatible(sizeRaw, size);
+    });
+    if (byAttrs.length === 1) return byAttrs[0];
+  }
+
   return null;
 }
 
