@@ -646,7 +646,7 @@ const Settings: React.FC<SettingsProps> = ({
       const res = await api.syncStockToTiendaNube();
       setStockSyncResult({ platform: 'Tienda Nube', updated: res.updated, errors: res.errors, logs: res.logs });
       if (res.errors > 0) {
-        showToast('error', `Tienda Nube: ${res.updated} actualizadas, ${res.errors} errores.`);
+        showToast('error', `Tienda Nube: ${res.updated} actualizadas, ${res.errors} errores. Se descargó el Excel.`);
       } else if (res.updated > 0) {
         showToast('success', `Tienda Nube: ${res.updated} variantes sincronizadas.`);
       } else {
@@ -669,8 +669,8 @@ const Settings: React.FC<SettingsProps> = ({
     setStockSyncResult(null);
     try {
       const [tnRes, mlRes] = await Promise.all([
-        api.syncStockToTiendaNube(),
-        api.syncStockToMercadoLibre(),
+        api.syncStockToTiendaNube({ downloadFailures: false }),
+        api.syncStockToMercadoLibre({ downloadFailures: false }),
       ]);
       const updated = (tnRes.updated || 0) + (mlRes.updated || 0);
       const errors = (tnRes.errors || 0) + (mlRes.errors || 0);
@@ -684,10 +684,18 @@ const Settings: React.FC<SettingsProps> = ({
         errors,
         logs,
       });
+      if (errors > 0) {
+        try {
+          await api.downloadStockSyncFailuresReport('both');
+          showToast('info', 'Se descargó el Excel con los artículos que no se actualizaron.');
+        } catch {
+          /* ignore */
+        }
+      }
       if (errors === 0 && updated > 0) {
         showToast('success', `Todos los artículos: ML ${mlRes.updated} · TN ${tnRes.updated} (incluye stock 0).`);
       } else if (errors > 0) {
-        showToast('warning', `ML ${mlRes.updated}/${mlRes.errors} · TN ${tnRes.updated}/${tnRes.errors}. Revisá el detalle.`);
+        showToast('warning', `ML ${mlRes.updated}/${mlRes.errors} · TN ${tnRes.updated}/${tnRes.errors}. Revisá el Excel.`);
       } else {
         showToast('info', 'No hubo variantes vinculadas para sincronizar.');
       }
@@ -721,7 +729,7 @@ const Settings: React.FC<SettingsProps> = ({
       const res = await api.syncStockToMercadoLibre();
       setStockSyncResult({ platform: 'Mercado Libre', updated: res.updated, errors: res.errors, logs: res.logs });
       if (res.errors > 0) {
-        showToast('error', `Mercado Libre: ${res.updated} actualizadas, ${res.errors} errores.`);
+        showToast('error', `Mercado Libre: ${res.updated} actualizadas, ${res.errors} errores. Se descargó el Excel.`);
       } else if (res.updated > 0) {
         showToast('success', `Mercado Libre: ${res.updated} variantes sincronizadas.`);
       } else {
@@ -4673,6 +4681,28 @@ Body JSON:
                     }>{line}</div>
                   ))}
                 </div>
+              )}
+              {stockSyncResult.errors > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const p = stockSyncResult.platform.includes('ML') && stockSyncResult.platform.includes('Tienda')
+                      ? 'both'
+                      : stockSyncResult.platform.includes('Mercado') || stockSyncResult.platform === 'Mercado Libre'
+                        ? 'ml'
+                        : stockSyncResult.platform.includes('Tienda')
+                          ? 'tn'
+                          : 'both';
+                    void api.downloadStockSyncFailuresReport(p as 'ml' | 'tn' | 'both').then(
+                      () => showToast('success', 'Excel descargado'),
+                      () => showToast('error', 'No se pudo descargar el Excel')
+                    );
+                  }}
+                  className="w-full py-2.5 rounded-xl font-semibold bg-emerald-700 hover:bg-emerald-600 text-white text-sm flex items-center justify-center gap-2"
+                >
+                  <Download size={16} />
+                  Descargar Excel de no actualizados
+                </button>
               )}
             </>
           )}

@@ -19,6 +19,7 @@ import {
   syncAllStockToMercadoLibre,
   getTiendaNubeStockSyncStatus,
   getMercadoLibreStockSyncStatus,
+  exportStockSyncFailuresXlsx,
   syncSelectedStockToTiendaNube,
   syncSelectedStockToMercadoLibre,
   syncAllStockFromMercadoLibre,
@@ -155,6 +156,7 @@ router.get('/mercadolibre/questions-ai/metrics', authMiddleware, getMLQuestionsA
 router.post('/mercadolibre/sync', syncProductsFromMercadoLibre);
 router.post('/mercadolibre/sync-stock', syncAllStockToMercadoLibre);
 router.get('/mercadolibre/sync-stock/status', getMercadoLibreStockSyncStatus);
+router.get('/stock-sync/failures-export', exportStockSyncFailuresXlsx);
 router.post('/mercadolibre/sync-stock-selected', syncSelectedStockToMercadoLibre);
 router.post('/mercadolibre/sync-from-ml', syncAllStockFromMercadoLibre);
 router.post('/mercadolibre/import-stock', importStockFromMercadoLibre);

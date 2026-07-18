@@ -1001,8 +1001,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     setShowSyncResultModal(true);
     try {
       const [tnRes, mlRes] = await Promise.all([
-        api.syncStockToTiendaNube(),
-        api.syncStockToMercadoLibre()
+        api.syncStockToTiendaNube({ downloadFailures: false }),
+        api.syncStockToMercadoLibre({ downloadFailures: false })
       ]);
       const totalUpdated = tnRes.updated + mlRes.updated;
       const totalErrors = tnRes.errors + mlRes.errors;
@@ -1016,9 +1016,17 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         errors: totalErrors,
         logs
       });
+      if (totalErrors > 0) {
+        try {
+          await api.downloadStockSyncFailuresReport('both');
+          showToast('info', 'Se descargó el Excel con los artículos que no se actualizaron.');
+        } catch {
+          /* ignore */
+        }
+      }
       if (onImportComplete && (totalUpdated > 0 || totalErrors > 0)) onImportComplete();
       if (totalErrors === 0 && totalUpdated > 0) showToast('success', `Sincronizado: ${totalUpdated} variantes a TN y ML.`);
-      else if (totalErrors > 0) showToast('warning', `Sincronizado con errores: ${totalUpdated} OK, ${totalErrors} fallos. Revisá el detalle.`);
+      else if (totalErrors > 0) showToast('warning', `Sincronizado con errores: ${totalUpdated} OK, ${totalErrors} fallos. Revisá el Excel.`);
       setServerListRefreshKey(k => k + 1);
     } catch (e: any) {
       setSyncResult({
@@ -4222,6 +4230,28 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                       ))}
                       {syncResult.logs.length > 50 && <div className="text-slate-500">… y {syncResult.logs.length - 50} líneas más</div>}
                     </div>
+                  )}
+                  {syncResult.errors > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const p = syncResult.platform.includes('Tienda') && syncResult.platform.includes('Mercado')
+                          ? 'both'
+                          : syncResult.platform.includes('Mercado')
+                            ? 'ml'
+                            : syncResult.platform.includes('Tienda')
+                              ? 'tn'
+                              : 'both';
+                        void api.downloadStockSyncFailuresReport(p as 'ml' | 'tn' | 'both').then(
+                          () => showToast('success', 'Excel descargado'),
+                          () => showToast('error', 'No se pudo descargar el Excel')
+                        );
+                      }}
+                      className="w-full py-2.5 rounded-xl font-semibold bg-emerald-700 hover:bg-emerald-600 text-white text-sm flex items-center justify-center gap-2"
+                    >
+                      <Download size={16} />
+                      Descargar Excel de no actualizados
+                    </button>
                   )}
                 </>
               )}

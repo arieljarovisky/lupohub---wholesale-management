@@ -21,7 +21,7 @@ const handleRequest = async <T>(requestFn: () => Promise<T>, fallback: T, errorM
 async function pollStockSyncJob(
   platform: 'ml' | 'tn',
   maxWaitMs = 15 * 60 * 1000
-): Promise<{ message: string; updated: number; errors: number; logs: string[]; total?: number }> {
+): Promise<{ message: string; updated: number; errors: number; logs: string[]; total?: number; failuresCount?: number }> {
   const statusPath =
     platform === 'ml'
       ? '/integrations/mercadolibre/sync-stock/status'
@@ -36,6 +36,7 @@ async function pollStockSyncJob(
       errors: number;
       logs: string[];
       total?: number;
+      failuresCount?: number;
     }>(statusPath, 'GET', undefined, undefined, 30000);
     if (st.status === 'done') {
       return {
@@ -44,6 +45,7 @@ async function pollStockSyncJob(
         errors: st.errors || 0,
         logs: st.logs || [],
         total: st.total,
+        failuresCount: st.failuresCount ?? st.errors ?? 0,
       };
     }
     if (st.status === 'error') {
@@ -53,6 +55,19 @@ async function pollStockSyncJob(
   throw new Error(
     'El sync sigue en el servidor pero tardó demasiado en el navegador. Revisá logs de Railway o el stock en ML/TN.'
   );
+}
+
+async function downloadStockSyncFailuresBlob(platform: 'ml' | 'tn' | 'both'): Promise<void> {
+  const blob = await getBlob(`/integrations/stock-sync/failures-export?platform=${platform}`, 60000);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const stamp = new Date().toISOString().slice(0, 10);
+  a.download = `stock_no_actualizados_${platform}_${stamp}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 type TnNormalizeBatchResponse = {
@@ -2571,7 +2586,7 @@ export const api = {
   },
 
   // Sincronizar stock a plataformas externas (catálogo completo = job async + poll; evita timeout proxy ~60s)
-  syncStockToTiendaNube: async (): Promise<{ message: string; updated: number; errors: number; logs: string[] }> => {
+  syncStockToTiendaNube: async (opts?: { downloadFailures?: boolean }): Promise<{ message: string; updated: number; errors: number; logs: string[]; failuresCount?: number }> => {
     return handleRequest(async () => {
       const start = await request<{
         async?: boolean;
@@ -2581,16 +2596,21 @@ export const api = {
         errors: number;
         logs: string[];
         total?: number;
+        failuresCount?: number;
       }>('/integrations/tiendanube/sync-stock', 'POST', undefined, undefined, 60000);
       if (start?.async && start.status === 'running') {
-        return await pollStockSyncJob('tn');
+        const result = await pollStockSyncJob('tn');
+        if (opts?.downloadFailures !== false && (result.failuresCount ?? result.errors) > 0) {
+          try { await downloadStockSyncFailuresBlob('tn'); } catch (e) { console.warn('No se pudo descargar Excel de fallos TN', e); }
+        }
+        return result;
       }
       return start;
     }, { message: 'Offline', updated: 0, errors: 0, logs: [] }, 'syncStockToTiendaNube');
   },
 
   /** Hub → ML: catálogo completo en background + poll. */
-  syncStockToMercadoLibre: async (): Promise<{ message: string; updated: number; errors: number; logs: string[]; total?: number }> => {
+  syncStockToMercadoLibre: async (opts?: { downloadFailures?: boolean }): Promise<{ message: string; updated: number; errors: number; logs: string[]; total?: number; failuresCount?: number }> => {
     const start = await request<{
       async?: boolean;
       status?: string;
@@ -2599,11 +2619,21 @@ export const api = {
       errors: number;
       logs: string[];
       total?: number;
+      failuresCount?: number;
     }>('/integrations/mercadolibre/sync-stock', 'POST', undefined, undefined, 60000);
     if (start?.async && start.status === 'running') {
-      return await pollStockSyncJob('ml');
+      const result = await pollStockSyncJob('ml');
+      if (opts?.downloadFailures !== false && (result.failuresCount ?? result.errors) > 0) {
+        try { await downloadStockSyncFailuresBlob('ml'); } catch (e) { console.warn('No se pudo descargar Excel de fallos ML', e); }
+      }
+      return result;
     }
     return start;
+  },
+
+  /** Excel del último sync: artículos que no se actualizaron. platform: ml | tn | both */
+  downloadStockSyncFailuresReport: async (platform: 'ml' | 'tn' | 'both' = 'both'): Promise<void> => {
+    await downloadStockSyncFailuresBlob(platform);
   },
 
   /** Excel: reporte completo de Mercado Libre por período (requiere sesión). */
