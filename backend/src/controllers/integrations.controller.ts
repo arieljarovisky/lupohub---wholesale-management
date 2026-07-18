@@ -32,6 +32,13 @@ import {
   skusCompatible,
   type MlVariantMatchLink,
 } from '../utils/mlVariationMatch';
+import {
+  beginStockSyncJob,
+  failStockSyncJob,
+  finishStockSyncJob,
+  getStockSyncJob,
+  isStockSyncRunning,
+} from '../services/stockSyncJob.service';
 const ML_AUTH_URL = 'https://auth.mercadolibre.com.ar/authorization';
 const ML_TOKEN_URL = 'https://api.mercadolibre.com/oauth/token';
 
@@ -3378,61 +3385,114 @@ export const getMlTnSyncIssues = async (req: Request, res: Response) => {
 };
 
 // Sincronizar todo el stock local a Tienda Nube
+export const getTiendaNubeStockSyncStatus = async (_req: Request, res: Response) => {
+  const job = getStockSyncJob('tn');
+  res.json({
+    async: true,
+    status: job.status,
+    message: job.message,
+    updated: job.updated,
+    errors: job.errors,
+    total: job.total,
+    logs: job.logs,
+    startedAt: job.startedAt,
+    finishedAt: job.finishedAt,
+  });
+};
+
 export const syncAllStockToTiendaNube = async (req: Request, res: Response) => {
   try {
+    if (isStockSyncRunning('tn')) {
+      const job = getStockSyncJob('tn');
+      return res.json({
+        async: true,
+        status: 'running',
+        message: 'Ya hay un sync a Tienda Nube en curso',
+        updated: job.updated,
+        errors: job.errors,
+        total: job.total,
+        logs: job.logs,
+      });
+    }
+
     const integration = await get(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
     if (!integration?.access_token || !integration?.store_id) {
       return res.status(400).json({ message: 'No hay integración con Tienda Nube' });
     }
 
-    const variants = await query(`
-      SELECT pv.id, pv.tienda_nube_variant_id, p.tienda_nube_id, s.stock, pv.sku,
-             COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
-      FROM product_variants pv
-      JOIN product_colors pc ON pc.id = pv.product_color_id
-      JOIN products p ON p.id = pc.product_id
-      LEFT JOIN stocks s ON s.variant_id = pv.id
-      WHERE pv.tienda_nube_variant_id IS NOT NULL AND p.tienda_nube_id IS NOT NULL
-    `);
-
-    let updated = 0;
-    let errors = 0;
-    const logs: string[] = [];
-
-    for (const v of variants) {
-      try {
-        const pack = Math.max(1, Number((v as any).tn_pack) || 1);
-        const stockToSend = Math.floor(Number(v.stock || 0) / pack);
-        await axios.put(
-          `https://api.tiendanube.com/v1/${integration.store_id}/products/${v.tienda_nube_id}/variants/${v.tienda_nube_variant_id}`,
-          { stock: stockToSend },
-          {
-            headers: {
-              'Authentication': `bearer ${integration.access_token}`,
-              'Content-Type': 'application/json',
-              'User-Agent': TN_USER_AGENT
-            }
-          }
-        );
-        updated++;
-        logs.push(`[OK] ${v.sku}: ${v.stock || 0} un. → ${stockToSend} (pack x${pack})`);
-      } catch (e: any) {
-        errors++;
-        logs.push(`[ERROR] ${v.sku}: ${e.response?.data?.description || e.message}`);
-      }
-      if (TN_RATE_LIMIT_DELAY_MS > 0) await sleep(TN_RATE_LIMIT_DELAY_MS);
+    if (!beginStockSyncJob('tn', 'Sincronizando stock a Tienda Nube…')) {
+      return res.json({ async: true, status: 'running', message: 'Ya hay un sync a Tienda Nube en curso', updated: 0, errors: 0, logs: [] });
     }
 
-    res.json({
-      message: 'Sincronización completada',
-      updated,
-      errors,
-      total: variants.length,
-      logs
+    // Responder ya: el proxy del hosting corta ~60s; el trabajo sigue en el proceso.
+    res.status(202).json({
+      async: true,
+      status: 'running',
+      message: 'Sync a Tienda Nube iniciado en segundo plano',
+      updated: 0,
+      errors: 0,
+      logs: [],
     });
+
+    void (async () => {
+      try {
+        const variants = await query(`
+          SELECT pv.id, pv.tienda_nube_variant_id, p.tienda_nube_id, s.stock, pv.sku,
+                 COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
+          FROM product_variants pv
+          JOIN product_colors pc ON pc.id = pv.product_color_id
+          JOIN products p ON p.id = pc.product_id
+          LEFT JOIN stocks s ON s.variant_id = pv.id
+          WHERE pv.tienda_nube_variant_id IS NOT NULL AND p.tienda_nube_id IS NOT NULL
+        `);
+
+        let updated = 0;
+        let errors = 0;
+        const logs: string[] = [];
+
+        for (const v of variants) {
+          try {
+            const pack = Math.max(1, Number((v as any).tn_pack) || 1);
+            const stockToSend = Math.floor(Number(v.stock || 0) / pack);
+            await axios.put(
+              `https://api.tiendanube.com/v1/${integration.store_id}/products/${v.tienda_nube_id}/variants/${v.tienda_nube_variant_id}`,
+              { stock: stockToSend },
+              {
+                headers: {
+                  'Authentication': `bearer ${integration.access_token}`,
+                  'Content-Type': 'application/json',
+                  'User-Agent': TN_USER_AGENT
+                }
+              }
+            );
+            updated++;
+            logs.push(`[OK] ${v.sku}: ${v.stock || 0} un. → ${stockToSend} (pack x${pack})`);
+          } catch (e: any) {
+            errors++;
+            logs.push(`[ERROR] ${v.sku}: ${e.response?.data?.description || e.message}`);
+          }
+          if (TN_RATE_LIMIT_DELAY_MS > 0) await sleep(TN_RATE_LIMIT_DELAY_MS);
+        }
+
+        console.log(`[Sync→TN] Fin: ${updated} OK, ${errors} errores, total=${variants.length}`);
+        finishStockSyncJob('tn', {
+          updated,
+          errors,
+          total: variants.length,
+          logs,
+          message: 'Sincronización a Tienda Nube completada',
+        });
+      } catch (error: any) {
+        console.error('Error syncing stock to TN:', error);
+        failStockSyncJob('tn', error?.message || 'Error sincronizando stock a Tienda Nube');
+      }
+    })();
   } catch (error: any) {
     console.error('Error syncing stock to TN:', error);
-    res.status(500).json({ message: 'Error sincronizando stock', error: error.message });
+    failStockSyncJob('tn', error?.message || 'Error sincronizando stock');
+    if (!res.headersSent) {
+      res.status(500).json({ message: 'Error sincronizando stock', error: error.message });
+    }
   }
 };
 
@@ -3506,94 +3566,145 @@ export const syncSelectedStockToTiendaNube = async (req: Request, res: Response)
   }
 };
 
+export const getMercadoLibreStockSyncStatus = async (_req: Request, res: Response) => {
+  const job = getStockSyncJob('ml');
+  res.json({
+    async: true,
+    status: job.status,
+    message: job.message,
+    updated: job.updated,
+    errors: job.errors,
+    total: job.total,
+    logs: job.logs,
+    startedAt: job.startedAt,
+    finishedAt: job.finishedAt,
+  });
+};
+
 // Sincronizar stock de la app hacia Mercado Libre (app = fuente de verdad). Usa la misma lógica que updateMercadoLibreStockByVariant (subrecurso + fallback PUT item).
 export const syncAllStockToMercadoLibre = async (req: Request, res: Response) => {
   try {
-    const { updateMercadoLibreStockByVariant, updateMercadoLibreStockByItem } = await import('./stock.controller');
-    const variants = await query(`
-      SELECT pv.id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id, p.mercado_libre_id, s.stock,
-             COALESCE(pv.external_sku, pv.sku) AS sku,
-             c.name AS color_name, sz.size_code AS size_code,
-             COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
-      FROM product_variants pv
-      JOIN product_colors pc ON pc.id = pv.product_color_id
-      JOIN products p ON p.id = pc.product_id
-      LEFT JOIN colors c ON c.id = pc.color_id
-      LEFT JOIN sizes sz ON sz.id = pv.size_id
-      LEFT JOIN stocks s ON s.variant_id = pv.id
-      WHERE (pv.mercado_libre_item_id IS NOT NULL)
-         OR (pv.mercado_libre_variant_id IS NOT NULL AND p.mercado_libre_id IS NOT NULL)
-    `);
-
-    const list = (variants || []) as any[];
-    let updated = 0;
-    let errors = 0;
-    const logs: string[] = [];
-    const concurrency = Math.max(1, Math.min(3, parseInt(process.env.ML_SYNC_STOCK_CONCURRENCY || '2', 10) || 2));
-
-    const syncOne = async (v: any): Promise<{ ok: boolean; log: string }> => {
-      const pack = Math.max(1, Number(v.ml_pack) || 1);
-      const stockToSend = Math.floor(Number(v.stock || 0) / pack);
-      const matchOpts = {
-        sku: v.sku,
-        color: v.color_name,
-        size: v.size_code,
-        variantId: String(v.id),
-        mlVariationId: v.mercado_libre_variant_id != null ? String(v.mercado_libre_variant_id) : null,
-      };
-      let ok = false;
-      // Preferir ítem + match por SKU/atributos (valida variation_id guardado; evita actualizar la variación equivocada).
-      if (v.mercado_libre_item_id) {
-        ok = await updateMercadoLibreStockByItem(v.mercado_libre_item_id, stockToSend, matchOpts);
-      } else if (v.mercado_libre_id && v.mercado_libre_variant_id) {
-        ok = await updateMercadoLibreStockByItem(v.mercado_libre_id, stockToSend, matchOpts);
-      }
-      if (ok) {
-        return { ok: true, log: `[OK] ${v.sku}: ${v.stock || 0} un. → ${stockToSend} (pack x${pack})` };
-      }
-      const mlRef = v.mercado_libre_item_id || (v.mercado_libre_id ? `${v.mercado_libre_id}/${v.mercado_libre_variant_id}` : 'sin vínculo');
-      console.warn(`[Sync→ML] Falló variante SKU=${v.sku} ML=${mlRef}`);
-      return { ok: false, log: `[ERROR] ${v.sku}: no se pudo actualizar ML ${mlRef}` };
-    };
-
-    const outcomes: Array<{ ok: boolean; log: string }> = new Array(list.length);
-    let next = 0;
-    const concurrencySafe = Math.max(1, Math.min(3, concurrency));
-    const workers = Array.from({ length: Math.min(concurrencySafe, Math.max(list.length, 1)) }, async () => {
-      while (true) {
-        const i = next++;
-        if (i >= list.length) break;
-        outcomes[i] = await syncOne(list[i]);
-      }
-    });
-    await Promise.all(workers);
-
-    let okLogged = 0;
-    for (const o of outcomes) {
-      if (!o) continue;
-      if (o.ok) {
-        updated++;
-        if (okLogged < 200) {
-          logs.push(o.log);
-          okLogged++;
-        }
-      } else {
-        errors++;
-        logs.push(o.log);
-      }
+    if (isStockSyncRunning('ml')) {
+      const job = getStockSyncJob('ml');
+      return res.json({
+        async: true,
+        status: 'running',
+        message: 'Ya hay un sync a Mercado Libre en curso',
+        updated: job.updated,
+        errors: job.errors,
+        total: job.total,
+        logs: job.logs,
+      });
     }
 
-    console.log(`[Sync→ML] Fin: ${updated} OK, ${errors} errores, total=${list.length}, concurrency=${concurrency}`);
-    res.json({
-      message: 'Stock sincronizado a Mercado Libre',
-      updated,
-      errors,
-      total: list.length,
-      logs
+    if (!beginStockSyncJob('ml', 'Sincronizando stock a Mercado Libre…')) {
+      return res.json({ async: true, status: 'running', message: 'Ya hay un sync a Mercado Libre en curso', updated: 0, errors: 0, logs: [] });
+    }
+
+    // Responder ya: el proxy del hosting corta ~60s; el trabajo sigue en el proceso.
+    res.status(202).json({
+      async: true,
+      status: 'running',
+      message: 'Sync a Mercado Libre iniciado en segundo plano',
+      updated: 0,
+      errors: 0,
+      logs: [],
     });
+
+    void (async () => {
+      try {
+        const { updateMercadoLibreStockByItem } = await import('./stock.controller');
+        const variants = await query(`
+          SELECT pv.id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id, p.mercado_libre_id, s.stock,
+                 COALESCE(pv.external_sku, pv.sku) AS sku,
+                 c.name AS color_name, sz.size_code AS size_code,
+                 COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
+          FROM product_variants pv
+          JOIN product_colors pc ON pc.id = pv.product_color_id
+          JOIN products p ON p.id = pc.product_id
+          LEFT JOIN colors c ON c.id = pc.color_id
+          LEFT JOIN sizes sz ON sz.id = pv.size_id
+          LEFT JOIN stocks s ON s.variant_id = pv.id
+          WHERE (pv.mercado_libre_item_id IS NOT NULL)
+             OR (pv.mercado_libre_variant_id IS NOT NULL AND p.mercado_libre_id IS NOT NULL)
+        `);
+
+        const list = (variants || []) as any[];
+        let updated = 0;
+        let errors = 0;
+        const logs: string[] = [];
+        const concurrency = Math.max(1, Math.min(3, parseInt(process.env.ML_SYNC_STOCK_CONCURRENCY || '2', 10) || 2));
+
+        const syncOne = async (v: any): Promise<{ ok: boolean; log: string }> => {
+          const pack = Math.max(1, Number(v.ml_pack) || 1);
+          const stockToSend = Math.floor(Number(v.stock || 0) / pack);
+          const matchOpts = {
+            sku: v.sku,
+            color: v.color_name,
+            size: v.size_code,
+            variantId: String(v.id),
+            mlVariationId: v.mercado_libre_variant_id != null ? String(v.mercado_libre_variant_id) : null,
+          };
+          let ok = false;
+          if (v.mercado_libre_item_id) {
+            ok = await updateMercadoLibreStockByItem(v.mercado_libre_item_id, stockToSend, matchOpts);
+          } else if (v.mercado_libre_id && v.mercado_libre_variant_id) {
+            ok = await updateMercadoLibreStockByItem(v.mercado_libre_id, stockToSend, matchOpts);
+          }
+          if (ok) {
+            return { ok: true, log: `[OK] ${v.sku}: ${v.stock || 0} un. → ${stockToSend} (pack x${pack})` };
+          }
+          const mlRef = v.mercado_libre_item_id || (v.mercado_libre_id ? `${v.mercado_libre_id}/${v.mercado_libre_variant_id}` : 'sin vínculo');
+          console.warn(`[Sync→ML] Falló variante SKU=${v.sku} ML=${mlRef}`);
+          return { ok: false, log: `[ERROR] ${v.sku}: no se pudo actualizar ML ${mlRef}` };
+        };
+
+        const outcomes: Array<{ ok: boolean; log: string }> = new Array(list.length);
+        let next = 0;
+        const concurrencySafe = Math.max(1, Math.min(3, concurrency));
+        const workers = Array.from({ length: Math.min(concurrencySafe, Math.max(list.length, 1)) }, async () => {
+          while (true) {
+            const i = next++;
+            if (i >= list.length) break;
+            outcomes[i] = await syncOne(list[i]);
+          }
+        });
+        await Promise.all(workers);
+
+        let okLogged = 0;
+        for (const o of outcomes) {
+          if (!o) continue;
+          if (o.ok) {
+            updated++;
+            if (okLogged < 200) {
+              logs.push(o.log);
+              okLogged++;
+            }
+          } else {
+            errors++;
+            logs.push(o.log);
+          }
+        }
+
+        console.log(`[Sync→ML] Fin: ${updated} OK, ${errors} errores, total=${list.length}, concurrency=${concurrency}`);
+        finishStockSyncJob('ml', {
+          updated,
+          errors,
+          total: list.length,
+          logs,
+          message: 'Stock sincronizado a Mercado Libre',
+        });
+      } catch (error: any) {
+        console.error('Error syncing stock to ML:', error);
+        failStockSyncJob('ml', error?.message || 'Error sincronizando stock a Mercado Libre');
+      }
+    })();
   } catch (error: any) {
     console.error('Error syncing stock to ML:', error);
-    res.status(500).json({ message: 'Error sincronizando stock a Mercado Libre', error: error.message });
+    failStockSyncJob('ml', error?.message || 'Error sincronizando stock a Mercado Libre');
+    if (!res.headersSent) {
+      res.status(500).json({ message: 'Error sincronizando stock a Mercado Libre', error: error.message });
+    }
   }
 };
 

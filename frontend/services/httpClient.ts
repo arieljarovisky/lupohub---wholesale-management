@@ -108,8 +108,13 @@ export const request = async <T = any>(path: string, method: HttpMethod = 'GET',
           String(err.message || '').toLowerCase().includes('network error') ||
           err.code === 'ERR_NETWORK';
         if (isGateway) {
+          const urlHint = String(config?.url || path || '');
+          const isAfip =
+            /afip|arca|invoice|factur|comprobante|cae/i.test(urlHint);
           throw new Error(
-            'No hubo respuesta del servidor (error de red o tiempo de espera del hosting). En facturación AFIP suele ser ARCA lento o un corte del proxy (~60s). Reintentá en unos minutos y verificá en AFIP si el comprobante se emitió antes de volver a intentar.'
+            isAfip
+              ? 'No hubo respuesta del servidor (error de red o tiempo de espera del hosting). En facturación AFIP suele ser ARCA lento o un corte del proxy (~60s). Reintentá en unos minutos y verificá en AFIP si el comprobante se emitió antes de volver a intentar.'
+              : 'No hubo respuesta del servidor (error de red o corte del proxy ~60s). Si estabas sincronizando stock, el backend puede seguir trabajando: esperá unos minutos y revisá ML/TN o los logs.'
           );
         }
       }
