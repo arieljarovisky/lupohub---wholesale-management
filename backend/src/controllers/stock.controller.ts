@@ -553,6 +553,23 @@ async function runExternalSyncWithRetries(
 // Sincronizar stock a todas las publicaciones vinculadas (variant_publications). Si no hay ninguna, fallback a columnas legacy.
 export const syncStockToExternalPlatforms = async (variantId: string, newStock: number): Promise<void> => {
   try {
+    const variantMeta = await get(
+      `SELECT pv.id, COALESCE(pv.external_sku, pv.sku) AS sku,
+              c.name AS color_name, sz.size_code AS size_code
+       FROM product_variants pv
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       LEFT JOIN colors c ON c.id = pc.color_id
+       LEFT JOIN sizes sz ON sz.id = pv.size_id
+       WHERE pv.id = ?`,
+      [variantId]
+    );
+    const matchOpts = {
+      sku: variantMeta?.sku != null ? String(variantMeta.sku) : null,
+      color: variantMeta?.color_name != null ? String(variantMeta.color_name) : null,
+      size: variantMeta?.size_code != null ? String(variantMeta.size_code) : null,
+      variantId,
+    };
+
     const publications = await query(
       `SELECT id, platform, external_product_id, external_variant_id, pack_size FROM variant_publications WHERE variant_id = ?`,
       [variantId]
@@ -594,7 +611,7 @@ export const syncStockToExternalPlatforms = async (variantId: string, newStock: 
             const label = `ML item=${itemId} variant=${variantId}`;
             tasks.push(
               runExternalSyncWithRetries(label, () =>
-                updateMercadoLibreStockByItem(itemId, stockToSend)
+                updateMercadoLibreStockByItem(itemId, stockToSend, matchOpts)
               )
             );
           }
@@ -646,7 +663,7 @@ export const syncStockToExternalPlatforms = async (variantId: string, newStock: 
         } else {
           await runExternalSyncWithRetries(
             `ML legacy item=${ownMlItemId} variant=${variantId}`,
-            () => updateMercadoLibreStockByItem(ownMlItemId, stockML)
+            () => updateMercadoLibreStockByItem(ownMlItemId, stockML, matchOpts)
           );
         }
       } else if (variant.mercado_libre_id && ownMlVarId) {
@@ -700,8 +717,17 @@ export const updateTiendaNubeStock = async (
   }
 };
 
-// Actualizar stock en Mercado Libre cuando la variante tiene su propia publicación (ítem sin variaciones o con una sola).
-export const updateMercadoLibreStockByItem = async (itemId: string, stock: number): Promise<boolean> => {
+// Actualizar stock en Mercado Libre. Si el ítem tiene varias variaciones, empareja por SKU/atributos.
+export const updateMercadoLibreStockByItem = async (
+  itemId: string,
+  stock: number,
+  opts?: {
+    sku?: string | null;
+    color?: string | null;
+    size?: string | null;
+    variantId?: string | null;
+  }
+): Promise<boolean> => {
   const integration = await get(
     `SELECT access_token FROM integrations WHERE platform = 'mercadolibre'`
   );
@@ -719,7 +745,9 @@ export const updateMercadoLibreStockByItem = async (itemId: string, stock: numbe
       console.warn(`[ML Stock] No se pudo resolver itemId válido desde "${itemId}"`);
       return false;
     }
-    const getRes = await withRetry429409(() => axios.get(`https://api.mercadolibre.com/items/${resolvedItemId}`, { headers }));
+    const getRes = await withRetry429409(() =>
+      axios.get(`https://api.mercadolibre.com/items/${resolvedItemId}?include_attributes=all`, { headers })
+    );
     const item = getRes.data;
     const variations: any[] = item.variations || [];
     if (variations.length === 0) {
@@ -740,8 +768,37 @@ export const updateMercadoLibreStockByItem = async (itemId: string, stock: numbe
       console.log(`[ML Stock] Actualizado publicación única (1 variación) ${resolvedItemId} a ${stock} unidades`);
       return true;
     }
-    console.log(`[ML Stock] Item ${resolvedItemId} tiene ${variations.length} variaciones; usar publicación con variaciones en su lugar`);
-    return false;
+
+    const { matchMlVariationForVariantLink } = await import('../utils/mlVariationMatch');
+    const matched = matchMlVariationForVariantLink(variations, {
+      sku: opts?.sku,
+      color: opts?.color,
+      size: opts?.size,
+    });
+    if (!matched?.id) {
+      console.log(
+        `[ML Stock] Item ${resolvedItemId} tiene ${variations.length} variaciones y no se pudo emparejar` +
+          (opts?.sku ? ` por SKU ${opts.sku}` : ' (sin SKU/atributos)')
+      );
+      return false;
+    }
+    const variationId = String(matched.id);
+    if (opts?.variantId) {
+      try {
+        await execute(
+          `UPDATE product_variants
+           SET mercado_libre_variant_id = ?
+           WHERE id = ? AND (mercado_libre_variant_id IS NULL OR TRIM(mercado_libre_variant_id) = '')`,
+          [variationId, opts.variantId]
+        );
+      } catch {
+        /* backfill best-effort */
+      }
+    }
+    console.log(
+      `[ML Stock] Ítem multi-variación ${resolvedItemId}: emparejado SKU=${opts?.sku || '-'} → var ${variationId}`
+    );
+    return updateMercadoLibreStockByVariant(resolvedItemId, variationId, stock);
   } catch (e: any) {
     console.error(`[ML Stock] Error actualizando publicación única ${itemId}:`, e.response?.data || e.message);
     return false;

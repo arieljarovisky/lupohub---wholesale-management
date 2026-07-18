@@ -21,6 +21,15 @@ import {
   loadExpressTrackingPageConfig,
   syncExpressTrackingPageToStore,
 } from '../services/tiendanubeExpressTrackingPage.service';
+import {
+  matchMlVariationForVariantLink,
+  mlVariationColorSizeFromApi,
+  mlVariationSkuFromApi,
+  normSkuForMlStockMatch,
+  normTextForMlStockMatch,
+  resolveMlStockForVariantLink,
+  type MlVariantMatchLink,
+} from '../utils/mlVariationMatch';
 const ML_AUTH_URL = 'https://auth.mercadolibre.com.ar/authorization';
 const ML_TOKEN_URL = 'https://api.mercadolibre.com/oauth/token';
 
@@ -364,49 +373,13 @@ function extractMlVariationsFromItemData(it: any): MlVariationRow[] {
   return dedupeMlVariationRows(out);
 }
 
-type VariantMlStockLink = {
+type VariantMlStockLink = MlVariantMatchLink & {
   variantId: string;
   variationId: string | null;
   sku: string;
   color: string;
   size: string;
 };
-
-function normSkuForMlStockMatch(s: string): string {
-  const d = String(s ?? '').replace(/\D/g, '');
-  return (d.replace(/^0+/, '') || '0').toUpperCase();
-}
-
-function normTextForMlStockMatch(s: string): string {
-  return String(s ?? '')
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
-}
-
-function mlVariationSkuFromApi(v: any): string {
-  const skuAttr =
-    Array.isArray(v?.attributes) &&
-    v.attributes.find((a: any) => (a?.id || '').toString().toUpperCase() === 'SELLER_SKU');
-  const skuFromAttr = skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '').toString().trim() : '';
-  return skuFromAttr || (v?.seller_sku ?? v?.seller_custom_field ?? '').toString().trim();
-}
-
-function mlVariationColorSizeFromApi(v: any): { color: string; size: string } {
-  let color = '';
-  let size = '';
-  const absorb = (attr: any) => {
-    const id = (attr?.id || '').toString().toUpperCase();
-    const name = (attr?.value_name ?? attr?.value ?? attr?.name ?? '').toString().trim();
-    if (!name) return;
-    if (id === 'COLOR' || id === 'COLOUR' || id === 'COR') color = color || name;
-    if (id === 'SIZE' || id === 'SIZE_TYPE' || id === 'TALLE' || id === 'TALLA') size = size || name;
-  };
-  (v?.attribute_combinations || []).forEach(absorb);
-  (Array.isArray(v?.attributes) ? v.attributes : []).forEach(absorb);
-  return { color, size };
-}
 
 function mlVariationRowFromApiVariation(v: any, item: any): MlVariationRow {
   const { color, size } = mlVariationColorSizeFromApi(v);
@@ -466,47 +439,6 @@ async function enrichMercadoLibreItemVariationsForCatalog(item: any, accessToken
     })
   );
   return { ...item, variations: enriched };
-}
-
-/** Empareja la variación ML correcta (evita usar el stock total del ítem cuando hay varias). */
-function matchMlVariationForVariantLink(variations: any[], link: VariantMlStockLink): any | null {
-  if (!variations.length) return null;
-  const varId = link.variationId != null ? String(link.variationId).trim() : '';
-  if (varId) {
-    const byId = variations.find((x: any) => String(x?.id) === varId);
-    if (byId) return byId;
-  }
-  const rawLocalSku = String(link.sku ?? '').trim();
-  if (rawLocalSku) {
-    const localSku = normSkuForMlStockMatch(rawLocalSku);
-    const bySku = variations.find((v: any) => {
-      const rawRemoteSku = mlVariationSkuFromApi(v).trim();
-      return rawRemoteSku && normSkuForMlStockMatch(rawRemoteSku) === localSku;
-    });
-    if (bySku) return bySku;
-  }
-  const colorN = normTextForMlStockMatch(link.color);
-  const sizeN = normTextForMlStockMatch(link.size);
-  if (colorN || sizeN) {
-    const byAttrs = variations.find((v: any) => {
-      const { color, size } = mlVariationColorSizeFromApi(v);
-      const c = normTextForMlStockMatch(color);
-      const s = normTextForMlStockMatch(size);
-      return (!colorN || c === colorN) && (!sizeN || s === sizeN);
-    });
-    if (byAttrs) return byAttrs;
-  }
-  return null;
-}
-
-function resolveMlStockForVariantLink(item: any, link: VariantMlStockLink): number | undefined {
-  const variations: any[] = Array.isArray(item?.variations) ? item.variations : [];
-  if (!variations.length) {
-    return typeof item?.available_quantity === 'number' ? Number(item.available_quantity) : undefined;
-  }
-  const matched = matchMlVariationForVariantLink(variations, link);
-  if (!matched) return undefined;
-  return Number(matched.available_quantity ?? 0);
 }
 
 /** ID de producto de catálogo (/p/MLA...) desde el permalink del ítem. */
@@ -3053,25 +2985,33 @@ export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: nu
     }
   }
 
-  // 2) Variantes con publicación propia en ML (cada variante = un ítem ML). Sincronizar stock ML → TN.
+  // 2) Variantes con mercado_libre_item_id (publicación propia o ítem multi-variación mal vinculado).
+  // Empareja por ml_variant_id / SKU / color+talle; no omitir solo porque el ítem tenga varias variaciones.
   const rowsByItem = await query(`
-    SELECT pv.mercado_libre_item_id AS ml_item_id,
+    SELECT pv.id AS variant_id,
+           pv.mercado_libre_item_id AS ml_item_id,
+           pv.mercado_libre_variant_id AS ml_variant_id,
            p.tienda_nube_id AS tn_id, pv.tienda_nube_variant_id AS tn_variant_id,
            COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack,
            COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack,
-           pv.sku
+           COALESCE(pv.external_sku, pv.sku) AS sku,
+           c.name AS color_name,
+           sz.size_code AS size_code
     FROM product_variants pv
     JOIN product_colors pc ON pc.id = pv.product_color_id
     JOIN products p ON p.id = pc.product_id
+    LEFT JOIN colors c ON c.id = pc.color_id
+    LEFT JOIN sizes sz ON sz.id = pv.size_id
     WHERE pv.mercado_libre_item_id IS NOT NULL
       AND p.tienda_nube_id IS NOT NULL AND pv.tienda_nube_variant_id IS NOT NULL
+      AND NOT (p.mercado_libre_id IS NOT NULL AND pv.mercado_libre_variant_id IS NOT NULL)
   `);
   if (rowsByItem?.length) {
     const batchSize = 10;
     for (let i = 0; i < rowsByItem.length; i += batchSize) {
       const batch = rowsByItem.slice(i, i + batchSize) as any[];
       const itemPromises = batch.map((row: any) =>
-        axios.get(`https://api.mercadolibre.com/items/${row.ml_item_id}`, {
+        axios.get(`https://api.mercadolibre.com/items/${row.ml_item_id}?include_attributes=all`, {
           headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
         }).then(r => r.data).catch(() => null)
       );
@@ -3085,15 +3025,43 @@ export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: nu
           continue;
         }
         const variations = item.variations || [];
-        if (variations.length > 1) {
-          console.warn(
-            `[AutoSync ML→TN] Omitido ml_item ${r.ml_item_id} (SKU ${r.sku}): tiene ${variations.length} variaciones y no se puede inferir una única.`
-          );
-          continue;
+        let mlQty: number;
+        if (variations.length === 0) {
+          mlQty = item.available_quantity ?? 0;
+        } else if (variations.length === 1) {
+          mlQty = variations[0].available_quantity ?? 0;
+        } else {
+          const matched = matchMlVariationForVariantLink(variations, {
+            variationId: r.ml_variant_id,
+            sku: r.sku,
+            color: r.color_name,
+            size: r.size_code,
+          });
+          if (!matched) {
+            console.warn(
+              `[AutoSync ML→TN] Omitido ml_item ${r.ml_item_id} (SKU ${r.sku}): ${variations.length} variaciones y no se pudo emparejar por id/SKU/atributos.`
+            );
+            continue;
+          }
+          mlQty = matched.available_quantity ?? 0;
+          const matchedVarId = String(matched.id);
+          if (
+            r.variant_id &&
+            matchedVarId &&
+            (!r.ml_variant_id || String(r.ml_variant_id).trim() === '')
+          ) {
+            try {
+              await execute(
+                `UPDATE product_variants
+                 SET mercado_libre_variant_id = ?
+                 WHERE id = ? AND (mercado_libre_variant_id IS NULL OR TRIM(mercado_libre_variant_id) = '')`,
+                [matchedVarId, r.variant_id]
+              );
+            } catch {
+              /* backfill best-effort */
+            }
+          }
         }
-        const mlQty = variations.length === 0
-          ? (item.available_quantity ?? 0)
-          : (variations[0].available_quantity ?? 0);
         const mlPack = Math.max(1, Number(r.ml_pack) || 1);
         const tnPack = Math.max(1, Number(r.tn_pack) || 1);
         const tnStock = Math.floor((Number(mlQty) * mlPack) / tnPack);
@@ -3361,13 +3329,21 @@ export async function diagnoseMlTnSyncIssues(): Promise<MlTnSyncIssueRow[]> {
     }
     const variations = item.variations || [];
     if (variations.length > 1) {
-      pushIssue(
-        r,
-        syncMode,
-        'ML_MULTI_VARIACIONES',
-        `El ítem ML ${r.ml_item_id} tiene ${variations.length} variaciones; no se puede inferir una única para sincronizar stock a TN.`
-      );
-      continue;
+      const matched = matchMlVariationForVariantLink(variations, {
+        variationId: r.ml_variant_id,
+        sku: r.variant_sku,
+        color: r.color_name,
+        size: r.size_code,
+      });
+      if (!matched) {
+        pushIssue(
+          r,
+          syncMode,
+          'ML_MULTI_VARIACIONES',
+          `El ítem ML ${r.ml_item_id} tiene ${variations.length} variaciones y no se pudo emparejar por id/SKU/atributos para sincronizar stock a TN.`
+        );
+        continue;
+      }
     }
     const tnOk = await tnVariantExists(String(r.tn_id), String(r.tn_variant_id));
     if (tnOk === false) {
@@ -3529,11 +3505,15 @@ export const syncAllStockToMercadoLibre = async (req: Request, res: Response) =>
   try {
     const { updateMercadoLibreStockByVariant, updateMercadoLibreStockByItem } = await import('./stock.controller');
     const variants = await query(`
-      SELECT pv.id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id, p.mercado_libre_id, s.stock, pv.sku,
+      SELECT pv.id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id, p.mercado_libre_id, s.stock,
+             COALESCE(pv.external_sku, pv.sku) AS sku,
+             c.name AS color_name, sz.size_code AS size_code,
              COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
       FROM product_variants pv
       JOIN product_colors pc ON pc.id = pv.product_color_id
       JOIN products p ON p.id = pc.product_id
+      LEFT JOIN colors c ON c.id = pc.color_id
+      LEFT JOIN sizes sz ON sz.id = pv.size_id
       LEFT JOIN stocks s ON s.variant_id = pv.id
       WHERE (pv.mercado_libre_item_id IS NOT NULL)
          OR (pv.mercado_libre_variant_id IS NOT NULL AND p.mercado_libre_id IS NOT NULL)
@@ -3547,14 +3527,25 @@ export const syncAllStockToMercadoLibre = async (req: Request, res: Response) =>
       const pack = Math.max(1, Number((v as any).ml_pack) || 1);
       const stockToSend = Math.floor(Number(v.stock || 0) / pack);
       let ok = false;
-      if (v.mercado_libre_id && v.mercado_libre_variant_id) {
+      if (v.mercado_libre_item_id && v.mercado_libre_variant_id) {
+        ok = await updateMercadoLibreStockByVariant(
+          v.mercado_libre_item_id,
+          v.mercado_libre_variant_id,
+          stockToSend
+        );
+      } else if (v.mercado_libre_id && v.mercado_libre_variant_id) {
         ok = await updateMercadoLibreStockByVariant(
           v.mercado_libre_id,
           v.mercado_libre_variant_id,
           stockToSend
         );
       } else if (v.mercado_libre_item_id) {
-        ok = await updateMercadoLibreStockByItem(v.mercado_libre_item_id, stockToSend);
+        ok = await updateMercadoLibreStockByItem(v.mercado_libre_item_id, stockToSend, {
+          sku: (v as any).sku,
+          color: (v as any).color_name,
+          size: (v as any).size_code,
+          variantId: String(v.id),
+        });
       }
       if (ok) {
         updated++;
@@ -3591,11 +3582,15 @@ export const syncSelectedStockToMercadoLibre = async (req: Request, res: Respons
     const { updateMercadoLibreStockByVariant, updateMercadoLibreStockByItem } = await import('./stock.controller');
     const placeholders = variantIds.map(() => '?').join(',');
     const variants = await query(
-      `SELECT pv.id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id, p.mercado_libre_id, s.stock, pv.sku,
+      `SELECT pv.id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id, p.mercado_libre_id, s.stock,
+              COALESCE(pv.external_sku, pv.sku) AS sku,
+              c.name AS color_name, sz.size_code AS size_code,
               COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
        FROM product_variants pv
        JOIN product_colors pc ON pc.id = pv.product_color_id
        JOIN products p ON p.id = pc.product_id
+       LEFT JOIN colors c ON c.id = pc.color_id
+       LEFT JOIN sizes sz ON sz.id = pv.size_id
        LEFT JOIN stocks s ON s.variant_id = pv.id
        WHERE pv.id IN (${placeholders})
          AND ((pv.mercado_libre_item_id IS NOT NULL)
@@ -3611,14 +3606,25 @@ export const syncSelectedStockToMercadoLibre = async (req: Request, res: Respons
       const pack = Math.max(1, Number((v as any).ml_pack) || 1);
       const stockToSend = Math.floor(Number(v.stock || 0) / pack);
       let ok = false;
-      if (v.mercado_libre_id && v.mercado_libre_variant_id) {
+      if (v.mercado_libre_item_id && v.mercado_libre_variant_id) {
+        ok = await updateMercadoLibreStockByVariant(
+          v.mercado_libre_item_id,
+          v.mercado_libre_variant_id,
+          stockToSend
+        );
+      } else if (v.mercado_libre_id && v.mercado_libre_variant_id) {
         ok = await updateMercadoLibreStockByVariant(
           v.mercado_libre_id,
           v.mercado_libre_variant_id,
           stockToSend
         );
       } else if (v.mercado_libre_item_id) {
-        ok = await updateMercadoLibreStockByItem(v.mercado_libre_item_id, stockToSend);
+        ok = await updateMercadoLibreStockByItem(v.mercado_libre_item_id, stockToSend, {
+          sku: (v as any).sku,
+          color: (v as any).color_name,
+          size: (v as any).size_code,
+          variantId: String(v.id),
+        });
       }
       if (ok) {
         updated++;
