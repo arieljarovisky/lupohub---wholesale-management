@@ -1475,6 +1475,7 @@ function letraFromCbteTipo(t: any): string {
 
 /**
  * Exporta el Excel "Ventas por Jurisdicción" con el formato esperado por el estudio contable.
+ * Incluye facturas/NC mayoristas + Mercado Libre + Tienda Nube (`external_*`).
  * Columnas: COD_PROVI, NOM_PROVI, FECHA_EMI (serial), T_COMP (FAC/CDE), N_COMP (A0002000012131),
  *           RAZON_SOC, SIN_IVA, IMP_IVA, IMPUEST, IMPORTE, COD_TRANSP, NOM_TRANSP.
  * NC va con montos en negativo y sin transporte.
@@ -1487,8 +1488,71 @@ export const exportVentasJurisdiccionXlsx = async (req: Request, res: Response) 
     }
 
     const authUser = (req as any).user;
-    const sellerJoinSql = authUser?.role === 'SELLER' ? ' AND c.seller_id = ?' : '';
-    const sellerParam = authUser?.role === 'SELLER' ? [authUser.id] : [];
+    const isSeller = authUser?.role === 'SELLER';
+    const sellerJoinSql = isSeller ? ' AND c.seller_id = ?' : '';
+    const sellerParam = isSeller ? [authUser.id] : [];
+
+    // Mercado Libre / Tienda Nube viven en external_*; no tienen seller_id → solo ADMIN (y roles no-seller).
+    // Totales externos se tratan como neto AFIP (misma unidad que orders.total / amount_credited mayorista).
+    // ML bulk puede generar N filas con el mismo CAE/PV/nro → agrupamos por comprobante.
+    const externalUnionSql = isSeller
+      ? ''
+      : `
+        UNION ALL
+
+        SELECT
+          'FAC' AS tipo,
+          DATE(MAX(ei.created_at)) AS fecha,
+          ei.cbte_tipo,
+          ei.punto_venta,
+          ei.cbte_desde,
+          ei.cbte_hasta,
+          ROUND(SUM(ei.total), 2) AS neto,
+          0 AS otros_impuestos,
+          NULL AS customer_id,
+          CASE
+            WHEN COUNT(DISTINCT NULLIF(TRIM(ei.customer_name), '')) <= 1
+            THEN COALESCE(MAX(NULLIF(TRIM(ei.customer_name), '')), 'Consumidor Final')
+            ELSE 'Consumidor Final'
+          END AS razon_social,
+          '' AS city,
+          '' AS address
+        FROM external_invoices ei
+        WHERE ei.source IN ('TIENDANUBE', 'MERCADOLIBRE')
+          AND DATE(ei.created_at) >= ? AND DATE(ei.created_at) <= ?
+        GROUP BY ei.cae, ei.punto_venta, ei.cbte_tipo, ei.cbte_desde, ei.cbte_hasta
+
+        UNION ALL
+
+        SELECT
+          'CDE' AS tipo,
+          DATE(MAX(ecn.created_at)) AS fecha,
+          ecn.cbte_tipo,
+          ecn.punto_venta,
+          ecn.cbte_desde,
+          ecn.cbte_hasta,
+          ROUND(SUM(ecn.amount_credited), 2) AS neto,
+          0 AS otros_impuestos,
+          NULL AS customer_id,
+          CASE
+            WHEN COUNT(DISTINCT NULLIF(TRIM(ei.customer_name), '')) <= 1
+            THEN COALESCE(MAX(NULLIF(TRIM(ei.customer_name), '')), 'Consumidor Final')
+            ELSE 'Consumidor Final'
+          END AS razon_social,
+          '' AS city,
+          '' AS address
+        FROM external_credit_notes ecn
+        JOIN external_invoices ei ON ei.id = ecn.external_invoice_id
+        WHERE ecn.source IN ('TIENDANUBE', 'MERCADOLIBRE')
+          AND DATE(ecn.created_at) >= ? AND DATE(ecn.created_at) <= ?
+        GROUP BY ecn.cae, ecn.punto_venta, ecn.cbte_tipo, ecn.cbte_desde, ecn.cbte_hasta
+      `;
+
+    const queryParams = [
+      desde, hasta, ...sellerParam,
+      desde, hasta, ...sellerParam,
+      ...(isSeller ? [] : [desde, hasta, desde, hasta]),
+    ];
 
     const rows = await query(
       `
@@ -1535,10 +1599,11 @@ export const exportVentasJurisdiccionXlsx = async (req: Request, res: Response) 
         WHERE o.date >= ? AND o.date <= ?${sellerJoinSql}
         GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
                  c.id, c.business_name, c.name, c.city, c.address
+        ${externalUnionSql}
       ) AS x
       ORDER BY x.fecha ASC, x.punto_venta ASC, x.cbte_desde ASC
       `,
-      [desde, hasta, ...sellerParam, desde, hasta, ...sellerParam]
+      queryParams
     ) as any[];
 
     // Primer transporte por cliente (fallback a customers.transport_number).
