@@ -1,4 +1,4 @@
-/** Empareja variaciones de un ítem ML por variationId, SKU o color+talle. */
+/** Empareja variaciones de un ítem ML por variationId / SKU (color+talle solo sin SKU local). */
 
 import { codigoTalleParaSku, nombreTalleDesdeCodigo, TALLE_CODIGO_A_NOMBRE } from '../talles-tango';
 
@@ -99,7 +99,10 @@ function colorCompatible(localColor: string, remoteColor: string): boolean {
 
 /**
  * Empareja la variación ML correcta.
- * Prioridad: SKU exacto → variationId solo si SKU vacío o coincide → color+talle si hay un único match.
+ * Prioridad: SKU exacto → variationId solo si SKU vacío o coincide → color+talle solo sin SKU local.
+ *
+ * Si hay SKU local, NUNCA se usa color+talle como fallback. Eso evitaba que
+ * 0067102-150-256 pise la variación de 0073304-150-256 en el mismo MLA.
  */
 export function matchMlVariationForVariantLink(variations: any[], link: MlVariantMatchLink): any | null {
   if (!Array.isArray(variations) || variations.length === 0) return null;
@@ -137,25 +140,21 @@ export function matchMlVariationForVariantLink(variations: any[], link: MlVarian
     if (byId) {
       const remoteSku = mlVariationSkuFromApi(byId).trim();
       if (!rawLocalSku) return byId;
-      if (!remoteSku) {
-        // Sin SKU remoto: exigir color+talle si los tenemos
-        const colorN = String(link.color ?? '').trim();
-        const sizeRaw = String(link.size ?? '').trim();
-        if (colorN || sizeRaw) {
-          const { color, size } = mlVariationColorSizeFromApi(byId);
-          const colorOk = !colorN || colorCompatible(colorN, color);
-          const sizeOk = !sizeRaw || sizesCompatible(sizeRaw, size);
-          if (colorOk && sizeOk) return byId;
-          return null;
-        }
-        return byId;
-      }
-      if (skusCompatible(rawLocalSku, remoteSku)) return byId;
-      // ID guardado apunta a otra variación (p.ej. backfill incorrecto): ignorar
+      // Con SKU local: solo confiar en el ID si el SKU remoto coincide.
+      // Si el remoto no tiene SKU (API incompleta / publicación sin seller_sku),
+      // no usar color+talle aquí: un ID mal guardado + mismo talle pisaba otro artículo.
+      if (remoteSku && skusCompatible(rawLocalSku, remoteSku)) return byId;
+      // ID guardado apunta a otra variación o no se puede verificar: ignorar
     }
   }
 
-  // 3) color + talle: solo si hay exactamente un match (evitar pisar otra talla del mismo color)
+  // 3) color + talle: NUNCA si la variante local tiene SKU.
+  // El GET /items a veces omite SELLER_SKU; sin esta guarda, 0067102-150-256 matcheaba
+  // por color+talle la variación de 0073304-150-256 en el mismo MLA y pisaba el stock.
+  if (rawLocalSku) {
+    return null;
+  }
+
   const colorN = String(link.color ?? '').trim();
   const sizeRaw = String(link.size ?? '').trim();
   if (colorN && sizeRaw) {

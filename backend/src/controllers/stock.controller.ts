@@ -775,8 +775,10 @@ export const updateMercadoLibreStockByItem = async (
     } = await import('../utils/mlVariationMatch');
 
     // Completar SKUs/atributos: el GET /items suele devolver variaciones incompletas.
+    // Con SKU local siempre enriquecemos: el matcher exige SKU exacto y sin enrich
+    // podría fallar o (antes) caer en color+talle y pisar otra variación.
     const missingSku = variations.some((v: any) => !mlVariationSkuFromApi(v));
-    if (missingSku || opts?.color || opts?.size) {
+    if (missingSku || opts?.sku || opts?.color || opts?.size) {
       item = await enrichMlItemVariationsForMatch(item, integration.access_token, (url, cfg) =>
         withRetry429409(() => axios.get(url, cfg))
       );
