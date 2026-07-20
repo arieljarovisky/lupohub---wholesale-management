@@ -357,6 +357,49 @@ function normalizeSkuKey(sku: string): string {
     .toUpperCase();
 }
 
+function padArticleCodeTo7(s: string): string {
+  const digits = String(s ?? '').replace(/\D/g, '');
+  if (!digits) return '';
+  return digits.length <= 7 ? digits.padStart(7, '0') : digits;
+}
+
+/** Variantes de SKU para cruzar catálogo TN con productos internos (padding, prefijos, etc.). */
+function articleLookupKeys(raw: string): string[] {
+  const t = String(raw ?? '').trim();
+  if (!t) return [];
+  const out = new Set<string>();
+  const add = (x: string) => {
+    const s = String(x ?? '').trim();
+    if (!s) return;
+    out.add(s);
+    const norm = normalizeSkuKey(s);
+    if (norm) out.add(norm);
+  };
+  add(t);
+  const base = t.split('-')[0];
+  if (base && base !== t) add(base);
+  const articleMatch = t.match(/^(\d{3,6}-\d{2,3})/);
+  if (articleMatch) add(articleMatch[1]);
+  const digits = t.replace(/\D/g, '');
+  if (digits) {
+    const noLead = digits.replace(/^0+/, '') || '0';
+    add(digits);
+    add(noLead);
+    add(padArticleCodeTo7(digits));
+    add(padArticleCodeTo7(noLead));
+    for (const pref of ['Q', 'C', 'P']) {
+      add(pref + noLead);
+      add(pref.toLowerCase() + noLead);
+      const p7 = padArticleCodeTo7(noLead);
+      if (p7) {
+        add(pref + p7);
+        add(pref.toLowerCase() + p7);
+      }
+    }
+  }
+  return [...out];
+}
+
 /** Aplica precios de una lista mayorista al catálogo (match por tienda_nube_id o código de artículo). */
 async function applyPriceListToCatalog(catalog: TiendaNubeCatalog, priceListId: string): Promise<TiendaNubeCatalog> {
   const listRow = await get(`SELECT id, name FROM price_lists WHERE id = ? LIMIT 1`, [priceListId]);
@@ -370,48 +413,53 @@ async function applyPriceListToCatalog(catalog: TiendaNubeCatalog, priceListId: 
     [priceListId]
   )) as Array<{ tnId?: string | null; sku?: string | null; price?: number | null }>;
 
-  const byTnId = new Map<string, number>();
-  const bySku = new Map<string, number>();
-  const bySkuNorm = new Map<string, number>();
+  const variantRows = (await query(
+    `SELECT pv.sku, pli.price
+     FROM price_list_items pli
+     INNER JOIN products p ON p.id = pli.product_id
+     INNER JOIN product_colors pc ON pc.product_id = p.id
+     INNER JOIN product_variants pv ON pv.product_color_id = pc.id
+     WHERE pli.price_list_id = ? AND pv.sku IS NOT NULL AND pv.sku != ''`,
+    [priceListId]
+  )) as Array<{ sku?: string | null; price?: number | null }>;
+
+  const priceByKey = new Map<string, number>();
+
+  const registerPrice = (keys: string[], price: number) => {
+    for (const key of keys) {
+      if (!priceByKey.has(key)) priceByKey.set(key, price);
+    }
+  };
 
   for (const row of rows || []) {
     const price = Number(row.price);
     if (!Number.isFinite(price) || price <= 0) continue;
     const tnId = row.tnId != null ? String(row.tnId).trim() : '';
-    if (tnId) byTnId.set(tnId, price);
+    if (tnId) registerPrice([`tn:${tnId}`], price);
     const sku = row.sku != null ? String(row.sku).trim() : '';
-    if (sku) {
-      bySku.set(sku, price);
-      bySkuNorm.set(normalizeSkuKey(sku), price);
-    }
+    if (sku) registerPrice(articleLookupKeys(sku), price);
+  }
+
+  for (const row of variantRows || []) {
+    const price = Number(row.price);
+    if (!Number.isFinite(price) || price <= 0) continue;
+    const sku = row.sku != null ? String(row.sku).trim() : '';
+    if (sku) registerPrice(articleLookupKeys(sku), price);
   }
 
   const resolvePrice = (tnProductId: number, articleCode: string): number | null => {
-    const tnKey = String(tnProductId);
-    if (byTnId.has(tnKey)) return byTnId.get(tnKey)!;
-
-    const code = (articleCode || '').trim();
-    if (code) {
-      if (bySku.has(code)) return bySku.get(code)!;
-      const codeNorm = normalizeSkuKey(code);
-      if (bySkuNorm.has(codeNorm)) return bySkuNorm.get(codeNorm)!;
-      for (const [sku, price] of bySku.entries()) {
-        if (sku.startsWith(`${code}-`) || sku.startsWith(code)) return price;
-      }
-      for (const [norm, price] of bySkuNorm.entries()) {
-        if (norm.startsWith(codeNorm)) return price;
-      }
+    const tnKey = `tn:${tnProductId}`;
+    if (priceByKey.has(tnKey)) return priceByKey.get(tnKey)!;
+    for (const key of articleLookupKeys(articleCode)) {
+      if (priceByKey.has(key)) return priceByKey.get(key)!;
     }
     return null;
   };
 
   for (const section of catalog.sections) {
     for (const product of section.products) {
-      const listPrice = resolvePrice(product.id, product.articleCode);
-      if (listPrice != null) {
-        product.price = listPrice;
-        product.promotionalPrice = null;
-      }
+      product.price = resolvePrice(product.id, product.articleCode);
+      product.promotionalPrice = null;
     }
   }
 
