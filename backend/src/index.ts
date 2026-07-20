@@ -55,6 +55,7 @@ import { addIncludeInSaldoToOrders } from './database/add_include_in_saldo_order
 import { addCustomerInvoiceFields } from './database/add_customer_invoice_fields';
 import { addExternalInvoicesTable } from './database/add_external_invoices_table';
 import { addExternalCreditNotesTable } from './database/add_external_credit_notes_table';
+import { addAfipSyncedVouchersTable } from './database/add_afip_synced_vouchers_table';
 import { addCustomerMultimediaLedger } from './database/add_customer_multimedia_ledger';
 import { addCustomerManualComprobantesTable } from './database/add_customer_manual_comprobantes';
 import { addCustomerManualComprobantesPdfColumns } from './database/add_customer_manual_comprobantes_pdf';
@@ -254,6 +255,7 @@ async function initDatabase() {
       await addCustomerInvoiceFields();
       await addExternalInvoicesTable();
       await addExternalCreditNotesTable();
+      await addAfipSyncedVouchersTable();
       await addCustomerMultimediaLedger();
       await addCustomerManualComprobantesTable();
       await addCustomerManualComprobantesPdfColumns();
