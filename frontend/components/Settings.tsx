@@ -646,7 +646,7 @@ const Settings: React.FC<SettingsProps> = ({
       const res = await api.syncStockToTiendaNube();
       setStockSyncResult({ platform: 'Tienda Nube', updated: res.updated, errors: res.errors, logs: res.logs });
       if (res.errors > 0) {
-        showToast('error', `Tienda Nube: ${res.updated} actualizadas, ${res.errors} errores.`);
+        showToast('error', `Tienda Nube: ${res.updated} actualizadas, ${res.errors} errores. Se descargó el Excel.`);
       } else if (res.updated > 0) {
         showToast('success', `Tienda Nube: ${res.updated} variantes sincronizadas.`);
       } else {
@@ -660,6 +660,65 @@ const Settings: React.FC<SettingsProps> = ({
     }
   };
 
+  /** Todos los artículos: LupoHub → Mercado Libre + Tienda Nube (incluye stock 0). */
+  const handleSyncStockToBothPlatforms = async () => {
+    setShowStockSyncModal(true);
+    setTnStockSyncLoading(true);
+    setMlStockSyncLoading(true);
+    setMlStockSyncIsImport(false);
+    setStockSyncResult(null);
+    try {
+      const [tnRes, mlRes] = await Promise.all([
+        api.syncStockToTiendaNube({ downloadFailures: false }),
+        api.syncStockToMercadoLibre({ downloadFailures: false }),
+      ]);
+      const updated = (tnRes.updated || 0) + (mlRes.updated || 0);
+      const errors = (tnRes.errors || 0) + (mlRes.errors || 0);
+      const logs = [
+        ...(tnRes.logs || []).map((l) => `[TN] ${l}`),
+        ...(mlRes.logs || []).map((l) => `[ML] ${l}`),
+      ];
+      setStockSyncResult({
+        platform: 'ML + Tienda Nube',
+        updated,
+        errors,
+        logs,
+      });
+      if (errors > 0) {
+        try {
+          await api.downloadStockSyncFailuresReport('both');
+          showToast('info', 'Se descargó el Excel con los artículos que no se actualizaron.');
+        } catch {
+          /* ignore */
+        }
+      }
+      if (errors === 0 && updated > 0) {
+        showToast('success', `Todos los artículos: ML ${mlRes.updated} · TN ${tnRes.updated} (incluye stock 0).`);
+      } else if (errors > 0) {
+        showToast('warning', `ML ${mlRes.updated}/${mlRes.errors} · TN ${tnRes.updated}/${tnRes.errors}. Revisá el Excel.`);
+      } else {
+        showToast('info', 'No hubo variantes vinculadas para sincronizar.');
+      }
+    } catch (e: any) {
+      const msg = e?.message || 'Error al sincronizar stock a ML y TN';
+      const timedOut = /timed?\s*out|timeout/i.test(String(msg));
+      setStockSyncResult({
+        platform: 'ML + Tienda Nube',
+        updated: 0,
+        errors: 1,
+        logs: [
+          timedOut
+            ? 'Timeout en el navegador: el backend puede seguir sincronizando. Revisá logs o reintentá más tarde.'
+            : msg,
+        ],
+      });
+      showToast('error', timedOut ? 'Timeout: el sync puede seguir en el servidor.' : msg);
+    } finally {
+      setTnStockSyncLoading(false);
+      setMlStockSyncLoading(false);
+    }
+  };
+
   // Sincronizar stock de la app hacia Mercado Libre (app = fuente de verdad)
   const handleSyncStockToMercadoLibre = async () => {
     setShowStockSyncModal(true);
@@ -670,15 +729,26 @@ const Settings: React.FC<SettingsProps> = ({
       const res = await api.syncStockToMercadoLibre();
       setStockSyncResult({ platform: 'Mercado Libre', updated: res.updated, errors: res.errors, logs: res.logs });
       if (res.errors > 0) {
-        showToast('error', `Mercado Libre: ${res.updated} actualizadas, ${res.errors} errores.`);
+        showToast('error', `Mercado Libre: ${res.updated} actualizadas, ${res.errors} errores. Se descargó el Excel.`);
       } else if (res.updated > 0) {
         showToast('success', `Mercado Libre: ${res.updated} variantes sincronizadas.`);
       } else {
         showToast('info', 'Mercado Libre: no hubo variantes para sincronizar (revisá vínculos ML).');
       }
     } catch (e: any) {
-      setStockSyncResult({ platform: 'Mercado Libre', updated: 0, errors: 1, logs: [e.message || 'Error desconocido'] });
-      showToast('error', e?.message || 'Error al sincronizar stock a Mercado Libre');
+      const msg = e?.message || 'Error al sincronizar stock a Mercado Libre';
+      const timedOut = /timed?\s*out|timeout/i.test(String(msg));
+      setStockSyncResult({
+        platform: 'Mercado Libre',
+        updated: 0,
+        errors: 1,
+        logs: [
+          timedOut
+            ? 'Timeout en el navegador: el backend puede seguir sincronizando en segundo plano. Revisá los logs del servidor o reintentá en unos minutos y verificá un producto en Inventario.'
+            : msg,
+        ],
+      });
+      showToast('error', timedOut ? 'Timeout: el sync puede seguir en el servidor. Revisá logs o reintentá.' : msg);
     } finally {
       setMlStockSyncLoading(false);
     }
@@ -988,6 +1058,9 @@ const Settings: React.FC<SettingsProps> = ({
   const [defaultSellerImportPassword, setDefaultSellerImportPassword] = useState('');
   const [sellerExcelImporting, setSellerExcelImporting] = useState(false);
   const sellersImportInputRef = useRef<HTMLInputElement>(null);
+  const [editingSellerPriceListsUser, setEditingSellerPriceListsUser] = useState<User | null>(null);
+  const [sellerAssignedPriceLists, setSellerAssignedPriceLists] = useState<string[]>([]);
+  const [savingSellerPriceLists, setSavingSellerPriceLists] = useState(false);
 
   // Price lists (solo ADMIN)
   const [priceLists, setPriceLists] = useState<PriceList[]>([]);
@@ -1621,14 +1694,31 @@ const Settings: React.FC<SettingsProps> = ({
                     {currentUser?.id !== u.id && (
                        <div className="flex items-center gap-2">
                          {u.role === Role.SELLER && (
-                           <button
-                             onClick={() => handleEditSellerAccess(u)}
-                             disabled={editingSellerAccessId === u.id}
-                             className="p-2 text-slate-600 hover:text-cyan-400 hover:bg-cyan-900/10 rounded-lg transition-all disabled:opacity-50"
-                             title="Editar email y contraseña"
-                           >
-                             {editingSellerAccessId === u.id ? <Loader2 size={18} className="animate-spin" /> : <Key size={18} />}
-                           </button>
+                           <>
+                             <button
+                               onClick={async () => {
+                                 setEditingSellerPriceListsUser(u);
+                                 try {
+                                   const assigned = await api.getSellerPriceLists(u.id);
+                                   setSellerAssignedPriceLists(assigned.map(pl => pl.id));
+                                 } catch {
+                                   setSellerAssignedPriceLists([]);
+                                 }
+                               }}
+                               className="p-2 text-slate-600 hover:text-green-400 hover:bg-green-900/10 rounded-lg transition-all"
+                               title="Asignar listas de precios"
+                             >
+                               <DollarSign size={18} />
+                             </button>
+                             <button
+                               onClick={() => handleEditSellerAccess(u)}
+                               disabled={editingSellerAccessId === u.id}
+                               className="p-2 text-slate-600 hover:text-cyan-400 hover:bg-cyan-900/10 rounded-lg transition-all disabled:opacity-50"
+                               title="Editar email y contraseña"
+                             >
+                               {editingSellerAccessId === u.id ? <Loader2 size={18} className="animate-spin" /> : <Key size={18} />}
+                             </button>
+                           </>
                          )}
                          <button 
                            onClick={async () => {
@@ -1653,6 +1743,92 @@ const Settings: React.FC<SettingsProps> = ({
            </div>
         </div>
       )}
+
+      {/* Modal: Asignar listas de precios a vendedor */}
+      <Modal
+        isOpen={!!editingSellerPriceListsUser}
+        onClose={() => {
+          if (!savingSellerPriceLists) {
+            setEditingSellerPriceListsUser(null);
+            setSellerAssignedPriceLists([]);
+          }
+        }}
+        title={editingSellerPriceListsUser ? `Listas de precios: ${editingSellerPriceListsUser.name}` : 'Listas de precios'}
+        footer={
+          <>
+            <button
+              type="button"
+              disabled={savingSellerPriceLists}
+              onClick={() => {
+                setEditingSellerPriceListsUser(null);
+                setSellerAssignedPriceLists([]);
+              }}
+              className="bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white px-4 py-2 rounded-lg font-bold text-sm"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              disabled={savingSellerPriceLists}
+              onClick={async () => {
+                if (!editingSellerPriceListsUser) return;
+                setSavingSellerPriceLists(true);
+                try {
+                  await api.setSellerPriceLists(editingSellerPriceListsUser.id, sellerAssignedPriceLists);
+                  showToast('success', `Listas asignadas a ${editingSellerPriceListsUser.name}`);
+                  setEditingSellerPriceListsUser(null);
+                  setSellerAssignedPriceLists([]);
+                } catch (err: any) {
+                  showToast('error', err?.message || 'Error asignando listas');
+                } finally {
+                  setSavingSellerPriceLists(false);
+                }
+              }}
+              className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2"
+            >
+              {savingSellerPriceLists ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+              Guardar
+            </button>
+          </>
+        }
+      >
+        <p className="text-slate-400 text-sm mb-4">
+          Seleccioná las listas de precios que este vendedor puede ver. Si no se asigna ninguna, el vendedor no podrá ver ninguna lista de precios.
+        </p>
+        {priceLists.length === 0 ? (
+          <p className="text-slate-500 text-sm py-4">No hay listas de precios creadas. Crealas primero en la pestaña "Listas de precios".</p>
+        ) : (
+          <div className="space-y-2 max-h-[50vh] overflow-y-auto">
+            {priceLists.map(pl => (
+              <label
+                key={pl.id}
+                className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-colors ${
+                  sellerAssignedPriceLists.includes(pl.id)
+                    ? 'bg-blue-900/30 border border-blue-600'
+                    : 'bg-slate-900 border border-slate-700 hover:border-slate-600'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={sellerAssignedPriceLists.includes(pl.id)}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setSellerAssignedPriceLists(prev => [...prev, pl.id]);
+                    } else {
+                      setSellerAssignedPriceLists(prev => prev.filter(id => id !== pl.id));
+                    }
+                  }}
+                  className="w-5 h-5 rounded border-slate-600 bg-slate-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0"
+                />
+                <div className="flex-1">
+                  <span className="text-white font-medium">{pl.name}</span>
+                  {pl.description && <p className="text-xs text-slate-500 mt-0.5">{pl.description}</p>}
+                </div>
+              </label>
+            ))}
+          </div>
+        )}
+      </Modal>
 
       {/* PRICE LISTS TAB */}
       {role === Role.ADMIN && activeTab === 'pricelists' && (
@@ -2293,11 +2469,32 @@ const Settings: React.FC<SettingsProps> = ({
               <li><strong className="text-slate-200">Tené tus productos en LupoHub.</strong> Importalos desde Tango (Inventario → Importar Tango) o cargalos a mano. El stock que cargues acá es el de tu depósito (fuente de verdad).</li>
               <li><strong className="text-slate-200">Vinculá cada variante con TN y ML.</strong> En <strong>Inventario → Mi inventario</strong>, en cada fila de producto tocá el ícono de <strong>cadena (Vincular)</strong>. Ahí cargá el <strong>ID de producto e ID de variante de Tienda Nube</strong> y el <strong>ID de publicación/variación de Mercado Libre</strong> que correspondan a esa variante. Sin este vínculo la app no sabe a qué listing enviar el stock.</li>
               <li><strong className="text-slate-200">SKU unificado.</strong> En Vincular producto podés usar el mismo código para inventario, ML y TN (botón &quot;Usar mismo código&quot;). Si en ML/TN usás otro código, ingresalo en ese campo. Packs (x2, x3): configurá en el mismo modal; el stock enviado = stock del depósito ÷ pack.</li>
-              <li><strong className="text-slate-200">Enviar stock a las plataformas.</strong> En esta pestaña (Integraciones) usá <strong>Sincronizar stock a Tienda Nube</strong> y <strong>Sincronizar stock a Mercado Libre</strong>. Se envía el stock actual de tu depósito (LupoHub) a cada variante que tengas vinculada.</li>
+              <li><strong className="text-slate-200">Enviar stock a las plataformas.</strong> Usá el botón verde <strong>ENVIAR STOCK A ML + TN (TODOS)</strong>: manda el stock de LupoHub (incluido 0) a Mercado Libre y Tienda Nube en un solo paso.</li>
             </ol>
             <p className="text-xs text-slate-500 mt-3">
               Los productos de TN y ML no se guardan en la base de datos; solo se usa el vínculo que vos cargás para enviar stock desde LupoHub hacia cada plataforma.
             </p>
+            {(integrations.mercadolibre || integrations.tiendanube) && (
+              <div className="mt-4 pt-4 border-t border-slate-600/60">
+                <button
+                  type="button"
+                  onClick={handleSyncStockToBothPlatforms}
+                  disabled={tnStockSyncLoading || mlStockSyncLoading}
+                  className="w-full sm:w-auto px-5 py-3 bg-emerald-600 hover:bg-emerald-500 rounded-xl text-white text-sm font-black transition-all flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg shadow-emerald-900/30"
+                  title="Envía el stock de LupoHub de TODOS los artículos vinculados a Mercado Libre y Tienda Nube (incluye stock 0)"
+                >
+                  {(tnStockSyncLoading || mlStockSyncLoading) ? (
+                    <Loader2 size={18} className="animate-spin" />
+                  ) : (
+                    <RefreshCw size={18} />
+                  )}
+                  ENVIAR STOCK A ML + TN (TODOS)
+                </button>
+                <p className="text-[11px] text-slate-500 mt-2">
+                  Un toque: todos los artículos vinculados. Puede tardar varios minutos.
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="bg-slate-800 rounded-3xl border border-slate-700 overflow-hidden shadow-xl">
@@ -4435,7 +4632,17 @@ Body JSON:
       <Modal
         isOpen={showStockSyncModal}
         onClose={() => { if (!tnStockSyncLoading && !mlStockSyncLoading) setShowStockSyncModal(false); }}
-        title={mlStockSyncLoading || stockSyncResult?.platform === 'Mercado Libre' ? (mlStockSyncIsImport ? 'Importar stock desde Mercado Libre' : 'Sincronizar stock a Mercado Libre') : (tnStockSyncLoading || stockSyncResult?.platform === 'Tienda Nube') ? 'Sincronizar Stock a Tienda Nube' : 'Sincronizar Stock'}
+        title={
+          mlStockSyncLoading || stockSyncResult?.platform === 'Mercado Libre' || stockSyncResult?.platform === 'ML + Tienda Nube'
+            ? mlStockSyncIsImport
+              ? 'Importar stock desde Mercado Libre'
+              : stockSyncResult?.platform === 'ML + Tienda Nube' || (tnStockSyncLoading && mlStockSyncLoading)
+                ? 'Enviar stock a ML + Tienda Nube'
+                : 'Sincronizar stock a Mercado Libre'
+            : tnStockSyncLoading || stockSyncResult?.platform === 'Tienda Nube'
+              ? 'Sincronizar Stock a Tienda Nube'
+              : 'Sincronizar Stock'
+        }
         footer={
           !tnStockSyncLoading && !mlStockSyncLoading && (
             <button onClick={() => setShowStockSyncModal(false)} className="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg font-bold text-sm w-full">
@@ -4474,6 +4681,28 @@ Body JSON:
                     }>{line}</div>
                   ))}
                 </div>
+              )}
+              {stockSyncResult.errors > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const p = stockSyncResult.platform.includes('ML') && stockSyncResult.platform.includes('Tienda')
+                      ? 'both'
+                      : stockSyncResult.platform.includes('Mercado') || stockSyncResult.platform === 'Mercado Libre'
+                        ? 'ml'
+                        : stockSyncResult.platform.includes('Tienda')
+                          ? 'tn'
+                          : 'both';
+                    void api.downloadStockSyncFailuresReport(p as 'ml' | 'tn' | 'both').then(
+                      () => showToast('success', 'Excel descargado'),
+                      () => showToast('error', 'No se pudo descargar el Excel')
+                    );
+                  }}
+                  className="w-full py-2.5 rounded-xl font-semibold bg-emerald-700 hover:bg-emerald-600 text-white text-sm flex items-center justify-center gap-2"
+                >
+                  <Download size={16} />
+                  Descargar Excel de no actualizados
+                </button>
               )}
             </>
           )}

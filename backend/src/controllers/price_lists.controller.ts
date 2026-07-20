@@ -36,16 +36,30 @@ async function copyPriceListItems(
   return count;
 }
 
-/** Listar listas de precios. ADMIN, WAREHOUSE y SELLER (solo lectura para catálogo/pedidos). */
+/** Listar listas de precios. ADMIN, WAREHOUSE ven todas; SELLER solo las asignadas. */
 export const listPriceLists = async (req: Request, res: Response) => {
   try {
-    const role = (req as any).user?.role;
+    const user = (req as any).user;
+    const role = user?.role;
     if (!['ADMIN', 'WAREHOUSE', 'SELLER'].includes(role)) {
       return res.status(403).json({ message: 'Sin permiso para listar listas de precios' });
     }
-    const rows = await query(
-      `SELECT id, name, description, created_at AS createdAt, updated_at AS updatedAt FROM price_lists ORDER BY name`
-    );
+
+    let rows;
+    if (role === 'SELLER') {
+      rows = await query(
+        `SELECT pl.id, pl.name, pl.description, pl.created_at AS createdAt, pl.updated_at AS updatedAt
+         FROM price_lists pl
+         INNER JOIN seller_price_lists spl ON spl.price_list_id = pl.id
+         WHERE spl.seller_id = ?
+         ORDER BY pl.name`,
+        [user.id]
+      );
+    } else {
+      rows = await query(
+        `SELECT id, name, description, created_at AS createdAt, updated_at AS updatedAt FROM price_lists ORDER BY name`
+      );
+    }
     res.json(rows || []);
   } catch (error: any) {
     console.error('listPriceLists:', error);
@@ -336,6 +350,110 @@ export const fillPriceListFromBase = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('fillPriceListFromBase:', error);
     res.status(500).json({ message: 'Error rellenando la lista' });
+  }
+};
+
+/** Obtener listas asignadas a un vendedor. Solo ADMIN. */
+export const getSellerPriceLists = async (req: Request, res: Response) => {
+  try {
+    if ((req as any).user?.role !== 'ADMIN') {
+      return res.status(403).json({ message: 'Solo administradores pueden ver asignaciones de listas' });
+    }
+    const { sellerId } = req.params;
+    const seller = await get('SELECT id, role FROM users WHERE id = ?', [sellerId]);
+    if (!seller) return res.status(404).json({ message: 'Vendedor no encontrado' });
+    if (seller.role !== 'SELLER') return res.status(400).json({ message: 'El usuario no es un vendedor' });
+
+    const rows = await query(
+      `SELECT pl.id, pl.name, pl.description, pl.created_at AS createdAt, pl.updated_at AS updatedAt
+       FROM price_lists pl
+       INNER JOIN seller_price_lists spl ON spl.price_list_id = pl.id
+       WHERE spl.seller_id = ?
+       ORDER BY pl.name`,
+      [sellerId]
+    );
+    res.json(rows || []);
+  } catch (error: any) {
+    console.error('getSellerPriceLists:', error);
+    res.status(500).json({ message: 'Error obteniendo listas del vendedor' });
+  }
+};
+
+/** Asignar listas de precios a un vendedor. Body: { priceListIds: string[] }. Solo ADMIN. */
+export const setSellerPriceLists = async (req: Request, res: Response) => {
+  try {
+    if ((req as any).user?.role !== 'ADMIN') {
+      return res.status(403).json({ message: 'Solo administradores pueden asignar listas a vendedores' });
+    }
+    const { sellerId } = req.params;
+    const { priceListIds } = req.body as { priceListIds?: string[] };
+
+    const seller = await get('SELECT id, role FROM users WHERE id = ?', [sellerId]);
+    if (!seller) return res.status(404).json({ message: 'Vendedor no encontrado' });
+    if (seller.role !== 'SELLER') return res.status(400).json({ message: 'El usuario no es un vendedor' });
+
+    if (!Array.isArray(priceListIds)) {
+      return res.status(400).json({ message: 'Se espera un array de priceListIds' });
+    }
+
+    await execute('DELETE FROM seller_price_lists WHERE seller_id = ?', [sellerId]);
+
+    for (const priceListId of priceListIds) {
+      if (!priceListId) continue;
+      const exists = await get('SELECT id FROM price_lists WHERE id = ?', [priceListId]);
+      if (!exists) continue;
+      await execute(
+        'INSERT INTO seller_price_lists (id, seller_id, price_list_id) VALUES (?, ?, ?)',
+        [uuidv4(), sellerId, priceListId]
+      );
+    }
+
+    const rows = await query(
+      `SELECT pl.id, pl.name, pl.description
+       FROM price_lists pl
+       INNER JOIN seller_price_lists spl ON spl.price_list_id = pl.id
+       WHERE spl.seller_id = ?
+       ORDER BY pl.name`,
+      [sellerId]
+    );
+    res.json({ sellerId, priceLists: rows || [] });
+  } catch (error: any) {
+    console.error('setSellerPriceLists:', error);
+    res.status(500).json({ message: 'Error asignando listas al vendedor' });
+  }
+};
+
+/** Obtener todos los vendedores con sus listas asignadas. Solo ADMIN. */
+export const getAllSellersWithPriceLists = async (req: Request, res: Response) => {
+  try {
+    if ((req as any).user?.role !== 'ADMIN') {
+      return res.status(403).json({ message: 'Solo administradores pueden ver asignaciones' });
+    }
+
+    const sellers = await query(
+      `SELECT id, name, email FROM users WHERE role = 'SELLER' ORDER BY name`
+    );
+
+    const result = [];
+    for (const seller of sellers || []) {
+      const priceLists = await query(
+        `SELECT pl.id, pl.name
+         FROM price_lists pl
+         INNER JOIN seller_price_lists spl ON spl.price_list_id = pl.id
+         WHERE spl.seller_id = ?
+         ORDER BY pl.name`,
+        [seller.id]
+      );
+      result.push({
+        ...seller,
+        priceLists: priceLists || []
+      });
+    }
+
+    res.json(result);
+  } catch (error: any) {
+    console.error('getAllSellersWithPriceLists:', error);
+    res.status(500).json({ message: 'Error obteniendo vendedores con listas' });
   }
 };
 

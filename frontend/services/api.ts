@@ -17,6 +17,59 @@ const handleRequest = async <T>(requestFn: () => Promise<T>, fallback: T, errorM
   }
 };
 
+/** Poll del job async Hub→ML/TN (el POST responde 202 enseguida; el proxy corta ~60s si se espera el resultado). */
+async function pollStockSyncJob(
+  platform: 'ml' | 'tn',
+  maxWaitMs = 15 * 60 * 1000
+): Promise<{ message: string; updated: number; errors: number; logs: string[]; total?: number; failuresCount?: number }> {
+  const statusPath =
+    platform === 'ml'
+      ? '/integrations/mercadolibre/sync-stock/status'
+      : '/integrations/tiendanube/sync-stock/status';
+  const started = Date.now();
+  while (Date.now() - started < maxWaitMs) {
+    await new Promise((r) => setTimeout(r, 2500));
+    const st = await request<{
+      status: string;
+      message: string;
+      updated: number;
+      errors: number;
+      logs: string[];
+      total?: number;
+      failuresCount?: number;
+    }>(statusPath, 'GET', undefined, undefined, 30000);
+    if (st.status === 'done') {
+      return {
+        message: st.message || 'Sincronización completada',
+        updated: st.updated || 0,
+        errors: st.errors || 0,
+        logs: st.logs || [],
+        total: st.total,
+        failuresCount: st.failuresCount ?? st.errors ?? 0,
+      };
+    }
+    if (st.status === 'error') {
+      throw new Error(st.message || 'Error en sincronización de stock');
+    }
+  }
+  throw new Error(
+    'El sync sigue en el servidor pero tardó demasiado en el navegador. Revisá logs de Railway o el stock en ML/TN.'
+  );
+}
+
+async function downloadStockSyncFailuresBlob(platform: 'ml' | 'tn' | 'both'): Promise<void> {
+  const blob = await getBlob(`/integrations/stock-sync/failures-export?platform=${platform}`, 60000);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const stamp = new Date().toISOString().slice(0, 10);
+  a.download = `stock_no_actualizados_${platform}_${stamp}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 type TnNormalizeBatchResponse = {
   message: string;
   updatedVariants: number;
@@ -677,6 +730,28 @@ export const api = {
   },
   setPriceListItemsBySku: async (id: string, items: { sku: string; price: number }[]): Promise<{ items: { productId: string; price: number }[]; imported: number; notFound?: string[] }> => {
     return request<any>(`/price-lists/${id}/items/by-sku`, 'PUT', { items });
+  },
+
+  /** Obtener todos los vendedores con sus listas de precios asignadas. Solo ADMIN. */
+  getSellersWithPriceLists: async (): Promise<Array<{ id: string; name: string; email: string; priceLists: { id: string; name: string }[] }>> => {
+    return request<any>('/price-lists/sellers', 'GET');
+  },
+
+  /** Obtener listas de precios asignadas a un vendedor. Solo ADMIN. */
+  getSellerPriceLists: async (sellerId: string): Promise<import('../types').PriceList[]> => {
+    const rows = await request<any[]>(`/price-lists/sellers/${sellerId}`, 'GET');
+    return (Array.isArray(rows) ? rows : []).map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      description: r.description ?? undefined,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt
+    }));
+  },
+
+  /** Asignar listas de precios a un vendedor. Solo ADMIN. */
+  setSellerPriceLists: async (sellerId: string, priceListIds: string[]): Promise<{ sellerId: string; priceLists: { id: string; name: string }[] }> => {
+    return request<any>(`/price-lists/sellers/${sellerId}`, 'PUT', { priceListIds });
   },
 
   // --- PRODUCTS ---
@@ -2510,17 +2585,55 @@ export const api = {
     }, { message: 'Offline', platform }, 'disconnectIntegration');
   },
 
-  // Sincronizar stock a plataformas externas
-  syncStockToTiendaNube: async (): Promise<{ message: string; updated: number; errors: number; logs: string[] }> => {
+  // Sincronizar stock a plataformas externas (catálogo completo = job async + poll; evita timeout proxy ~60s)
+  syncStockToTiendaNube: async (opts?: { downloadFailures?: boolean }): Promise<{ message: string; updated: number; errors: number; logs: string[]; failuresCount?: number }> => {
     return handleRequest(async () => {
-      return await request<{ message: string; updated: number; errors: number; logs: string[] }>('/integrations/tiendanube/sync-stock', 'POST', undefined, undefined, 180000);
+      const start = await request<{
+        async?: boolean;
+        status?: string;
+        message: string;
+        updated: number;
+        errors: number;
+        logs: string[];
+        total?: number;
+        failuresCount?: number;
+      }>('/integrations/tiendanube/sync-stock', 'POST', undefined, undefined, 60000);
+      if (start?.async && start.status === 'running') {
+        const result = await pollStockSyncJob('tn');
+        if (opts?.downloadFailures !== false && (result.failuresCount ?? result.errors) > 0) {
+          try { await downloadStockSyncFailuresBlob('tn'); } catch (e) { console.warn('No se pudo descargar Excel de fallos TN', e); }
+        }
+        return result;
+      }
+      return start;
     }, { message: 'Offline', updated: 0, errors: 0, logs: [] }, 'syncStockToTiendaNube');
   },
 
-  syncStockToMercadoLibre: async (): Promise<{ message: string; updated: number; errors: number; logs: string[] }> => {
-    return handleRequest(async () => {
-      return await request<{ message: string; updated: number; errors: number; logs: string[] }>('/integrations/mercadolibre/sync-stock', 'POST', undefined, undefined, 180000);
-    }, { message: 'Offline', updated: 0, errors: 0, logs: [] }, 'syncStockToMercadoLibre');
+  /** Hub → ML: catálogo completo en background + poll. */
+  syncStockToMercadoLibre: async (opts?: { downloadFailures?: boolean }): Promise<{ message: string; updated: number; errors: number; logs: string[]; total?: number; failuresCount?: number }> => {
+    const start = await request<{
+      async?: boolean;
+      status?: string;
+      message: string;
+      updated: number;
+      errors: number;
+      logs: string[];
+      total?: number;
+      failuresCount?: number;
+    }>('/integrations/mercadolibre/sync-stock', 'POST', undefined, undefined, 60000);
+    if (start?.async && start.status === 'running') {
+      const result = await pollStockSyncJob('ml');
+      if (opts?.downloadFailures !== false && (result.failuresCount ?? result.errors) > 0) {
+        try { await downloadStockSyncFailuresBlob('ml'); } catch (e) { console.warn('No se pudo descargar Excel de fallos ML', e); }
+      }
+      return result;
+    }
+    return start;
+  },
+
+  /** Excel del último sync: artículos que no se actualizaron. platform: ml | tn | both */
+  downloadStockSyncFailuresReport: async (platform: 'ml' | 'tn' | 'both' = 'both'): Promise<void> => {
+    await downloadStockSyncFailuresBlob(platform);
   },
 
   /** Excel: reporte completo de Mercado Libre por período (requiere sesión). */

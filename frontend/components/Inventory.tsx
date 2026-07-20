@@ -174,7 +174,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
   const [selectedVariantIds, setSelectedVariantIds] = useState<string[]>([]);
   const [selectionModeEnabled, setSelectionModeEnabled] = useState(false);
-  const [syncSelectedLoading, setSyncSelectedLoading] = useState<'tn' | 'ml' | null>(null);
+  const [syncSelectedLoading, setSyncSelectedLoading] = useState<'tn' | 'ml' | 'both' | null>(null);
+  const [syncingGroupKey, setSyncingGroupKey] = useState<string | null>(null);
   
   // Creation Modal State
   const [isCreating, setIsCreating] = useState(false);
@@ -1000,8 +1001,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     setShowSyncResultModal(true);
     try {
       const [tnRes, mlRes] = await Promise.all([
-        api.syncStockToTiendaNube(),
-        api.syncStockToMercadoLibre()
+        api.syncStockToTiendaNube({ downloadFailures: false }),
+        api.syncStockToMercadoLibre({ downloadFailures: false })
       ]);
       const totalUpdated = tnRes.updated + mlRes.updated;
       const totalErrors = tnRes.errors + mlRes.errors;
@@ -1015,9 +1016,17 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         errors: totalErrors,
         logs
       });
+      if (totalErrors > 0) {
+        try {
+          await api.downloadStockSyncFailuresReport('both');
+          showToast('info', 'Se descargó el Excel con los artículos que no se actualizaron.');
+        } catch {
+          /* ignore */
+        }
+      }
       if (onImportComplete && (totalUpdated > 0 || totalErrors > 0)) onImportComplete();
       if (totalErrors === 0 && totalUpdated > 0) showToast('success', `Sincronizado: ${totalUpdated} variantes a TN y ML.`);
-      else if (totalErrors > 0) showToast('warning', `Sincronizado con errores: ${totalUpdated} OK, ${totalErrors} fallos. Revisá el detalle.`);
+      else if (totalErrors > 0) showToast('warning', `Sincronizado con errores: ${totalUpdated} OK, ${totalErrors} fallos. Revisá el Excel.`);
       setServerListRefreshKey(k => k + 1);
     } catch (e: any) {
       setSyncResult({
@@ -1113,6 +1122,71 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       showToast('error', e?.message || 'Error al enviar a Mercado Libre');
     } finally {
       setSyncSelectedLoading(null);
+    }
+  };
+
+  /** Envía stock de la selección a ML y TN (incluye 0 = sin stock). */
+  const handleSyncSelectedToBoth = async () => {
+    if (selectedVariantIds.length === 0) return;
+    const ids = [...selectedVariantIds];
+    setSyncSelectedLoading('both');
+    try {
+      const [ml, tn] = await Promise.all([
+        api.syncSelectedStockToMercadoLibre(ids),
+        api.syncSelectedStockToTiendaNube(ids),
+      ]);
+      const errors = (ml.errors || 0) + (tn.errors || 0);
+      if (errors === 0 && ((ml.updated || 0) + (tn.updated || 0)) > 0) {
+        showToast('success', `ML ${ml.updated} y TN ${tn.updated} actualizadas (incluye stock 0).`);
+      } else if (errors > 0) {
+        showToast('warning', `ML ${ml.updated} OK/${ml.errors} err · TN ${tn.updated} OK/${tn.errors} err`);
+      } else {
+        showToast('info', 'Ninguna variante con vínculo ML/TN en la selección.');
+      }
+      setServerListRefreshKey(k => k + 1);
+      setTimeout(() => {
+        api.getVariantExternalStocks(ids).then((ext) => {
+          if (ext?.stocks) setVariantExternalStocks((prev) => ({ ...prev, ...ext.stocks }));
+        }).catch(() => {});
+      }, 1200);
+    } catch (e: any) {
+      showToast('error', e?.message || 'Error al enviar a ML y TN');
+    } finally {
+      setSyncSelectedLoading(null);
+    }
+  };
+
+  /** Masivo por artículo: todas las variantes del grupo (incluido stock 0) → ML + TN. */
+  const handleSyncGroupStockToBoth = async (groupKey: string, variantIds: string[]) => {
+    const ids = Array.from(new Set((variantIds || []).map((id) => String(id || '').trim()).filter(Boolean)));
+    if (ids.length === 0) {
+      showToast('info', 'Este artículo no tiene variantes para sincronizar.');
+      return;
+    }
+    setSyncingGroupKey(groupKey);
+    try {
+      const [ml, tn] = await Promise.all([
+        api.syncSelectedStockToMercadoLibre(ids),
+        api.syncSelectedStockToTiendaNube(ids),
+      ]);
+      const errors = (ml.errors || 0) + (tn.errors || 0);
+      if (errors === 0 && ((ml.updated || 0) + (tn.updated || 0)) > 0) {
+        showToast('success', `${groupKey}: ML ${ml.updated} · TN ${tn.updated} (incluye stock 0).`);
+      } else if (errors > 0) {
+        showToast('warning', `${groupKey}: ML ${ml.updated}/${ml.errors} · TN ${tn.updated}/${tn.errors}`);
+      } else {
+        showToast('info', `${groupKey}: ninguna variante con vínculo ML/TN.`);
+      }
+      setServerListRefreshKey(k => k + 1);
+      setTimeout(() => {
+        api.getVariantExternalStocks(ids).then((ext) => {
+          if (ext?.stocks) setVariantExternalStocks((prev) => ({ ...prev, ...ext.stocks }));
+        }).catch(() => {});
+      }, 1200);
+    } catch (e: any) {
+      showToast('error', e?.message || `Error al sincronizar ${groupKey}`);
+    } finally {
+      setSyncingGroupKey(null);
     }
   };
 
@@ -2400,9 +2474,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                     <Cloud size={17} className="text-slate-400 shrink-0" />
                     Enviar a Tienda Nube
                   </button>
-                  <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncStock(); }} disabled={!!syncLoading} className="w-full flex items-center gap-3 mx-1.5 px-3 py-2.5 text-left text-sm text-slate-300 hover:bg-white/5 hover:text-white rounded-xl disabled:opacity-50 max-w-[calc(100%-12px)]">
-                    <RefreshCw size={17} className="text-slate-400 shrink-0" />
-                    Enviar a TN + ML
+                  <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncStock(); }} disabled={!!syncLoading} className="w-full flex items-center gap-3 mx-1.5 px-3 py-2.5 text-left text-sm text-emerald-300 hover:bg-emerald-900/30 hover:text-emerald-200 rounded-xl disabled:opacity-50 max-w-[calc(100%-12px)] border border-emerald-700/40" title="Envía el stock de LupoHub de TODOS los artículos vinculados a Mercado Libre y Tienda Nube (incluye stock 0)">
+                    <RefreshCw size={17} className="text-emerald-400 shrink-0" />
+                    Enviar stock ML + TN (todos)
                   </button>
                   <button type="button" onClick={() => { setTopDotsOpen(false); handleSyncFromMercadoLibre(); }} disabled={!!syncLoading} className="w-full flex items-center gap-3 mx-1.5 px-3 py-2.5 text-left text-sm text-slate-400 hover:bg-white/5 hover:text-slate-200 rounded-xl disabled:opacity-50 max-w-[calc(100%-12px)]">
                     <RefreshCw size={17} className="text-slate-500 shrink-0" />
@@ -2635,6 +2709,15 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
             Mercado Libre
           </button>
           <button
+            onClick={handleSyncSelectedToBoth}
+            disabled={!!syncSelectedLoading}
+            title="Envía el stock de LupoHub (incluido 0) a Mercado Libre y Tienda Nube"
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-sm font-medium hover:bg-emerald-500/20 disabled:opacity-50 transition-colors"
+          >
+            {syncSelectedLoading === 'both' ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+            ML + TN
+          </button>
+          <button
             onClick={() => setSelectedVariantIds([])}
             className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-slate-400 text-sm hover:text-slate-200 hover:bg-white/5 transition-colors"
           >
@@ -2841,9 +2924,22 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               {isExpanded && (
                 <div className="border-t border-slate-700 bg-slate-900/30 animate-fade-in">
                   <div className="p-2 sm:p-4 space-y-2">
-                    {isAdminOrWarehouse && !loadingVariantsByGroup[groupKey] && variantsToShow.length > 0 && (
+                    {isAdminOrWarehouse && !loadingVariantsByGroup[groupKey] && groupVariants.length > 0 && (
                       <>
                       <div className="flex flex-col sm:flex-row justify-end gap-2 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleSyncGroupStockToBoth(groupKey, articleVariantIds);
+                          }}
+                          disabled={syncingGroupKey === groupKey || !!syncSelectedLoading}
+                          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-semibold transition-colors min-h-[44px] touch-manipulation border border-emerald-500/40 disabled:opacity-50"
+                          title="Envía el stock de LupoHub de TODAS las variantes de este artículo a Mercado Libre y Tienda Nube (incluye stock 0)"
+                        >
+                          {syncingGroupKey === groupKey ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                          Enviar stock ML + TN
+                        </button>
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); openMergeManualModalFromGroup(groupKey, groupVariants); }}
@@ -2891,7 +2987,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                         </button>
                       </div>
                       <p className="text-xs text-slate-500 text-right mt-2">
-                        Un solo flujo para todas las variantes: agregá publicaciones ML/TN y emparejá cada talle/color.
+                        <strong className="text-slate-400">Enviar stock ML + TN</strong> actualiza todas las variantes del artículo (incluido 0).
+                        {' '}Vincular es un flujo aparte para emparejar publicaciones ML/TN por talle/color.
                       </p>
                       </>
                     )}
@@ -4133,6 +4230,28 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                       ))}
                       {syncResult.logs.length > 50 && <div className="text-slate-500">… y {syncResult.logs.length - 50} líneas más</div>}
                     </div>
+                  )}
+                  {syncResult.errors > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const p = syncResult.platform.includes('Tienda') && syncResult.platform.includes('Mercado')
+                          ? 'both'
+                          : syncResult.platform.includes('Mercado')
+                            ? 'ml'
+                            : syncResult.platform.includes('Tienda')
+                              ? 'tn'
+                              : 'both';
+                        void api.downloadStockSyncFailuresReport(p as 'ml' | 'tn' | 'both').then(
+                          () => showToast('success', 'Excel descargado'),
+                          () => showToast('error', 'No se pudo descargar el Excel')
+                        );
+                      }}
+                      className="w-full py-2.5 rounded-xl font-semibold bg-emerald-700 hover:bg-emerald-600 text-white text-sm flex items-center justify-center gap-2"
+                    >
+                      <Download size={16} />
+                      Descargar Excel de no actualizados
+                    </button>
                   )}
                 </>
               )}

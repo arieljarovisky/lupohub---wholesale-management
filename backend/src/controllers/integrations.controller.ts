@@ -21,6 +21,27 @@ import {
   loadExpressTrackingPageConfig,
   syncExpressTrackingPageToStore,
 } from '../services/tiendanubeExpressTrackingPage.service';
+import {
+  matchMlVariationForVariantLink,
+  mlVariationColorSizeFromApi,
+  mlVariationSkuFromApi,
+  normSkuForMlStockMatch,
+  normTextForMlStockMatch,
+  resolveMlStockForVariantLink,
+  enrichMlItemVariationsForMatch,
+  skusCompatible,
+  type MlVariantMatchLink,
+} from '../utils/mlVariationMatch';
+import {
+  beginStockSyncJob,
+  failStockSyncJob,
+  finishStockSyncJob,
+  getStockSyncFailures,
+  getStockSyncJob,
+  isStockSyncRunning,
+  type StockSyncFailure,
+} from '../services/stockSyncJob.service';
+import ExcelJS from 'exceljs';
 const ML_AUTH_URL = 'https://auth.mercadolibre.com.ar/authorization';
 const ML_TOKEN_URL = 'https://api.mercadolibre.com/oauth/token';
 
@@ -364,49 +385,13 @@ function extractMlVariationsFromItemData(it: any): MlVariationRow[] {
   return dedupeMlVariationRows(out);
 }
 
-type VariantMlStockLink = {
+type VariantMlStockLink = MlVariantMatchLink & {
   variantId: string;
   variationId: string | null;
   sku: string;
   color: string;
   size: string;
 };
-
-function normSkuForMlStockMatch(s: string): string {
-  const d = String(s ?? '').replace(/\D/g, '');
-  return (d.replace(/^0+/, '') || '0').toUpperCase();
-}
-
-function normTextForMlStockMatch(s: string): string {
-  return String(s ?? '')
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
-}
-
-function mlVariationSkuFromApi(v: any): string {
-  const skuAttr =
-    Array.isArray(v?.attributes) &&
-    v.attributes.find((a: any) => (a?.id || '').toString().toUpperCase() === 'SELLER_SKU');
-  const skuFromAttr = skuAttr ? (skuAttr.value_name ?? skuAttr.value ?? '').toString().trim() : '';
-  return skuFromAttr || (v?.seller_sku ?? v?.seller_custom_field ?? '').toString().trim();
-}
-
-function mlVariationColorSizeFromApi(v: any): { color: string; size: string } {
-  let color = '';
-  let size = '';
-  const absorb = (attr: any) => {
-    const id = (attr?.id || '').toString().toUpperCase();
-    const name = (attr?.value_name ?? attr?.value ?? attr?.name ?? '').toString().trim();
-    if (!name) return;
-    if (id === 'COLOR' || id === 'COLOUR' || id === 'COR') color = color || name;
-    if (id === 'SIZE' || id === 'SIZE_TYPE' || id === 'TALLE' || id === 'TALLA') size = size || name;
-  };
-  (v?.attribute_combinations || []).forEach(absorb);
-  (Array.isArray(v?.attributes) ? v.attributes : []).forEach(absorb);
-  return { color, size };
-}
 
 function mlVariationRowFromApiVariation(v: any, item: any): MlVariationRow {
   const { color, size } = mlVariationColorSizeFromApi(v);
@@ -466,47 +451,6 @@ async function enrichMercadoLibreItemVariationsForCatalog(item: any, accessToken
     })
   );
   return { ...item, variations: enriched };
-}
-
-/** Empareja la variación ML correcta (evita usar el stock total del ítem cuando hay varias). */
-function matchMlVariationForVariantLink(variations: any[], link: VariantMlStockLink): any | null {
-  if (!variations.length) return null;
-  const varId = link.variationId != null ? String(link.variationId).trim() : '';
-  if (varId) {
-    const byId = variations.find((x: any) => String(x?.id) === varId);
-    if (byId) return byId;
-  }
-  const rawLocalSku = String(link.sku ?? '').trim();
-  if (rawLocalSku) {
-    const localSku = normSkuForMlStockMatch(rawLocalSku);
-    const bySku = variations.find((v: any) => {
-      const rawRemoteSku = mlVariationSkuFromApi(v).trim();
-      return rawRemoteSku && normSkuForMlStockMatch(rawRemoteSku) === localSku;
-    });
-    if (bySku) return bySku;
-  }
-  const colorN = normTextForMlStockMatch(link.color);
-  const sizeN = normTextForMlStockMatch(link.size);
-  if (colorN || sizeN) {
-    const byAttrs = variations.find((v: any) => {
-      const { color, size } = mlVariationColorSizeFromApi(v);
-      const c = normTextForMlStockMatch(color);
-      const s = normTextForMlStockMatch(size);
-      return (!colorN || c === colorN) && (!sizeN || s === sizeN);
-    });
-    if (byAttrs) return byAttrs;
-  }
-  return null;
-}
-
-function resolveMlStockForVariantLink(item: any, link: VariantMlStockLink): number | undefined {
-  const variations: any[] = Array.isArray(item?.variations) ? item.variations : [];
-  if (!variations.length) {
-    return typeof item?.available_quantity === 'number' ? Number(item.available_quantity) : undefined;
-  }
-  const matched = matchMlVariationForVariantLink(variations, link);
-  if (!matched) return undefined;
-  return Number(matched.available_quantity ?? 0);
 }
 
 /** ID de producto de catálogo (/p/MLA...) desde el permalink del ítem. */
@@ -3053,25 +2997,33 @@ export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: nu
     }
   }
 
-  // 2) Variantes con publicación propia en ML (cada variante = un ítem ML). Sincronizar stock ML → TN.
+  // 2) Variantes con mercado_libre_item_id (publicación propia o ítem multi-variación mal vinculado).
+  // Empareja por ml_variant_id / SKU / color+talle; no omitir solo porque el ítem tenga varias variaciones.
   const rowsByItem = await query(`
-    SELECT pv.mercado_libre_item_id AS ml_item_id,
+    SELECT pv.id AS variant_id,
+           pv.mercado_libre_item_id AS ml_item_id,
+           pv.mercado_libre_variant_id AS ml_variant_id,
            p.tienda_nube_id AS tn_id, pv.tienda_nube_variant_id AS tn_variant_id,
            COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack,
            COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack,
-           pv.sku
+           COALESCE(pv.external_sku, pv.sku) AS sku,
+           c.name AS color_name,
+           sz.size_code AS size_code
     FROM product_variants pv
     JOIN product_colors pc ON pc.id = pv.product_color_id
     JOIN products p ON p.id = pc.product_id
+    LEFT JOIN colors c ON c.id = pc.color_id
+    LEFT JOIN sizes sz ON sz.id = pv.size_id
     WHERE pv.mercado_libre_item_id IS NOT NULL
       AND p.tienda_nube_id IS NOT NULL AND pv.tienda_nube_variant_id IS NOT NULL
+      AND NOT (p.mercado_libre_id IS NOT NULL AND pv.mercado_libre_variant_id IS NOT NULL)
   `);
   if (rowsByItem?.length) {
     const batchSize = 10;
     for (let i = 0; i < rowsByItem.length; i += batchSize) {
       const batch = rowsByItem.slice(i, i + batchSize) as any[];
       const itemPromises = batch.map((row: any) =>
-        axios.get(`https://api.mercadolibre.com/items/${row.ml_item_id}`, {
+        axios.get(`https://api.mercadolibre.com/items/${row.ml_item_id}?include_attributes=all`, {
           headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
         }).then(r => r.data).catch(() => null)
       );
@@ -3085,15 +3037,47 @@ export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: nu
           continue;
         }
         const variations = item.variations || [];
-        if (variations.length > 1) {
-          console.warn(
-            `[AutoSync ML→TN] Omitido ml_item ${r.ml_item_id} (SKU ${r.sku}): tiene ${variations.length} variaciones y no se puede inferir una única.`
-          );
-          continue;
+        let mlQty: number;
+        if (variations.length === 0) {
+          mlQty = item.available_quantity ?? 0;
+        } else if (variations.length === 1) {
+          mlQty = variations[0].available_quantity ?? 0;
+        } else {
+          let itemForMatch = item;
+          try {
+            itemForMatch = await enrichMlItemVariationsForMatch(item, mlToken.access_token, (url, cfg) =>
+              axios.get(url, cfg)
+            );
+          } catch {
+            /* best-effort */
+          }
+          const matched = matchMlVariationForVariantLink(itemForMatch.variations || variations, {
+            variationId: r.ml_variant_id,
+            sku: r.sku,
+            color: r.color_name,
+            size: r.size_code,
+          });
+          if (!matched) {
+            console.warn(
+              `[AutoSync ML→TN] Omitido ml_item ${r.ml_item_id} (SKU ${r.sku}): ${variations.length} variaciones y no se pudo emparejar por id/SKU/atributos.`
+            );
+            continue;
+          }
+          mlQty = matched.available_quantity ?? 0;
+          const matchedVarId = String(matched.id);
+          const remoteSku = mlVariationSkuFromApi(matched).trim();
+          const skuExact = !!(r.sku && remoteSku && skusCompatible(String(r.sku), remoteSku));
+          if (r.variant_id && matchedVarId && skuExact) {
+            try {
+              await execute(
+                `UPDATE product_variants SET mercado_libre_variant_id = ? WHERE id = ?`,
+                [matchedVarId, r.variant_id]
+              );
+            } catch {
+              /* backfill best-effort */
+            }
+          }
         }
-        const mlQty = variations.length === 0
-          ? (item.available_quantity ?? 0)
-          : (variations[0].available_quantity ?? 0);
         const mlPack = Math.max(1, Number(r.ml_pack) || 1);
         const tnPack = Math.max(1, Number(r.tn_pack) || 1);
         const tnStock = Math.floor((Number(mlQty) * mlPack) / tnPack);
@@ -3361,13 +3345,21 @@ export async function diagnoseMlTnSyncIssues(): Promise<MlTnSyncIssueRow[]> {
     }
     const variations = item.variations || [];
     if (variations.length > 1) {
-      pushIssue(
-        r,
-        syncMode,
-        'ML_MULTI_VARIACIONES',
-        `El ítem ML ${r.ml_item_id} tiene ${variations.length} variaciones; no se puede inferir una única para sincronizar stock a TN.`
-      );
-      continue;
+      const matched = matchMlVariationForVariantLink(variations, {
+        variationId: r.ml_variant_id,
+        sku: r.variant_sku,
+        color: r.color_name,
+        size: r.size_code,
+      });
+      if (!matched) {
+        pushIssue(
+          r,
+          syncMode,
+          'ML_MULTI_VARIACIONES',
+          `El ítem ML ${r.ml_item_id} tiene ${variations.length} variaciones y no se pudo emparejar por id/SKU/atributos para sincronizar stock a TN.`
+        );
+        continue;
+      }
     }
     const tnOk = await tnVariantExists(String(r.tn_id), String(r.tn_variant_id));
     if (tnOk === false) {
@@ -3396,61 +3388,139 @@ export const getMlTnSyncIssues = async (req: Request, res: Response) => {
 };
 
 // Sincronizar todo el stock local a Tienda Nube
+export const getTiendaNubeStockSyncStatus = async (_req: Request, res: Response) => {
+  const job = getStockSyncJob('tn');
+  res.json({
+    async: true,
+    status: job.status,
+    message: job.message,
+    updated: job.updated,
+    errors: job.errors,
+    total: job.total,
+    logs: job.logs,
+    failuresCount: job.failures.length,
+    startedAt: job.startedAt,
+    finishedAt: job.finishedAt,
+  });
+};
+
 export const syncAllStockToTiendaNube = async (req: Request, res: Response) => {
   try {
+    if (isStockSyncRunning('tn')) {
+      const job = getStockSyncJob('tn');
+      return res.json({
+        async: true,
+        status: 'running',
+        message: 'Ya hay un sync a Tienda Nube en curso',
+        updated: job.updated,
+        errors: job.errors,
+        total: job.total,
+        logs: job.logs,
+        failuresCount: job.failures.length,
+      });
+    }
+
     const integration = await get(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
     if (!integration?.access_token || !integration?.store_id) {
       return res.status(400).json({ message: 'No hay integración con Tienda Nube' });
     }
 
-    const variants = await query(`
-      SELECT pv.id, pv.tienda_nube_variant_id, p.tienda_nube_id, s.stock, pv.sku,
-             COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
-      FROM product_variants pv
-      JOIN product_colors pc ON pc.id = pv.product_color_id
-      JOIN products p ON p.id = pc.product_id
-      LEFT JOIN stocks s ON s.variant_id = pv.id
-      WHERE pv.tienda_nube_variant_id IS NOT NULL AND p.tienda_nube_id IS NOT NULL
-    `);
-
-    let updated = 0;
-    let errors = 0;
-    const logs: string[] = [];
-
-    for (const v of variants) {
-      try {
-        const pack = Math.max(1, Number((v as any).tn_pack) || 1);
-        const stockToSend = Math.floor(Number(v.stock || 0) / pack);
-        await axios.put(
-          `https://api.tiendanube.com/v1/${integration.store_id}/products/${v.tienda_nube_id}/variants/${v.tienda_nube_variant_id}`,
-          { stock: stockToSend },
-          {
-            headers: {
-              'Authentication': `bearer ${integration.access_token}`,
-              'Content-Type': 'application/json',
-              'User-Agent': TN_USER_AGENT
-            }
-          }
-        );
-        updated++;
-        logs.push(`[OK] ${v.sku}: ${v.stock || 0} un. → ${stockToSend} (pack x${pack})`);
-      } catch (e: any) {
-        errors++;
-        logs.push(`[ERROR] ${v.sku}: ${e.response?.data?.description || e.message}`);
-      }
-      if (TN_RATE_LIMIT_DELAY_MS > 0) await sleep(TN_RATE_LIMIT_DELAY_MS);
+    if (!beginStockSyncJob('tn', 'Sincronizando stock a Tienda Nube…')) {
+      return res.json({ async: true, status: 'running', message: 'Ya hay un sync a Tienda Nube en curso', updated: 0, errors: 0, logs: [], failuresCount: 0 });
     }
 
-    res.json({
-      message: 'Sincronización completada',
-      updated,
-      errors,
-      total: variants.length,
-      logs
+    // Responder ya: el proxy del hosting corta ~60s; el trabajo sigue en el proceso.
+    res.status(202).json({
+      async: true,
+      status: 'running',
+      message: 'Sync a Tienda Nube iniciado en segundo plano',
+      updated: 0,
+      errors: 0,
+      logs: [],
+      failuresCount: 0,
     });
+
+    void (async () => {
+      try {
+        const variants = await query(`
+          SELECT pv.id, pv.tienda_nube_variant_id, p.tienda_nube_id, s.stock, pv.sku,
+                 p.name AS product_name, p.sku AS product_sku,
+                 c.name AS color_name, sz.size_code AS size_code,
+                 COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
+          FROM product_variants pv
+          JOIN product_colors pc ON pc.id = pv.product_color_id
+          JOIN products p ON p.id = pc.product_id
+          LEFT JOIN colors c ON c.id = pc.color_id
+          LEFT JOIN sizes sz ON sz.id = pv.size_id
+          LEFT JOIN stocks s ON s.variant_id = pv.id
+          WHERE pv.tienda_nube_variant_id IS NOT NULL AND p.tienda_nube_id IS NOT NULL
+        `);
+
+        let updated = 0;
+        let errors = 0;
+        const logs: string[] = [];
+        const failures: StockSyncFailure[] = [];
+
+        for (const v of variants as any[]) {
+          const pack = Math.max(1, Number(v.tn_pack) || 1);
+          const stockHub = Number(v.stock || 0);
+          const stockToSend = Math.floor(stockHub / pack);
+          const externalId = `${v.tienda_nube_id}/${v.tienda_nube_variant_id}`;
+          try {
+            await axios.put(
+              `https://api.tiendanube.com/v1/${integration.store_id}/products/${v.tienda_nube_id}/variants/${v.tienda_nube_variant_id}`,
+              { stock: stockToSend },
+              {
+                headers: {
+                  'Authentication': `bearer ${integration.access_token}`,
+                  'Content-Type': 'application/json',
+                  'User-Agent': TN_USER_AGENT
+                }
+              }
+            );
+            updated++;
+            logs.push(`[OK] ${v.sku}: ${stockHub} un. → ${stockToSend} (pack x${pack})`);
+          } catch (e: any) {
+            errors++;
+            const reason = e.response?.data?.description || e.response?.data?.message || e.message || 'Error desconocido';
+            logs.push(`[ERROR] ${v.sku}: ${reason}`);
+            failures.push({
+              platform: 'Tienda Nube',
+              sku: String(v.sku || ''),
+              productName: String(v.product_name || ''),
+              productSku: String(v.product_sku || ''),
+              color: String(v.color_name || ''),
+              size: String(v.size_code || ''),
+              stockHub,
+              stockSent: stockToSend,
+              pack,
+              externalId,
+              reason: String(reason),
+            });
+          }
+          if (TN_RATE_LIMIT_DELAY_MS > 0) await sleep(TN_RATE_LIMIT_DELAY_MS);
+        }
+
+        console.log(`[Sync→TN] Fin: ${updated} OK, ${errors} errores, total=${variants.length}`);
+        finishStockSyncJob('tn', {
+          updated,
+          errors,
+          total: variants.length,
+          logs,
+          failures,
+          message: 'Sincronización a Tienda Nube completada',
+        });
+      } catch (error: any) {
+        console.error('Error syncing stock to TN:', error);
+        failStockSyncJob('tn', error?.message || 'Error sincronizando stock a Tienda Nube');
+      }
+    })();
   } catch (error: any) {
     console.error('Error syncing stock to TN:', error);
-    res.status(500).json({ message: 'Error sincronizando stock', error: error.message });
+    failStockSyncJob('tn', error?.message || 'Error sincronizando stock');
+    if (!res.headersSent) {
+      res.status(500).json({ message: 'Error sincronizando stock', error: error.message });
+    }
   }
 };
 
@@ -3524,59 +3594,240 @@ export const syncSelectedStockToTiendaNube = async (req: Request, res: Response)
   }
 };
 
-// Sincronizar stock de la app hacia Mercado Libre (app = fuente de verdad). Usa la misma lógica que updateMercadoLibreStockByVariant (subrecurso + fallback PUT item).
-export const syncAllStockToMercadoLibre = async (req: Request, res: Response) => {
+export const getMercadoLibreStockSyncStatus = async (_req: Request, res: Response) => {
+  const job = getStockSyncJob('ml');
+  res.json({
+    async: true,
+    status: job.status,
+    message: job.message,
+    updated: job.updated,
+    errors: job.errors,
+    total: job.total,
+    logs: job.logs,
+    failuresCount: job.failures.length,
+    startedAt: job.startedAt,
+    finishedAt: job.finishedAt,
+  });
+};
+
+/** Excel con artículos/variantes que no se actualizaron en el último sync masivo. */
+export const exportStockSyncFailuresXlsx = async (req: Request, res: Response) => {
   try {
-    const { updateMercadoLibreStockByVariant, updateMercadoLibreStockByItem } = await import('./stock.controller');
-    const variants = await query(`
-      SELECT pv.id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id, p.mercado_libre_id, s.stock, pv.sku,
-             COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
-      FROM product_variants pv
-      JOIN product_colors pc ON pc.id = pv.product_color_id
-      JOIN products p ON p.id = pc.product_id
-      LEFT JOIN stocks s ON s.variant_id = pv.id
-      WHERE (pv.mercado_libre_item_id IS NOT NULL)
-         OR (pv.mercado_libre_variant_id IS NOT NULL AND p.mercado_libre_id IS NOT NULL)
-    `);
+    const raw = String(req.query.platform || 'both').toLowerCase();
+    const platform = raw === 'ml' || raw === 'tn' || raw === 'both' ? raw : 'both';
+    const failures = getStockSyncFailures(platform);
 
-    let updated = 0;
-    let errors = 0;
-    const logs: string[] = [];
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'LupoHub';
+    workbook.created = new Date();
+    const ws = workbook.addWorksheet('No actualizados');
+    ws.columns = [
+      { header: 'Plataforma', key: 'platform', width: 16 },
+      { header: 'SKU variante', key: 'sku', width: 28 },
+      { header: 'Artículo (SKU)', key: 'productSku', width: 16 },
+      { header: 'Nombre', key: 'productName', width: 36 },
+      { header: 'Color', key: 'color', width: 16 },
+      { header: 'Talle', key: 'size', width: 10 },
+      { header: 'Stock Hub', key: 'stockHub', width: 12 },
+      { header: 'Stock enviado', key: 'stockSent', width: 14 },
+      { header: 'Pack', key: 'pack', width: 8 },
+      { header: 'ID externo', key: 'externalId', width: 28 },
+      { header: 'Motivo', key: 'reason', width: 50 },
+    ];
+    ws.getRow(1).font = { bold: true };
 
-    for (const v of variants) {
-      const pack = Math.max(1, Number((v as any).ml_pack) || 1);
-      const stockToSend = Math.floor(Number(v.stock || 0) / pack);
-      let ok = false;
-      if (v.mercado_libre_id && v.mercado_libre_variant_id) {
-        ok = await updateMercadoLibreStockByVariant(
-          v.mercado_libre_id,
-          v.mercado_libre_variant_id,
-          stockToSend
-        );
-      } else if (v.mercado_libre_item_id) {
-        ok = await updateMercadoLibreStockByItem(v.mercado_libre_item_id, stockToSend);
-      }
-      if (ok) {
-        updated++;
-        logs.push(`[OK] ${v.sku}: ${v.stock || 0} un. → ${stockToSend} (pack x${pack})`);
-      } else {
-        errors++;
-        const mlRef = v.mercado_libre_item_id || (v.mercado_libre_id ? `${v.mercado_libre_id}/${v.mercado_libre_variant_id}` : 'sin vínculo');
-        logs.push(`[ERROR] ${v.sku}: no se pudo actualizar ML ${mlRef}`);
-        console.warn(`[Sync→ML] Falló variante SKU=${v.sku} ML=${mlRef}`);
+    if (failures.length === 0) {
+      ws.addRow({
+        platform: platform === 'ml' ? 'Mercado Libre' : platform === 'tn' ? 'Tienda Nube' : 'ML + TN',
+        sku: '',
+        productSku: '',
+        productName: 'Sin fallos en el último sync (o todavía no terminó)',
+        color: '',
+        size: '',
+        stockHub: '',
+        stockSent: '',
+        pack: '',
+        externalId: '',
+        reason: '',
+      });
+    } else {
+      for (const f of failures) {
+        ws.addRow({
+          platform: f.platform,
+          sku: f.sku,
+          productSku: f.productSku,
+          productName: f.productName,
+          color: f.color,
+          size: f.size,
+          stockHub: f.stockHub,
+          stockSent: f.stockSent,
+          pack: f.pack,
+          externalId: f.externalId,
+          reason: f.reason,
+        });
       }
     }
 
-    res.json({
-      message: 'Stock sincronizado a Mercado Libre',
-      updated,
-      errors,
-      total: variants.length,
-      logs
+    const buf = await workbook.xlsx.writeBuffer();
+    const stamp = new Date().toISOString().slice(0, 10);
+    const filename = `stock_no_actualizados_${platform}_${stamp}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(Buffer.from(buf as ArrayBuffer));
+  } catch (error: any) {
+    console.error('Error exportando fallos de sync stock:', error);
+    res.status(500).json({ message: 'Error generando Excel de no actualizados', error: error.message });
+  }
+};
+
+// Sincronizar stock de la app hacia Mercado Libre (app = fuente de verdad). Usa la misma lógica que updateMercadoLibreStockByVariant (subrecurso + fallback PUT item).
+export const syncAllStockToMercadoLibre = async (req: Request, res: Response) => {
+  try {
+    if (isStockSyncRunning('ml')) {
+      const job = getStockSyncJob('ml');
+      return res.json({
+        async: true,
+        status: 'running',
+        message: 'Ya hay un sync a Mercado Libre en curso',
+        updated: job.updated,
+        errors: job.errors,
+        total: job.total,
+        logs: job.logs,
+        failuresCount: job.failures.length,
+      });
+    }
+
+    if (!beginStockSyncJob('ml', 'Sincronizando stock a Mercado Libre…')) {
+      return res.json({ async: true, status: 'running', message: 'Ya hay un sync a Mercado Libre en curso', updated: 0, errors: 0, logs: [], failuresCount: 0 });
+    }
+
+    // Responder ya: el proxy del hosting corta ~60s; el trabajo sigue en el proceso.
+    res.status(202).json({
+      async: true,
+      status: 'running',
+      message: 'Sync a Mercado Libre iniciado en segundo plano',
+      updated: 0,
+      errors: 0,
+      logs: [],
+      failuresCount: 0,
     });
+
+    void (async () => {
+      try {
+        const { updateMercadoLibreStockByItem } = await import('./stock.controller');
+        const variants = await query(`
+          SELECT pv.id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id, p.mercado_libre_id, s.stock,
+                 COALESCE(pv.external_sku, pv.sku) AS sku,
+                 p.name AS product_name, p.sku AS product_sku,
+                 c.name AS color_name, sz.size_code AS size_code,
+                 COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
+          FROM product_variants pv
+          JOIN product_colors pc ON pc.id = pv.product_color_id
+          JOIN products p ON p.id = pc.product_id
+          LEFT JOIN colors c ON c.id = pc.color_id
+          LEFT JOIN sizes sz ON sz.id = pv.size_id
+          LEFT JOIN stocks s ON s.variant_id = pv.id
+          WHERE (pv.mercado_libre_item_id IS NOT NULL)
+             OR (pv.mercado_libre_variant_id IS NOT NULL AND p.mercado_libre_id IS NOT NULL)
+        `);
+
+        const list = (variants || []) as any[];
+        let updated = 0;
+        let errors = 0;
+        const logs: string[] = [];
+        const failures: StockSyncFailure[] = [];
+        const concurrency = Math.max(1, Math.min(3, parseInt(process.env.ML_SYNC_STOCK_CONCURRENCY || '2', 10) || 2));
+
+        const syncOne = async (v: any): Promise<{ ok: boolean; log: string; failure?: StockSyncFailure }> => {
+          const pack = Math.max(1, Number(v.ml_pack) || 1);
+          const stockHub = Number(v.stock || 0);
+          const stockToSend = Math.floor(stockHub / pack);
+          const matchOpts = {
+            sku: v.sku,
+            color: v.color_name,
+            size: v.size_code,
+            variantId: String(v.id),
+            mlVariationId: v.mercado_libre_variant_id != null ? String(v.mercado_libre_variant_id) : null,
+          };
+          let ok = false;
+          if (v.mercado_libre_item_id) {
+            ok = await updateMercadoLibreStockByItem(v.mercado_libre_item_id, stockToSend, matchOpts);
+          } else if (v.mercado_libre_id && v.mercado_libre_variant_id) {
+            ok = await updateMercadoLibreStockByItem(v.mercado_libre_id, stockToSend, matchOpts);
+          }
+          const mlRef = v.mercado_libre_item_id || (v.mercado_libre_id ? `${v.mercado_libre_id}/${v.mercado_libre_variant_id}` : 'sin vínculo');
+          if (ok) {
+            return { ok: true, log: `[OK] ${v.sku}: ${stockHub} un. → ${stockToSend} (pack x${pack})` };
+          }
+          console.warn(`[Sync→ML] Falló variante SKU=${v.sku} ML=${mlRef}`);
+          const reason = `No se pudo actualizar ML ${mlRef} (publicación cerrada, sin match de variación/SKU, o error de API)`;
+          return {
+            ok: false,
+            log: `[ERROR] ${v.sku}: ${reason}`,
+            failure: {
+              platform: 'Mercado Libre',
+              sku: String(v.sku || ''),
+              productName: String(v.product_name || ''),
+              productSku: String(v.product_sku || ''),
+              color: String(v.color_name || ''),
+              size: String(v.size_code || ''),
+              stockHub,
+              stockSent: stockToSend,
+              pack,
+              externalId: String(mlRef),
+              reason,
+            },
+          };
+        };
+
+        const outcomes: Array<{ ok: boolean; log: string; failure?: StockSyncFailure }> = new Array(list.length);
+        let next = 0;
+        const concurrencySafe = Math.max(1, Math.min(3, concurrency));
+        const workers = Array.from({ length: Math.min(concurrencySafe, Math.max(list.length, 1)) }, async () => {
+          while (true) {
+            const i = next++;
+            if (i >= list.length) break;
+            outcomes[i] = await syncOne(list[i]);
+          }
+        });
+        await Promise.all(workers);
+
+        let okLogged = 0;
+        for (const o of outcomes) {
+          if (!o) continue;
+          if (o.ok) {
+            updated++;
+            if (okLogged < 200) {
+              logs.push(o.log);
+              okLogged++;
+            }
+          } else {
+            errors++;
+            logs.push(o.log);
+            if (o.failure) failures.push(o.failure);
+          }
+        }
+
+        console.log(`[Sync→ML] Fin: ${updated} OK, ${errors} errores, total=${list.length}, concurrency=${concurrency}`);
+        finishStockSyncJob('ml', {
+          updated,
+          errors,
+          total: list.length,
+          logs,
+          failures,
+          message: 'Stock sincronizado a Mercado Libre',
+        });
+      } catch (error: any) {
+        console.error('Error syncing stock to ML:', error);
+        failStockSyncJob('ml', error?.message || 'Error sincronizando stock a Mercado Libre');
+      }
+    })();
   } catch (error: any) {
     console.error('Error syncing stock to ML:', error);
-    res.status(500).json({ message: 'Error sincronizando stock a Mercado Libre', error: error.message });
+    failStockSyncJob('ml', error?.message || 'Error sincronizando stock a Mercado Libre');
+    if (!res.headersSent) {
+      res.status(500).json({ message: 'Error sincronizando stock a Mercado Libre', error: error.message });
+    }
   }
 };
 
@@ -3591,11 +3842,15 @@ export const syncSelectedStockToMercadoLibre = async (req: Request, res: Respons
     const { updateMercadoLibreStockByVariant, updateMercadoLibreStockByItem } = await import('./stock.controller');
     const placeholders = variantIds.map(() => '?').join(',');
     const variants = await query(
-      `SELECT pv.id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id, p.mercado_libre_id, s.stock, pv.sku,
+      `SELECT pv.id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id, p.mercado_libre_id, s.stock,
+              COALESCE(pv.external_sku, pv.sku) AS sku,
+              c.name AS color_name, sz.size_code AS size_code,
               COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
        FROM product_variants pv
        JOIN product_colors pc ON pc.id = pv.product_color_id
        JOIN products p ON p.id = pc.product_id
+       LEFT JOIN colors c ON c.id = pc.color_id
+       LEFT JOIN sizes sz ON sz.id = pv.size_id
        LEFT JOIN stocks s ON s.variant_id = pv.id
        WHERE pv.id IN (${placeholders})
          AND ((pv.mercado_libre_item_id IS NOT NULL)
@@ -3610,15 +3865,18 @@ export const syncSelectedStockToMercadoLibre = async (req: Request, res: Respons
     for (const v of variants) {
       const pack = Math.max(1, Number((v as any).ml_pack) || 1);
       const stockToSend = Math.floor(Number(v.stock || 0) / pack);
+      const matchOpts = {
+        sku: (v as any).sku,
+        color: (v as any).color_name,
+        size: (v as any).size_code,
+        variantId: String(v.id),
+        mlVariationId: v.mercado_libre_variant_id != null ? String(v.mercado_libre_variant_id) : null,
+      };
       let ok = false;
-      if (v.mercado_libre_id && v.mercado_libre_variant_id) {
-        ok = await updateMercadoLibreStockByVariant(
-          v.mercado_libre_id,
-          v.mercado_libre_variant_id,
-          stockToSend
-        );
-      } else if (v.mercado_libre_item_id) {
-        ok = await updateMercadoLibreStockByItem(v.mercado_libre_item_id, stockToSend);
+      if (v.mercado_libre_item_id) {
+        ok = await updateMercadoLibreStockByItem(v.mercado_libre_item_id, stockToSend, matchOpts);
+      } else if (v.mercado_libre_id) {
+        ok = await updateMercadoLibreStockByItem(v.mercado_libre_id, stockToSend, matchOpts);
       }
       if (ok) {
         updated++;
