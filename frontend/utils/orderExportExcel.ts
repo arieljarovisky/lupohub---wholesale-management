@@ -9,8 +9,11 @@ import { nombreTalleDesdeCodigo } from './tallesTango';
 const BORDER = { style: 'thin' as const, color: { argb: 'FF000000' } };
 const ALL_BORDERS = { top: BORDER, left: BORDER, bottom: BORDER, right: BORDER };
 const HEADER_FILL = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFD9D9D9' } };
-/** Separador decimal coma (planilla cliente AR). */
-const MONEY_FMT = '#.##0,00';
+/**
+ * Formato Excel estándar: `.` = decimal, `,` = miles (el cliente los muestra según locale, p. ej. 1.234,56 en AR).
+ * No usar '#.##0,00' — Excel interpreta mal ese patrón y los precios se ven incorrectos.
+ */
+const MONEY_FMT = '#,##0.00';
 /** Cantidades: enteros sin decimales (evita 2,0 en Numbers/Excel AR). */
 const QTY_FMT = '0';
 
@@ -72,13 +75,15 @@ function descriptionForExport(item: OrderItem): string {
   return parts.join(' ') || '—';
 }
 
+/** Misma regla que factura/AFIP: post-picking usa pickeado si hay; si picked=0, la cantidad pedida. */
 function lineQuantity(item: OrderItem, order: Order): number {
   const q = Number(item.quantity) || 0;
   const postPicking =
     !order.noStockImpact &&
     ['Falta controlar', 'Controlado', 'Despachado'].includes(String(order.status || ''));
   if (!postPicking) return q;
-  return Math.min(q, Math.max(0, Number(item.picked) || 0));
+  const picked = Math.max(0, Number(item.picked) || 0);
+  return picked > 0 ? Math.min(q, picked) : q;
 }
 
 function formatShortDateHeader(dateStr: string): string {
