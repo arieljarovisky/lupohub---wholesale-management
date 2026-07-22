@@ -413,6 +413,97 @@ export const getProductBySku = async (req: any, res: Response) => {
       }
     }));
 
+    // Si el vínculo está solo en variant_publications (Más publ.) y no en columnas
+    // principales, el inventario mostraba "Sin vincular" aunque en Vincular se veía lleno.
+    try {
+      const variantIds = variants.map((v: any) => String(v.variant_id)).filter(Boolean);
+      if (variantIds.length > 0) {
+        const ph = variantIds.map(() => '?').join(',');
+        const pubRows = await query(
+          `SELECT variant_id, platform, external_product_id, external_variant_id, created_at
+           FROM variant_publications
+           WHERE variant_id IN (${ph})
+           ORDER BY created_at ASC`,
+          variantIds
+        );
+        const firstPubByVariantPlatform = new Map<string, { productId: string; variantId: string }>();
+        for (const pr of pubRows || []) {
+          const vid = String((pr as any).variant_id || '');
+          const platform = String((pr as any).platform || '');
+          const key = `${vid}::${platform}`;
+          if (!vid || !platform || firstPubByVariantPlatform.has(key)) continue;
+          const productId = String((pr as any).external_product_id || '').trim();
+          const varId = (pr as any).external_variant_id != null ? String((pr as any).external_variant_id).trim() : '';
+          if (!productId && !varId) continue;
+          firstPubByVariantPlatform.set(key, { productId, variantId: varId });
+        }
+
+        for (const v of variants as any[]) {
+          const vid = String(v.variant_id || '');
+          const mlEmpty =
+            !(v.externalIds?.mercadoLibreItemId != null && String(v.externalIds.mercadoLibreItemId).trim() !== '') &&
+            !(v.externalIds?.mercadoLibreVariant != null && String(v.externalIds.mercadoLibreVariant).trim() !== '');
+          const tnEmpty = !(v.externalIds?.tiendaNubeVariant != null && String(v.externalIds.tiendaNubeVariant).trim() !== '');
+
+          if (mlEmpty) {
+            const pub = firstPubByVariantPlatform.get(`${vid}::mercadolibre`);
+            if (pub && (pub.productId || pub.variantId)) {
+              v.externalIds.mercadoLibreItemId = pub.productId || v.externalIds.mercadoLibreItemId;
+              v.externalIds.mercadoLibreVariant = pub.variantId || v.externalIds.mercadoLibreVariant;
+              v.mercado_libre_item_id = v.externalIds.mercadoLibreItemId;
+              v.mercado_libre_variant_id = v.externalIds.mercadoLibreVariant;
+              // Persistir para que inventario, sync y "Desvincular" usen la misma fuente.
+              try {
+                await execute(
+                  `UPDATE product_variants
+                   SET mercado_libre_item_id = COALESCE(NULLIF(mercado_libre_item_id, ''), ?),
+                       mercado_libre_variant_id = COALESCE(NULLIF(mercado_libre_variant_id, ''), ?)
+                   WHERE id = ?
+                     AND (mercado_libre_item_id IS NULL OR mercado_libre_item_id = '')
+                     AND (mercado_libre_variant_id IS NULL OR mercado_libre_variant_id = '')`,
+                  [pub.productId || null, pub.variantId || null, vid]
+                );
+              } catch {
+                /* ignore backfill errors */
+              }
+            }
+          }
+
+          if (tnEmpty) {
+            const pub = firstPubByVariantPlatform.get(`${vid}::tiendanube`);
+            if (pub?.variantId) {
+              v.externalIds.tiendaNubeVariant = pub.variantId;
+              v.tienda_nube_variant_id = pub.variantId;
+              if (pub.productId && !product.tienda_nube_id) {
+                try {
+                  await execute(
+                    `UPDATE products SET tienda_nube_id = COALESCE(NULLIF(tienda_nube_id, ''), ?) WHERE id = ?`,
+                    [pub.productId, product.id]
+                  );
+                  product.tienda_nube_id = pub.productId;
+                } catch {
+                  /* ignore */
+                }
+              }
+              try {
+                await execute(
+                  `UPDATE product_variants
+                   SET tienda_nube_variant_id = COALESCE(NULLIF(tienda_nube_variant_id, ''), ?)
+                   WHERE id = ?
+                     AND (tienda_nube_variant_id IS NULL OR tienda_nube_variant_id = '')`,
+                  [pub.variantId, vid]
+                );
+              } catch {
+                /* ignore */
+              }
+            }
+          }
+        }
+      }
+    } catch (pubMergeErr) {
+      console.warn('[getProductBySku] merge variant_publications:', (pubMergeErr as Error)?.message);
+    }
+
     const stock_total = variants.reduce((sum: number, v: any) => sum + Number(v.stock || 0), 0);
     res.json({ 
       ...product, 

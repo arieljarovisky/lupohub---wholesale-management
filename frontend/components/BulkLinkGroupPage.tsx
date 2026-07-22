@@ -472,6 +472,8 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
   const [unifyAbsorbId, setUnifyAbsorbId] = useState<string | null>(null);
   const [unifyKeeperId, setUnifyKeeperId] = useState<string | null>(null);
   const [unifySaving, setUnifySaving] = useState(false);
+  /** Variantes cuyo ML/TN fue emparejado automáticamente y aún no está guardado en DB. */
+  const [suggestedLinkIds, setSuggestedLinkIds] = useState<Set<string>>(() => new Set());
   const [pendingCatalogFetch, setPendingCatalogFetch] = useState<{
     loadId: number;
     assignments: Record<string, VariantAssignment>;
@@ -536,6 +538,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
     setTnVariants([]);
     setLoading(true);
     try {
+      setSuggestedLinkIds(new Set());
       const p: any = await api.getProductBySku(groupKey, INVENTORY_PRODUCT_FETCH_OPTS);
       if (!p) {
         showToast('error', 'Artículo no encontrado');
@@ -760,6 +763,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
     const next: Record<string, VariantAssignment> = { ...prev };
     const usedMl = new Set<string>();
     const usedTn = new Set<string>();
+    const newlySuggested = new Set<string>();
     localVariants.forEach((local) => {
       const a = next[local.variantId];
       if (a?.ml?.trim()) {
@@ -793,6 +797,8 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
           ml: '',
         };
       }
+      const hadMl = !!next[local.variantId].ml?.trim();
+      const hadTn = !!next[local.variantId].tn?.trim();
       if (!next[local.variantId].ml?.trim() && mlList.length > 0) {
         let match = skuN ? mlList.find((m) => norm(m.sku) === skuN) : null;
         if (!match) {
@@ -809,6 +815,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
             next[local.variantId].ml = match.variationId;
             next[local.variantId].mlItemId = match.itemId;
             usedMl.add(key);
+            if (!hadMl) newlySuggested.add(local.variantId);
           }
         }
       }
@@ -828,11 +835,19 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
             next[local.variantId].tn = match.variantId;
             next[local.variantId].tnProductId = match.productId;
             usedTn.add(key);
+            if (!hadTn) newlySuggested.add(local.variantId);
           }
         }
       }
     });
     setAssignments(next);
+    if (newlySuggested.size > 0) {
+      setSuggestedLinkIds((prev) => {
+        const merged = new Set(prev);
+        newlySuggested.forEach((id) => merged.add(id));
+        return merged;
+      });
+    }
     return next;
   };
 
@@ -1750,6 +1765,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       const removed = await cleanupSiblingPublications();
       const extraPubs = await syncAllSourcePublications();
       onImportComplete?.();
+      setSuggestedLinkIds(new Set());
       const removedNote = removed > 0 ? ` Se quitaron ${removed} publicación(es) duplicada(s) de otras variantes.` : '';
       showToast(
         'success',
@@ -1858,6 +1874,18 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
           </button>
         </div>
       </header>
+
+      {suggestedLinkIds.size > 0 && (
+        <div className="rounded-xl border border-amber-600/40 bg-amber-950/30 px-4 py-3 text-sm text-amber-100/95">
+          <p className="font-semibold text-amber-200">
+            {suggestedLinkIds.size} variante(s) con emparejamiento sugerido (aún no guardado)
+          </p>
+          <p className="text-xs text-amber-200/70 mt-1">
+            El inventario solo marca como vinculado lo que está guardado. Revisá las filas y tocá{' '}
+            <strong className="text-amber-100">Guardar vinculaciones</strong> para que dejen de aparecer como “Sin vincular”.
+          </p>
+        </div>
+      )}
 
       {/* Pasos */}
       <div className="shrink-0 flex flex-wrap items-center gap-2 sm:gap-0">
@@ -2316,6 +2344,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                         />
                       </td>
                       <td className="p-3 align-top">
+                        <div className="flex flex-col items-start gap-1">
                         {hasAssignmentConflict ? (
                           <AlertCircle
                             size={18}
@@ -2335,6 +2364,15 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                         ) : (
                           <Circle size={18} className="text-slate-600" title="Sin vincular" />
                         )}
+                        {suggestedLinkIds.has(v.variantId) && (
+                          <span
+                            className="text-[9px] font-bold uppercase tracking-wide text-amber-300 bg-amber-900/40 border border-amber-700/50 px-1.5 py-0.5 rounded"
+                            title="Emparejado automáticamente: guardá para que el inventario lo tome como vinculado"
+                          >
+                            Sugerido
+                          </span>
+                        )}
+                        </div>
                       </td>
                       <td className="p-3 align-top min-w-[180px]">
                         <div className="space-y-1.5">

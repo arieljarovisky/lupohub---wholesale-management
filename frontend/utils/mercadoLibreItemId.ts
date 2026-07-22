@@ -97,7 +97,7 @@ export type ChannelStockDisplay = { text: string; className: string };
 /** Texto para columna ML/TN en inventario (evita mostrar solo "—"). */
 export function getChannelStockDisplay(linked: boolean, stock: number | undefined): ChannelStockDisplay {
   if (!linked) {
-    return { text: 'Sin sincronizar', className: 'text-amber-500/90' };
+    return { text: 'Sin vincular', className: 'text-amber-500/90' };
   }
   if (stock === undefined) {
     return { text: '—', className: 'text-slate-500' };
