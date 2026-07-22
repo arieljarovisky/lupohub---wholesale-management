@@ -519,6 +519,19 @@ function isAdminProductIncluded(productId: number, products: Record<string, Prod
   return products[productId]?.included !== false;
 }
 
+function stripManualPrices(products: Record<string, ProductOverride>): Record<string, ProductOverride> {
+  const out = { ...products };
+  for (const [pid, ov] of Object.entries(out)) {
+    if (ov?.price !== undefined || ov?.promotionalPrice !== undefined) {
+      const next = { ...ov };
+      delete next.price;
+      delete next.promotionalPrice;
+      out[pid] = next;
+    }
+  }
+  return out;
+}
+
 function mergeProductOverrides(
   server: Record<string, ProductOverride>,
   local: Record<string, ProductOverride>
@@ -2286,7 +2299,11 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
     return () => clearTimeout(t);
   }, [isSeller, userId, selectedPriceListId, sellerOverrides]);
 
-  const effectiveShowPrice = isSeller ? !!selectedPriceListId : config.showPrice && !!selectedPriceListId;
+  const catalogMatchesPriceList =
+    !selectedPriceListId || catalog?.priceListId === selectedPriceListId;
+  const effectiveShowPrice =
+    catalogMatchesPriceList &&
+    (isSeller ? !!selectedPriceListId : config.showPrice && !!selectedPriceListId);
   const selectedPriceListName = useMemo(
     () => priceLists.find((pl) => pl.id === selectedPriceListId)?.name || catalog?.priceListName || '',
     [priceLists, selectedPriceListId, catalog?.priceListName]
@@ -2334,11 +2351,14 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
         : serverCfg;
       const isDirty = isAdmin && JSON.stringify(configRef.current) !== savedSnapshotRef.current;
       if (!isDirty) {
-        setConfig(merged);
-        if (isAdmin && merged.priceListId) {
-          setSelectedPriceListId(merged.priceListId);
+        const nextConfig = overridePriceListId
+          ? { ...merged, products: stripManualPrices(merged.products), priceListId: overridePriceListId }
+          : merged;
+        setConfig(nextConfig);
+        if (isAdmin && nextConfig.priceListId) {
+          setSelectedPriceListId(nextConfig.priceListId);
         }
-        const snap = JSON.stringify(merged);
+        const snap = JSON.stringify(nextConfig);
         setSavedSnapshot(snap);
         savedSnapshotRef.current = snap;
         setSavedAt(cfgRes?.updatedAt || null);
@@ -2360,7 +2380,16 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
         const cached = localStorage.getItem(CATALOG_CACHE_KEY);
         if (cached) {
           const parsed = JSON.parse(cached);
-          if (parsed?.sections) setCatalog(parsed);
+          if (parsed?.sections) {
+            const cachedListId = parsed.priceListId ? String(parsed.priceListId) : '';
+            const localCfg = readCachedConfig();
+            const expectedListId = localCfg?.priceListId ? String(localCfg.priceListId) : '';
+            if (!cachedListId || !expectedListId || cachedListId === expectedListId) {
+              setCatalog(parsed);
+            } else {
+              localStorage.removeItem(CATALOG_CACHE_KEY);
+            }
+          }
         }
       } catch { /* ignore */ }
     }
@@ -2502,15 +2531,44 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
       }
     }
     if (isAdmin) {
-      setConfig((p) => ({
-        ...p,
-        priceListId: id || undefined,
-        showPrice: id ? p.showPrice : false,
-      }));
+      setConfig((p) => {
+        const products = { ...p.products };
+        for (const [pid, ov] of Object.entries(products)) {
+          if (ov?.price !== undefined || ov?.promotionalPrice !== undefined) {
+            const next = { ...ov };
+            delete next.price;
+            delete next.promotionalPrice;
+            products[pid] = next;
+          }
+        }
+        return {
+          ...p,
+          products,
+          priceListId: id || undefined,
+          showPrice: id ? p.showPrice : false,
+        };
+      });
     }
     setError('');
-    if (id && catalog) {
-      void load(id);
+    if (id) {
+      if (catalog) {
+        void load(id);
+      } else if (isAdmin) {
+        try {
+          localStorage.removeItem(CATALOG_CACHE_KEY);
+        } catch {
+          /* ignore */
+        }
+      }
+    } else {
+      setCatalog(null);
+      if (isAdmin) {
+        try {
+          localStorage.removeItem(CATALOG_CACHE_KEY);
+        } catch {
+          /* ignore */
+        }
+      }
     }
   };
 
