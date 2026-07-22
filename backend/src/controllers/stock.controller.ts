@@ -794,17 +794,22 @@ export const updateMercadoLibreStockByItem = async (
     if (!matched?.id) {
       console.log(
         `[ML Stock] Item ${resolvedItemId} tiene ${variations.length} variaciones y no se pudo emparejar` +
-          (opts?.sku ? ` por SKU ${opts.sku}` : ' (sin SKU/atributos)')
+          (opts?.sku ? ` por SKU ${opts.sku}` : ' (sin SKU/atributos)') +
+          (opts?.mlVariationId ? ` (variation_id=${opts.mlVariationId} no está en el ítem)` : '')
       );
-      // Si el ID guardado era dudoso, limpiarlo para no seguir pisando otra variación.
+      // Solo limpiar el ID si YA NO existe en la publicación (quedó huérfano).
+      // No borrar vínculos válidos cuando falla el match por SKU.
       if (opts?.variantId && opts?.mlVariationId) {
-        try {
-          await execute(
-            `UPDATE product_variants SET mercado_libre_variant_id = NULL WHERE id = ? AND mercado_libre_variant_id = ?`,
-            [opts.variantId, String(opts.mlVariationId)]
-          );
-        } catch {
-          /* best-effort */
+        const idStillOnItem = variations.some((v: any) => String(v?.id) === String(opts.mlVariationId));
+        if (!idStillOnItem) {
+          try {
+            await execute(
+              `UPDATE product_variants SET mercado_libre_variant_id = NULL WHERE id = ? AND mercado_libre_variant_id = ?`,
+              [opts.variantId, String(opts.mlVariationId)]
+            );
+          } catch {
+            /* best-effort */
+          }
         }
       }
       return false;
@@ -812,8 +817,10 @@ export const updateMercadoLibreStockByItem = async (
     const variationId = String(matched.id);
     const remoteSku = mlVariationSkuFromApi(matched).trim();
     const skuExact = !!opts?.sku && !!remoteSku && skusCompatible(String(opts.sku), remoteSku);
-    // Solo persistir variation_id si el match fue por SKU exacto (evita backfills cruzados 150↔180).
-    if (opts?.variantId && skuExact) {
+    const linkedBySavedId =
+      !!opts?.mlVariationId && String(opts.mlVariationId) === variationId;
+    // Persistir variation_id si match por SKU exacto o si el usuario ya lo tenía vinculado.
+    if (opts?.variantId && (skuExact || linkedBySavedId)) {
       try {
         await execute(
           `UPDATE product_variants SET mercado_libre_variant_id = ? WHERE id = ?`,
@@ -822,19 +829,10 @@ export const updateMercadoLibreStockByItem = async (
       } catch {
         /* backfill best-effort */
       }
-    } else if (opts?.variantId && opts?.mlVariationId && String(opts.mlVariationId) !== variationId) {
-      try {
-        await execute(
-          `UPDATE product_variants SET mercado_libre_variant_id = NULL WHERE id = ? AND mercado_libre_variant_id = ?`,
-          [opts.variantId, String(opts.mlVariationId)]
-        );
-      } catch {
-        /* best-effort */
-      }
     }
     console.log(
       `[ML Stock] Ítem multi-variación ${resolvedItemId}: emparejado SKU=${opts?.sku || '-'} → var ${variationId}` +
-        (skuExact ? ' (SKU exacto)' : '')
+        (skuExact ? ' (SKU exacto)' : linkedBySavedId ? ' (variation_id guardado)' : '')
     );
     return updateMercadoLibreStockByVariant(resolvedItemId, variationId, stock);
   } catch (e: any) {

@@ -99,10 +99,11 @@ function colorCompatible(localColor: string, remoteColor: string): boolean {
 
 /**
  * Empareja la variación ML correcta.
- * Prioridad: SKU exacto → variationId solo si SKU vacío o coincide → color+talle solo sin SKU local.
+ * Prioridad: variationId guardado (vínculo explícito) → SKU exacto → color+talle solo sin SKU local.
  *
- * Si hay SKU local, NUNCA se usa color+talle como fallback. Eso evitaba que
- * 0067102-150-256 pise la variación de 0073304-150-256 en el mismo MLA.
+ * El ID que el usuario guardó al vincular manda: no se descarta por SKU distinto/vacío en ML
+ * (antes eso dejaba ML en "—" y borraba el vínculo tras sync).
+ * color+talle solo sin SKU local: evita que dos artículos del mismo MLA se pisen.
  */
 export function matchMlVariationForVariantLink(variations: any[], link: MlVariantMatchLink): any | null {
   if (!Array.isArray(variations) || variations.length === 0) return null;
@@ -110,7 +111,13 @@ export function matchMlVariationForVariantLink(variations: any[], link: MlVarian
   const rawLocalSku = String(link.sku ?? '').trim();
   const varId = link.variationId != null ? String(link.variationId).trim() : '';
 
-  // 1) SKU exacto (fuente de verdad)
+  // 1) variationId explícito (vínculo guardado en LupoHub)
+  if (varId) {
+    const byId = variations.find((x: any) => String(x?.id) === varId);
+    if (byId) return byId;
+  }
+
+  // 2) SKU exacto
   if (rawLocalSku) {
     const bySku = variations.filter((v: any) => {
       const rawRemoteSku = mlVariationSkuFromApi(v).trim();
@@ -118,7 +125,6 @@ export function matchMlVariationForVariantLink(variations: any[], link: MlVarian
     });
     if (bySku.length === 1) return bySku[0];
     if (bySku.length > 1) {
-      // Desambiguar por color+talle si hay varios con el mismo SKU
       const colorN = String(link.color ?? '').trim();
       const sizeRaw = String(link.size ?? '').trim();
       if (colorN || sizeRaw) {
@@ -134,23 +140,7 @@ export function matchMlVariationForVariantLink(variations: any[], link: MlVarian
     }
   }
 
-  // 2) variationId solo si no contradice el SKU local
-  if (varId) {
-    const byId = variations.find((x: any) => String(x?.id) === varId);
-    if (byId) {
-      const remoteSku = mlVariationSkuFromApi(byId).trim();
-      if (!rawLocalSku) return byId;
-      // Con SKU local: solo confiar en el ID si el SKU remoto coincide.
-      // Si el remoto no tiene SKU (API incompleta / publicación sin seller_sku),
-      // no usar color+talle aquí: un ID mal guardado + mismo talle pisaba otro artículo.
-      if (remoteSku && skusCompatible(rawLocalSku, remoteSku)) return byId;
-      // ID guardado apunta a otra variación o no se puede verificar: ignorar
-    }
-  }
-
   // 3) color + talle: NUNCA si la variante local tiene SKU.
-  // El GET /items a veces omite SELLER_SKU; sin esta guarda, 0067102-150-256 matcheaba
-  // por color+talle la variación de 0073304-150-256 en el mismo MLA y pisaba el stock.
   if (rawLocalSku) {
     return null;
   }

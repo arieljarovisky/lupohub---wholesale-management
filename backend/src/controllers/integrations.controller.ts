@@ -4047,10 +4047,17 @@ export const getVariantExternalStocks = async (req: Request, res: Response) => {
           ) {
             continue;
           }
-          pushMlLink(pub.itemId, { ...baseLink, variationId: pub.variationId });
+          // Pubs a veces se guardaron sin external_variant_id (clave '...MLA...' + vacío).
+          // Usar el variation_id de la columna principal si el pub no lo trae.
+          pushMlLink(pub.itemId, {
+            ...baseLink,
+            variationId: pub.variationId || linkCtx?.ownVarId || null,
+          });
         }
 
-        if (pubs.length === 0) {
+        // Siempre incluir el vínculo principal (columnas), aunque haya pubs.
+        // Si solo hay pubs sin variation_id, sin esto ML queda en "—".
+        {
           const ownItemId =
             (r as any).mercado_libre_item_id != null && String((r as any).mercado_libre_item_id).trim() !== ''
               ? String((r as any).mercado_libre_item_id).trim()
