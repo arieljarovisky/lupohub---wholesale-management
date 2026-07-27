@@ -75,7 +75,7 @@ type PublicationSource = {
   id: string;
   variationCount?: number;
   loadError?: string;
-  /** Precargado desde vínculos guardados; se quita al pegar un ID nuevo manualmente */
+  /** Precargado desde vínculos guardados al abrir el artículo */
   autoLoaded?: boolean;
   /** Unidades por venta en esta publicación (ej. pack x3 → 3) */
   packSize?: number;
@@ -1300,13 +1300,13 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       return false;
     }
     setMlSources((prev) => {
-      const base = prev.filter((s) => !s.autoLoaded);
-      const seen = new Set(base.map((s) => s.id));
-      const next = [...base];
+      const seen = new Set(prev.map((s) => normalizeMercadoLibreItemId(s.id) || s.id));
+      const next = [...prev];
       ids.forEach((id) => {
         restoreDismissedSource('ml', id);
-        if (!seen.has(id)) {
-          seen.add(id);
+        const norm = normalizeMercadoLibreItemId(id) || id;
+        if (!seen.has(norm)) {
+          seen.add(norm);
           next.push({ id, packSize: packMl });
         }
       });
@@ -1322,13 +1322,13 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       return false;
     }
     setTnSources((prev) => {
-      const base = prev.filter((s) => !s.autoLoaded);
-      const seen = new Set(base.map((s) => s.id));
-      const next = [...base];
+      const seen = new Set(prev.map((s) => normalizedTnCatalogId(s.id)));
+      const next = [...prev];
       ids.forEach((id) => {
         restoreDismissedSource('tn', id);
-        if (!seen.has(id)) {
-          seen.add(id);
+        const norm = normalizedTnCatalogId(id);
+        if (!seen.has(norm)) {
+          seen.add(norm);
           next.push({ id, packSize: packTn });
         }
       });
