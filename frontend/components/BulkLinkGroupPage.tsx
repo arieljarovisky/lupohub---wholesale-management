@@ -25,7 +25,7 @@ import { api } from '../services/api';
 import VariantExtraPublicationsPanel from './VariantExtraPublicationsPanel';
 import { labelTalle, codigoTalleParaSku } from '../utils/tallesTango';
 import { sizesAreBizDuplicatePair, sizesMatchForLink, getSizeCanonicalSet } from '../utils/inventoryUtils';
-import { normalizeMercadoLibreItemId, mercadoLibreItemIdsMatch } from '../utils/mercadoLibreItemId';
+import { normalizeMercadoLibreItemId, mercadoLibreItemIdsMatch, mercadoLibreItemIdCandidates } from '../utils/mercadoLibreItemId';
 import { normalizeTiendaNubeProductId } from '../utils/tiendaNubeUrl';
 
 const INVENTORY_PRODUCT_FETCH_OPTS = { includeRelated: false } as const;
@@ -234,6 +234,20 @@ function matchLocalToRow(
   if (!colorOk) return false;
   if (sizesMatchForLink(local.size, row.size || '')) return true;
   return norm(row.size || '') === norm(local.size);
+}
+
+function mlSourceIdKeys(ids: string[]): Set<string> {
+  const keys = new Set<string>();
+  for (const raw of ids) {
+    for (const c of mercadoLibreItemIdCandidates(raw)) {
+      keys.add(c.toLowerCase());
+    }
+  }
+  return keys;
+}
+
+function mlVariationsForSource(rows: MlVariationRow[], itemId: string): MlVariationRow[] {
+  return rows.filter((m) => mercadoLibreItemIdsMatch(m.itemId, itemId));
 }
 
 function mlOptionKey(row: MlVariationRow): string {
@@ -858,13 +872,15 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
     localVariants: typeof variants,
     mlList: MlVariationRow[],
     tnList: TnVariantRow[],
-    current?: Record<string, VariantAssignment>
+    current?: Record<string, VariantAssignment>,
+    sourceList?: PublicationSource[]
   ): Record<string, VariantAssignment> => {
     const prev = current ?? assignments;
     const next: Record<string, VariantAssignment> = { ...prev };
     const usedMl = new Set<string>();
     const usedTn = new Set<string>();
     const newlySuggested = new Set<string>();
+    const activeMlSources = sourceList ?? mlSources;
     localVariants.forEach((local) => {
       const a = next[local.variantId];
       iterMlAssignmentKeys(a).forEach((key) => usedMl.add(key));
@@ -893,13 +909,13 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       const hadMl = hasAnyMlAssignment(next[local.variantId]);
       const hadTn = !!next[local.variantId].tn?.trim();
       const mlSourcesToMatch =
-        mlSources.length > 0
-          ? mlSources
+        activeMlSources.length > 0
+          ? activeMlSources
           : [{ id: '', packSize: 1 } as PublicationSource];
       for (const src of mlSourcesToMatch) {
         const srcItemId = src.id ? mlItemKey(src.id) : '';
         const scoped =
-          srcItemId && mlSources.length > 0
+          srcItemId && activeMlSources.length > 0
             ? mlList.filter((m) => mercadoLibreItemIdsMatch(m.itemId, src.id))
             : mlList;
         if (scoped.length === 0) continue;
@@ -923,7 +939,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
         usedMl.add(key);
         if (!hadMl) newlySuggested.add(local.variantId);
       }
-      next[local.variantId] = syncPrimaryMlAssignment(next[local.variantId], mlSources);
+      next[local.variantId] = syncPrimaryMlAssignment(next[local.variantId], activeMlSources);
       if (!next[local.variantId].tn?.trim() && tnList.length > 0) {
         let match = skuN ? tnList.find((t) => norm(t.sku) === skuN) : null;
         if (!match) {
@@ -1013,9 +1029,10 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
 
   const getVisibleMlOptionsForSource = useCallback(
     (_variantId: string, itemId: string, selectedVariationId?: string) => {
-      const scoped = (filteredMl.length > 0 ? filteredMl : mlVariations).filter((m) =>
-        mercadoLibreItemIdsMatch(m.itemId, itemId)
-      );
+      const pubRows = mlVariationsForSource(mlVariations, itemId);
+      const scoped = mlSearch.trim()
+        ? pubRows.filter((m) => optionMatch(mlSearch, m))
+        : pubRows;
       const selected = (selectedVariationId || '').trim();
       if (!selected) return scoped;
       if (scoped.some((m) => m.variationId === selected)) return scoped;
@@ -1025,7 +1042,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       if (opt) return [opt, ...scoped];
       return scoped;
     },
-    [filteredMl, mlVariations]
+    [mlVariations, mlSearch]
   );
 
   const linkStats = useMemo(() => {
@@ -1378,19 +1395,39 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       showToast('error', 'No se pudo obtener ningún ID de ML');
       return false;
     }
-    setMlSources((prev) => {
-      const seen = new Set(prev.map((s) => normalizeMercadoLibreItemId(s.id) || s.id));
-      const next = [...prev];
-      ids.forEach((id) => {
-        restoreDismissedSource('ml', id);
-        const norm = normalizeMercadoLibreItemId(id) || id;
-        if (!seen.has(norm)) {
-          seen.add(norm);
-          next.push({ id, packSize: packMl });
-        }
-      });
-      return next;
+    const nextSources = [...mlSources];
+    const seen = new Set(nextSources.map((s) => normalizeMercadoLibreItemId(s.id) || s.id));
+    let addedCount = 0;
+    ids.forEach((id) => {
+      restoreDismissedSource('ml', id);
+      const norm = normalizeMercadoLibreItemId(id) || id;
+      if (!seen.has(norm)) {
+        seen.add(norm);
+        nextSources.push({ id, packSize: packMl });
+        addedCount++;
+      }
     });
+    if (addedCount === 0) {
+      showToast('info', 'Esas publicaciones ML ya están en la lista.');
+      return false;
+    }
+    setMlSources(nextSources);
+    void (async () => {
+      setLoading(true);
+      try {
+        const { rows: mlList } = await fetchMlCatalogRows(nextSources);
+        const baseAssignments = repairMlAssignmentsFromCatalog(variants, assignments, mlList);
+        runAutoMatch(variants, mlList, tnVariants, baseAssignments, nextSources);
+        showToast(
+          'success',
+          `Agregada(s) ${addedCount} publicación(es). ${mlList.length} variaciones ML cargadas.`
+        );
+      } catch {
+        showToast('error', 'No se pudieron cargar las variaciones de la publicación nueva.');
+      } finally {
+        setLoading(false);
+      }
+    })();
     return true;
   };
 
@@ -1453,18 +1490,24 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
         }
       })
     );
-    const fetchedIds = new Set(sources.map((s) => s.id));
+    const fetchedKeys = mlSourceIdKeys(sources.map((s) => s.id));
     const updated = new Map(nextSources.map((s) => [s.id, s]));
     setMlSources((prev) =>
       prev.map((s) => {
-        const patch = updated.get(s.id);
-        return patch ? { ...s, variationCount: patch.variationCount, loadError: patch.loadError } : s;
+        const patch =
+          updated.get(s.id) ||
+          [...updated.values()].find((u) => mercadoLibreItemIdsMatch(u.id, s.id));
+        return patch
+          ? { ...s, variationCount: patch.variationCount, loadError: patch.loadError }
+          : s;
       })
     );
     setMlVariations((prev) => {
       const kept = prev.filter((row) => {
-        const itemNorm = normalizeMercadoLibreItemId(row.itemId) || row.itemId;
-        return !fetchedIds.has(row.itemId) && !fetchedIds.has(itemNorm);
+        for (const c of mercadoLibreItemIdCandidates(row.itemId)) {
+          if (fetchedKeys.has(c.toLowerCase())) return false;
+        }
+        return true;
       });
       return dedupeMlCatalogRows([...kept, ...allRows]);
     });
@@ -1544,7 +1587,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
           }
         }
 
-        runAutoMatch(localVariants, mlResult.rows, tnResult.rows, nextAssign);
+        runAutoMatch(localVariants, mlResult.rows, tnResult.rows, nextAssign, mlSrc);
 
         const errors: string[] = [];
         [...mlResult.sources, ...tnResult.sources].forEach((s) => {
@@ -1570,7 +1613,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
     setLoading(true);
     const { rows: mlList } = await fetchMlCatalogRows(mlSources);
     const baseAssignments = repairMlAssignmentsFromCatalog(variants, assignments, mlList);
-    runAutoMatch(variants, mlList, tnVariants, baseAssignments);
+    runAutoMatch(variants, mlList, tnVariants, baseAssignments, mlSources);
     setLoading(false);
     showToast('success', `Cargadas ${mlList.length} variaciones de ${mlSources.length} publicación(es) ML.`);
   };
@@ -1600,7 +1643,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
         baseAssignments = remapped;
       }
     }
-    runAutoMatch(variants, mlVariations, tnList, baseAssignments);
+    runAutoMatch(variants, mlVariations, tnList, baseAssignments, mlSources);
     setLoading(false);
     showToast('success', `Cargadas ${tnList.length} variantes de ${tnSources.length} producto(s) TN.`);
   };
@@ -1616,7 +1659,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       tnSources.length > 0 ? fetchTnCatalogRows(tnSources) : Promise.resolve({ rows: [] as TnVariantRow[], sources: [] as PublicationSource[] }),
     ]);
     const repaired = repairMlAssignmentsFromCatalog(variants, assignments, mlResult.rows);
-    const next = runAutoMatch(variants, mlResult.rows, tnResult.rows, repaired);
+    const next = runAutoMatch(variants, mlResult.rows, tnResult.rows, repaired, mlSources);
     setLoading(false);
     const errors: string[] = [];
     [...mlResult.sources, ...tnResult.sources].forEach((s) => {
@@ -2573,6 +2616,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                             mlSources.map((src) => {
                               const srcPack = Math.max(1, src.packSize ?? packMl);
                               const selectedVar = getMlVariationForItem(rowAssignment, src.id);
+                              const pubRows = mlVariationsForSource(mlVariations, src.id);
                               const options = getVisibleMlOptionsForSource(v.variantId, src.id, selectedVar);
                               const selectedOpt = options.find((m) => m.variationId === selectedVar);
                               return (
@@ -2582,8 +2626,16 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                                 >
                                   <div className="flex items-center justify-between gap-2">
                                     <span className="font-mono text-[10px] text-amber-200/90 truncate">{src.id}</span>
-                                    <span className="text-[9px] font-bold text-amber-400/80 shrink-0">Pack x{srcPack}</span>
+                                    <span className="text-[9px] font-bold text-amber-400/80 shrink-0">
+                                      Pack x{srcPack}
+                                      {src.variationCount != null ? ` · ${src.variationCount} var.` : ''}
+                                    </span>
                                   </div>
+                                  {src.loadError && (
+                                    <p className="text-[10px] text-red-400" title={src.loadError}>
+                                      Error al cargar: {src.loadError}
+                                    </p>
+                                  )}
                                   {mlVariations.length > 0 ? (
                                     <select
                                       value={selectedVar ? mlOptionKey({ itemId: src.id, variationId: selectedVar } as MlVariationRow) : ''}
@@ -2643,9 +2695,17 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                                       ↳ {formatMlOptionLabel(selectedOpt)}
                                     </p>
                                   )}
-                                  {mlVariations.length > 0 && !selectedVar && options.length === 0 && (
-                                    <p className="text-[10px] text-amber-400/90">Sin variaciones para este filtro.</p>
-                                  )}
+                                  {pubRows.length === 0 && !src.loadError ? (
+                                    <p className="text-[10px] text-amber-400/90">
+                                      Variaciones sin cargar — apretá «Cargar todas ML» en el Paso 1.
+                                    </p>
+                                  ) : mlVariations.length > 0 && !selectedVar && options.length === 0 ? (
+                                    <p className="text-[10px] text-amber-400/90">
+                                      {mlSearch.trim()
+                                        ? 'Sin coincidencias con el filtro de búsqueda.'
+                                        : 'Sin variaciones disponibles para esta publicación.'}
+                                    </p>
+                                  ) : null}
                                 </div>
                               );
                             })
