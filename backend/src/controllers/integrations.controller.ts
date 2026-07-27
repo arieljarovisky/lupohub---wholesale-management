@@ -601,12 +601,12 @@ async function findMercadoLibreSiblingListingIds(
   }).slice(0, 120);
 }
 
-function mlFamilyNameFromItem(item: any): string {
+export function mlFamilyNameFromItem(item: any): string {
   return String(item?.family_name ?? '').trim();
 }
 
 /** Prefijo de artículo Lupo/Tango desde SKU (ej. 24650150542 → 24650, 24650-130-280 → 24650). */
-function extractArticlePrefixFromMlSku(sku: string): string | null {
+export function extractArticlePrefixFromMlSku(sku: string): string | null {
   const s = String(sku || '').trim();
   if (!s) return null;
   const dashHead = s.split('-')[0];
@@ -618,7 +618,7 @@ function extractArticlePrefixFromMlSku(sku: string): string | null {
   return null;
 }
 
-function collectMercadoLibreItemSkus(it: any): string[] {
+export function collectMercadoLibreItemSkus(it: any): string[] {
   const out = new Set<string>();
   const add = (v: unknown) => {
     const t = String(v ?? '').trim();
@@ -675,7 +675,7 @@ async function searchMercadoLibreSellerItems(
 }
 
 /** Publicaciones hermanas por family_name (User Product / catálogo ML). */
-async function resolveMercadoLibreItemsByFamilyName(
+export async function resolveMercadoLibreItemsByFamilyName(
   familyName: string,
   sellerId: string | number,
   accessToken: string
@@ -697,7 +697,7 @@ async function resolveMercadoLibreItemsByFamilyName(
 }
 
 /** Publicaciones del mismo artículo por prefijo de SKU (24650 → 24650130542, 24650140542…). */
-async function resolveMercadoLibreItemsByArticlePrefix(
+export async function resolveMercadoLibreItemsByArticlePrefix(
   prefix: string,
   sellerId: string | number,
   accessToken: string

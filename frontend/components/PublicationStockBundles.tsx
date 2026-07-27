@@ -626,7 +626,12 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
         unmatchedDetails.length === 0
           ? `Se importaron ${res.variations.length} variaciones (${fullyMatched} auto-mapeadas)`
           : `Importadas ${res.variations.length} · ${fullyMatched} OK · ${skippedAssorted} surtido(s) manual · revisar el resto`;
-      showToast(unmatchedDetails.length === 0 || fullyMatched > 0 ? 'success' : 'error', headline);
+      const detail =
+        unmatchedDetails.length > 0 ? `\n${unmatchedDetails.slice(0, 3).join('\n')}` : '';
+      showToast(
+        unmatchedDetails.length === 0 || fullyMatched > 0 ? 'success' : 'error',
+        `${headline}${detail}`
+      );
     } catch (e: any) {
       showToast('error', e?.message || 'No se pudieron importar las variaciones');
     } finally {

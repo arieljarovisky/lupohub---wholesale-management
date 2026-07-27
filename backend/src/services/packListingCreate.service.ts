@@ -6,7 +6,12 @@ import {
   mlColorSizeFromTitle,
   normalizeMercadoLibreItemId,
   resolveMercadoLibreCatalogProductItems,
-  resolveMercadoLibreUserProductItems
+  resolveMercadoLibreUserProductItems,
+  resolveMercadoLibreItemsByFamilyName,
+  resolveMercadoLibreItemsByArticlePrefix,
+  mlFamilyNameFromItem,
+  extractArticlePrefixFromMlSku,
+  collectMercadoLibreItemSkus
 } from '../controllers/integrations.controller';
 import { tnPostWithRetry } from '../utils/tiendanubeClient';
 import {
@@ -2639,6 +2644,15 @@ function listingPackVariationFromColorSize(opts: {
   };
 }
 
+function articlePrefixForPackSku(sku: string): string | null {
+  const s = String(sku || '').trim();
+  if (!s) return null;
+  const digits = s.replace(/\D/g, '');
+  // Artículos Lupo tipo 0069102130999111800 → 0069102
+  if (digits.length >= 13) return digits.slice(0, 7);
+  return extractArticlePrefixFromMlSku(s);
+}
+
 async function fetchMlUserProductChildPackVariations(
   userProductId: string,
   accessToken: string,
@@ -2649,27 +2663,121 @@ async function fetchMlUserProductChildPackVariations(
     sellerId,
     accessToken
   );
-  const rawIds = upResolved.debug.rawItemIds.length
-    ? upResolved.debug.rawItemIds
-    : upResolved.itemCandidates;
+  const idSet = new Set<string>();
+  const addId = (raw: unknown) => {
+    const id = normalizeMercadoLibreItemId(raw) || String(raw || '').trim();
+    if (id && /^ML[A-Z]{0,5}\d+$/i.test(id)) idSet.add(id);
+  };
+  for (const id of upResolved.debug.rawItemIds) addId(id);
+  for (const id of upResolved.itemCandidates) addId(id);
+
+  // Un solo UP suele ser 1 MLA; el pack completo está en la familia / mismos hermanos.
+  let seedItem: any = null;
+  for (const candidate of idSet) {
+    seedItem = await fetchMercadoLibreItemById(candidate, accessToken);
+    if (seedItem) break;
+  }
+
+  // family_id del User Product → todos los UP de la familia → todos sus MLA.
+  try {
+    const upMeta = await axios.get(
+      `https://api.mercadolibre.com/user-products/${encodeURIComponent(userProductId)}`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        validateStatus: () => true
+      }
+    );
+    const familyId = upMeta?.data?.family_id != null ? String(upMeta.data.family_id).trim() : '';
+    const siteId = String(upMeta?.data?.site_id || seedItem?.site_id || 'MLA').trim() || 'MLA';
+    if (familyId) {
+      const famRes = await axios.get(
+        `https://api.mercadolibre.com/sites/${encodeURIComponent(siteId)}/user-products-families/${encodeURIComponent(familyId)}`,
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          validateStatus: () => true
+        }
+      );
+      const familyUps: unknown[] = Array.isArray(famRes?.data?.user_products)
+        ? famRes.data.user_products
+        : Array.isArray(famRes?.data?.results)
+          ? famRes.data.results
+          : Array.isArray(famRes?.data)
+            ? famRes.data
+            : [];
+      for (const entry of familyUps) {
+        const upId =
+          typeof entry === 'string'
+            ? entry
+            : String((entry as any)?.id ?? (entry as any)?.user_product_id ?? '').trim();
+        if (!/^MLAU\d+$/i.test(upId)) continue;
+        const children = await resolveMercadoLibreUserProductItems(upId, sellerId, accessToken);
+        for (const id of children.debug.rawItemIds) addId(id);
+      }
+      console.log('[ML pack] Familia UP expandida', {
+        userProductId,
+        familyId,
+        siteId,
+        familyUpCount: familyUps.length,
+        itemIds: idSet.size
+      });
+    }
+  } catch (e: any) {
+    console.warn('[ML pack] No se pudo expandir family_id:', e?.message || e);
+  }
+
+  if (seedItem) {
+    const familyName = mlFamilyNameFromItem(seedItem);
+    if (familyName) {
+      for (const id of await resolveMercadoLibreItemsByFamilyName(familyName, sellerId, accessToken)) {
+        addId(id);
+      }
+    }
+    for (const sku of collectMercadoLibreItemSkus(seedItem)) {
+      const prefix = articlePrefixForPackSku(sku);
+      if (!prefix) continue;
+      for (const id of await resolveMercadoLibreItemsByArticlePrefix(prefix, sellerId, accessToken)) {
+        addId(id);
+      }
+    }
+  }
+
+  const rawIds = Array.from(idSet);
+  console.log('[ML pack] Ítems para pack MLAU', {
+    userProductId,
+    fromUpSearch: upResolved.debug.rawItemIds.length,
+    expandedTotal: rawIds.length,
+    sample: rawIds.slice(0, 8)
+  });
   if (!rawIds.length) return null;
 
   const out: ListingPackVariation[] = [];
   const seenItems = new Set<string>();
   let title = '';
   let resolvedId = userProductId;
+  const seedPrefix = seedItem
+    ? collectMercadoLibreItemSkus(seedItem)
+        .map((s) => articlePrefixForPackSku(s))
+        .find(Boolean)
+    : null;
 
   for (const candidate of rawIds) {
     const item = await fetchMercadoLibreItemById(candidate, accessToken);
     if (!item) continue;
     const itemId = normalizeMercadoLibreItemId(item.id) || String(item.id || candidate).trim();
     if (!itemId || seenItems.has(itemId)) continue;
+
+    if (seedPrefix) {
+      const itemPrefix = collectMercadoLibreItemSkus(item)
+        .map((s) => articlePrefixForPackSku(s))
+        .find(Boolean);
+      if (itemPrefix && itemPrefix !== seedPrefix) continue;
+    }
+
     seenItems.add(itemId);
     if (!title && item.title) title = String(item.title).trim();
     resolvedId = itemId;
 
     const variations = Array.isArray(item.variations) ? item.variations : [];
-    // User Product: cada ítem hijo suele ser 0–1 variación (un combo). Tratarlo como publicación entera.
     if (variations.length <= 1) {
       const fromItem = mlColorSizeFromItem(item);
       const v0 = variations[0];
@@ -2681,7 +2789,6 @@ async function fetchMlUserProductChildPackVariations(
         listingPackVariationFromColorSize({
           color: fromItem.color,
           size: fromItem.size,
-          // Vacío: el stock se sincroniza al ítem MLA, no a variation_id
           variationId: '',
           itemId,
           sku,
