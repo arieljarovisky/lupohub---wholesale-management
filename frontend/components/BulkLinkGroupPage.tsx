@@ -67,6 +67,8 @@ function dedupeMlCatalogRows(rows: MlVariationRow[]): MlVariationRow[] {
 
 const norm = (s: string) => (s || '').toString().trim().toLowerCase().replace(/\s+/g, ' ');
 
+const PACK_OPTIONS = [1, 2, 3, 6, 12] as const;
+
 type RowLinkStatus = 'complete' | 'partial' | 'empty';
 
 type PublicationSource = {
@@ -75,6 +77,8 @@ type PublicationSource = {
   loadError?: string;
   /** Precargado desde vínculos guardados; se quita al pegar un ID nuevo manualmente */
   autoLoaded?: boolean;
+  /** Unidades por venta en esta publicación (ej. pack x3 → 3) */
+  packSize?: number;
 };
 
 type MlVariationRow = {
@@ -1303,7 +1307,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
         restoreDismissedSource('ml', id);
         if (!seen.has(id)) {
           seen.add(id);
-          next.push({ id });
+          next.push({ id, packSize: packMl });
         }
       });
       return next;
@@ -1325,12 +1329,20 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
         restoreDismissedSource('tn', id);
         if (!seen.has(id)) {
           seen.add(id);
-          next.push({ id });
+          next.push({ id, packSize: packTn });
         }
       });
       return next;
     });
     return true;
+  };
+
+  const updateMlSourcePack = (id: string, packSize: number) => {
+    setMlSources((prev) => prev.map((s) => (s.id === id ? { ...s, packSize } : s)));
+  };
+
+  const updateTnSourcePack = (id: string, packSize: number) => {
+    setTnSources((prev) => prev.map((s) => (s.id === id ? { ...s, packSize } : s)));
   };
 
   const fetchMlCatalogRows = async (sources: PublicationSource[]) => {
@@ -1545,6 +1557,15 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
 
   const syncAllSourcePublications = async () => {
     let added = 0;
+    const mlPackByItemId = new Map(
+      mlSources.map((s) => {
+        const normId = normalizeMercadoLibreItemId(s.id) || s.id;
+        return [normId, Math.max(1, s.packSize ?? packMl)];
+      })
+    );
+    const tnPackByProductId = new Map(
+      tnSources.map((s) => [s.id, Math.max(1, s.packSize ?? packTn)])
+    );
     const mlSourceIds = new Set(
       mlSources.map((s) => normalizeMercadoLibreItemId(s.id)).filter(Boolean) as string[]
     );
@@ -1592,7 +1613,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
               platform: 'mercadolibre',
               externalProductId: row.itemId,
               externalVariantId: row.variationId,
-              packSize: packMl,
+              packSize: mlPackByItemId.get(itemId) ?? packMl,
             });
             added++;
           } catch {
@@ -1614,7 +1635,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
               platform: 'tiendanube',
               externalProductId: row.productId,
               externalVariantId: row.variantId,
-              packSize: packTn,
+              packSize: tnPackByProductId.get(row.productId) ?? packTn,
             });
             added++;
           } catch {
@@ -1946,9 +1967,10 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
           <div>
             <h2 className="text-sm font-bold text-white">Paso 1 · Publicaciones a sincronizar</h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Agregá todas las publicaciones ML y productos TN de este artículo. Al guardar, el stock se sincroniza
-              en cada una según el emparejamiento por <strong className="text-slate-300">SKU</strong> o{' '}
-              <strong className="text-slate-300">talle y color</strong>.
+              Agregá todas las publicaciones ML y productos TN de este artículo. Indicá el{' '}
+              <strong className="text-slate-300">pack</strong> de cada una (ej. x1 unidad, x3 pack). Al guardar, el
+              stock se sincroniza en cada una según el emparejamiento por{' '}
+              <strong className="text-slate-300">SKU</strong> o <strong className="text-slate-300">talle y color</strong>.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -2002,12 +2024,31 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                   Sin publicaciones ML
                 </p>
               ) : (
-                mlSources.map((src) => (
+                mlSources.map((src) => {
+                  const srcPack = Math.max(1, src.packSize ?? packMl);
+                  return (
                   <div
                     key={src.id}
-                    className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-slate-900/50 border border-amber-800/30"
+                    className="flex flex-wrap items-center gap-2 px-2.5 py-2 rounded-lg bg-slate-900/50 border border-amber-800/30"
                   >
                     <span className="flex-1 min-w-0 font-mono text-xs text-amber-100 truncate">{src.id}</span>
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      {PACK_OPTIONS.map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          onClick={() => updateMlSourcePack(src.id, n)}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors ${
+                            srcPack === n
+                              ? 'bg-amber-600 text-white'
+                              : 'bg-slate-800 text-slate-400 hover:text-amber-200'
+                          }`}
+                          title={`Pack x${n}`}
+                        >
+                          x{n}
+                        </button>
+                      ))}
+                    </div>
                     {src.variationCount != null && (
                       <span className="text-[10px] text-emerald-400 shrink-0">{src.variationCount} var.</span>
                     )}
@@ -2025,7 +2066,8 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                       <Trash2 size={14} />
                     </button>
                   </div>
-                ))
+                  );
+                })
               )}
             </div>
             <div className="flex gap-2">
@@ -2088,12 +2130,31 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                   Sin productos TN
                 </p>
               ) : (
-                tnSources.map((src) => (
+                tnSources.map((src) => {
+                  const srcPack = Math.max(1, src.packSize ?? packTn);
+                  return (
                   <div
                     key={src.id}
-                    className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-slate-900/50 border border-cyan-800/30"
+                    className="flex flex-wrap items-center gap-2 px-2.5 py-2 rounded-lg bg-slate-900/50 border border-cyan-800/30"
                   >
                     <span className="flex-1 min-w-0 font-mono text-xs text-cyan-100 truncate">{src.id}</span>
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      {PACK_OPTIONS.map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          onClick={() => updateTnSourcePack(src.id, n)}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors ${
+                            srcPack === n
+                              ? 'bg-cyan-600 text-white'
+                              : 'bg-slate-800 text-slate-400 hover:text-cyan-200'
+                          }`}
+                          title={`Pack x${n}`}
+                        >
+                          x{n}
+                        </button>
+                      ))}
+                    </div>
                     {src.variationCount != null && (
                       <span className="text-[10px] text-emerald-400 shrink-0">{src.variationCount} var.</span>
                     )}
@@ -2111,7 +2172,8 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                       <Trash2 size={14} />
                     </button>
                   </div>
-                ))
+                  );
+                })
               )}
             </div>
             <div className="flex gap-2">

@@ -2093,12 +2093,16 @@ export const addVariantPublication = async (req: Request, res: Response) => {
     if (!exists) return res.status(404).json({ message: 'Variante no encontrada' });
     const id = uuidv4();
     await execute(
-      `INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size) VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE pack_size = VALUES(pack_size)`,
       [id, variantId, platform, String(externalProductId).trim(), extVariantId, pack]
     );
     const row = await get(
-      'SELECT id, variant_id, platform, external_product_id, external_variant_id, pack_size, created_at FROM variant_publications WHERE id = ?',
-      [id]
+      `SELECT id, variant_id, platform, external_product_id, external_variant_id, pack_size, created_at
+       FROM variant_publications
+       WHERE variant_id = ? AND platform = ? AND external_product_id = ? AND external_variant_id = ?`,
+      [variantId, platform, String(externalProductId).trim(), extVariantId]
     );
     try {
       const stockRow = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [variantId]);
