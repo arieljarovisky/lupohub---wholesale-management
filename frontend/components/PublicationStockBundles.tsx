@@ -30,6 +30,28 @@ function normalizeSizeKey(s: string): string {
     .trim();
 }
 
+/** Tokens de talle para "130 - P" ↔ "130" / "P". */
+function sizeMatchTokens(s: string): string[] {
+  const raw = stripDiacritics(String(s || '').toLowerCase()).replace(/^talle\s+/, '').trim();
+  if (!raw) return [];
+  const tokens = new Set<string>();
+  tokens.add(raw.replace(/\s+/g, ''));
+  for (const part of raw.split(/[-/·|,]+/)) {
+    const t = part.trim().replace(/\s+/g, '');
+    if (t) tokens.add(t);
+  }
+  const digits = raw.match(/\d{2,3}/g);
+  if (digits) digits.forEach((d) => tokens.add(d));
+  return [...tokens];
+}
+
+function sizesLooselyMatch(a: string, b: string): boolean {
+  const ta = sizeMatchTokens(a);
+  const tb = sizeMatchTokens(b);
+  if (!ta.length || !tb.length) return !a?.trim() || !b?.trim();
+  return ta.some((x) => tb.includes(x));
+}
+
 type DraftPublicationImage = {
   key: string;
   url: string;
@@ -140,6 +162,8 @@ type PackColorVariant = {
   bundleId?: string;
   label: string;
   externalVariantId: string;
+  /** MLA hijo cuando el pack es User Product (MLAU). */
+  externalProductId?: string;
   items: DraftItem[];
   search: string;
   expanded: boolean;
@@ -149,6 +173,7 @@ const newPackColorVariant = (partial?: Partial<PackColorVariant>): PackColorVari
   key: Math.random().toString(36).slice(2),
   label: '',
   externalVariantId: '',
+  externalProductId: undefined,
   items: [],
   search: '',
   expanded: true,
@@ -438,8 +463,8 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
       const colorKey = normalizeColorKey(colorRaw);
       if (!colorKey) return null;
       const sizeKey = normalizeSizeKey(sizeRaw);
-      const candidates = sizeKey
-        ? articleVariants.filter((v) => normalizeSizeKey(v.size) === sizeKey)
+      const candidates = sizeRaw.trim()
+        ? articleVariants.filter((v) => sizesLooselyMatch(v.size, sizeRaw))
         : articleVariants;
       const pool = candidates.length > 0 ? candidates : articleVariants;
 
@@ -485,31 +510,57 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
       }
 
       const existingByVar = new Map<string, PackColorVariant>();
+      const existingByItem = new Map<string, PackColorVariant>();
       for (const pv of packColorVariants) {
         const ext = parseExternalVariantId(pv.externalVariantId);
         if (ext && pv.bundleId) existingByVar.set(ext, pv);
+        const itemNorm = pv.externalProductId
+          ? normalizeMercadoLibreItemId(pv.externalProductId) || pv.externalProductId
+          : '';
+        if (itemNorm && pv.bundleId) existingByItem.set(itemNorm, pv);
       }
 
       const unmatchedDetails: string[] = [];
       let fullyMatched = 0;
       let partial = 0;
+      let skippedAssorted = 0;
 
       const next: PackColorVariant[] = res.variations.map((v) => {
         const sizeSuffix = v.sizeValueName ? ` (${v.sizeValueName})` : '';
         const label = `${v.colorValueName || 'Combo'}${sizeSuffix}`.trim();
+        const itemNorm = v.itemId
+          ? normalizeMercadoLibreItemId(v.itemId) || v.itemId
+          : '';
 
-        const existing = existingByVar.get(v.variationId);
+        const existing =
+          (itemNorm && existingByItem.get(itemNorm)) ||
+          (v.variationId ? existingByVar.get(v.variationId) : undefined);
         if (existing) {
-          existingByVar.delete(v.variationId);
+          if (itemNorm) existingByItem.delete(itemNorm);
+          if (v.variationId) existingByVar.delete(v.variationId);
           return {
             ...existing,
             label: existing.label || label,
-            externalVariantId: v.variationId,
+            externalVariantId: v.variationId || existing.externalVariantId,
+            externalProductId: v.itemId || existing.externalProductId,
             expanded: existing.items.length === 0
           };
         }
 
-        const colorsToMatch = v.parsedColors.length > 0 ? v.parsedColors : [];
+        // Surtido: dejar fila vacía para carga manual (no auto-map).
+        if (v.isAssorted || v.parsedColors.length === 0) {
+          skippedAssorted += 1;
+          unmatchedDetails.push(`${label} → surtido: completar colores a mano`);
+          return newPackColorVariant({
+            label,
+            externalVariantId: v.variationId,
+            externalProductId: v.itemId,
+            items: [],
+            expanded: true
+          });
+        }
+
+        const colorsToMatch = v.parsedColors;
         const items: DraftItem[] = [];
         const colorMisses: string[] = [];
 
@@ -527,10 +578,7 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
           });
         }
 
-        const isAssorted = v.isAssorted || colorsToMatch.length === 0;
-        if (isAssorted) {
-          unmatchedDetails.push(`${label} → variación surtida sin colores parseables`);
-        } else if (colorMisses.length > 0) {
+        if (colorMisses.length > 0) {
           unmatchedDetails.push(
             `${label} → sin coincidencia para: ${colorMisses.join(', ')}`
           );
@@ -545,12 +593,27 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
         return newPackColorVariant({
           label,
           externalVariantId: v.variationId,
+          externalProductId: v.itemId,
           items,
           expanded: items.length === 0 || colorMisses.length > 0
         });
       });
 
-      const orphanedKeptCombos = [...existingByVar.values()];
+      const orphanedKeptCombos = [
+        ...new Map(
+          [...existingByVar.values(), ...existingByItem.values()].map((pv) => [pv.key, pv])
+        ).values()
+      ].filter(
+        (pv) =>
+          !next.some(
+            (x) =>
+              (pv.bundleId && x.bundleId === pv.bundleId) ||
+              (pv.externalProductId &&
+                x.externalProductId &&
+                (normalizeMercadoLibreItemId(pv.externalProductId) || pv.externalProductId) ===
+                  (normalizeMercadoLibreItemId(x.externalProductId) || x.externalProductId))
+          )
+      );
       const finalList = [...next, ...orphanedKeptCombos];
       setPackColorVariants(finalList.length > 0 ? finalList : [newPackColorVariant()]);
       setVariationImportReport({
@@ -562,8 +625,8 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
       const headline =
         unmatchedDetails.length === 0
           ? `Se importaron ${res.variations.length} variaciones (${fullyMatched} auto-mapeadas)`
-          : `Importadas ${res.variations.length} variaciones · ${unmatchedDetails.length} necesitan revisión`;
-      showToast(unmatchedDetails.length === 0 ? 'success' : 'error', headline);
+          : `Importadas ${res.variations.length} · ${fullyMatched} OK · ${skippedAssorted} surtido(s) manual · revisar el resto`;
+      showToast(unmatchedDetails.length === 0 || fullyMatched > 0 ? 'success' : 'error', headline);
     } catch (e: any) {
       showToast('error', e?.message || 'No se pudieron importar las variaciones');
     } finally {
@@ -750,6 +813,7 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
           bundleId: b.id,
           label: b.label || '',
           externalVariantId: b.externalVariantId || '',
+          externalProductId: b.externalProductId || g.externalProductId,
           expanded: true,
           items: b.items.map((it) => ({
             variantId: it.variantId,
@@ -799,6 +863,7 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
         id: pv.bundleId,
         label: pv.label.trim() || undefined,
         externalVariantId: parseExternalVariantId(pv.externalVariantId) || undefined,
+        externalProductId: pv.externalProductId?.trim() || undefined,
         items: pv.items.map((d) => ({ variantId: d.variantId, unitsPerSale: d.unitsPerSale }))
       }));
 
@@ -869,13 +934,38 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
     }
     setSaving(true);
     try {
-      await api.savePublicationBundleGroup({
-        platform,
-        externalProductId: productId,
-        listingLabel: listingLabel.trim() || null,
-        variants
-      });
-      showToast('success', 'Pack guardado');
+      // User Product (MLAU): cada combo es un MLA hijo → un bundle por MLA.
+      const byProduct = new Map<string, typeof variants>();
+      for (const v of variants) {
+        const extProd = (v.externalProductId || productId).trim();
+        const list = byProduct.get(extProd) || [];
+        list.push(v);
+        byProduct.set(extProd, list);
+      }
+      let saved = 0;
+      for (const [extProd, groupVariants] of byProduct) {
+        await api.savePublicationBundleGroup({
+          platform,
+          externalProductId: extProd,
+          listingLabel:
+            (listingLabel.trim() && byProduct.size === 1
+              ? listingLabel.trim()
+              : groupVariants[0]?.label) || null,
+          variants: groupVariants.map((v) => ({
+            id: v.id,
+            label: v.label,
+            externalVariantId: v.externalVariantId,
+            items: v.items
+          }))
+        });
+        saved += groupVariants.length;
+      }
+      showToast(
+        'success',
+        byProduct.size > 1
+          ? `Pack guardado: ${saved} combo(s) en ${byProduct.size} publicaciones ML`
+          : 'Pack guardado'
+      );
       resetForm();
       await loadBundles();
     } catch (e: any) {
@@ -1050,11 +1140,16 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
                 <div className="space-y-2">
                   <div>
                     <label className="text-[11px] text-slate-500 block mb-1">
-                      {platform === 'mercadolibre' ? 'MLA / link publicación pack' : 'ID producto pack TN'}
+                      {platform === 'mercadolibre'
+                        ? 'MLA / MLAU / link del pack'
+                        : 'ID producto pack TN'}
                     </label>
                     <input
                       value={listingInput}
                       onChange={(e) => setListingInput(e.target.value)}
+                      placeholder={
+                        platform === 'mercadolibre' ? 'Ej. MLAU3982109881 o MLA…' : 'ID producto'
+                      }
                       className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white font-mono text-sm"
                     />
                   </div>
@@ -1072,7 +1167,7 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
                         !selectedArticleKey
                           ? 'Seleccioná el artículo del pack antes de importar'
                           : !listingInput.trim()
-                          ? 'Pegá el MLA / link de la publicación pack'
+                          ? 'Pegá el MLA / MLAU del pack'
                           : `Trae las variaciones de ${platform === 'mercadolibre' ? 'Mercado Libre' : 'Tienda Nube'} y arma las combinaciones automáticamente`
                       }
                     >
@@ -1084,8 +1179,8 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
                       Importar variaciones de {platform === 'mercadolibre' ? 'ML' : 'TN'}
                     </button>
                     <p className="text-[10px] text-slate-500 flex-1 min-w-0">
-                      Carga cada variación de la publicación e intenta asignar automáticamente las variantes del
-                      artículo a descontar (por color + talle).
+                      Si pegás un MLAU, expande cada MLA hijo y mapea combos (ej. Negro-Blanco-Gris → 3
+                      colores). Los «Surtido» quedan para completar a mano.
                     </p>
                   </div>
                   {variationImportReport && (
@@ -1672,14 +1767,29 @@ const PublicationStockBundles: React.FC<PublicationStockBundlesProps> = ({
                           {linkMode === 'existing' && (
                             <div>
                               <label className="text-[10px] text-slate-500 block mb-1">
-                                {platform === 'mercadolibre' ? 'ID variación ML' : 'ID variante TN'}
+                                {pv.externalProductId && !pv.externalVariantId
+                                  ? 'Publicación ML (ítem)'
+                                  : platform === 'mercadolibre'
+                                    ? 'ID variación ML'
+                                    : 'ID variante TN'}
                               </label>
-                              <input
-                                value={pv.externalVariantId}
-                                onChange={(e) => updateColorVariant(pv.key, { externalVariantId: e.target.value })}
-                                placeholder="Obligatorio si hay varias"
-                                className="w-full bg-slate-900 border border-slate-600 rounded-lg px-2 py-1.5 text-white font-mono text-xs"
-                              />
+                              {pv.externalProductId && !pv.externalVariantId ? (
+                                <input
+                                  value={pv.externalProductId}
+                                  onChange={(e) =>
+                                    updateColorVariant(pv.key, { externalProductId: e.target.value.trim() })
+                                  }
+                                  placeholder="MLA…"
+                                  className="w-full bg-slate-900 border border-slate-600 rounded-lg px-2 py-1.5 text-white font-mono text-xs"
+                                />
+                              ) : (
+                                <input
+                                  value={pv.externalVariantId}
+                                  onChange={(e) => updateColorVariant(pv.key, { externalVariantId: e.target.value })}
+                                  placeholder="Obligatorio si hay varias"
+                                  className="w-full bg-slate-900 border border-slate-600 rounded-lg px-2 py-1.5 text-white font-mono text-xs"
+                                />
+                              )}
                             </div>
                           )}
                         </div>

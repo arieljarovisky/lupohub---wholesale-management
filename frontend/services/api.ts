@@ -1011,6 +1011,7 @@ export const api = {
     title: string;
     variations: Array<{
       variationId: string;
+      itemId?: string;
       colorValueName: string;
       sizeValueName: string;
       parsedColors: string[];
@@ -1029,6 +1030,7 @@ export const api = {
       variations: Array.isArray(res?.variations)
         ? res.variations.map((v: any) => ({
             variationId: String(v?.variationId ?? ''),
+            itemId: v?.itemId ? String(v.itemId) : undefined,
             colorValueName: String(v?.colorValueName ?? ''),
             sizeValueName: String(v?.sizeValueName ?? ''),
             parsedColors: Array.isArray(v?.parsedColors)
