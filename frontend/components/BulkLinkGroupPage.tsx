@@ -105,9 +105,91 @@ type TnVariantRow = {
 type VariantAssignment = {
   ml?: string;
   mlItemId?: string;
+  /** Variación ML por publicación (itemId normalizado → variationId) */
+  mlByItemId?: Record<string, string>;
   tn?: string;
   tnProductId?: string;
 };
+
+function mlItemKey(itemId: string): string {
+  return normalizeMercadoLibreItemId(itemId) || itemId;
+}
+
+function getMlVariationForItem(a: VariantAssignment | undefined, itemId: string): string {
+  if (!a) return '';
+  const key = mlItemKey(itemId);
+  if (a.mlByItemId?.[key]) return a.mlByItemId[key];
+  if (
+    a.mlItemId &&
+    mercadoLibreItemIdsMatch(a.mlItemId, itemId) &&
+    a.ml &&
+    !isMercadoLibrePublicationId(a.ml)
+  ) {
+    return a.ml;
+  }
+  return '';
+}
+
+function setMlVariationForItem(
+  a: VariantAssignment | undefined,
+  itemId: string,
+  variationId: string
+): VariantAssignment {
+  const key = mlItemKey(itemId);
+  const mlByItemId = { ...(a?.mlByItemId || {}) };
+  if (variationId) mlByItemId[key] = variationId;
+  else delete mlByItemId[key];
+  return {
+    ...(a || {}),
+    mlByItemId: Object.keys(mlByItemId).length > 0 ? mlByItemId : undefined,
+  };
+}
+
+function primaryMlSourceItemId(sources: PublicationSource[]): string | null {
+  if (sources.length === 0) return null;
+  const x1 = sources.find((s) => Math.max(1, s.packSize ?? 1) === 1);
+  const pick = x1 ?? sources[0];
+  return mlItemKey(pick.id);
+}
+
+function syncPrimaryMlAssignment(
+  a: VariantAssignment | undefined,
+  sources: PublicationSource[]
+): VariantAssignment {
+  if (!a) return {};
+  const primaryItem = primaryMlSourceItemId(sources);
+  if (!primaryItem) return a;
+  const variationId = getMlVariationForItem(a, primaryItem);
+  if (!variationId) {
+    return { ...a, ml: '', mlItemId: undefined };
+  }
+  return { ...a, ml: variationId, mlItemId: primaryItem };
+}
+
+function hasAnyMlAssignment(a: VariantAssignment | undefined): boolean {
+  if (!a) return false;
+  if (a.ml?.trim() && !isMercadoLibrePublicationId(a.ml)) return true;
+  return Object.values(a.mlByItemId || {}).some((v) => !!v.trim());
+}
+
+function iterMlAssignmentKeys(a: VariantAssignment | undefined): string[] {
+  if (!a) return [];
+  const keys: string[] = [];
+  if (a.mlByItemId) {
+    for (const [itemId, variationId] of Object.entries(a.mlByItemId)) {
+      const vid = variationId.trim();
+      if (!vid) continue;
+      const key = mlAssignmentKey(vid, itemId);
+      if (key) keys.push(key);
+    }
+  }
+  const ml = (a.ml || '').trim();
+  if (ml && !isMercadoLibrePublicationId(ml)) {
+    const key = mlAssignmentKey(ml, a.mlItemId);
+    if (key && !keys.includes(key)) keys.push(key);
+  }
+  return keys;
+}
 
 function primaryMlItemIdFromAssignment(a?: VariantAssignment): string | null {
   if (!a) return null;
@@ -287,7 +369,7 @@ function getRowLinkStatus(ml?: string, tn?: string): RowLinkStatus {
 }
 
 function hasMlAssignment(a?: VariantAssignment): boolean {
-  return !!a?.ml?.trim();
+  return hasAnyMlAssignment(a);
 }
 
 function variantHadTnLink(externalIds?: { tiendaNubeVariant?: string | number | null }): boolean {
@@ -310,6 +392,7 @@ function clearMlAssignmentFields(assignment?: VariantAssignment): VariantAssignm
     ...assignment,
     ml: '',
     mlItemId: undefined,
+    mlByItemId: undefined,
   };
 }
 
@@ -696,9 +779,23 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
           parentTn ||
           undefined;
         const tnProductId = tnProductIdRaw ? normalizedTnCatalogId(tnProductIdRaw) : undefined;
+        const mlByItemId: Record<string, string> = {};
+        if (mlItemId && mlVal) {
+          mlByItemId[mlItemKey(mlItemId)] = mlVal;
+        }
+        pubs.forEach((pub: { platform: string; external_product_id?: string; external_variant_id?: string }) => {
+          if (pub.platform !== 'mercadolibre' || !pub.external_product_id) return;
+          const varId =
+            pub.external_variant_id != null && String(pub.external_variant_id).trim() !== ''
+              ? String(pub.external_variant_id).trim()
+              : '';
+          if (!varId || isMercadoLibrePublicationId(varId)) return;
+          mlByItemId[mlItemKey(pub.external_product_id)] = varId;
+        });
         nextAssign[v.variantId] = {
           ml: mlVal,
           mlItemId: mlItemId,
+          mlByItemId: Object.keys(mlByItemId).length > 0 ? mlByItemId : undefined,
           tn: tnVal,
           tnProductId,
         };
@@ -770,15 +867,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
     const newlySuggested = new Set<string>();
     localVariants.forEach((local) => {
       const a = next[local.variantId];
-      if (a?.ml?.trim()) {
-        const ml = a.ml.trim();
-        if (isMercadoLibrePublicationId(ml)) return;
-        if (a.mlItemId) {
-          usedMl.add(mlOptionKey({ itemId: a.mlItemId, variationId: ml } as MlVariationRow));
-        } else {
-          usedMl.add(ml);
-        }
-      }
+      iterMlAssignmentKeys(a).forEach((key) => usedMl.add(key));
       if (a?.tn?.trim()) {
         const tn = a.tn.trim();
         const pid = a.tnProductId?.trim();
@@ -801,28 +890,40 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
           ml: '',
         };
       }
-      const hadMl = !!next[local.variantId].ml?.trim();
+      const hadMl = hasAnyMlAssignment(next[local.variantId]);
       const hadTn = !!next[local.variantId].tn?.trim();
-      if (!next[local.variantId].ml?.trim() && mlList.length > 0) {
-        let match = skuN ? mlList.find((m) => norm(m.sku) === skuN) : null;
+      const mlSourcesToMatch =
+        mlSources.length > 0
+          ? mlSources
+          : [{ id: '', packSize: 1 } as PublicationSource];
+      for (const src of mlSourcesToMatch) {
+        const srcItemId = src.id ? mlItemKey(src.id) : '';
+        const scoped =
+          srcItemId && mlSources.length > 0
+            ? mlList.filter((m) => mercadoLibreItemIdsMatch(m.itemId, src.id))
+            : mlList;
+        if (scoped.length === 0) continue;
+        if (srcItemId && getMlVariationForItem(next[local.variantId], srcItemId)) continue;
+        if (!srcItemId && next[local.variantId].ml?.trim()) continue;
+        let match = skuN ? scoped.find((m) => norm(m.sku) === skuN) : null;
         if (!match) {
-          match = mlList.find(
+          match = scoped.find(
             (m) =>
               norm(m.color) === colorN &&
               (norm(m.size) === sizeN || sizesMatchForLink(local.size, m.size || ''))
           );
         }
-        if (!match && mlList.length === 1) match = mlList[0];
-        if (match) {
-          const key = mlOptionKey(match);
-          if (!usedMl.has(key)) {
-            next[local.variantId].ml = match.variationId;
-            next[local.variantId].mlItemId = match.itemId;
-            usedMl.add(key);
-            if (!hadMl) newlySuggested.add(local.variantId);
-          }
-        }
+        if (!match && scoped.length === 1) match = scoped[0];
+        if (!match) continue;
+        const key = mlOptionKey(match);
+        if (usedMl.has(key)) continue;
+        next[local.variantId] = srcItemId
+          ? setMlVariationForItem(next[local.variantId], srcItemId, match.variationId)
+          : { ...next[local.variantId], ml: match.variationId, mlItemId: match.itemId };
+        usedMl.add(key);
+        if (!hadMl) newlySuggested.add(local.variantId);
       }
+      next[local.variantId] = syncPrimaryMlAssignment(next[local.variantId], mlSources);
       if (!next[local.variantId].tn?.trim() && tnList.length > 0) {
         let match = skuN ? tnList.find((t) => norm(t.sku) === skuN) : null;
         if (!match) {
@@ -893,11 +994,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
   const assignedMlKeys = useMemo(() => {
     const map = new Map<string, string>();
     variants.forEach((v) => {
-      const a = assignments[v.variantId];
-      const ml = a?.ml?.trim();
-      if (!ml) return;
-      const key = mlAssignmentKey(ml, a?.mlItemId);
-      if (key) map.set(key, v.variantId);
+      iterMlAssignmentKeys(assignments[v.variantId]).forEach((key) => map.set(key, v.variantId));
     });
     return map;
   }, [variants, assignments]);
@@ -914,33 +1011,19 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
     return map;
   }, [variants, assignments]);
 
-  const getVisibleMlOptions = useCallback(
-    (variantId: string, selectedMl?: string, selectedMlItemId?: string) => {
-      const pool = filteredMl.length > 0 ? filteredMl : mlVariations;
-      const selected = (selectedMl || '').trim();
-      if (!selected || /^ML[A-Z]{1,5}\d+$/i.test(selected)) return pool;
-      if (
-        pool.some(
-          (m) => m.variationId === selected && (!selectedMlItemId || m.itemId === selectedMlItemId)
-        )
-      ) {
-        return pool;
-      }
-      const opt = mlVariations.find(
-        (m) => m.variationId === selected && (!selectedMlItemId || m.itemId === selectedMlItemId)
+  const getVisibleMlOptionsForSource = useCallback(
+    (_variantId: string, itemId: string, selectedVariationId?: string) => {
+      const scoped = (filteredMl.length > 0 ? filteredMl : mlVariations).filter((m) =>
+        mercadoLibreItemIdsMatch(m.itemId, itemId)
       );
-      if (opt) return [opt, ...pool];
-      if (selectedMlItemId) {
-        const synthetic = {
-          itemId: selectedMlItemId,
-          variationId: selected,
-          sku: '',
-          color: '',
-          size: '',
-        } as MlVariationRow;
-        return [synthetic, ...pool];
-      }
-      return pool;
+      const selected = (selectedVariationId || '').trim();
+      if (!selected) return scoped;
+      if (scoped.some((m) => m.variationId === selected)) return scoped;
+      const opt = mlVariations.find(
+        (m) => m.variationId === selected && mercadoLibreItemIdsMatch(m.itemId, itemId)
+      );
+      if (opt) return [opt, ...scoped];
+      return scoped;
     },
     [filteredMl, mlVariations]
   );
@@ -951,7 +1034,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
     let both = 0;
     variants.forEach((v) => {
       const a = assignments[v.variantId];
-      const hasMl = !!a?.ml?.trim();
+      const hasMl = hasAnyMlAssignment(a);
       const hasTn = !!a?.tn?.trim();
       if (hasMl) ml++;
       if (hasTn) tn++;
@@ -969,7 +1052,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
     if (loading || autoCollapsedStep1Ref.current) return;
     const hasLinks = variants.some((v) => {
       const a = assignments[v.variantId];
-      return !!(a?.ml?.trim() || a?.tn?.trim());
+      return !!(hasAnyMlAssignment(a) || a?.tn?.trim());
     });
     if (catalogsLoaded || hasLinks) {
       autoCollapsedStep1Ref.current = true;
@@ -1031,10 +1114,9 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
     if (!key) return null;
     for (const v of variants) {
       if (v.variantId === variantId) continue;
-      const a = assignments[v.variantId];
-      const otherMl = a?.ml?.trim();
-      if (!otherMl) continue;
-      if (mlAssignmentKey(otherMl, a?.mlItemId) === key) return v.variantId;
+      for (const otherKey of iterMlAssignmentKeys(assignments[v.variantId])) {
+        if (otherKey === key) return v.variantId;
+      }
     }
     return null;
   };
@@ -1142,14 +1224,11 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
   const duplicateMlByVariant = useMemo(() => {
     const keyToIds = new Map<string, string[]>();
     variants.forEach((v) => {
-      const a = assignments[v.variantId];
-      const ml = a?.ml?.trim();
-      if (!ml) return;
-      const key = mlAssignmentKey(ml, a?.mlItemId);
-      if (!key) return;
-      const list = keyToIds.get(key) || [];
-      list.push(v.variantId);
-      keyToIds.set(key, list);
+      iterMlAssignmentKeys(assignments[v.variantId]).forEach((key) => {
+        const list = keyToIds.get(key) || [];
+        list.push(v.variantId);
+        keyToIds.set(key, list);
+      });
     });
     const dup = new Set<string>();
     const partner = new Map<string, string>();
@@ -1600,24 +1679,48 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       };
       const ownPrimaryMl = primaryMlByVariant.get(v.variantId);
       const ownPrimaryMlNorm = ownPrimaryMl ? normalizeMercadoLibreItemId(ownPrimaryMl) || ownPrimaryMl : null;
-      const hasMlAssignment = !!(a?.ml?.trim() || ownPrimaryMl);
+      const hasMlAssignment = hasAnyMlAssignment(a);
 
       if (hasMlAssignment) {
-        for (const row of mlVariations) {
-          if (!matchLocalToRow(local, row)) continue;
-          const itemId = normalizeMercadoLibreItemId(row.itemId);
-          if (!itemId || !mlSourceIds.has(itemId)) continue;
-          if (itemId !== ownPrimaryMlNorm && allPrimaryMl.has(itemId)) continue;
-          try {
-            await api.addVariantPublication(v.variantId, {
-              platform: 'mercadolibre',
-              externalProductId: row.itemId,
-              externalVariantId: row.variationId,
-              packSize: mlPackByItemId.get(itemId) ?? packMl,
-            });
-            added++;
-          } catch {
-            /* ya vinculada */
+        for (const src of mlSources) {
+          const itemId = mlItemKey(src.id);
+          const explicitVar = getMlVariationForItem(a, itemId);
+          if (explicitVar) {
+            const row = mlVariations.find(
+              (m) => mercadoLibreItemIdsMatch(m.itemId, src.id) && m.variationId === explicitVar
+            );
+            if (row) {
+              try {
+                await api.addVariantPublication(v.variantId, {
+                  platform: 'mercadolibre',
+                  externalProductId: row.itemId,
+                  externalVariantId: row.variationId,
+                  packSize: mlPackByItemId.get(itemId) ?? packMl,
+                });
+                added++;
+              } catch {
+                /* ya vinculada */
+              }
+              continue;
+            }
+          }
+          for (const row of mlVariations) {
+            if (!matchLocalToRow(local, row)) continue;
+            const rowItemId = normalizeMercadoLibreItemId(row.itemId);
+            if (!rowItemId || rowItemId !== itemId || !mlSourceIds.has(rowItemId)) continue;
+            if (rowItemId !== ownPrimaryMlNorm && allPrimaryMl.has(rowItemId)) continue;
+            try {
+              await api.addVariantPublication(v.variantId, {
+                platform: 'mercadolibre',
+                externalProductId: row.itemId,
+                externalVariantId: row.variationId,
+                packSize: mlPackByItemId.get(rowItemId) ?? packMl,
+              });
+              added++;
+            } catch {
+              /* ya vinculada */
+            }
+            break;
           }
         }
       }
@@ -1694,15 +1797,18 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
 
   const handleSave = async () => {
     if (!productId) return;
+    const saveAssignments = Object.fromEntries(
+      variants.map((v) => [
+        v.variantId,
+        syncPrimaryMlAssignment(assignments[v.variantId], mlSources),
+      ])
+    );
     const mlSeen = new Map<string, string>();
     const tnSeen = new Map<string, string>();
     for (const v of variants) {
-      const a = assignments[v.variantId];
-      const ml = a?.ml?.trim() || '';
+      const a = saveAssignments[v.variantId];
       const tn = a?.tn?.trim() || '';
-      if (ml) {
-        const mlKey = mlAssignmentKey(ml, a?.mlItemId);
-        if (!mlKey) continue;
+      for (const mlKey of iterMlAssignmentKeys(a)) {
         const other = mlSeen.get(mlKey);
         if (other) {
           showToast('error', `La variación ML ya está asignada a otra fila. Cada variación externa solo puede vincularse a una variante local.`);
@@ -1733,12 +1839,12 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
         await api.updateVariant(String(v.variantId), { sku: nextSku });
       }
       const mlUnlinks = variants.filter((v) => {
-        const a = assignments[v.variantId];
+        const a = saveAssignments[v.variantId];
         return variantHadMlLink(v.externalIds) && !hasMlAssignment(a);
       });
       const links = variants
         .map((v) => {
-          const a = assignments[v.variantId];
+          const a = saveAssignments[v.variantId];
           const ml = a?.ml?.trim() || '';
           const tn = a?.tn?.trim() || '';
           const isMlItemId = /^ML[A-Z]{1,5}\d+$/i.test(ml);
@@ -1769,9 +1875,9 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       if (links.length > 0) {
         const allMlOwn =
           links.every((l) => {
-            const ml = assignments[l.variantId]?.ml?.trim() || '';
+            const ml = saveAssignments[l.variantId]?.ml?.trim() || '';
             return !ml || /^ML[A-Z]{1,5}\d+$/i.test(ml);
-          }) && links.some((l) => /^ML[A-Z]{1,5}\d+$/i.test(assignments[l.variantId]?.ml?.trim() || ''));
+          }) && links.some((l) => /^ML[A-Z]{1,5}\d+$/i.test(saveAssignments[l.variantId]?.ml?.trim() || ''));
         const primaryMl = mlSources[0]?.id;
         const primaryTn = tnSources[0]?.id;
         const res = await api.bulkLinkVariants({
@@ -2366,10 +2472,12 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
               </thead>
               <tbody>
                 {variants.map((v) => {
-                  const mlVal = assignments[v.variantId]?.ml ?? '';
-                  const tnVal = assignments[v.variantId]?.tn ?? '';
-                  const tnProductId = assignments[v.variantId]?.tnProductId ?? '';
-                  const status = getRowLinkStatus(mlVal, tnVal);
+                  const rowAssignment = assignments[v.variantId];
+                  const mlVal = rowAssignment?.ml ?? '';
+                  const hasMlLinked = hasAnyMlAssignment(rowAssignment);
+                  const tnVal = rowAssignment?.tn ?? '';
+                  const tnProductId = rowAssignment?.tnProductId ?? '';
+                  const status = getRowLinkStatus(hasMlLinked ? 'linked' : '', tnVal);
                   const mlLabel = resolveMlLabel(v.variantId);
                   const tnLabel = resolveTnLabel(v.variantId);
                   const pubCount = pubCounts[v.variantId] ?? 0;
@@ -2453,37 +2561,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                         </div>
                       </td>
                       <td className="p-3 align-top min-w-[220px]">
-                        <div className="space-y-1.5">
-                          <input
-                            type="text"
-                            value={mlVal}
-                            onChange={(e) => {
-                              const trimmed = e.target.value.trim();
-                              setAssignments((prev) => ({
-                                ...prev,
-                                [v.variantId]: !trimmed
-                                  ? clearMlAssignmentFields(prev[v.variantId])
-                                  : {
-                                      ...prev[v.variantId],
-                                      ml: trimmed,
-                                      mlItemId: /^ML[A-Z]{1,5}\d+$/i.test(trimmed)
-                                        ? undefined
-                                        : prev[v.variantId]?.mlItemId,
-                                    },
-                              }));
-                            }}
-                            placeholder={mlVariations.length > 0 ? 'ID variación o MLA' : 'MLA o variación'}
-                            className={`w-full bg-slate-800/80 border rounded-lg px-2.5 py-2 text-white text-xs font-mono outline-none ${
-                              hasDuplicateMl
-                                ? 'border-rose-500/70 focus:border-rose-400'
-                                : 'border-amber-800/40 focus:border-amber-500/70'
-                            }`}
-                          />
-                          {mlLabel && (
-                            <p className="text-[10px] text-amber-200/70 truncate pl-0.5" title={mlLabel}>
-                              ↳ {mlLabel}
-                            </p>
-                          )}
+                        <div className="space-y-2">
                           {hasDuplicateMl && (
                             <p className="text-[10px] text-rose-400 pl-0.5">
                               Misma variación ML que otra fila
@@ -2491,68 +2569,173 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                               . Corregí o unificá las variantes duplicadas.
                             </p>
                           )}
-                          {mlVariations.length > 0 ? (
-                            <select
-                              value={mlSelectValue(mlVal, assignments[v.variantId]?.mlItemId, mlVariations)}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                if (!val) {
+                          {mlSources.length > 0 ? (
+                            mlSources.map((src) => {
+                              const srcPack = Math.max(1, src.packSize ?? packMl);
+                              const selectedVar = getMlVariationForItem(rowAssignment, src.id);
+                              const options = getVisibleMlOptionsForSource(v.variantId, src.id, selectedVar);
+                              const selectedOpt = options.find((m) => m.variationId === selectedVar);
+                              return (
+                                <div
+                                  key={src.id}
+                                  className="rounded-lg border border-amber-800/30 bg-slate-900/40 p-2 space-y-1"
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="font-mono text-[10px] text-amber-200/90 truncate">{src.id}</span>
+                                    <span className="text-[9px] font-bold text-amber-400/80 shrink-0">Pack x{srcPack}</span>
+                                  </div>
+                                  {mlVariations.length > 0 ? (
+                                    <select
+                                      value={selectedVar ? mlOptionKey({ itemId: src.id, variationId: selectedVar } as MlVariationRow) : ''}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        if (!val) {
+                                          setAssignments((prev) => ({
+                                            ...prev,
+                                            [v.variantId]: syncPrimaryMlAssignment(
+                                              setMlVariationForItem(prev[v.variantId], src.id, ''),
+                                              mlSources
+                                            ),
+                                          }));
+                                          return;
+                                        }
+                                        const [itemId, variationId] = val.split('::');
+                                        const conflict = findMlAssignmentConflict(v.variantId, variationId, itemId);
+                                        if (conflict) {
+                                          const other = variants.find((x) => x.variantId === conflict);
+                                          showToast(
+                                            'error',
+                                            `Esa variación ML ya está en otra fila${other ? ` (${formatOptionLabel(other)})` : ''}.`
+                                          );
+                                          return;
+                                        }
+                                        setAssignments((prev) => ({
+                                          ...prev,
+                                          [v.variantId]: syncPrimaryMlAssignment(
+                                            setMlVariationForItem(prev[v.variantId], src.id, variationId),
+                                            mlSources
+                                          ),
+                                        }));
+                                      }}
+                                      className={`w-full bg-slate-800 border rounded-lg px-2 py-1.5 text-slate-300 text-xs outline-none ${
+                                        hasDuplicateMl
+                                          ? 'border-rose-500/70 focus:border-rose-400'
+                                          : 'border-slate-600 focus:border-amber-500/60'
+                                      }`}
+                                    >
+                                      <option value="">Elegir variación…</option>
+                                      {options.map((m) => {
+                                        const owner = assignedMlKeys.get(mlOptionKey(m));
+                                        const takenElsewhere = owner && owner !== v.variantId;
+                                        return (
+                                          <option key={mlOptionKey(m)} value={mlOptionKey(m)}>
+                                            {formatMlOptionLabel(m)}
+                                            {takenElsewhere ? ' · en otra fila' : ''}
+                                          </option>
+                                        );
+                                      })}
+                                    </select>
+                                  ) : (
+                                    <p className="text-[10px] text-slate-500">Cargá ML arriba</p>
+                                  )}
+                                  {selectedOpt && (
+                                    <p className="text-[10px] text-amber-200/70 truncate" title={formatMlOptionLabel(selectedOpt)}>
+                                      ↳ {formatMlOptionLabel(selectedOpt)}
+                                    </p>
+                                  )}
+                                  {mlVariations.length > 0 && !selectedVar && options.length === 0 && (
+                                    <p className="text-[10px] text-amber-400/90">Sin variaciones para este filtro.</p>
+                                  )}
+                                </div>
+                              );
+                            })
+                          ) : (
+                            <>
+                              <input
+                                type="text"
+                                value={mlVal}
+                                onChange={(e) => {
+                                  const trimmed = e.target.value.trim();
                                   setAssignments((prev) => ({
                                     ...prev,
-                                    [v.variantId]: clearMlAssignmentFields(prev[v.variantId]),
+                                    [v.variantId]: !trimmed
+                                      ? clearMlAssignmentFields(prev[v.variantId])
+                                      : {
+                                          ...prev[v.variantId],
+                                          ml: trimmed,
+                                          mlItemId: /^ML[A-Z]{1,5}\d+$/i.test(trimmed)
+                                            ? undefined
+                                            : prev[v.variantId]?.mlItemId,
+                                        },
                                   }));
-                                  return;
-                                }
-                                const [itemId, variationId] = val.split('::');
-                                const conflict = findMlAssignmentConflict(v.variantId, variationId, itemId);
-                                if (conflict) {
-                                  const other = variants.find((x) => x.variantId === conflict);
-                                  showToast(
-                                    'error',
-                                    `Esa variación ML ya está en otra fila${other ? ` (${formatOptionLabel(other)})` : ''}.`
-                                  );
-                                  return;
-                                }
-                                setAssignments((prev) => ({
-                                  ...prev,
-                                  [v.variantId]: {
-                                    ...prev[v.variantId],
-                                    ml: variationId,
-                                    mlItemId: itemId,
-                                  },
-                                }));
-                              }}
-                              className={`w-full bg-slate-800 border rounded-lg px-2 py-1.5 text-slate-300 text-xs outline-none ${
-                                hasDuplicateMl
-                                  ? 'border-rose-500/70 focus:border-rose-400'
-                                  : 'border-slate-600 focus:border-amber-500/60'
-                              }`}
-                            >
-                              <option value="">Elegir de ML cargado…</option>
-                              {getVisibleMlOptions(v.variantId, mlVal, assignments[v.variantId]?.mlItemId).map((m) => {
-                                const owner = assignedMlKeys.get(mlOptionKey(m));
-                                const takenElsewhere = owner && owner !== v.variantId;
-                                return (
-                                  <option key={mlOptionKey(m)} value={mlOptionKey(m)}>
-                                    {m.itemId} · {formatMlOptionLabel(m)}
-                                    {takenElsewhere ? ' · en otra fila' : ''}
-                                  </option>
-                                );
-                              })}
-                            </select>
-                          ) : (
-                            !mlVal && (
-                              <p className="text-[10px] text-slate-500 pl-0.5">Cargá ML arriba o pegá un MLA</p>
-                            )
+                                }}
+                                placeholder={mlVariations.length > 0 ? 'ID variación o MLA' : 'MLA o variación'}
+                                className={`w-full bg-slate-800/80 border rounded-lg px-2.5 py-2 text-white text-xs font-mono outline-none ${
+                                  hasDuplicateMl
+                                    ? 'border-rose-500/70 focus:border-rose-400'
+                                    : 'border-amber-800/40 focus:border-amber-500/70'
+                                }`}
+                              />
+                              {mlLabel && (
+                                <p className="text-[10px] text-amber-200/70 truncate pl-0.5" title={mlLabel}>
+                                  ↳ {mlLabel}
+                                </p>
+                              )}
+                              {mlVariations.length > 0 ? (
+                                <select
+                                  value={mlSelectValue(mlVal, rowAssignment?.mlItemId, mlVariations)}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    if (!val) {
+                                      setAssignments((prev) => ({
+                                        ...prev,
+                                        [v.variantId]: clearMlAssignmentFields(prev[v.variantId]),
+                                      }));
+                                      return;
+                                    }
+                                    const [itemId, variationId] = val.split('::');
+                                    const conflict = findMlAssignmentConflict(v.variantId, variationId, itemId);
+                                    if (conflict) {
+                                      const other = variants.find((x) => x.variantId === conflict);
+                                      showToast(
+                                        'error',
+                                        `Esa variación ML ya está en otra fila${other ? ` (${formatOptionLabel(other)})` : ''}.`
+                                      );
+                                      return;
+                                    }
+                                    setAssignments((prev) => ({
+                                      ...prev,
+                                      [v.variantId]: syncPrimaryMlAssignment(
+                                        setMlVariationForItem(prev[v.variantId], itemId, variationId),
+                                        mlSources
+                                      ),
+                                    }));
+                                  }}
+                                  className={`w-full bg-slate-800 border rounded-lg px-2 py-1.5 text-slate-300 text-xs outline-none ${
+                                    hasDuplicateMl
+                                      ? 'border-rose-500/70 focus:border-rose-400'
+                                      : 'border-slate-600 focus:border-amber-500/60'
+                                  }`}
+                                >
+                                  <option value="">Elegir de ML cargado…</option>
+                                  {(filteredMl.length > 0 ? filteredMl : mlVariations).map((m) => {
+                                    const owner = assignedMlKeys.get(mlOptionKey(m));
+                                    const takenElsewhere = owner && owner !== v.variantId;
+                                    return (
+                                      <option key={mlOptionKey(m)} value={mlOptionKey(m)}>
+                                        {m.itemId} · {formatMlOptionLabel(m)}
+                                        {takenElsewhere ? ' · en otra fila' : ''}
+                                      </option>
+                                    );
+                                  })}
+                                </select>
+                              ) : (
+                                !mlVal && (
+                                  <p className="text-[10px] text-slate-500 pl-0.5">Cargá ML arriba o pegá un MLA</p>
+                                )
+                              )}
+                            </>
                           )}
-                          {mlVariations.length > 0 &&
-                            !mlVal &&
-                            getVisibleMlOptions(v.variantId, mlVal, assignments[v.variantId]?.mlItemId).length ===
-                              0 && (
-                              <p className="text-[10px] text-amber-400/90 pl-0.5">
-                                No hay variaciones ML cargadas para este filtro.
-                              </p>
-                            )}
                         </div>
                       </td>
                       <td className="p-3 align-top min-w-[220px]">
