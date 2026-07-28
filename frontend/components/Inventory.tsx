@@ -168,6 +168,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const skipStockBlurRef = useRef(false);
   /** Texto del input mientras se edita (no pisar stock con 0 al borrar el campo). */
   const [stockEditDraft, setStockEditDraft] = useState('');
+  /** Paso de ajuste rápido (−/+): 1, 5 o 10. */
+  const [stockAdjustStep, setStockAdjustStep] = useState<1 | 5 | 10>(1);
+  const stockHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stockHoldIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stockHoldValueRef = useRef<number | null>(null);
+  const stockHoldProductRef = useRef<string | null>(null);
   const [cardDotsPosition, setCardDotsPosition] = useState<{ top: number; left: number } | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [editingStockId, setEditingStockId] = useState<string | null>(null);
@@ -1375,22 +1381,63 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     flushStockSave(productId);
   };
 
-  const adjustStock = (productId: string, currentStock: number, delta: number) => {
+  const clearStockHold = () => {
+    if (stockHoldTimerRef.current) {
+      clearTimeout(stockHoldTimerRef.current);
+      stockHoldTimerRef.current = null;
+    }
+    if (stockHoldIntervalRef.current) {
+      clearInterval(stockHoldIntervalRef.current);
+      stockHoldIntervalRef.current = null;
+    }
+  };
+
+  /** −/+ con el paso elegido; mantener pulsado repite (guarda al soltar). */
+  const startStockHold = (productId: string, direction: -1 | 1) => {
     if (!onUpdateStock) return;
-    const newStock = Math.max(0, currentStock + delta);
-    if (newStock === currentStock) return;
-    persistManualStock(productId, newStock);
+    armSkipStockBlur();
+    clearStockHold();
+    const step = stockAdjustStep * direction;
+    let current = parseStockDraft(stockEditDraft, 0);
+    stockHoldProductRef.current = productId;
+    const tick = () => {
+      const next = Math.max(0, current + step);
+      if (next === current) return;
+      current = next;
+      stockHoldValueRef.current = next;
+      setStockEditDraft(String(next));
+      applyLocalStock(productId, next);
+    };
+    tick();
+    stockHoldTimerRef.current = setTimeout(() => {
+      stockHoldIntervalRef.current = setInterval(tick, 70);
+    }, 380);
+  };
+
+  const endStockHold = () => {
+    const productId = stockHoldProductRef.current;
+    const value = stockHoldValueRef.current;
+    clearStockHold();
+    stockHoldProductRef.current = null;
+    stockHoldValueRef.current = null;
+    if (productId != null && value != null && onUpdateStock) {
+      persistManualStock(productId, value);
+    }
   };
 
   /** Solo actualiza el draft mientras editás (sin API ni stock=0 al borrar). */
   const onManualStockInputChange = (_productId: string, value: string) => {
-    setStockEditDraft(value);
+    // Permitir vacío y solo dígitos (tipear 50, 120, etc.).
+    if (value === '' || /^\d+$/.test(value)) {
+      setStockEditDraft(value);
+    }
   };
 
   /** Guarda stock manual al salir del input o al confirmar (incluye 0 explícito). */
-  const commitManualStock = (productId: string, value: string) => {
+  const commitManualStock = (productId: string, value: string, opts?: { force?: boolean }) => {
     if (!onUpdateStock) return;
-    if (skipStockBlurRef.current) return;
+    // skipStockBlur evita el blur al clickear −/+/✓; el ✓ debe forzar el guardado.
+    if (skipStockBlurRef.current && !opts?.force) return;
     const baseline = baselineManualStockRef.current[productId] ?? 0;
     const trimmed = value.trim();
     // Campo vacío al salir = cancelar edición (volver al baseline), no forzar 0.
@@ -3085,25 +3132,56 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                               {isAdminOrWarehouse ? (
                                 <div className="flex items-center gap-3">
                                   {isEditing ? (
-                                    <div className="flex items-center gap-2 animate-fade-in bg-slate-900 p-2 sm:p-1.5 rounded-lg border border-slate-600">
+                                    <div className="flex flex-col gap-1.5 animate-fade-in bg-slate-900 p-2 sm:p-1.5 rounded-lg border border-slate-600">
+                                      <div className="flex items-center gap-1.5 justify-center">
+                                        {([1, 5, 10] as const).map((step) => (
+                                          <button
+                                            key={step}
+                                            type="button"
+                                            onMouseDown={(e) => {
+                                              e.preventDefault();
+                                              armSkipStockBlur();
+                                            }}
+                                            onClick={() => setStockAdjustStep(step)}
+                                            className={`px-2 py-0.5 rounded text-[10px] font-bold border touch-manipulation ${
+                                              stockAdjustStep === step
+                                                ? 'bg-blue-600 border-blue-500 text-white'
+                                                : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
+                                            }`}
+                                            title={`Ajustar de a ${step}`}
+                                          >
+                                            ±{step}
+                                          </button>
+                                        ))}
+                                        <span className="text-[9px] text-slate-500 ml-1 hidden sm:inline">o escribí el total</span>
+                                      </div>
+                                      <div className="flex items-center gap-2">
                                       <button
                                         type="button"
                                         onMouseDown={(e) => {
                                           e.preventDefault();
-                                          armSkipStockBlur();
+                                          startStockHold(product.id, -1);
                                         }}
-                                        onClick={() => {
-                                          const cur = parseStockDraft(stockEditDraft, product.stock);
-                                          adjustStock(product.id, cur, -1);
+                                        onMouseUp={endStockHold}
+                                        onMouseLeave={endStockHold}
+                                        onTouchStart={(e) => {
+                                          e.preventDefault();
+                                          startStockHold(product.id, -1);
                                         }}
+                                        onTouchEnd={endStockHold}
+                                        onTouchCancel={endStockHold}
                                         className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center bg-slate-800 rounded-lg sm:rounded hover:bg-slate-700 text-slate-300 active:scale-95 touch-manipulation"
+                                        title={`Bajar ${stockAdjustStep} (mantener para repetir)`}
                                       >
                                         <Minus size={18} className="sm:w-4 sm:h-4" />
                                       </button>
                                       <input 
-                                        type="number" 
+                                        type="text"
+                                        inputMode="numeric"
+                                        pattern="[0-9]*"
                                         autoFocus
                                         value={stockEditDraft}
+                                        onFocus={(e) => e.currentTarget.select()}
                                         onChange={(e) => onManualStockInputChange(product.id, e.target.value)}
                                         onBlur={(e) => commitManualStock(product.id, e.target.value)}
                                         onKeyDown={(e) => {
@@ -3113,19 +3191,25 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                             setEditingStockId(null);
                                           }
                                         }}
-                                        className="w-14 sm:w-12 bg-transparent text-center font-bold text-white text-lg outline-none"
+                                        className="w-16 sm:w-14 bg-transparent text-center font-bold text-white text-lg outline-none"
+                                        title="Escribí la cantidad final y Enter o ✓"
                                       />
                                       <button
                                         type="button"
                                         onMouseDown={(e) => {
                                           e.preventDefault();
-                                          armSkipStockBlur();
+                                          startStockHold(product.id, 1);
                                         }}
-                                        onClick={() => {
-                                          const cur = parseStockDraft(stockEditDraft, product.stock);
-                                          adjustStock(product.id, cur, 1);
+                                        onMouseUp={endStockHold}
+                                        onMouseLeave={endStockHold}
+                                        onTouchStart={(e) => {
+                                          e.preventDefault();
+                                          startStockHold(product.id, 1);
                                         }}
+                                        onTouchEnd={endStockHold}
+                                        onTouchCancel={endStockHold}
                                         className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center bg-blue-600 rounded-lg sm:rounded text-white hover:bg-blue-500 active:scale-95 touch-manipulation"
+                                        title={`Subir ${stockAdjustStep} (mantener para repetir)`}
                                       >
                                         <Plus size={18} className="sm:w-4 sm:h-4" />
                                       </button>
@@ -3136,7 +3220,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                           armSkipStockBlur();
                                         }}
                                         onClick={() => {
-                                          commitManualStock(product.id, stockEditDraft);
+                                          clearStockHold();
+                                          commitManualStock(product.id, stockEditDraft, { force: true });
                                           setEditingStockId(null);
                                         }}
                                         className="w-10 h-10 sm:w-8 sm:h-8 flex items-center justify-center bg-green-600 rounded-lg sm:rounded text-white hover:bg-green-500 active:scale-95 ml-1 touch-manipulation"
@@ -3144,6 +3229,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                       >
                                         <Check size={18} className="sm:w-4 sm:h-4" />
                                       </button>
+                                      </div>
                                     </div>
                                   ) : (
                                     <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
