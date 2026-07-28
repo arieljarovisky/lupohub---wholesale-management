@@ -551,8 +551,28 @@ async function runExternalSyncWithRetries(
   return false;
 }
 
-// Sincronizar stock a todas las publicaciones vinculadas (variant_publications). Si no hay ninguna, fallback a columnas legacy.
-export const syncStockToExternalPlatforms = async (variantId: string, newStock: number): Promise<void> => {
+export type SyncExternalPlatform = 'mercadolibre' | 'tiendanube';
+
+export type SyncStockExternalResult = {
+  mlAttempted: number;
+  mlOk: number;
+  tnAttempted: number;
+  tnOk: number;
+  logs: string[];
+};
+
+const ALL_SYNC_PLATFORMS: SyncExternalPlatform[] = ['mercadolibre', 'tiendanube'];
+
+// Sincronizar stock a publicaciones vinculadas (variant_publications). Si no hay ninguna, fallback a columnas legacy.
+export const syncStockToExternalPlatforms = async (
+  variantId: string,
+  newStock: number,
+  opts?: { platforms?: SyncExternalPlatform[] }
+): Promise<SyncStockExternalResult> => {
+  const result: SyncStockExternalResult = { mlAttempted: 0, mlOk: 0, tnAttempted: 0, tnOk: 0, logs: [] };
+  const platforms = new Set(
+    (opts?.platforms?.length ? opts.platforms : ALL_SYNC_PLATFORMS).filter(Boolean)
+  );
   try {
     const variantMeta = await get(
       `SELECT pv.id, COALESCE(pv.external_sku, pv.sku) AS sku,
@@ -571,6 +591,7 @@ export const syncStockToExternalPlatforms = async (variantId: string, newStock: 
       variantId,
       mlVariationId: null as string | null,
     };
+    const skuLabel = matchOpts.sku || variantId;
 
     const publications = await query(
       `SELECT id, platform, external_product_id, external_variant_id, pack_size FROM variant_publications WHERE variant_id = ?`,
@@ -584,41 +605,51 @@ export const syncStockToExternalPlatforms = async (variantId: string, newStock: 
       const linkCtx = await loadVariantMlLinkContext(variantId);
       const pubsToSync = linkCtx
         ? [
-            ...filterTnPublicationsForSync(publications as any[], linkCtx),
-            ...filterMlPublicationsForSync(publications as any[], linkCtx)
+            ...(platforms.has('tiendanube') ? filterTnPublicationsForSync(publications as any[], linkCtx) : []),
+            ...(platforms.has('mercadolibre') ? filterMlPublicationsForSync(publications as any[], linkCtx) : [])
           ]
-        : (publications as any[]);
-      const tasks: Promise<boolean>[] = [];
+        : (publications as any[]).filter((p) => platforms.has(p.platform));
+      const tasks: Promise<void>[] = [];
       for (const pub of pubsToSync) {
         const pack = Math.max(1, Number(pub.pack_size) || 1);
         const stockToSend = stockForPlatform(newStock, pack);
-        if (pub.platform === 'tiendanube' && pub.external_variant_id) {
-          const label = `TN pub=${pub.external_product_id}/${pub.external_variant_id} variant=${variantId}`;
+        if (pub.platform === 'tiendanube' && pub.external_variant_id && platforms.has('tiendanube')) {
+          const label = `TN pub=${pub.external_product_id}/${pub.external_variant_id}`;
+          result.tnAttempted++;
           tasks.push(
             runExternalSyncWithRetries(label, () =>
               updateTiendaNubeStock(pub.external_product_id, pub.external_variant_id, stockToSend)
-            )
+            ).then((ok) => {
+              if (ok) result.tnOk++;
+              result.logs.push(ok ? `[OK] ${skuLabel} → ${label} = ${stockToSend}` : `[ERROR] ${skuLabel} → ${label}`);
+            })
           );
-        } else if (pub.platform === 'mercadolibre') {
+        } else if (pub.platform === 'mercadolibre' && platforms.has('mercadolibre')) {
           const itemId = pub.external_product_id;
           const variationId = (pub.external_variant_id && String(pub.external_variant_id).trim()) || null;
-          const label = variationId
-            ? `ML item=${itemId} var=${variationId} variant=${variantId}`
-            : `ML item=${itemId} variant=${variantId}`;
+          const label = variationId ? `ML item=${itemId} var=${variationId}` : `ML item=${itemId}`;
+          result.mlAttempted++;
           tasks.push(
             runExternalSyncWithRetries(label, () =>
               updateMercadoLibreStockByItem(itemId, stockToSend, {
                 ...matchOpts,
                 mlVariationId: variationId,
               })
-            )
+            ).then((ok) => {
+              if (ok) result.mlOk++;
+              result.logs.push(ok ? `[OK] ${skuLabel} → ${label} = ${stockToSend}` : `[ERROR] ${skuLabel} → ${label}`);
+            })
           );
         }
       }
       // Paralelo: ML y TN reciben el mismo stock casi a la vez (menos “ML ya actualizó y TN no”).
       await Promise.all(tasks);
-    } else {
-      // Fallback: enlaces legacy en product_variants + products
+    }
+
+    // Si faltó ML o TN en publications (o no había pubs), completar con columnas legacy.
+    const needLegacyMl = platforms.has('mercadolibre') && result.mlAttempted === 0;
+    const needLegacyTn = platforms.has('tiendanube') && result.tnAttempted === 0;
+    if (needLegacyMl || needLegacyTn) {
       const variant = await get(
         `SELECT pv.id, pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
                 p.tienda_nube_id, p.mercado_libre_id, pv.sku, pv.external_sku,
@@ -630,49 +661,60 @@ export const syncStockToExternalPlatforms = async (variantId: string, newStock: 
          WHERE pv.id = ?`,
         [variantId]
       );
-      if (!variant) return;
+      if (variant) {
+        matchOpts.mlVariationId =
+          variant.mercado_libre_variant_id != null && String(variant.mercado_libre_variant_id).trim() !== ''
+            ? String(variant.mercado_libre_variant_id).trim()
+            : null;
 
-      matchOpts.mlVariationId =
-        variant.mercado_libre_variant_id != null && String(variant.mercado_libre_variant_id).trim() !== ''
-          ? String(variant.mercado_libre_variant_id).trim()
-          : null;
+        const stockTN = stockForPlatform(newStock, variant.tn_pack);
+        const stockML = stockForPlatform(newStock, variant.ml_pack);
 
-      const stockTN = stockForPlatform(newStock, variant.tn_pack);
-      const stockML = stockForPlatform(newStock, variant.ml_pack);
-
-      if (variant.tienda_nube_id && variant.tienda_nube_variant_id) {
-        await runExternalSyncWithRetries(
-          `TN legacy=${variant.tienda_nube_id}/${variant.tienda_nube_variant_id} variant=${variantId}`,
-          () => updateTiendaNubeStock(variant.tienda_nube_id, variant.tienda_nube_variant_id, stockTN)
-        );
+        if (needLegacyTn && variant.tienda_nube_id && variant.tienda_nube_variant_id) {
+          const label = `TN legacy=${variant.tienda_nube_id}/${variant.tienda_nube_variant_id}`;
+          result.tnAttempted++;
+          const ok = await runExternalSyncWithRetries(label, () =>
+            updateTiendaNubeStock(variant.tienda_nube_id, variant.tienda_nube_variant_id, stockTN)
+          );
+          if (ok) result.tnOk++;
+          result.logs.push(ok ? `[OK] ${skuLabel} → ${label} = ${stockTN}` : `[ERROR] ${skuLabel} → ${label}`);
+        }
+        // Publicación propia por variante (mercado_libre_item_id) tiene prioridad sobre el ítem
+        // padre del producto (mercado_libre_id).
+        const ownMlItemId =
+          variant.mercado_libre_item_id != null && String(variant.mercado_libre_item_id).trim() !== ''
+            ? String(variant.mercado_libre_item_id).trim()
+            : null;
+        const parentMlId =
+          variant.mercado_libre_id != null && String(variant.mercado_libre_id).trim() !== ''
+            ? String(variant.mercado_libre_id).trim()
+            : null;
+        if (needLegacyMl) {
+          if (ownMlItemId) {
+            const label = `ML legacy item=${ownMlItemId}`;
+            result.mlAttempted++;
+            const ok = await runExternalSyncWithRetries(label, () =>
+              updateMercadoLibreStockByItem(ownMlItemId, stockML, matchOpts)
+            );
+            if (ok) result.mlOk++;
+            result.logs.push(ok ? `[OK] ${skuLabel} → ${label} = ${stockML}` : `[ERROR] ${skuLabel} → ${label}`);
+          } else if (parentMlId) {
+            const label = `ML legacy=${parentMlId}`;
+            result.mlAttempted++;
+            const ok = await runExternalSyncWithRetries(label, () =>
+              updateMercadoLibreStockByItem(parentMlId, stockML, matchOpts)
+            );
+            if (ok) result.mlOk++;
+            result.logs.push(ok ? `[OK] ${skuLabel} → ${label} = ${stockML}` : `[ERROR] ${skuLabel} → ${label}`);
+          }
+        }
       }
-      // Publicación propia por variante (mercado_libre_item_id) tiene prioridad sobre el ítem
-      // padre del producto (mercado_libre_id). Si no, una variante puede poner stock en 6 y otra
-      // pisarlo a 0 usando el mismo MLA vía variación del catálogo padre.
-      const ownMlItemId =
-        variant.mercado_libre_item_id != null && String(variant.mercado_libre_item_id).trim() !== ''
-          ? String(variant.mercado_libre_item_id).trim()
-          : null;
-      const parentMlId =
-        variant.mercado_libre_id != null && String(variant.mercado_libre_id).trim() !== ''
-          ? String(variant.mercado_libre_id).trim()
-          : null;
-      if (ownMlItemId) {
-        await runExternalSyncWithRetries(
-          `ML legacy item=${ownMlItemId} variant=${variantId}`,
-          () => updateMercadoLibreStockByItem(ownMlItemId, stockML, matchOpts)
-        );
-      } else if (parentMlId) {
-        await runExternalSyncWithRetries(
-          `ML legacy=${parentMlId} variant=${variantId}`,
-          () => updateMercadoLibreStockByItem(parentMlId, stockML, matchOpts)
-        );
-      }
-      // Sin vínculo ML explícito: no sincronizar.
     }
   } catch (error) {
     console.error('Error syncing stock to external platforms:', error);
+    result.logs.push(`[ERROR] variant=${variantId}: ${(error as any)?.message || error}`);
   }
+  return result;
 };
 
 // Actualizar stock en Tienda Nube

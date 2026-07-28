@@ -2998,11 +2998,23 @@ export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: nu
   }
 
   // 2) Variantes con mercado_libre_item_id (publicación propia o ítem multi-variación mal vinculado).
-  // Empareja por ml_variant_id / SKU / color+talle; no omitir solo porque el ítem tenga varias variaciones.
+  // Empareja por ml_variant_id (columnas o variant_publications) / SKU / color+talle.
   const rowsByItem = await query(`
     SELECT pv.id AS variant_id,
            pv.mercado_libre_item_id AS ml_item_id,
-           pv.mercado_libre_variant_id AS ml_variant_id,
+           COALESCE(
+             NULLIF(TRIM(pv.mercado_libre_variant_id), ''),
+             (
+               SELECT NULLIF(TRIM(vp.external_variant_id), '')
+               FROM variant_publications vp
+               WHERE vp.variant_id = pv.id
+                 AND vp.platform = 'mercadolibre'
+                 AND vp.external_product_id = pv.mercado_libre_item_id
+                 AND NULLIF(TRIM(vp.external_variant_id), '') IS NOT NULL
+               ORDER BY vp.created_at DESC
+               LIMIT 1
+             )
+           ) AS ml_variant_id,
            p.tienda_nube_id AS tn_id, pv.tienda_nube_variant_id AS tn_variant_id,
            COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack,
            COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack,
@@ -3525,6 +3537,7 @@ export const syncAllStockToTiendaNube = async (req: Request, res: Response) => {
 };
 
 // Enviar stock solo de variantes seleccionadas a Tienda Nube
+// Usa syncStockToExternalPlatforms (variant_publications + legacy) para no ignorar vínculos del Paso 1.
 export const syncSelectedStockToTiendaNube = async (req: Request, res: Response) => {
   try {
     const variantIds = Array.isArray(req.body?.variantIds) ? req.body.variantIds.filter((id: unknown) => typeof id === 'string' && id.length > 0) : [];
@@ -3537,16 +3550,13 @@ export const syncSelectedStockToTiendaNube = async (req: Request, res: Response)
       return res.status(400).json({ message: 'No hay integración con Tienda Nube' });
     }
 
+    const { syncStockToExternalPlatforms } = await import('./stock.controller');
     const placeholders = variantIds.map(() => '?').join(',');
     const variants = await query(
-      `SELECT pv.id, pv.tienda_nube_variant_id, p.tienda_nube_id, s.stock, pv.sku,
-              COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
+      `SELECT pv.id, s.stock, COALESCE(pv.external_sku, pv.sku) AS sku
        FROM product_variants pv
-       JOIN product_colors pc ON pc.id = pv.product_color_id
-       JOIN products p ON p.id = pc.product_id
        LEFT JOIN stocks s ON s.variant_id = pv.id
-       WHERE pv.id IN (${placeholders})
-         AND pv.tienda_nube_variant_id IS NOT NULL AND p.tienda_nube_id IS NOT NULL`,
+       WHERE pv.id IN (${placeholders})`,
       variantIds
     );
 
@@ -3554,38 +3564,27 @@ export const syncSelectedStockToTiendaNube = async (req: Request, res: Response)
     let errors = 0;
     const logs: string[] = [];
 
-    for (const v of variants) {
-      try {
-        const pack = Math.max(1, Number((v as any).tn_pack) || 1);
-        const stockToSend = Math.floor(Number(v.stock || 0) / pack);
-        await axios.put(
-          `https://api.tiendanube.com/v1/${integration.store_id}/products/${v.tienda_nube_id}/variants/${v.tienda_nube_variant_id}`,
-          { stock: stockToSend },
-          {
-            headers: {
-              'Authentication': `bearer ${integration.access_token}`,
-              'Content-Type': 'application/json',
-              'User-Agent': TN_USER_AGENT
-            }
-          }
-        );
-        updated++;
-        logs.push(`[OK] ${v.sku}: ${v.stock || 0} un. → ${stockToSend} (pack x${pack})`);
-      } catch (e: any) {
-        errors++;
-        logs.push(`[ERROR] ${v.sku}: ${e.response?.data?.description || e.message}`);
+    for (const v of variants as any[]) {
+      const stockHub = Number(v.stock || 0);
+      const syncRes = await syncStockToExternalPlatforms(String(v.id), stockHub, { platforms: ['tiendanube'] });
+      logs.push(...syncRes.logs);
+      updated += syncRes.tnOk;
+      errors += Math.max(0, syncRes.tnAttempted - syncRes.tnOk);
+      if (syncRes.tnAttempted === 0) {
+        logs.push(`[INFO] ${v.sku || v.id}: sin vínculo TN (columnas ni publicaciones)`);
       }
       if (TN_RATE_LIMIT_DELAY_MS > 0) await sleep(TN_RATE_LIMIT_DELAY_MS);
     }
 
-    const skipped = variantIds.length - variants.length;
-    if (skipped > 0) logs.push(`[INFO] ${skipped} variante(s) sin vínculo TN o no encontradas, omitidas.`);
+    const found = new Set((variants as any[]).map((v) => String(v.id)));
+    const skipped = variantIds.filter((id: string) => !found.has(id)).length;
+    if (skipped > 0) logs.push(`[INFO] ${skipped} variante(s) no encontradas, omitidas.`);
 
     res.json({
       message: 'Stock enviado a Tienda Nube (selección)',
       updated,
       errors,
-      total: variants.length,
+      total: (variants as any[]).length,
       logs
     });
   } catch (error: any) {
@@ -3831,7 +3830,8 @@ export const syncAllStockToMercadoLibre = async (req: Request, res: Response) =>
   }
 };
 
-// Enviar stock solo de variantes seleccionadas a Mercado Libre
+// Enviar stock solo de variantes seleccionadas a Mercado Libre.
+// Usa syncStockToExternalPlatforms para respetar variant_publications (variation_id / pack).
 export const syncSelectedStockToMercadoLibre = async (req: Request, res: Response) => {
   try {
     const variantIds = Array.isArray(req.body?.variantIds) ? req.body.variantIds.filter((id: unknown) => typeof id === 'string' && id.length > 0) : [];
@@ -3839,22 +3839,13 @@ export const syncSelectedStockToMercadoLibre = async (req: Request, res: Respons
       return res.status(400).json({ message: 'Indicá al menos una variante (variantIds)' });
     }
 
-    const { updateMercadoLibreStockByVariant, updateMercadoLibreStockByItem } = await import('./stock.controller');
+    const { syncStockToExternalPlatforms } = await import('./stock.controller');
     const placeholders = variantIds.map(() => '?').join(',');
     const variants = await query(
-      `SELECT pv.id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id, p.mercado_libre_id, s.stock,
-              COALESCE(pv.external_sku, pv.sku) AS sku,
-              c.name AS color_name, sz.size_code AS size_code,
-              COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
+      `SELECT pv.id, s.stock, COALESCE(pv.external_sku, pv.sku) AS sku
        FROM product_variants pv
-       JOIN product_colors pc ON pc.id = pv.product_color_id
-       JOIN products p ON p.id = pc.product_id
-       LEFT JOIN colors c ON c.id = pc.color_id
-       LEFT JOIN sizes sz ON sz.id = pv.size_id
        LEFT JOIN stocks s ON s.variant_id = pv.id
-       WHERE pv.id IN (${placeholders})
-         AND ((pv.mercado_libre_item_id IS NOT NULL)
-              OR (pv.mercado_libre_variant_id IS NOT NULL AND p.mercado_libre_id IS NOT NULL))`,
+       WHERE pv.id IN (${placeholders})`,
       variantIds
     );
 
@@ -3862,39 +3853,26 @@ export const syncSelectedStockToMercadoLibre = async (req: Request, res: Respons
     let errors = 0;
     const logs: string[] = [];
 
-    for (const v of variants) {
-      const pack = Math.max(1, Number((v as any).ml_pack) || 1);
-      const stockToSend = Math.floor(Number(v.stock || 0) / pack);
-      const matchOpts = {
-        sku: (v as any).sku,
-        color: (v as any).color_name,
-        size: (v as any).size_code,
-        variantId: String(v.id),
-        mlVariationId: v.mercado_libre_variant_id != null ? String(v.mercado_libre_variant_id) : null,
-      };
-      let ok = false;
-      if (v.mercado_libre_item_id) {
-        ok = await updateMercadoLibreStockByItem(v.mercado_libre_item_id, stockToSend, matchOpts);
-      } else if (v.mercado_libre_id) {
-        ok = await updateMercadoLibreStockByItem(v.mercado_libre_id, stockToSend, matchOpts);
-      }
-      if (ok) {
-        updated++;
-        logs.push(`[OK] ${v.sku}: ${v.stock || 0} un. → ${stockToSend} (pack x${pack})`);
-      } else {
-        errors++;
-        logs.push(`[ERROR] ${v.sku}: no se pudo actualizar`);
+    for (const v of variants as any[]) {
+      const stockHub = Number(v.stock || 0);
+      const syncRes = await syncStockToExternalPlatforms(String(v.id), stockHub, { platforms: ['mercadolibre'] });
+      logs.push(...syncRes.logs);
+      updated += syncRes.mlOk;
+      errors += Math.max(0, syncRes.mlAttempted - syncRes.mlOk);
+      if (syncRes.mlAttempted === 0) {
+        logs.push(`[INFO] ${v.sku || v.id}: sin vínculo ML (columnas ni publicaciones)`);
       }
     }
 
-    const skipped = variantIds.length - variants.length;
-    if (skipped > 0) logs.push(`[INFO] ${skipped} variante(s) sin vínculo ML o no encontradas, omitidas.`);
+    const found = new Set((variants as any[]).map((v) => String(v.id)));
+    const skipped = variantIds.filter((id: string) => !found.has(id)).length;
+    if (skipped > 0) logs.push(`[INFO] ${skipped} variante(s) no encontradas, omitidas.`);
 
     res.json({
       message: 'Stock enviado a Mercado Libre (selección)',
       updated,
       errors,
-      total: variants.length,
+      total: (variants as any[]).length,
       logs
     });
   } catch (error: any) {
