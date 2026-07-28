@@ -9,7 +9,6 @@ import {
   resolveMercadoLibreUserProductItems,
   resolveMercadoLibreItemsByFamilyName,
   resolveMercadoLibreItemsByArticlePrefix,
-  mlFamilyNameFromItem,
   extractArticlePrefixFromMlSku,
   collectMercadoLibreItemSkus
 } from '../controllers/integrations.controller';
