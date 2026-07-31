@@ -24,7 +24,7 @@ import {
 import { api } from '../services/api';
 import VariantExtraPublicationsPanel from './VariantExtraPublicationsPanel';
 import { labelTalle, codigoTalleParaSku } from '../utils/tallesTango';
-import { sizesAreBizDuplicatePair, sizesMatchForLink, getSizeCanonicalSet } from '../utils/inventoryUtils';
+import { sizesAreBizDuplicatePair, sizesMatchForLink, getSizeCanonicalSet, colorsMatchForLink } from '../utils/inventoryUtils';
 import { normalizeMercadoLibreItemId, mercadoLibreItemIdsMatch, mercadoLibreItemIdCandidates } from '../utils/mercadoLibreItemId';
 import { normalizeTiendaNubeProductId } from '../utils/tiendaNubeUrl';
 
@@ -250,7 +250,7 @@ function matchLocalToRow(
 ): boolean {
   const skuN = norm(local.sku);
   if (skuN && row.sku && norm(row.sku) === skuN) return true;
-  const colorOk = norm(row.color || '') === norm(local.color);
+  const colorOk = colorsMatchForLink(local.color, row.color || '');
   if (!colorOk) return false;
   if (sizesMatchForLink(local.size, row.size || '')) return true;
   return norm(row.size || '') === norm(local.size);
@@ -982,7 +982,6 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       if (!variantHasStock(local)) return;
       const skuN = norm(local.sku);
       const sizeN = norm(local.size);
-      const colorN = norm(local.color);
       if (!next[local.variantId]) next[local.variantId] = { ml: '', tn: '' };
       if (isMercadoLibrePublicationId(next[local.variantId].ml || '')) {
         next[local.variantId] = {
@@ -1013,7 +1012,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
         if (!match) {
           match = scoped.find(
             (m) =>
-              norm(m.color) === colorN &&
+              colorsMatchForLink(local.color, m.color || '') &&
               (norm(m.size) === sizeN || sizesMatchForLink(local.size, m.size || ''))
           );
         }
@@ -1033,7 +1032,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
         if (!match) {
           match = tnList.find(
             (t) =>
-              norm(t.color) === colorN &&
+              colorsMatchForLink(local.color, t.color || '') &&
               (norm(t.size) === sizeN || sizesMatchForLink(local.size, t.size || ''))
           );
         }

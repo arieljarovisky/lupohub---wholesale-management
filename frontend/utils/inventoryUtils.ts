@@ -297,6 +297,34 @@ export function sizesMatchForLink(localSize: string, externalSize: string): bool
   return sizesAreBizDuplicatePair(localSize, externalSize);
 }
 
+function normColorForLink(s: string): string {
+  return String(s || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ');
+}
+
+/** Alias de color para emparejar inventario ↔ ML/TN (Nude ≈ Natural). */
+const COLOR_LINK_ALIAS_GROUPS: string[][] = [
+  ['nude', 'natural', 'natutal', 'rosa nude', 'beige nude'],
+];
+
+/** Comparar color local vs externo (incluye Nude ≈ Natural). */
+export function colorsMatchForLink(localColor: string, externalColor: string): boolean {
+  const a = normColorForLink(localColor);
+  const b = normColorForLink(externalColor);
+  if (!a || !b) return false;
+  if (a === b || a.includes(b) || b.includes(a)) return true;
+  for (const group of COLOR_LINK_ALIAS_GROUPS) {
+    const aIn = group.some((g) => a === g || a.includes(g));
+    const bIn = group.some((g) => b === g || b.includes(g));
+    if (aIn && bIn) return true;
+  }
+  return false;
+}
+
 export function matchesSizeFilter(productSizeCode: string, selectedFilterSize: string): boolean {
   if (selectedFilterSize === 'ALL') return true;
   const productSet = getSizeCanonicalSet(productSizeCode);

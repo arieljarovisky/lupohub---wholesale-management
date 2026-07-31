@@ -25,6 +25,7 @@ import {
   matchMlVariationForVariantLink,
   mlVariationColorSizeFromApi,
   mlVariationSkuFromApi,
+  reconcileMlColorSizeWithLupoSku,
   normSkuForMlStockMatch,
   normTextForMlStockMatch,
   resolveMlStockForVariantLink,
@@ -374,12 +375,15 @@ function extractMlVariationsFromItemData(it: any): MlVariationRow[] {
   const colorAttr = attrs.find((a: any) => ['COLOR', 'COLOUR', 'COR'].includes((a?.id || '').toString().toUpperCase()));
   const sizeAttr = attrs.find((a: any) => ['SIZE', 'SIZE_TYPE', 'TALLE', 'TALLA'].includes((a?.id || '').toString().toUpperCase()));
   const parsed = mlColorSizeFromTitle((it.title || '').toString().trim());
+  const rawColor = (colorAttr ? (colorAttr.value_name ?? colorAttr.value ?? '') : parsed.color).toString().trim();
+  const rawSize = (sizeAttr ? (sizeAttr.value_name ?? sizeAttr.value ?? '') : parsed.size).toString().trim();
+  const reconciled = reconcileMlColorSizeWithLupoSku(sku, rawColor, rawSize);
   out.push({
     variationId: String(it.id),
     itemId: String(it.id || ''),
     sku,
-    color: (colorAttr ? (colorAttr.value_name ?? colorAttr.value ?? '') : parsed.color).toString().trim(),
-    size: (sizeAttr ? (sizeAttr.value_name ?? sizeAttr.value ?? '') : parsed.size).toString().trim(),
+    color: reconciled.color,
+    size: reconciled.size,
     stock: it.available_quantity || 0
   });
   return dedupeMlVariationRows(out);
@@ -398,12 +402,13 @@ function mlVariationRowFromApiVariation(v: any, item: any): MlVariationRow {
   const sku = mlVariationSkuFromApi(v);
   const title = (item?.title || '').toString().trim();
   const parsed = !color && !size && title ? mlColorSizeFromTitle(title) : { color: '', size: '' };
+  const reconciled = reconcileMlColorSizeWithLupoSku(sku, color || parsed.color, size || parsed.size);
   return {
     variationId: String(v.id),
     itemId: String(item?.id || ''),
     sku,
-    color: color || parsed.color,
-    size: size || parsed.size,
+    color: reconciled.color,
+    size: reconciled.size,
     stock: v.available_quantity || 0
   };
 }
@@ -6163,7 +6168,7 @@ export function mlBaseTitle(title: string): string {
   const last = words[words.length - 1];
   const secondLast = words[words.length - 2];
   const sizeLike = /^(P|M|G|GG|XG|XXG|XXXG|U|Único|\d{2,3})$/i;
-  const colorLike = /^(blanco|negro|rojo|azul|verde|gris|rosa|nude|beige|celeste|amarillo|bordo|marron|multicolor)$/i;
+  const colorLike = /^(blanco|negro|rojo|azul|verde|gris|rosa|nude|natural|beige|celeste|amarillo|bordo|marron|multicolor)$/i;
   if (sizeLike.test(last) && words.length >= 2) {
     if (colorLike.test(secondLast)) return words.slice(0, -2).join(' ');
     return words.slice(0, -1).join(' ');
@@ -6190,7 +6195,7 @@ export function mlColorSizeFromTitle(title: string): { color: string; size: stri
     .trim();
 
   const words = t.split(/\s+/).filter(Boolean);
-  const colorLike = /^(blanco|negro|rojo|azul|verde|gris|rosa|nude|beige|celeste|amarillo|bordo|marron|multicolor)$/i;
+  const colorLike = /^(blanco|negro|rojo|azul|verde|gris|rosa|nude|natural|beige|celeste|amarillo|bordo|marron|multicolor)$/i;
   const sizeLike = /^(P|M|G|GG|XG|XXG|XXXG|U|Único|\d{2,3})$/i;
   if (words.length >= 2 && sizeLike.test(words[words.length - 1])) {
     const size = words[words.length - 1];
@@ -6638,14 +6643,17 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
         const colorFromAttr = fromAttrs(attrs, ['COLOR', 'COLOUR', 'COR']);
         const sizeFromAttr = fromAttrs(attrs, ['SIZE', 'SIZE_TYPE', 'TALLE', 'TALLA']);
         const titleParsed = mlColorSizeFromTitle((it.title || '').toString().trim());
-        const color = colorFromAttr || titleParsed.color || '';
-        const size = sizeFromAttr || titleParsed.size || '';
+        const reconciled = reconcileMlColorSizeWithLupoSku(
+          sku,
+          colorFromAttr || titleParsed.color || '',
+          sizeFromAttr || titleParsed.size || ''
+        );
         return {
           variationId: it.id,
           itemId: String(it.id || ''),
           sku,
-          color,
-          size,
+          color: reconciled.color,
+          size: reconciled.size,
           stock: it.available_quantity || 0
         };
       });

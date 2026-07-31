@@ -1,6 +1,7 @@
 /** Empareja variaciones de un ítem ML por variationId / SKU / color+talle (con guardas). */
 
 import { codigoTalleParaSku, nombreTalleDesdeCodigo, TALLE_CODIGO_A_NOMBRE } from '../talles-tango';
+import { colorsAreEquivalent } from './colorNameStandard';
 
 export type MlVariantMatchLink = {
   variationId?: string | null;
@@ -113,10 +114,28 @@ export function skusCompatible(localRaw: string, remoteRaw: string): boolean {
 }
 
 function colorCompatible(localColor: string, remoteColor: string): boolean {
-  const a = normTextForMlStockMatch(localColor);
-  const b = normTextForMlStockMatch(remoteColor);
-  if (!a || !b) return false;
-  return a === b || a.includes(b) || b.includes(a);
+  return colorsAreEquivalent(localColor, remoteColor);
+}
+
+/**
+ * Si el SKU Lupo (artículo+talle+color) contradice el talle de ML, priorizar el talle del SKU
+ * y no confiar en el color de atributos (evita "…0654 · G / Blanco" cuando el SKU es Nude/P).
+ */
+export function reconcileMlColorSizeWithLupoSku(
+  sku: string,
+  color: string,
+  size: string
+): { color: string; size: string } {
+  const digits = String(sku || '').replace(/\D/g, '');
+  if (digits.length < 13) return { color, size };
+  const sizeCode = digits.slice(-6, -3);
+  if (!sizeCode || (!TALLE_CODIGO_A_NOMBRE[sizeCode] && !/^\d{3}$/.test(sizeCode))) {
+    return { color, size };
+  }
+  const mlSize = String(size || '').trim();
+  if (!mlSize) return { color, size: sizeCode };
+  if (sizesCompatible(mlSize, sizeCode)) return { color, size: mlSize };
+  return { color: '', size: sizeCode };
 }
 
 /**
