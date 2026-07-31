@@ -188,25 +188,36 @@ function syncPrimaryMlAssignment(
 
 function hasAnyMlAssignment(a: VariantAssignment | undefined): boolean {
   if (!a) return false;
-  if (a.ml?.trim() && !isMercadoLibrePublicationId(a.ml)) return true;
+  if (a.ml?.trim()) return true;
   return Object.values(a.mlByItemId || {}).some((v) => !!v.trim());
 }
 
 function iterMlAssignmentKeys(a: VariantAssignment | undefined): string[] {
   if (!a) return [];
   const keys: string[] = [];
+  const push = (key: string | null) => {
+    if (key && !keys.includes(key)) keys.push(key);
+  };
   if (a.mlByItemId) {
     for (const [itemId, variationId] of Object.entries(a.mlByItemId)) {
       const vid = variationId.trim();
       if (!vid) continue;
-      const key = mlAssignmentKey(vid, itemId);
-      if (key) keys.push(key);
+      // Si la "variación" es un MLA (ítem sin array variations), la clave es ese ítem.
+      // Usar el itemId real de la variación, no la fuente canónica del Paso 1.
+      if (isMercadoLibrePublicationId(vid)) {
+        push(mlAssignmentKey(vid, vid));
+      } else {
+        push(mlAssignmentKey(vid, itemId));
+      }
     }
   }
   const ml = (a.ml || '').trim();
-  if (ml && !isMercadoLibrePublicationId(ml)) {
-    const key = mlAssignmentKey(ml, a.mlItemId);
-    if (key && !keys.includes(key)) keys.push(key);
+  if (ml) {
+    if (isMercadoLibrePublicationId(ml)) {
+      push(mlAssignmentKey(ml, ml));
+    } else {
+      push(mlAssignmentKey(ml, a.mlItemId));
+    }
   }
   return keys;
 }
@@ -283,6 +294,16 @@ function mlOptionKey(row: MlVariationRow): string {
   return `${itemId}::${row.variationId}`;
 }
 
+/** Clave de conflicto/ocupación alineada con iterMlAssignmentKeys (soporta MLA-como-variación). */
+function mlRowConflictKey(row: MlVariationRow): string | null {
+  const vid = String(row.variationId || '').trim();
+  if (!vid) return null;
+  if (isMercadoLibrePublicationId(vid)) {
+    return normalizeMercadoLibreItemId(vid) || vid.toUpperCase();
+  }
+  return mlAssignmentKey(vid, row.itemId);
+}
+
 function tnOptionKey(row: TnVariantRow): string {
   return `${row.productId}::${row.variantId}`;
 }
@@ -316,8 +337,7 @@ function mlKeyUsedByOtherVariant(
 ): boolean {
   for (const [vid, a] of Object.entries(assignments)) {
     if (vid === variantId) continue;
-    const otherKey = mlAssignmentKey(a?.ml || '', a?.mlItemId);
-    if (otherKey === key) return true;
+    if (iterMlAssignmentKeys(a).includes(key)) return true;
   }
   return false;
 }
@@ -375,8 +395,8 @@ function repairMlAssignmentsFromCatalog(
       continue;
     }
 
-    const matchKey = mlOptionKey(match);
-    if (mlKeyUsedByOtherVariant(next, local.variantId, matchKey)) continue;
+    const matchKey = mlRowConflictKey(match);
+    if (!matchKey || mlKeyUsedByOtherVariant(next, local.variantId, matchKey)) continue;
     if (key) usedKeys.delete(key);
     usedKeys.add(matchKey);
     next[local.variantId] = { ...a, ml: match.variationId, mlItemId: match.itemId };
@@ -923,8 +943,38 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
         packSize: mlPackSizeById.get(normalizeMercadoLibreItemId(id) || id) || 1,
       }));
       const syncedAssign: Record<string, VariantAssignment> = {};
+      const catalogKeySet = new Set(catalogSources.map((s) => mlItemKey(s.id)));
       for (const v of list) {
-        syncedAssign[v.variantId] = syncPrimaryMlAssignment(nextAssign[v.variantId], catalogSources);
+        const raw = nextAssign[v.variantId] || {};
+        const prunedByItem: Record<string, string> = {};
+        for (const [itemId, variationId] of Object.entries(raw.mlByItemId || {})) {
+          const vid = String(variationId || '').trim();
+          if (!vid) continue;
+          // Solo conservar asignaciones de las publicaciones del Paso 1 (canónica + packs).
+          if (catalogKeySet.has(mlItemKey(itemId))) {
+            prunedByItem[mlItemKey(itemId)] = vid;
+          }
+        }
+        // Si el vínculo primario es un MLA distinto a la fuente canónica (variante = ítem),
+        // mapearlo bajo la fuente del Paso 1 para el select.
+        const primaryItem = primaryMlSourceItemId(catalogSources);
+        const ownItem = primaryMlItemIdFromAssignment(raw) || primaryMlItemIdFromVariantExternal(v);
+        if (primaryItem && ownItem && !prunedByItem[primaryItem]) {
+          const ownVar =
+            (raw.ml || '').trim() && !isMercadoLibrePublicationId(raw.ml || '')
+              ? String(raw.ml).trim()
+              : isMercadoLibrePublicationId(ownItem)
+                ? ownItem
+                : '';
+          if (ownVar) prunedByItem[primaryItem] = ownVar;
+        }
+        syncedAssign[v.variantId] = syncPrimaryMlAssignment(
+          {
+            ...raw,
+            mlByItemId: Object.keys(prunedByItem).length > 0 ? prunedByItem : undefined,
+          },
+          catalogSources
+        );
       }
       setMlSources(catalogSources);
       setTnSources(tnSourceIds.map((id) => ({ id, autoLoaded: true })));
@@ -1018,8 +1068,8 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
         }
         if (!match && scoped.length === 1) match = scoped[0];
         if (!match) continue;
-        const key = mlOptionKey(match);
-        if (usedMl.has(key)) continue;
+        const key = mlRowConflictKey(match);
+        if (!key || usedMl.has(key)) continue;
         next[local.variantId] = srcItemId
           ? setMlVariationForItem(next[local.variantId], srcItemId, match.variationId)
           : { ...next[local.variantId], ml: match.variationId, mlItemId: match.itemId };
@@ -1326,18 +1376,19 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
   };
 
   const duplicateMlByVariant = useMemo(() => {
-    const keyToIds = new Map<string, string[]>();
+    const keyToIds = new Map<string, Set<string>>();
     variants.forEach((v) => {
       iterMlAssignmentKeys(assignments[v.variantId]).forEach((key) => {
-        const list = keyToIds.get(key) || [];
-        list.push(v.variantId);
-        keyToIds.set(key, list);
+        const set = keyToIds.get(key) || new Set<string>();
+        set.add(v.variantId);
+        keyToIds.set(key, set);
       });
     });
     const dup = new Set<string>();
     const partner = new Map<string, string>();
-    keyToIds.forEach((ids) => {
-      if (ids.length < 2) return;
+    keyToIds.forEach((idSet) => {
+      if (idSet.size < 2) return;
+      const ids = [...idSet];
       ids.forEach((id) => {
         dup.add(id);
         const other = ids.find((x) => x !== id);
@@ -2804,7 +2855,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                                     >
                                       <option value="">Elegir variación…</option>
                                       {options.map((m) => {
-                                        const owner = assignedMlKeys.get(mlOptionKey(m));
+                                        const owner = assignedMlKeys.get(mlRowConflictKey(m) || '');
                                         const takenElsewhere = owner && owner !== v.variantId;
                                         return (
                                           <option
@@ -2912,7 +2963,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                                 >
                                   <option value="">Elegir de ML cargado…</option>
                                   {(filteredMl.length > 0 ? filteredMl : mlVariations).map((m) => {
-                                    const owner = assignedMlKeys.get(mlOptionKey(m));
+                                    const owner = assignedMlKeys.get(mlRowConflictKey(m) || '');
                                     const takenElsewhere = owner && owner !== v.variantId;
                                     return (
                                       <option key={mlOptionKey(m)} value={mlOptionKey(m)}>
