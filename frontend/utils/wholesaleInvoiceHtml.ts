@@ -184,21 +184,18 @@ export function groupOrderItemsByArticleAndSize(
     const variantId = item.variantId ?? item.productId;
     const localProduct = variantId ? products.find((p: Product) => p.id === variantId) : undefined;
     const variantSku = (localProduct?.sku ?? item.sku ?? '').toString().trim();
-    const completePrint =
-      tryCompletePrintCodeFromSku(variantSku) ?? tryCompletePrintCodeFromSku(String(item.sku ?? '').trim());
     const { sizeCode, colorCode } = sizeAndColorCodesForPrint(item, variantSku, localProduct);
-    const articleCode = articleCodeForPrintGroup(variantSku);
+    const articleCode = articleCodeForPrintGroup(variantSku || String(item.sku ?? ''));
     const sizeKey = sizeKeyForGroup(sizeCode);
     const unit = Number(item.priceAtMoment ?? 0);
-    // Sin colorCode no fusionar talles de colores distintos: usar colorName o variantId.
+    // Agrupar siempre por artículo+talle+color del catálogo (no por SKU concatenado,
+    // que puede estar corrupto y fusionar Negro+Nude en el mismo código).
     const colorKey =
       String(colorCode || '').trim() ||
       String(item.colorName || '').trim().toLowerCase() ||
       String(variantId || item.productId || '').trim() ||
       '_';
-    const groupKey = completePrint
-      ? `${completePrint}|${Math.round(unit * 100)}`
-      : `${articleCode}|${sizeKey}|${colorKey}|${Math.round(unit * 100)}`;
+    const groupKey = `${articleCode}|${sizeKey}|${colorKey}|${Math.round(unit * 100)}`;
 
     const despachoRaw =
       (item as OrderItem & { numeroDespacho?: string; numero_despacho?: string }).numeroDespacho ??
@@ -663,14 +660,24 @@ function sizeAndColorCodesForPrint(
   variantSku: string,
   localProduct: Product | undefined
 ): { sizeCode: string; colorCode: string } {
+  // Fuente de verdad: color/talle del pedido (JOIN a colors/sizes). El SKU de variante
+  // puede estar corrupto (ej. Nude 600 con sku …654) y no debe pisar el color real.
+  const itemSize = String(item.sizeCode ?? localProduct?.size ?? '').trim();
+  const itemColor =
+    String(item.colorCode ?? '').trim() ||
+    colorCodeForPrintItem(item, variantSku);
+  if (itemSize && itemColor) {
+    return { sizeCode: itemSize, colorCode: itemColor.replace(/\D/g, '') || itemColor };
+  }
+
   const itemSku = String(item.sku ?? '').trim();
   const fromSku =
     talleColorFromHyphenatedSku(variantSku) ??
     talleColorFromHyphenatedSku(itemSku) ??
     talleColorFromConcatenatedSku(variantSku) ??
     talleColorFromConcatenatedSku(itemSku);
-  const sizeCode = fromSku?.talle ?? String(item.sizeCode ?? localProduct?.size ?? '').trim();
-  const colorCode = fromSku?.color ?? colorCodeForPrintItem(item, variantSku);
+  const sizeCode = itemSize || fromSku?.talle || '';
+  const colorCode = (itemColor || fromSku?.color || '').replace(/\D/g, '') || itemColor || fromSku?.color || '';
   return { sizeCode, colorCode };
 }
 
@@ -685,16 +692,26 @@ export function printCodeForOrderItem(item: OrderItem, products: Product[]): str
     return printCodeForTrifilSku(variantSku || rawItemSku);
   }
 
+  const { sizeCode, colorCode } = sizeAndColorCodesForPrint(item, variantSku, localProduct);
+  const articleFromSku = articleCodeForPrintGroup(variantSku || rawItemSku);
+  if (colorCode && sizeCode) {
+    const built = printCodeArticleSizeColor(articleFromSku, sizeCode, colorCode);
+    if (built) return built;
+  }
+
+  // Fallback: SKU ya concatenado solo si su sufijo de color coincide (o no hay color confiable).
   const complete =
     tryCompletePrintCodeFromSku(rawItemSku) ?? tryCompletePrintCodeFromSku(variantSku);
-  if (complete) return complete;
+  if (complete) {
+    if (!colorCode) return complete;
+    const suffix = complete.slice(-3).replace(/^0+/, '') || complete.slice(-3);
+    const want = String(colorCode).replace(/\D/g, '').replace(/^0+/, '') || colorCode;
+    if (suffix === want || complete.slice(-3) === String(colorCode).padStart(3, '0').slice(-3)) {
+      return complete;
+    }
+  }
 
-  const { sizeCode, colorCode } = sizeAndColorCodesForPrint(item, variantSku, localProduct);
-  const built = printCodeArticleSizeColor(
-    articleCodeForPrintGroup(variantSku || rawItemSku),
-    sizeCode,
-    colorCode
-  );
+  const built = printCodeArticleSizeColor(articleFromSku, sizeCode, colorCode);
   if (built) return built;
   return normalizeSkuForPrint(rawItemSku || variantSku);
 }

@@ -1729,16 +1729,19 @@ export const importTangoArticles = async (req: Request, res: Response) => {
         let variantId: string;
         if (!existingVariant) {
           variantId = uuidv4();
+          // SKU siempre desde artículo+talle+color resueltos (no confiar en codigo13 si vino mal parseado).
+          const variantSku = `${r.articulo}${r.talle}${r.color}`;
           await execute(
             `INSERT INTO product_variants (id, product_color_id, size_id, sku) VALUES (?, ?, ?, ?)`,
-            [variantId, productColorId, sizeId, r.codigo13]
+            [variantId, productColorId, sizeId, variantSku]
           );
           const qty = r.initialStock ?? 0;
           await execute(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?)`, [variantId, qty]);
           variantsCreated++;
         } else {
           variantId = existingVariant.id as string;
-          await execute(`UPDATE product_variants SET sku = ? WHERE id = ?`, [r.codigo13, variantId]);
+          const variantSku = `${r.articulo}${r.talle}${r.color}`;
+          await execute(`UPDATE product_variants SET sku = ? WHERE id = ?`, [variantSku, variantId]);
           variantsUpdated++;
           if (r.initialStock !== undefined) {
             if (keepStockOnExistingVariants) {
@@ -1759,7 +1762,7 @@ export const importTangoArticles = async (req: Request, res: Response) => {
           }
           const prodRow = await get(`SELECT name FROM products WHERE id = ?`, [productId]);
           const prodName = String((prodRow as any)?.name || r.articulo || '').trim();
-          const descripcionItem = `${prodName} - ${r.codigo13}`.trim();
+          const descripcionItem = `${prodName} - ${r.articulo}${r.talle}${r.color}`.trim();
 
           if (qtyDespacho > 0) {
             const di = await get(
