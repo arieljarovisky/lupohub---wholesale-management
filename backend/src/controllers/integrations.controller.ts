@@ -610,15 +610,19 @@ export function mlFamilyNameFromItem(item: any): string {
   return String(item?.family_name ?? '').trim();
 }
 
-/** Prefijo de artículo Lupo/Tango desde SKU (ej. 24650150542 → 24650, 24650-130-280 → 24650). */
+/** Prefijo de artículo Lupo/Tango desde SKU (ej. 4090001150111 → 4090001, 24650-130-280 → 24650). */
 export function extractArticlePrefixFromMlSku(sku: string): string | null {
   const s = String(sku || '').trim();
   if (!s) return null;
   const dashHead = s.split('-')[0];
   if (/^\d{4,7}$/.test(dashHead)) return dashHead;
   const digits = s.replace(/\D/g, '');
-  if (digits.length >= 11) return digits.slice(0, 5);
-  if (digits.length >= 8) return digits.slice(0, 5);
+  // artículo(N) + talle(3) + color(3): sacar los últimos 6 dígitos.
+  // Antes se usaba slice(0,5) y partía mal artículos de 7 (4090001 → 40900).
+  if (digits.length >= 11) {
+    const article = digits.slice(0, digits.length - 6);
+    if (/^\d{4,8}$/.test(article)) return article;
+  }
   if (/^\d{4,7}$/.test(digits)) return digits;
   return null;
 }
@@ -6502,8 +6506,17 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
       /^MLAU\d+$/i.test(requestedNormalized);
     const itemHasVariationArray = Array.isArray(item.variations) && item.variations.length > 0;
 
-    // Publicación única con item.variations: usar solo ese ítem (evita 4×N duplicados al mezclar hermanos/UP).
-    if (itemHasVariationArray && singleItemVariations.length > 0 && !requestLooksLikeCatalog) {
+    // Publicación clásica con varias variaciones en el mismo ítem: usar solo ese ítem.
+    // Si tiene 0–1 variación puede ser un hermano de User Product (un MLA por color/talle):
+    // seguir agregando familia para no perder variantes.
+    if (
+      itemHasVariationArray &&
+      singleItemVariations.length > 1 &&
+      !requestLooksLikeCatalog &&
+      !/^MLAU\d+$/i.test(itemUserProductId) &&
+      !mlFamilyNameFromItem(item) &&
+      item?.catalog_listing !== true
+    ) {
       return res.json({
         variations: singleItemVariations,
         singleProduct: singleItemVariations.length === 1,
@@ -6562,8 +6575,9 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
       const distinctColors = new Set(aggregated.map((v) => v.color.toLowerCase().trim()).filter(Boolean));
       const distinctSizes = new Set(aggregated.map((v) => v.size.toLowerCase().trim()).filter(Boolean));
 
-      // Si solo aparece un color, ampliar por family_name o prefijo SKU del artículo.
-      if (distinctColors.size <= 1) {
+      // Completar familia siempre (no solo con 1 color): el prefijo de artículo encuentra
+      // talles/colores faltantes (ej. faltaba Blanco G de 4090001).
+      {
         const extraIds = new Set(allItemIds.map((id) => normalizeMercadoLibreItemId(id)));
         if (familyNameOnItem) {
           for (const id of await resolveMercadoLibreItemsByFamilyName(familyNameOnItem, mlToken.user_id, mlToken.access_token)) {
