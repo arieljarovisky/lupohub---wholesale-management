@@ -78,6 +78,14 @@ function normalizeSizeCode(value: unknown, skuRaw?: string): string {
     const norm = codigoTalleParaSku(fromSku) || fromSku;
     if (/^\d{1,3}$/.test(norm)) return norm;
   }
+  // Concatenado artículo+talle+color (ej. 4090001140997 → 140).
+  if (!sku.includes('-')) {
+    const digits = sku.replace(/\D/g, '');
+    if (digits.length >= 11 && digits.length <= 17) {
+      const talle = digits.slice(-6, -3);
+      if (/^\d{1,3}$/.test(talle)) return talle;
+    }
+  }
   return '';
 }
 
@@ -567,7 +575,18 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       const productCode = resolveDisplayArticleCode(
         baseSku || articleCodeForOrderRow(undefined, rawSku) || rawSku || parentProductId
       );
-      const colorCode = String((item as any).colorCode || '').trim() || colorName;
+      let colorCode = String((item as any).colorCode || '').trim();
+      if (!colorCode && rawSku) {
+        const parts = rawSku.split('-').filter(Boolean);
+        if (parts.length >= 3) colorCode = parts[parts.length - 1].replace(/\D/g, '') || parts[parts.length - 1];
+        else {
+          const digits = rawSku.replace(/\D/g, '');
+          if (!rawSku.includes('-') && digits.length >= 11 && digits.length <= 17) {
+            colorCode = digits.slice(-3);
+          }
+        }
+      }
+      if (!colorCode) colorCode = colorName;
       const colorKey = variantColorKey(colorCode, colorName);
       const key = findHydrationRowKey(rowsByKey, productCode, colorKey, parentProductId);
 

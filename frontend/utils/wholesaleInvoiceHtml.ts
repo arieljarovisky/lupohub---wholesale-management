@@ -32,6 +32,8 @@ export function colorCodeForPrintItem(item: OrderItem, variantSku?: string): str
     const c = parts[parts.length - 1].trim();
     return c.replace(/\D/g, '') || c;
   }
+  const fromConcat = talleColorFromConcatenatedSku(sku);
+  if (fromConcat?.color) return fromConcat.color;
   return '';
 }
 
@@ -182,14 +184,21 @@ export function groupOrderItemsByArticleAndSize(
     const variantId = item.variantId ?? item.productId;
     const localProduct = variantId ? products.find((p: Product) => p.id === variantId) : undefined;
     const variantSku = (localProduct?.sku ?? item.sku ?? '').toString().trim();
-    const completePrint = tryCompletePrintCodeFromSku(variantSku);
+    const completePrint =
+      tryCompletePrintCodeFromSku(variantSku) ?? tryCompletePrintCodeFromSku(String(item.sku ?? '').trim());
     const { sizeCode, colorCode } = sizeAndColorCodesForPrint(item, variantSku, localProduct);
     const articleCode = articleCodeForPrintGroup(variantSku);
     const sizeKey = sizeKeyForGroup(sizeCode);
     const unit = Number(item.priceAtMoment ?? 0);
+    // Sin colorCode no fusionar talles de colores distintos: usar colorName o variantId.
+    const colorKey =
+      String(colorCode || '').trim() ||
+      String(item.colorName || '').trim().toLowerCase() ||
+      String(variantId || item.productId || '').trim() ||
+      '_';
     const groupKey = completePrint
       ? `${completePrint}|${Math.round(unit * 100)}`
-      : `${articleCode}|${sizeKey}|${colorCode}|${Math.round(unit * 100)}`;
+      : `${articleCode}|${sizeKey}|${colorKey}|${Math.round(unit * 100)}`;
 
     const despachoRaw =
       (item as OrderItem & { numeroDespacho?: string; numero_despacho?: string }).numeroDespacho ??
@@ -635,14 +644,31 @@ export function talleColorFromHyphenatedSku(skuRaw: string): { talle: string; co
   return { talle, color };
 }
 
+/** Talle y color desde SKU concatenado (ej. 4090001140997 → talle 140, color 997). */
+export function talleColorFromConcatenatedSku(skuRaw: string): { talle: string; color: string } | null {
+  const sku = String(skuRaw ?? '').trim();
+  if (!sku || sku.includes('-') || /\s/.test(sku)) return null;
+  const m = sku.match(/^([A-Za-z]*)(\d+)$/);
+  if (!m || m[2].length < 6) return null;
+  const digits = m[2];
+  if (digits.length < 11 || digits.length > 17) return null;
+  const talle = digits.slice(-6, -3);
+  const color = digits.slice(-3);
+  if (!/^\d{1,3}$/.test(talle) || !/^\d{1,3}$/.test(color)) return null;
+  return { talle, color };
+}
+
 function sizeAndColorCodesForPrint(
   item: OrderItem,
   variantSku: string,
   localProduct: Product | undefined
 ): { sizeCode: string; colorCode: string } {
+  const itemSku = String(item.sku ?? '').trim();
   const fromSku =
     talleColorFromHyphenatedSku(variantSku) ??
-    talleColorFromHyphenatedSku(String(item.sku ?? '').trim());
+    talleColorFromHyphenatedSku(itemSku) ??
+    talleColorFromConcatenatedSku(variantSku) ??
+    talleColorFromConcatenatedSku(itemSku);
   const sizeCode = fromSku?.talle ?? String(item.sizeCode ?? localProduct?.size ?? '').trim();
   const colorCode = fromSku?.color ?? colorCodeForPrintItem(item, variantSku);
   return { sizeCode, colorCode };
