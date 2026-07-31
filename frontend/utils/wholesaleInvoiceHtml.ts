@@ -230,7 +230,7 @@ export function groupOrderItemsByArticleAndSize(
         ...acc.template,
         sizeCode: acc.sizeCode,
         colorCode: acc.colorCode || acc.template.colorCode,
-        sku: undefined,
+        sku: variantSkuGrouped || acc.template.sku,
       },
       products
     );
