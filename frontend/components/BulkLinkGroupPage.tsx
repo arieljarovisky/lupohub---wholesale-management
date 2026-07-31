@@ -260,11 +260,15 @@ function matchLocalToRow(
   row: { sku?: string; size?: string; color?: string }
 ): boolean {
   const skuN = norm(local.sku);
-  if (skuN && row.sku && norm(row.sku) === skuN) return true;
+  const skuOk = !!(skuN && row.sku && norm(row.sku) === skuN);
   const colorOk = colorsMatchForLink(local.color, row.color || '');
-  if (!colorOk) return false;
-  if (sizesMatchForLink(local.size, row.size || '')) return true;
-  return norm(row.size || '') === norm(local.size);
+  const sizeOk =
+    sizesMatchForLink(local.size, row.size || '') || norm(row.size || '') === norm(local.size);
+  // Si ML trae color+talle y no calzan con la fila local, no confiar solo en el SKU
+  // (en familias UP el seller_sku a veces está cruzado entre variantes).
+  if (row.color?.trim() && row.size?.trim() && !(colorOk && sizeOk)) return false;
+  if (skuOk) return true;
+  return colorOk && sizeOk;
 }
 
 function mlSourceIdKeys(ids: string[]): Set<string> {
@@ -324,6 +328,14 @@ function findMlCatalogMatchForLocal(
   const scoped = pool.length > 0 ? pool : mlList;
   const skuN = norm(local.sku);
   let match = skuN ? scoped.find((m) => norm(m.sku) === skuN) : null;
+  if (
+    match &&
+    match.color?.trim() &&
+    match.size?.trim() &&
+    !matchLocalToRow(local, { color: match.color, size: match.size })
+  ) {
+    match = null;
+  }
   if (!match) {
     match = scoped.find((m) => matchLocalToRow(local, m)) || null;
   }
@@ -1059,6 +1071,18 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
         if (srcItemId && getMlVariationForItem(next[local.variantId], srcItemId)) continue;
         if (!srcItemId && next[local.variantId].ml?.trim()) continue;
         let match = skuN ? scoped.find((m) => norm(m.sku) === skuN) : null;
+        // SKU cruzado entre variantes de la familia: si color/talle ML no calzan, ignorar el SKU.
+        if (
+          match &&
+          match.color?.trim() &&
+          match.size?.trim() &&
+          !(
+            colorsMatchForLink(local.color, match.color) &&
+            (norm(match.size) === sizeN || sizesMatchForLink(local.size, match.size || ''))
+          )
+        ) {
+          match = null;
+        }
         if (!match) {
           match = scoped.find(
             (m) =>

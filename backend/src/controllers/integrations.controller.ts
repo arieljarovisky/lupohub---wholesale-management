@@ -6527,6 +6527,46 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
       });
     }
 
+    const familyNameOnItem = mlFamilyNameFromItem(item);
+    // Familia ML (mismo family_name, un MLA por color/talle): resolver por familia primero.
+    // user_product_id es por variante (1 ítem), no trae hermanas.
+    if (familyNameOnItem && !shouldResolveAsUserProduct) {
+      try {
+        const familyIds = await resolveMercadoLibreItemsByFamilyName(
+          familyNameOnItem,
+          mlToken.user_id,
+          mlToken.access_token
+        );
+        const ids = Array.from(
+          new Set(
+            [resolvedItemId, ...familyIds]
+              .map((id) => normalizeMercadoLibreItemId(id))
+              .filter(Boolean)
+          )
+        );
+        if (ids.length > 1) {
+          const aggregated = await aggregateMercadoLibreVariationsFromItemIds(ids, mlToken.access_token);
+          if (aggregated.length > 0) {
+            return res.json({
+              variations: aggregated,
+              singleProduct: false,
+              itemId: item.id,
+              requestedItemId: String(req.params.itemId || ''),
+              resolvedItemId,
+              resolvedFromFamilyName: true,
+              debug: {
+                familyName: familyNameOnItem,
+                itemIdsCount: ids.length,
+                variationCount: aggregated.length,
+              },
+            });
+          }
+        }
+      } catch {
+        // seguir con el flujo general
+      }
+    }
+
     const allItemIds = await gatherMercadoLibreItemIdsForAllVariations({
       requestedRaw: String(req.params.itemId || ''),
       requestedNormalized,
@@ -6539,7 +6579,6 @@ export const getMercadoLibreItemVariations = async (req: Request, res: Response)
       preloadedUserProductIds: userProductItemCandidates
     });
     const distinctItemIds = new Set(allItemIds.map((id) => normalizeMercadoLibreItemId(id)));
-    const familyNameOnItem = mlFamilyNameFromItem(item);
     const shouldAggregateMulti =
       shouldResolveAsUserProduct ||
       Boolean(catalogFromPermalink) ||
