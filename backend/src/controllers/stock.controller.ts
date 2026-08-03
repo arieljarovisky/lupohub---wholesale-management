@@ -1136,7 +1136,11 @@ export const getStockMovements = async (req: Request, res: Response) => {
        LEFT JOIN customers c ON c.id = o.customer_id
        LEFT JOIN users ua
          ON sm.movement_type = 'AJUSTE_MANUAL'
-        AND ua.id = TRIM(REPLACE(sm.reference, 'Ajuste por usuario', ''))
+        AND (
+          sm.reference LIKE CONCAT('Ajuste por usuario %', ua.id, '%')
+          OR sm.reference LIKE CONCAT('Ajuste por usuario: %', ua.id, '%')
+          OR TRIM(REPLACE(REPLACE(sm.reference, 'Ajuste por usuario:', ''), 'Ajuste por usuario', '')) = ua.id
+        )
        WHERE ${whereClause}
        ORDER BY sm.created_at DESC
        LIMIT ?`,
@@ -1174,11 +1178,19 @@ export const updateVariantStockEndpoint = async (req: Request, res: Response) =>
     if (typeof stock !== 'number' || stock < 0) {
       return res.status(400).json({ message: 'stock debe ser un número >= 0' });
     }
+    let userName: string | null = typeof user?.name === 'string' ? user.name : null;
+    if (!userName && userId !== 'sistema') {
+      const row = await get(`SELECT name FROM users WHERE id = ?`, [userId]);
+      userName = row?.name ? String(row.name) : null;
+    }
+    const reference = userName
+      ? `Ajuste por usuario: ${userName}`
+      : `Ajuste por usuario ${userId}`;
     const ok = await updateVariantStock(
       variantId,
       Math.floor(stock),
       'AJUSTE_MANUAL',
-      `Ajuste por usuario ${userId}`,
+      reference,
       true
     );
     if (!ok) return res.status(500).json({ message: 'Error actualizando stock' });
