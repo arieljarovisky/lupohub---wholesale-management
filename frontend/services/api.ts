@@ -2000,7 +2000,7 @@ export const api = {
     if (params?.sellerId) q.set('sellerId', params.sellerId);
     if (params?.from) q.set('from', params.from);
     if (params?.to) q.set('to', params.to);
-    if (params?.source === 'sistema' || params?.source === 'tango') {
+    if (params?.source === 'sistema' || params?.source === 'tango' || params?.source === 'historial') {
       q.set('source', params.source);
     }
     const qs = q.toString() ? `?${q.toString()}` : '';

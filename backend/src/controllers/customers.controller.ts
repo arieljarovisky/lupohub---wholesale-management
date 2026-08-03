@@ -2862,8 +2862,8 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
 
   try {
     const requestedSellerId = String(req.query.sellerId || '').trim();
-    const from = String(req.query.from || '').trim();
-    const to = String(req.query.to || '').trim();
+    const fromRaw = String(req.query.from || '').trim();
+    const toRaw = String(req.query.to || '').trim();
     const sellerIdFilter =
       user.role === 'SELLER'
         ? user.id
@@ -2884,10 +2884,17 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
               : 'sistema';
     const includeTangoInHistorial = INCLUDE_TANGO_IMPORT_IN_SYSTEM;
 
+    /**
+     * Modo Tango: el import Multimedia es histórico (años atrás). Un filtro tipo «mes en curso»
+     * deja todas las FAC fuera del detalle (solo «Saldo al inicio»). Siempre listamos el ledger completo.
+     */
+    const from = mode === 'tango' ? '' : fromRaw;
+    const to = mode === 'tango' ? '' : toRaw;
+
     const sellerWhere = sellerIdFilter ? 'WHERE c.seller_id = ?' : '';
     const sellerParams: any[] = sellerIdFilter ? [sellerIdFilter] : [];
     /**
-     * Detalle del Excel: solo movimientos entre `from` y `to` (si vienen en la URL).
+     * Detalle del Excel: solo movimientos entre `from` y `to` (si vienen en la URL; no aplica en modo tango).
      * El saldo corrido arranca en «Saldo al inicio del período» y cierra en saldo pendiente (cartera).
      */
     const invoiceRangeFilter = `${from ? ' AND DATE(COALESCE(i.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(i.created_at, o.date)) <= ?' : ''}`;
@@ -3561,10 +3568,10 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       }
       const saldoPeriodo = Math.round(running * 100) / 100;
       const saldoCartera = carteraByCustomerId.get(c.id) ?? saldoPeriodo;
-      // Solo Tango: el saldo del Excel es el neto de movimientos importados (sin saldo inicial LupoHub).
-      const saldoExcel = mode === 'tango' && !from ? saldoPeriodo : saldoCartera;
+      // Solo Tango: saldo = neto de movimientos importados (la cartera LupoHub no incluye Tango).
+      const saldoExcel = mode === 'tango' ? saldoPeriodo : saldoCartera;
 
-      if (mode === 'tango' && !from) {
+      if (mode === 'tango') {
         if (movs.length === 0) continue;
       } else if (Math.abs(saldoCartera) <= 0.005) {
         continue;
@@ -3590,7 +3597,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         }
       }
 
-      const saldoCarteraLabel = saldoCartera.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const saldoTituloLabel = saldoExcel.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       const titleRow = wsDetalle.addRow([
         `CLIENTE: ${c.customer_name}`,
         `VENDEDOR: ${c.seller_name ?? c.seller_id ?? '-'}`,
@@ -3598,7 +3605,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         '',
         '',
         '',
-        `SALDO A COBRAR: ${saldoCarteraLabel}`,
+        `SALDO A COBRAR: ${saldoTituloLabel}`,
       ]);
       wsDetalle.mergeCells(titleRow.number, 1, titleRow.number, 3);
       wsDetalle.mergeCells(titleRow.number, 4, titleRow.number, 6);
@@ -3629,15 +3636,16 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
 
       /** Saldo al empezar el período listado: cierra en saldo pendiente (cartera) al final de las filas. */
       let saldoCorrido =
-        mode === 'tango' && !from
+        mode === 'tango'
           ? 0
           : Math.round((saldoCartera - netoTabla) * 100) / 100;
 
-      // Con solo Tango no mostramos «Saldo inicial» (es el arranque manual de LupoHub / un puente sintético).
-      // Sí «Saldo al inicio del período» si hay filtro `from` (aunque no haya movimientos en el rango).
+      // Con solo Tango no mostramos «Saldo inicial» LupoHub (el ledger importado ya es el historial completo).
+      // Sí «Saldo al inicio del período» si hay filtro `from` en sistema/historial.
       const showSaldoInicioPeriodo =
-        (Boolean(from) && Math.abs(saldoCorrido) > 0.005) ||
-        (movsOrdenados.length > 0 && mode !== 'tango' && Math.abs(saldoCorrido) > 0.005);
+        mode !== 'tango' &&
+        ((Boolean(from) && Math.abs(saldoCorrido) > 0.005) ||
+          (movsOrdenados.length > 0 && Math.abs(saldoCorrido) > 0.005));
       if (showSaldoInicioPeriodo) {
         const saldoIniRow = wsDetalle.addRow({
           fecha: from
@@ -3660,8 +3668,8 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         const debe = Number(m.debe || 0);
         const haber = Number(m.haber || 0);
         saldoCorrido = Math.round((saldoCorrido + debe - haber) * 100) / 100;
-        // Solo Tango: el corrido es la suma de movimientos importados (sin forzar cartera LupoHub).
-        if (i === movsOrdenados.length - 1 && !(mode === 'tango' && !from)) {
+        // Sistema/historial: forzar cierre en cartera LupoHub. Tango: el corrido es la suma importada.
+        if (i === movsOrdenados.length - 1 && mode !== 'tango') {
           saldoCorrido = Math.round(saldoCartera * 100) / 100;
         }
         wsDetalle.addRow({
@@ -3675,7 +3683,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         });
       }
 
-      const saldoResumen = mode === 'tango' && !from ? saldoExcel : saldoCartera;
+      const saldoResumen = mode === 'tango' ? saldoExcel : saldoCartera;
 
       const resumenLabelRow = wsDetalle.addRow(['RESUMEN', '', '', '', '', '', '']);
       const mainSaldoRow = wsDetalle.addRow(['Saldo pendiente', '', '', '', '', '', saldoResumen]);

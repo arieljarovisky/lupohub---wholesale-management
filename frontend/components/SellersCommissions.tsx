@@ -836,10 +836,20 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
                       name="massExportSaldosSource"
                       className="accent-amber-500"
                       checked={massExportSaldosSource === 'tango'}
-                      onChange={() => setMassExportSaldosSource('tango')}
+                      onChange={() => {
+                        setMassExportSaldosSource('tango');
+                        // El import Tango es histórico: un rango de mes oculta todas las FAC.
+                        setMassExportFrom('');
+                        setMassExportTo('');
+                      }}
                     />
-                    Solo importado de Tango (Multimedia)
+                    Solo importado de Tango (Multimedia) — historial completo
                   </label>
+                  {massExportSaldosSource === 'tango' ? (
+                    <p className="text-[11px] text-amber-200/90 leading-snug">
+                      En modo Tango se listan todas las facturas/recibos importados del cliente (se ignora el rango de fechas).
+                    </p>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -1039,8 +1049,6 @@ function SellerDetailView({
               await api.exportSaldosPendientesPorCliente({
                 sellerId: seller.id,
                 sellerName: seller.name,
-                from: exportFrom || undefined,
-                to: exportTo || undefined,
                 source: 'tango'
               });
             } catch {
@@ -1050,7 +1058,7 @@ function SellerDetailView({
             }
           }}
           className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-amber-700/60 text-amber-300 hover:text-white hover:bg-amber-700/20 text-sm font-semibold transition disabled:opacity-50"
-          title="Solo movimientos importados de Tango (Multimedia): facturas, NC y recibos importados"
+          title="Historial completo importado de Tango/Multimedia (ignora el rango de fechas)"
         >
           {exportSaldosLoading === 'tango' ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
           Excel por cliente · solo Tango
