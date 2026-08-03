@@ -52,6 +52,7 @@ const formatYmdLocal = (d: Date) => {
 };
 
 type MassExportRangePreset =
+  | 'all'
   | 'current_month'
   | 'last_month'
   | 'last_3_months'
@@ -60,6 +61,7 @@ type MassExportRangePreset =
   | 'ytd';
 
 const MASS_EXPORT_RANGE_PRESETS: { id: MassExportRangePreset; label: string }[] = [
+  { id: 'all', label: 'Todo el historial' },
   { id: 'current_month', label: 'Mes en curso' },
   { id: 'last_month', label: 'Mes anterior' },
   { id: 'last_3_months', label: 'Últimos 3 meses' },
@@ -76,6 +78,8 @@ function massExportRangeForPreset(preset: MassExportRangePreset): { from: string
     new Date(anchor.getFullYear(), anchor.getMonth() + delta, 1);
 
   switch (preset) {
+    case 'all':
+      return { from: '', to: '' };
     case 'current_month':
       return { from: formatYmdLocal(monthStart(today)), to };
     case 'last_month': {
@@ -222,7 +226,10 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
   };
 
   const openMassExportModal = (mode: 'saldos' | 'commissionDetail') => {
-    const { from, to } = massExportRangeForPreset('current_month');
+    // Saldos: por defecto todo el historial (si se fuerza el mes, las facturas viejas no salen como filas).
+    // Comisiones: mes en curso (el detalle es por período de cobros).
+    const { from, to } =
+      mode === 'saldos' ? massExportRangeForPreset('all') : massExportRangeForPreset('current_month');
     setMassExportMode(mode);
     setMassExportFrom(from);
     setMassExportTo(to);
@@ -247,8 +254,9 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
   const activeMassExportPreset = useMemo((): MassExportRangePreset | null => {
     const from = massExportFrom.trim();
     const to = massExportTo.trim();
-    if (!from || !to) return null;
+    if (!from && !to) return 'all';
     for (const p of MASS_EXPORT_RANGE_PRESETS) {
+      if (p.id === 'all') continue;
       const r = massExportRangeForPreset(p.id);
       if (r.from === from && r.to === to) return p.id;
     }
@@ -691,7 +699,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
               <h3 className="text-white font-black text-lg">Descarga masiva por vendedor</h3>
               <p className="text-slate-400 text-sm mt-1">
                 {massExportMode === 'saldos'
-                  ? 'Elegí vendedores y rango de fechas. Se descarga un Excel por cada vendedor seleccionado.'
+                  ? 'Elegí vendedores y, si querés, un rango. Por defecto se incluye todo el historial (facturas, pedidos, NC y recibos) de cada cliente.'
                   : 'Elegí vendedores y rango de fechas. Se arma un detalle de comisiones por cada uno.'}
               </p>
             </div>
@@ -794,7 +802,8 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
 
               {massExportMode === 'saldos' && (
                 <p className="text-[11px] text-slate-500 leading-snug">
-                  El detalle respeta el rango «desde» / «hasta». La columna Saldo termina en el saldo pendiente a cobrar (deuda actual, no solo del mes).
+                  Con fechas vacías («Todo el historial») el detalle lista todas las facturas/pedidos/NC/recibos de cada cliente.
+                  Si filtrás un rango, solo aparecen movimientos de ese período; el saldo verde sigue siendo la deuda actual.
                 </p>
               )}
 
@@ -968,7 +977,7 @@ function SellerDetailView({
             />
           </div>
           <span className="text-[10px] text-slate-500 max-w-md leading-snug">
-            El detalle solo incluye movimientos entre «desde» y «hasta». La columna Saldo cierra en el saldo pendiente (fila verde).
+            Dejá las fechas vacías para listar todas las facturas/pedidos de cada cliente. Si ponés rango, el detalle solo incluye movimientos entre «desde» y «hasta»; el saldo verde es la deuda actual.
           </span>
         </div>
         <button

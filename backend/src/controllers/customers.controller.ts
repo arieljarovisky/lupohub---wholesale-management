@@ -125,6 +125,7 @@ function labelTipoSaldoExporter(m: { tipo?: string | null; comprobante?: string 
   if (tipo === 'NOTA_CREDITO') return 'NOTA DE CREDITO';
   if (tipo === 'NOTA_CREDITO_IMPORTADA') return 'NOTA DE CREDITO (import.)';
   if (tipo === 'NOTA_DEBITO_IMPORTADA') return 'NOTA DE DEBITO (import.)';
+  if (tipo === 'PEDIDO') return 'PEDIDO (sin factura)';
 
   if (comprobanteIndicaNotaCredito(comp)) {
     if (
@@ -2891,6 +2892,8 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
      */
     const invoiceRangeFilter = `${from ? ' AND DATE(COALESCE(i.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(i.created_at, o.date)) <= ?' : ''}`;
     const invoiceOpeningFilter = ' AND DATE(COALESCE(i.created_at, o.date)) < ?';
+    const pedidoRangeFilter = `${from ? ' AND DATE(o.date) >= ?' : ''}${to ? ' AND DATE(o.date) <= ?' : ''}`;
+    const pedidoOpeningFilter = ' AND DATE(o.date) < ?';
     const ncRangeFilter = `${from ? ' AND DATE(COALESCE(cn.created_at, inv.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(cn.created_at, inv.created_at, o.date)) <= ?' : ''}`;
     const ncOpeningFilter = ' AND DATE(COALESCE(cn.created_at, inv.created_at, o.date)) < ?';
     const externalNcRangeFilter = `${from ? ' AND DATE(COALESCE(ecn.created_at, ei.created_at)) >= ?' : ''}${to ? ' AND DATE(COALESCE(ecn.created_at, ei.created_at)) <= ?' : ''}`;
@@ -2955,6 +2958,51 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         JOIN customers c ON c.id = o.customer_id
         LEFT JOIN users u ON u.id = c.seller_id
         WHERE 1=1 ${invoiceOpeningFilter}`;
+
+    /** Pedidos con saldo pendiente sin factura AFIP (misma lógica que el historial del cliente). */
+    const branchPedidoSinFactura = `
+        SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
+          o.date AS fecha,
+          'PEDIDO' AS tipo,
+          o.id AS comprobante,
+          o.id AS order_id,
+          (${SQL_ORDER_SALDO_RESIDUAL}) AS debe,
+          0 AS haber
+        FROM orders o
+        LEFT JOIN (${SQL_CN_TOTAL_SUBQUERY}) cn ON cn.order_id = o.id
+        JOIN customers c ON c.id = o.customer_id
+        LEFT JOIN users u ON u.id = c.seller_id
+        WHERE ${SQL_ORDER_ACTIVE_COND}
+          AND ${SQL_ORDER_IN_SALDO_SCOPE}
+          AND (${SQL_ORDER_SALDO_RESIDUAL}) > 0.005
+          AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
+          ${pedidoRangeFilter}`;
+
+    const branchPedidoSinFacturaOpening = `
+        SELECT
+          c.id AS customer_id,
+          COALESCE(c.business_name, c.name, 'Cliente') AS customer_name,
+          c.seller_id AS seller_id,
+          u.name AS seller_name,
+          o.date AS fecha,
+          'PEDIDO' AS tipo,
+          o.id AS comprobante,
+          o.id AS order_id,
+          (${SQL_ORDER_SALDO_RESIDUAL}) AS debe,
+          0 AS haber
+        FROM orders o
+        LEFT JOIN (${SQL_CN_TOTAL_SUBQUERY}) cn ON cn.order_id = o.id
+        JOIN customers c ON c.id = o.customer_id
+        LEFT JOIN users u ON u.id = c.seller_id
+        WHERE ${SQL_ORDER_ACTIVE_COND}
+          AND ${SQL_ORDER_IN_SALDO_SCOPE}
+          AND (${SQL_ORDER_SALDO_RESIDUAL}) > 0.005
+          AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
+          ${pedidoOpeningFilter}`;
 
     const branchNcSistema = `
         SELECT
@@ -3338,6 +3386,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
     const branchesByMode: Record<typeof mode, string[]> = {
       historial: [
         branchFacturaSistema,
+        branchPedidoSinFactura,
         branchNcSistema,
         branchNcExterna,
         branchReciboSistema,
@@ -3346,6 +3395,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       ],
       sistema: [
         branchFacturaSistema,
+        branchPedidoSinFactura,
         branchNcSistema,
         branchReciboSistema,
         branchManualComprobante
@@ -3355,6 +3405,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
     const branchesOpeningByMode: Record<typeof mode, string[]> = {
       historial: [
         branchFacturaSistemaOpening,
+        branchPedidoSinFacturaOpening,
         branchNcSistemaOpening,
         branchNcExternaOpening,
         branchReciboSistemaOpening,
@@ -3363,6 +3414,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       ],
       sistema: [
         branchFacturaSistemaOpening,
+        branchPedidoSinFacturaOpening,
         branchNcSistemaOpening,
         branchReciboSistemaOpening,
         branchManualComprobanteOpening
@@ -3430,6 +3482,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       fecha: string;
       tipo:
         | 'FACTURA'
+        | 'PEDIDO'
         | 'NOTA_CREDITO'
         | 'NOTA_CREDITO_IMPORTADA'
         | 'NOTA_DEBITO_IMPORTADA'
@@ -3581,13 +3634,17 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           : Math.round((saldoCartera - netoTabla) * 100) / 100;
 
       // Con solo Tango no mostramos «Saldo inicial» (es el arranque manual de LupoHub / un puente sintético).
-      // Sí «Saldo al inicio del período» si hay filtro `from`.
+      // Sí «Saldo al inicio del período» si hay filtro `from` (aunque no haya movimientos en el rango).
       const showSaldoInicioPeriodo =
-        movsOrdenados.length > 0 &&
-        (Boolean(from) || (mode !== 'tango' && Math.abs(saldoCorrido) > 0.005));
+        (Boolean(from) && Math.abs(saldoCorrido) > 0.005) ||
+        (movsOrdenados.length > 0 && mode !== 'tango' && Math.abs(saldoCorrido) > 0.005);
       if (showSaldoInicioPeriodo) {
         const saldoIniRow = wsDetalle.addRow({
-          fecha: from ? ymdToExcelDate(from) : ymdToExcelDate(movsOrdenados[0].fecha),
+          fecha: from
+            ? ymdToExcelDate(from)
+            : movsOrdenados.length > 0
+              ? ymdToExcelDate(movsOrdenados[0].fecha)
+              : null,
           tipo: from ? 'Saldo al inicio del período' : 'Saldo inicial',
           comprobante: '',
           pedido: '',
