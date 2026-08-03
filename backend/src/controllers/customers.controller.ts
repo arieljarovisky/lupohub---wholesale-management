@@ -2882,19 +2882,19 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
             : INCLUDE_TANGO_IMPORT_IN_SYSTEM
               ? 'historial'
               : 'sistema';
-    const includeTangoInHistorial = INCLUDE_TANGO_IMPORT_IN_SYSTEM;
+    const includeTangoInHistorial = true; // Excel historial: siempre listar import Multimedia (aunque la cartera LupoHub no lo sume)
 
     /**
-     * Modo Tango: el import Multimedia es histórico (años atrás). Un filtro tipo «mes en curso»
-     * deja todas las FAC fuera del detalle (solo «Saldo al inicio»). Siempre listamos el ledger completo.
+     * Modo Tango / Historial: el import Multimedia es histórico (años atrás). Un filtro tipo «mes en curso»
+     * deja todas las FAC fuera del detalle (solo «Saldo al inicio»). Listamos el ledger completo.
      */
-    const from = mode === 'tango' ? '' : fromRaw;
-    const to = mode === 'tango' ? '' : toRaw;
+    const from = mode === 'tango' || mode === 'historial' ? '' : fromRaw;
+    const to = mode === 'tango' || mode === 'historial' ? '' : toRaw;
 
     const sellerWhere = sellerIdFilter ? 'WHERE c.seller_id = ?' : '';
     const sellerParams: any[] = sellerIdFilter ? [sellerIdFilter] : [];
     /**
-     * Detalle del Excel: solo movimientos entre `from` y `to` (si vienen en la URL; no aplica en modo tango).
+     * Detalle del Excel: solo movimientos entre `from` y `to` (si vienen; historial/tango ignoran el rango).
      * El saldo corrido arranca en «Saldo al inicio del período» y cierra en saldo pendiente (cartera).
      */
     const invoiceRangeFilter = `${from ? ' AND DATE(COALESCE(i.created_at, o.date)) >= ?' : ''}${to ? ' AND DATE(COALESCE(i.created_at, o.date)) <= ?' : ''}`;

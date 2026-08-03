@@ -131,7 +131,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
   const [massExportFrom, setMassExportFrom] = useState<string>('');
   const [massExportTo, setMassExportTo] = useState<string>('');
   const [massExportError, setMassExportError] = useState<string>('');
-  const [massExportSaldosSource, setMassExportSaldosSource] = useState<'historial' | 'sistema' | 'tango'>('sistema');
+  const [massExportSaldosSource, setMassExportSaldosSource] = useState<'historial' | 'sistema' | 'tango'>('historial');
   const [massExportSellerIds, setMassExportSellerIds] = useState<string[]>([]);
 
   const sellers = useMemo(() => users.filter((u) => u.role === Role.SELLER), [users]);
@@ -226,13 +226,13 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
   };
 
   const openMassExportModal = (mode: 'saldos' | 'commissionDetail') => {
-    // Saldos: por defecto todo el historial (si se fuerza el mes, las facturas viejas no salen como filas).
-    // Comisiones: mes en curso (el detalle es por período de cobros).
+    // Saldos: por defecto todo el historial (incl. Tango). Comisiones: mes en curso.
     const { from, to } =
       mode === 'saldos' ? massExportRangeForPreset('all') : massExportRangeForPreset('current_month');
     setMassExportMode(mode);
     setMassExportFrom(from);
     setMassExportTo(to);
+    if (mode === 'saldos') setMassExportSaldosSource('historial');
     setMassExportSellerIds(sellers.map((s) => s.id));
     setMassExportError('');
     setMassExportModalOpen(true);
@@ -815,6 +815,20 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
                       type="radio"
                       name="massExportSaldosSource"
                       className="accent-emerald-500"
+                      checked={massExportSaldosSource === 'historial'}
+                      onChange={() => {
+                        setMassExportSaldosSource('historial');
+                        setMassExportFrom('');
+                        setMassExportTo('');
+                      }}
+                    />
+                    Historial completo (LupoHub + facturas/recibos importados de Tango)
+                  </label>
+                  <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="massExportSaldosSource"
+                      className="accent-emerald-500"
                       checked={massExportSaldosSource === 'sistema'}
                       onChange={() => setMassExportSaldosSource('sistema')}
                     />
@@ -824,30 +838,21 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
                     <input
                       type="radio"
                       name="massExportSaldosSource"
-                      className="accent-emerald-500"
-                      checked={massExportSaldosSource === 'historial'}
-                      onChange={() => setMassExportSaldosSource('historial')}
-                    />
-                    Historial completo (sistema + externos por CUIT; sin import Tango)
-                  </label>
-                  <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="massExportSaldosSource"
                       className="accent-amber-500"
                       checked={massExportSaldosSource === 'tango'}
                       onChange={() => {
                         setMassExportSaldosSource('tango');
-                        // El import Tango es histórico: un rango de mes oculta todas las FAC.
                         setMassExportFrom('');
                         setMassExportTo('');
                       }}
                     />
-                    Solo importado de Tango (Multimedia) — historial completo
+                    Solo importado de Tango (Multimedia)
                   </label>
-                  {massExportSaldosSource === 'tango' ? (
+                  {massExportSaldosSource === 'historial' || massExportSaldosSource === 'tango' ? (
                     <p className="text-[11px] text-amber-200/90 leading-snug">
-                      En modo Tango se listan todas las facturas/recibos importados del cliente (se ignora el rango de fechas).
+                      {massExportSaldosSource === 'historial'
+                        ? 'Incluye las FAC/REC de Tango de cada cliente (historial completo; sin filtro de fechas).'
+                        : 'Se listan todas las facturas/recibos importados del cliente (se ignora el rango de fechas).'}
                     </p>
                   ) : null}
                 </div>
@@ -1024,8 +1029,6 @@ function SellerDetailView({
               await api.exportSaldosPendientesPorCliente({
                 sellerId: seller.id,
                 sellerName: seller.name,
-                from: exportFrom || undefined,
-                to: exportTo || undefined,
                 source: 'historial'
               });
             } catch {
@@ -1035,10 +1038,10 @@ function SellerDetailView({
             }
           }}
           className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-600 text-slate-200 hover:text-white hover:bg-slate-800 text-sm font-semibold transition disabled:opacity-50"
-          title="Facturas, notas de crédito y recibos del sistema más comprobantes externos por CUIT (sin import Tango)"
+          title="LupoHub (AFIP) + facturas/recibos importados de Tango + externos por CUIT"
         >
           {exportSaldosLoading === 'historial' ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-          Excel por cliente · historial
+          Excel por cliente · historial (con Tango)
         </button>
         <button
           type="button"
