@@ -146,6 +146,43 @@ function labelTipoSaldoExporter(m: { tipo?: string | null; comprobante?: string 
   return tipo;
 }
 
+/**
+ * Recorta el detalle desde la última vez que el saldo corrido quedó en ~0
+ * (cliente al día). Si nunca llegó a cero, devuelve todo el historial.
+ */
+function trimMovementsSinceLastZeroBalance<T extends { fecha: string; debe: number; haber: number; comprobante?: string | null }>(
+  movs: T[],
+  syntheticOpening = 0
+): { movs: T[]; startSaldo: number; cutAtZero: boolean } {
+  const sorted = [...movs].sort((a, b) => {
+    const da = new Date(a.fecha || 0).getTime() || 0;
+    const db = new Date(b.fecha || 0).getTime() || 0;
+    if (da !== db) return da - db;
+    return String(a.comprobante || '').localeCompare(String(b.comprobante || ''), 'es');
+  });
+
+  let running = Math.round((Number(syntheticOpening) || 0) * 100) / 100;
+  /** Índice del movimiento tras el cual el saldo quedó en cero; -1 = ya estaba en cero al inicio. */
+  let lastZeroAfterIdx = Math.abs(running) <= 0.005 ? -1 : Number.NaN;
+
+  for (let i = 0; i < sorted.length; i += 1) {
+    running = Math.round((running + Number(sorted[i].debe || 0) - Number(sorted[i].haber || 0)) * 100) / 100;
+    if (Math.abs(running) <= 0.005) lastZeroAfterIdx = i;
+  }
+
+  if (!Number.isFinite(lastZeroAfterIdx)) {
+    return { movs: sorted, startSaldo: Math.round((Number(syntheticOpening) || 0) * 100) / 100, cutAtZero: false };
+  }
+  if (lastZeroAfterIdx === sorted.length - 1) {
+    return { movs: [], startSaldo: 0, cutAtZero: true };
+  }
+  return {
+    movs: sorted.slice(lastZeroAfterIdx + 1),
+    startSaldo: 0,
+    cutAtZero: true
+  };
+}
+
 function parseSellerCommissionPercentage(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null;
   const n = Number(v);
@@ -2864,6 +2901,13 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
     const requestedSellerId = String(req.query.sellerId || '').trim();
     const fromRaw = String(req.query.from || '').trim();
     const toRaw = String(req.query.to || '').trim();
+    const sinceZeroRaw = String(req.query.sinceZero || req.query.desdeCero || '').trim().toLowerCase();
+    const sinceZero =
+      sinceZeroRaw === '1' ||
+      sinceZeroRaw === 'true' ||
+      sinceZeroRaw === 'yes' ||
+      sinceZeroRaw === 'desde-cero' ||
+      sinceZeroRaw === 'since-zero';
     const sellerIdFilter =
       user.role === 'SELLER'
         ? user.id
@@ -2885,11 +2929,11 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
     const includeTangoInHistorial = true; // Excel historial: siempre listar import Multimedia (aunque la cartera LupoHub no lo sume)
 
     /**
-     * Modo Tango / Historial: el import Multimedia es histórico (años atrás). Un filtro tipo «mes en curso»
-     * deja todas las FAC fuera del detalle (solo «Saldo al inicio»). Listamos el ledger completo.
+     * Modo Tango / Historial / desde-cero: necesitamos el ledger completo para recortar
+     * o listar import Multimedia (años atrás). Un filtro de mes ocultaría las FAC.
      */
-    const from = mode === 'tango' || mode === 'historial' ? '' : fromRaw;
-    const to = mode === 'tango' || mode === 'historial' ? '' : toRaw;
+    const from = mode === 'tango' || mode === 'historial' || sinceZero ? '' : fromRaw;
+    const to = mode === 'tango' || mode === 'historial' || sinceZero ? '' : toRaw;
 
     const sellerWhere = sellerIdFilter ? 'WHERE c.seller_id = ?' : '';
     const sellerParams: any[] = sellerIdFilter ? [sellerIdFilter] : [];
@@ -3560,19 +3604,47 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
     );
     let lastSellerGroup = '';
     for (const c of customersOrdered) {
-      const movs = byCustomer.get(c.id) || [];
+      const movsRaw = byCustomer.get(c.id) || [];
       const openingBalance = from ? Math.round((openingByCustomer.get(c.id) || 0) * 100) / 100 : 0;
-      let running = openingBalance;
-      for (const m of movs) {
-        running = Math.round((running + Number(m.debe || 0) - Number(m.haber || 0)) * 100) / 100;
+
+      let movsOrdenados = [...movsRaw].sort((a, b) => {
+        const da = new Date(a.fecha || 0).getTime() || 0;
+        const db = new Date(b.fecha || 0).getTime() || 0;
+        if (da !== db) return da - db;
+        return String(a.comprobante || '').localeCompare(String(b.comprobante || ''), 'es');
+      });
+
+      let netoAll = 0;
+      for (const m of movsOrdenados) {
+        netoAll = Math.round((netoAll + Number(m.debe || 0) - Number(m.haber || 0)) * 100) / 100;
       }
-      const saldoPeriodo = Math.round(running * 100) / 100;
-      const saldoCartera = carteraByCustomerId.get(c.id) ?? saldoPeriodo;
+
+      const saldoPeriodoFull = Math.round((openingBalance + netoAll) * 100) / 100;
+      const saldoCartera = carteraByCustomerId.get(c.id) ?? saldoPeriodoFull;
+
+      /** Arranque sintético (saldo inicial LupoHub / diferencia vs cartera) antes de recortar. */
+      const syntheticOpening =
+        mode === 'tango' ? 0 : Math.round((saldoCartera - netoAll) * 100) / 100;
+
+      let startSaldo = mode === 'tango' ? 0 : syntheticOpening;
+      let cutAtZero = false;
+      if (sinceZero) {
+        const trimmed = trimMovementsSinceLastZeroBalance(movsOrdenados, mode === 'tango' ? 0 : syntheticOpening);
+        movsOrdenados = trimmed.movs;
+        startSaldo = trimmed.startSaldo;
+        cutAtZero = trimmed.cutAtZero;
+      }
+
+      let netoTabla = 0;
+      for (const m of movsOrdenados) {
+        netoTabla = Math.round((netoTabla + Number(m.debe || 0) - Number(m.haber || 0)) * 100) / 100;
+      }
+      const saldoPeriodo = Math.round((startSaldo + netoTabla) * 100) / 100;
       // Solo Tango: saldo = neto de movimientos importados (la cartera LupoHub no incluye Tango).
       const saldoExcel = mode === 'tango' ? saldoPeriodo : saldoCartera;
 
       if (mode === 'tango') {
-        if (movs.length === 0) continue;
+        if (movsOrdenados.length === 0 && Math.abs(saldoPeriodo) <= 0.005) continue;
       } else if (Math.abs(saldoCartera) <= 0.005) {
         continue;
       }
@@ -3622,27 +3694,11 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         cell.alignment = { horizontal: 'left', vertical: 'middle' };
       });
 
-      const movsOrdenados = [...movs].sort((a, b) => {
-        const da = new Date(a.fecha || 0).getTime() || 0;
-        const db = new Date(b.fecha || 0).getTime() || 0;
-        if (da !== db) return da - db;
-        return String(a.comprobante || '').localeCompare(String(b.comprobante || ''), 'es');
-      });
+      let saldoCorrido = startSaldo;
 
-      let netoTabla = 0;
-      for (const m of movsOrdenados) {
-        netoTabla = Math.round((netoTabla + Number(m.debe || 0) - Number(m.haber || 0)) * 100) / 100;
-      }
-
-      /** Saldo al empezar el período listado: cierra en saldo pendiente (cartera) al final de las filas. */
-      let saldoCorrido =
-        mode === 'tango'
-          ? 0
-          : Math.round((saldoCartera - netoTabla) * 100) / 100;
-
-      // Con solo Tango no mostramos «Saldo inicial» LupoHub (el ledger importado ya es el historial completo).
-      // Sí «Saldo al inicio del período» si hay filtro `from` en sistema/historial.
+      // Con desde-cero: arrancamos en 0 (sin «Saldo inicial» opaco). Sino, lógica previa.
       const showSaldoInicioPeriodo =
+        !sinceZero &&
         mode !== 'tango' &&
         ((Boolean(from) && Math.abs(saldoCorrido) > 0.005) ||
           (movsOrdenados.length > 0 && Math.abs(saldoCorrido) > 0.005));
@@ -3661,6 +3717,28 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           saldo: saldoCorrido,
         });
         saldoIniRow.font = { italic: true, color: { argb: 'FF64748B' } };
+      } else if (sinceZero && cutAtZero && movsOrdenados.length > 0) {
+        const ceroRow = wsDetalle.addRow({
+          fecha: ymdToExcelDate(movsOrdenados[0].fecha),
+          tipo: 'Desde saldo en cero',
+          comprobante: '',
+          pedido: '',
+          debe: 0,
+          haber: 0,
+          saldo: 0,
+        });
+        ceroRow.font = { italic: true, color: { argb: 'FF64748B' } };
+      } else if (sinceZero && movsOrdenados.length === 0 && Math.abs(saldoExcel) > 0.005) {
+        const saldoIniRow = wsDetalle.addRow({
+          fecha: null,
+          tipo: 'Saldo pendiente (sin movimientos posteriores al último cero)',
+          comprobante: '',
+          pedido: '',
+          debe: 0,
+          haber: 0,
+          saldo: saldoExcel,
+        });
+        saldoIniRow.font = { italic: true, color: { argb: 'FF64748B' } };
       }
 
       for (let i = 0; i < movsOrdenados.length; i += 1) {
@@ -3668,8 +3746,12 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
         const debe = Number(m.debe || 0);
         const haber = Number(m.haber || 0);
         saldoCorrido = Math.round((saldoCorrido + debe - haber) * 100) / 100;
-        // Sistema/historial: forzar cierre en cartera LupoHub. Tango: el corrido es la suma importada.
-        if (i === movsOrdenados.length - 1 && mode !== 'tango') {
+        // Sistema/historial sin desde-cero: forzar cierre en cartera LupoHub.
+        if (i === movsOrdenados.length - 1 && mode !== 'tango' && !sinceZero) {
+          saldoCorrido = Math.round(saldoCartera * 100) / 100;
+        }
+        if (i === movsOrdenados.length - 1 && sinceZero && mode !== 'tango') {
+          // Con desde-cero el corrido debe cerrar en la deuda actual.
           saldoCorrido = Math.round(saldoCartera * 100) / 100;
         }
         wsDetalle.addRow({
@@ -3718,7 +3800,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       .replace(/[\\/:*?"<>|]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
-    const modoLabel = mode;
+    const modoLabel = sinceZero ? `${mode}-desde-cero` : mode;
     const filename = `saldos ${modoLabel} - ${sellerLabelSafe || 'todos'} - ${datePart}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);

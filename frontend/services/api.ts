@@ -1989,6 +1989,8 @@ export const api = {
     from?: string;
     to?: string;
     sellerName?: string;
+    /** Si true, lista solo movimientos desde la última vez que el saldo del cliente quedó en cero. */
+    sinceZero?: boolean;
     /**
      * historial: facturas/NC/recibos del sistema + import Tango/Multimedia + externos por CUIT.
      * sistema: solo tablas LupoHub (facturas AFIP, NC y recibos). Default si no se pasa source.
@@ -2000,6 +2002,7 @@ export const api = {
     if (params?.sellerId) q.set('sellerId', params.sellerId);
     if (params?.from) q.set('from', params.from);
     if (params?.to) q.set('to', params.to);
+    if (params?.sinceZero) q.set('sinceZero', '1');
     if (params?.source === 'sistema' || params?.source === 'tango' || params?.source === 'historial') {
       q.set('source', params.source);
     }
