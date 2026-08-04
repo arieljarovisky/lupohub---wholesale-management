@@ -41,7 +41,7 @@ function ymdDaysAgo(days: number): string {
   return `${y}-${m}-${day}`;
 }
 
-/** Parsea Excel para lista de precios. Detecta columnas por cabecera (Artículo, Código, Precio, etc.). Si todas las variantes tienen el mismo precio, una fila por artículo basta. */
+/** Parsea Excel para lista de precios. Detecta columnas por cabecera (Código, Precio, etc.), tolerando fila de título arriba (como el export propio). */
 async function parsePriceListExcel(file: File): Promise<{ sku: string; price: number }[]> {
   const data = new Uint8Array(await file.arrayBuffer());
   const workbook = XLSX.read(data, { type: 'array' });
@@ -49,25 +49,80 @@ async function parsePriceListExcel(file: File): Promise<{ sku: string; price: nu
   if (!sheetName) return [];
   const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '' }) as (string | number)[][];
   if (rows.length === 0) return [];
-  const first = rows[0].map(c => String(c ?? '').trim());
-  const firstLower = first.map(h => h.toLowerCase());
-  // Nombres típicos en listas de precios (es-AR): artículo/código y precio
-  const skuKw = ['sku', 'código', 'codigo', 'articulo', 'artículo', 'art', 'cod', 'article', 'descripción', 'producto', 'item'];
-  const priceKw = ['precio', 'price', 'importe', 'precio unitario', 'p. unit', 'p.unit', 'unitario', 'lista', 'precio lista', 'valor', 'pvp'];
-  let skuCol = firstLower.findIndex(h => skuKw.some(k => (h || '').includes(k)));
-  let priceCol = firstLower.findIndex(h => priceKw.some(k => (h || '').includes(k)));
+
+  const norm = (v: unknown) => String(v ?? '').trim().toLowerCase();
+  /** Cabeceras de código/SKU (no "descripción": en el export es columna aparte). */
+  const isSkuHeader = (h: string) =>
+    /\b(sku|c[oó]digo|codigo|cod\.?|art[ií]culo|articulo|article|item)\b/.test(h);
+  /**
+   * Cabeceras de precio. Celda corta para no confundir el título
+   * "Lista de precios — Agosto 2026" (además se ignora por ser fila de 1 celda).
+   */
+  const isPriceHeader = (h: string) => {
+    if (!h || h.length > 28) return false;
+    return (
+      h.includes('precio') ||
+      h.includes('price') ||
+      h.includes('importe') ||
+      h.includes('pvp') ||
+      h.includes('unitario') ||
+      h.includes('p. unit') ||
+      h.includes('p.unit') ||
+      (h.includes('valor') && !h.includes('descrip'))
+    );
+  };
+
+  let headerRow = -1;
+  let skuCol = -1;
+  let priceCol = -1;
+  const scanLimit = Math.min(rows.length, 20);
+  for (let r = 0; r < scanLimit; r++) {
+    const cells = (rows[r] || []).map(norm);
+    const nonEmpty = cells.filter(Boolean).length;
+    if (nonEmpty < 2) continue; // fila título / vacía
+    const sCol = cells.findIndex(isSkuHeader);
+    const pCol = cells.findIndex(isPriceHeader);
+    if (sCol >= 0 && pCol >= 0 && sCol !== pCol) {
+      headerRow = r;
+      skuCol = sCol;
+      priceCol = pCol;
+      break;
+    }
+  }
   if (skuCol < 0) skuCol = 0;
-  if (priceCol < 0) priceCol = 1;
+  if (priceCol < 0) priceCol = Math.min(skuCol + 1, Math.max(0, (rows[0]?.length || 2) - 1));
   if (priceCol === skuCol) priceCol = skuCol + 1;
-  const looksLikeHeader = (val: string) => !/^\d+$/.test(String(val).trim()) && (firstLower[skuCol] && skuKw.some(k => firstLower[skuCol].includes(k)) || firstLower[priceCol] && priceKw.some(k => firstLower[priceCol].includes(k)));
-  const start = looksLikeHeader(firstLower[skuCol] + firstLower[priceCol]) ? 1 : 0;
+  const start = headerRow >= 0 ? headerRow + 1 : 0;
+
+  const parsePriceCell = (p: string | number | undefined | null): number => {
+    if (typeof p === 'number') return p;
+    const raw = String(p ?? '').trim();
+    if (!raw) return NaN;
+    // 1.234,56 → 1234.56 | 1234.56 → 1234.56 | 1234,56 → 1234.56
+    const cleaned = raw.replace(/[^\d.,-]/g, '');
+    if (!cleaned || cleaned === '-' || cleaned === '.' || cleaned === ',') return NaN;
+    const hasComma = cleaned.includes(',');
+    const hasDot = cleaned.includes('.');
+    let normalized = cleaned;
+    if (hasComma && hasDot) {
+      normalized = cleaned.lastIndexOf(',') > cleaned.lastIndexOf('.')
+        ? cleaned.replace(/\./g, '').replace(',', '.')
+        : cleaned.replace(/,/g, '');
+    } else if (hasComma) {
+      normalized = cleaned.replace(',', '.');
+    }
+    return parseFloat(normalized);
+  };
+
   const items: { sku: string; price: number }[] = [];
   for (let i = start; i < rows.length; i++) {
-    const rawSku = rows[i][skuCol];
-    const p = rows[i][priceCol];
+    const rawSku = rows[i]?.[skuCol];
+    const p = rows[i]?.[priceCol];
     let sku = rawSku == null ? '' : typeof rawSku === 'number' ? String(rawSku) : String(rawSku).trim();
     if (sku && typeof rawSku === 'number' && sku.length <= 8) sku = sku.padStart(Math.max(sku.length, 7), '0');
-    const price = typeof p === 'number' ? p : parseFloat(String(p ?? '0').replace(/[^\d.,-]/g, '').replace(',', '.'));
+    // Saltar filas que siguen siendo cabecera/título
+    if (!sku || isSkuHeader(norm(sku)) || isPriceHeader(norm(sku))) continue;
+    const price = parsePriceCell(p);
     if (sku && !isNaN(price) && price >= 0) items.push({ sku, price });
   }
   return items;
