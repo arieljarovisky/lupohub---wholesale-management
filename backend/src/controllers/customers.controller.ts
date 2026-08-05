@@ -4774,7 +4774,7 @@ async function fixRestoredInvoiceDatesForCustomer(customerId: string): Promise<n
      SET i.created_at = o.date
      WHERE o.customer_id = ?
        AND o.date IS NOT NULL
-       AND i.created_at > DATE_ADD(o.date, INTERVAL 3 DAY)`,
+       AND DATE(i.created_at) > DATE_ADD(o.date, INTERVAL 3 DAY)`,
     [customerId]
   );
   return Number((result as { affectedRows?: number })?.affectedRows ?? 0);

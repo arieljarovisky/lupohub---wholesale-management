@@ -152,12 +152,29 @@ function dateFromYmd(value: any): Date | null {
     const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (m) return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
   }
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    // MySQL DATE suele llegar como medianoche UTC o AR (T03:00Z). Usar componentes UTC
+    // del día civil, no devolver el Date crudo (evita desfase al formatear).
+    return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
+  }
   const ymd = normalizeDate(value);
   const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (m) return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
   return null;
 }
+
+/**
+ * Fecha del comprobante para Arciba RetPer:
+ * - reemisión NC+FA → fecha de emisión de la FA nueva
+ * - factura restaurada (created_at >> fecha pedido) → o.date (created_at es la restauración)
+ * - caso normal → DATE(created_at) = emisión AFIP (no la fecha del pedido)
+ */
+const SQL_RETPER_FAC_FECHA = `CASE
+  WHEN cn_reemit.id IS NOT NULL THEN COALESCE(DATE(i.created_at), DATE(cn_reemit.created_at), o.date)
+  WHEN i.created_at IS NOT NULL AND o.date IS NOT NULL
+    AND DATE(i.created_at) > DATE_ADD(o.date, INTERVAL 3 DAY) THEN o.date
+  ELSE COALESCE(DATE(i.created_at), o.date)
+END`;
 
 /** "20/05/2026" */
 function formatDateEsShort(value: any): string {
@@ -1800,27 +1817,17 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
     }
     const whereFac: string[] = [];
     const paramsFac: any[] = [];
+    // Filtrar por la misma fecha que va al TXT (emisión AFIP / pedido si fue restauración).
     if (fromDate && toDate) {
-      // Pedido del mes, emisión FA/NC del mes, o reemisión (NC+FA) emitida en el mes.
-      whereFac.push(`(
-        (o.date >= ? AND o.date <= ?)
-        OR (COALESCE(DATE(i.created_at), o.date) >= ? AND COALESCE(DATE(i.created_at), o.date) <= ?)
-        OR EXISTS (
-          SELECT 1 FROM credit_notes cn_m
-          WHERE cn_m.order_id = o.id
-            AND COALESCE(cn_m.superseded_by_reinvoice, 0) = 1
-            AND COALESCE(DATE(cn_m.created_at), DATE(i.created_at), o.date) >= ?
-            AND COALESCE(DATE(cn_m.created_at), DATE(i.created_at), o.date) <= ?
-        )
-      )`);
-      paramsFac.push(fromDate, toDate, fromDate, toDate, fromDate, toDate);
+      whereFac.push(`(${SQL_RETPER_FAC_FECHA}) >= ? AND (${SQL_RETPER_FAC_FECHA}) <= ?`);
+      paramsFac.push(fromDate, toDate);
     } else {
       if (fromDate) {
-        whereFac.push('COALESCE(DATE(i.created_at), o.date) >= ?');
+        whereFac.push(`(${SQL_RETPER_FAC_FECHA}) >= ?`);
         paramsFac.push(fromDate);
       }
       if (toDate) {
-        whereFac.push('COALESCE(DATE(i.created_at), o.date) <= ?');
+        whereFac.push(`(${SQL_RETPER_FAC_FECHA}) <= ?`);
         paramsFac.push(toDate);
       }
     }
@@ -1874,10 +1881,7 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
     const rowsRaw = await query(
       `
       SELECT
-        CASE
-          WHEN cn_reemit.id IS NOT NULL THEN COALESCE(DATE(i.created_at), DATE(cn_reemit.created_at), o.date)
-          ELSE o.date
-        END AS fecha,
+        ${SQL_RETPER_FAC_FECHA} AS fecha,
         i.cbte_tipo,
         i.punto_venta,
         i.cbte_desde,
