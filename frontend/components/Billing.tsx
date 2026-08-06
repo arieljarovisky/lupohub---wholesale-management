@@ -323,15 +323,8 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
       return;
     }
     try {
-      const result = await api.exportVentasJurisdiccion({ desde: d, hasta: h });
-      if (result?.incompleteAfipSync) {
-        showToast(
-          'success',
-          'Excel descargado. La sync de facturas ML (AFIP) quedó parcial: volvé a exportar para completar.'
-        );
-      } else {
-        showToast('success', 'Excel de Ventas por Jurisdicción descargado.');
-      }
+      await api.exportVentasJurisdiccion({ desde: d, hasta: h });
+      showToast('success', 'Excel de Ventas por Jurisdicción descargado.');
     } catch (err: any) {
       showToast('error', err?.message || 'Error exportando Ventas por Jurisdicción');
     }

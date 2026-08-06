@@ -4,10 +4,6 @@ import * as XLSX from 'xlsx';
 import { cityMatchesFilter } from '../utils/cityNormalize';
 import { syncOrderPaymentStatus } from '../services/orderPaymentBalance.service';
 import { sqlInvoiceAmountFromOrderTotal } from '../config/orderPricing';
-import {
-  getMercadoLibreAfipPuntosVenta,
-  syncAfipVouchersForDateRange,
-} from '../services/afipVoucherSync.service';
 
 const SQL_INVOICE_IMPORTE_EXPR = sqlInvoiceAmountFromOrderTotal();
 
@@ -1496,8 +1492,7 @@ function letraFromCbteTipo(t: any): string {
 
 /**
  * Exporta el Excel "Ventas por Jurisdicción" con el formato esperado por el estudio contable.
- * Incluye facturas/NC mayoristas + Tienda Nube / ML emitidas en LupoHub (`external_*`)
- * + comprobantes del Facturador Mercado Libre (AFIP PV configurado, default 22).
+ * Solo facturas/NC mayoristas (sin Tienda Nube ni Mercado Libre).
  * Columnas: COD_PROVI, NOM_PROVI, FECHA_EMI (serial), T_COMP (FAC/CDE), N_COMP (A0002000012131),
  *           RAZON_SOC, SIN_IVA, IMP_IVA, IMPUEST, IMPORTE, COD_TRANSP, NOM_TRANSP.
  * NC va con montos en negativo y sin transporte.
@@ -1514,125 +1509,9 @@ export const exportVentasJurisdiccionXlsx = async (req: Request, res: Response) 
     const sellerJoinSql = isSeller ? ' AND c.seller_id = ?' : '';
     const sellerParam = isSeller ? [authUser.id] : [];
 
-    const mlAfipPuntos = getMercadoLibreAfipPuntosVenta();
-    let afipSyncIncomplete = false;
-    if (!isSeller) {
-      try {
-        const syncResult = await syncAfipVouchersForDateRange({ desde, hasta, puntosVenta: mlAfipPuntos });
-        afipSyncIncomplete = !!syncResult.incomplete;
-        if (syncResult.message) {
-          console.log(`[Ventas jurisdicción] ${syncResult.message}`, {
-            scanned: syncResult.scanned,
-            upserted: syncResult.upserted,
-            puntosVenta: syncResult.puntosVenta,
-          });
-        }
-      } catch (syncErr: any) {
-        // No bloqueamos el export mayorista/TN si AFIP ML falla; se exporta lo disponible.
-        console.warn(
-          '[Ventas jurisdicción] Sync AFIP ML (PV facturador) falló:',
-          syncErr?.message || syncErr
-        );
-        afipSyncIncomplete = true;
-      }
-    }
-
-    // Mercado Libre / Tienda Nube viven en external_*; no tienen seller_id → solo ADMIN (y roles no-seller).
-    // Totales externos se tratan como neto AFIP (misma unidad que orders.total / amount_credited mayorista).
-    // ML bulk puede generar N filas con el mismo CAE/PV/nro → agrupamos por comprobante.
-    // Además: comprobantes AFIP del Facturador ML (PV 22 por defecto) desde afip_synced_vouchers.
-    const mlPvPlaceholders = mlAfipPuntos.map(() => '?').join(',');
-    const externalUnionSql = isSeller
-      ? ''
-      : `
-        UNION ALL
-
-        SELECT
-          'FAC' AS tipo,
-          DATE(MAX(ei.created_at)) AS fecha,
-          ei.cbte_tipo,
-          ei.punto_venta,
-          ei.cbte_desde,
-          ei.cbte_hasta,
-          ROUND(SUM(ei.total), 2) AS neto,
-          0 AS otros_impuestos,
-          NULL AS customer_id,
-          CASE
-            WHEN COUNT(DISTINCT NULLIF(TRIM(ei.customer_name), '')) <= 1
-            THEN COALESCE(MAX(NULLIF(TRIM(ei.customer_name), '')), 'Consumidor Final')
-            ELSE 'Consumidor Final'
-          END AS razon_social,
-          '' AS city,
-          '' AS address
-        FROM external_invoices ei
-        WHERE ei.source IN ('TIENDANUBE', 'MERCADOLIBRE')
-          AND DATE(ei.created_at) >= ? AND DATE(ei.created_at) <= ?
-        GROUP BY ei.cae, ei.punto_venta, ei.cbte_tipo, ei.cbte_desde, ei.cbte_hasta
-
-        UNION ALL
-
-        SELECT
-          'CDE' AS tipo,
-          DATE(MAX(ecn.created_at)) AS fecha,
-          ecn.cbte_tipo,
-          ecn.punto_venta,
-          ecn.cbte_desde,
-          ecn.cbte_hasta,
-          ROUND(SUM(ecn.amount_credited), 2) AS neto,
-          0 AS otros_impuestos,
-          NULL AS customer_id,
-          CASE
-            WHEN COUNT(DISTINCT NULLIF(TRIM(ei.customer_name), '')) <= 1
-            THEN COALESCE(MAX(NULLIF(TRIM(ei.customer_name), '')), 'Consumidor Final')
-            ELSE 'Consumidor Final'
-          END AS razon_social,
-          '' AS city,
-          '' AS address
-        FROM external_credit_notes ecn
-        JOIN external_invoices ei ON ei.id = ecn.external_invoice_id
-        WHERE ecn.source IN ('TIENDANUBE', 'MERCADOLIBRE')
-          AND DATE(ecn.created_at) >= ? AND DATE(ecn.created_at) <= ?
-        GROUP BY ecn.cae, ecn.punto_venta, ecn.cbte_tipo, ecn.cbte_desde, ecn.cbte_hasta
-
-        UNION ALL
-
-        -- Facturador Mercado Libre (y otros PV AFIP configurados en AFIP_ML_PTO_VTA).
-        -- Excluye duplicados ya presentes en external_invoices (misma PV/tipo/nro).
-        SELECT
-          CASE
-            WHEN v.cbte_tipo IN (3, 8, 13) THEN 'CDE'
-            ELSE 'FAC'
-          END AS tipo,
-          v.fecha AS fecha,
-          v.cbte_tipo,
-          v.punto_venta,
-          v.cbte_desde,
-          v.cbte_hasta,
-          v.imp_neto AS neto,
-          COALESCE(v.imp_trib, 0) AS otros_impuestos,
-          NULL AS customer_id,
-          CASE
-            WHEN v.doc_nro IS NOT NULL AND CHAR_LENGTH(v.doc_nro) >= 7
-            THEN CONCAT('Doc ', v.doc_nro)
-            ELSE 'Consumidor Final'
-          END AS razon_social,
-          '' AS city,
-          '' AS address
-        FROM afip_synced_vouchers v
-        WHERE v.punto_venta IN (${mlPvPlaceholders})
-          AND v.fecha >= ? AND v.fecha <= ?
-          AND NOT EXISTS (
-            SELECT 1 FROM external_invoices ei
-            WHERE ei.punto_venta = v.punto_venta
-              AND ei.cbte_tipo = v.cbte_tipo
-              AND ei.cbte_desde = v.cbte_desde
-          )
-      `;
-
     const queryParams = [
       desde, hasta, ...sellerParam,
       desde, hasta, ...sellerParam,
-      ...(isSeller ? [] : [desde, hasta, desde, hasta, ...mlAfipPuntos, desde, hasta]),
     ];
 
     const rows = await query(
@@ -1680,7 +1559,6 @@ export const exportVentasJurisdiccionXlsx = async (req: Request, res: Response) 
         WHERE o.date >= ? AND o.date <= ?${sellerJoinSql}
         GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
                  c.id, c.business_name, c.name, c.city, c.address
-        ${externalUnionSql}
       ) AS x
       ORDER BY x.fecha ASC, x.punto_venta ASC, x.cbte_desde ASC
       `,
@@ -1784,10 +1662,6 @@ export const exportVentasJurisdiccionXlsx = async (req: Request, res: Response) 
     const filename = `VENTAS_JURISDICCION_${yyyymm || 'rango'}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    if (afipSyncIncomplete) {
-      res.setHeader('X-Afip-Sync-Incomplete', '1');
-      res.setHeader('Access-Control-Expose-Headers', 'X-Afip-Sync-Incomplete, Content-Disposition');
-    }
     return res.send(buffer);
   } catch (error: any) {
     console.error('exportVentasJurisdiccionXlsx:', error);
