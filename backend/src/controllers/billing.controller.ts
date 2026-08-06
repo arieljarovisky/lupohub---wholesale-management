@@ -1424,48 +1424,190 @@ export const printBilling = async (req: Request, res: Response) => {
   }
 };
 
-/** Detecta provincia a partir del campo `city` (y opcionalmente `address`) del cliente. */
-function detectProvincia(city: string, address: string = ''): { code: string; name: string } {
-  const haystack = `${city || ''} ${address || ''}`
+/** Detecta provincia a partir de la ciudad/localidad del cliente (no usar calle: "MENDOZA 123" no es Mendoza). */
+function detectProvincia(city: string): { code: string; name: string } {
+  const haystack = String(city || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
-  if (!haystack.trim()) return { code: '', name: '' };
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!haystack) return { code: '', name: '' };
 
-  /** Códigos conocidos según Excel modelo del estudio contable (Tango). El resto va vacío y se completa manual. */
+  /**
+   * Códigos conocidos según Excel modelo del estudio contable (Tango).
+   * El resto deja COD vacío; NOM se completa igual para facilitar la carga manual.
+   * Incluye localidades frecuentes de clientes (GBA, interior) además del nombre de provincia.
+   */
   const PROVINCIAS: Array<{ code: string; name: string; patterns: RegExp[] }> = [
-    { code: '01', name: 'CAPITAL', patterns: [/capital\s*federal/, /\bcaba\b/, /ciudad\s*autonoma/, /^capital$/] },
-    { code: '02', name: 'BUENOS AIRES', patterns: [/buenos\s*aires/, /\bbs\s*\.?\s*as\b/, /provincia\s*de\s*buenos\s*aires/] },
-    { code: '',   name: 'CATAMARCA', patterns: [/catamarca/] },
-    { code: '',   name: 'CHACO', patterns: [/\bchaco\b/, /resistencia/] },
-    { code: '',   name: 'CHUBUT', patterns: [/chubut/, /comodoro\s*rivadavia/, /trelew/, /puerto\s*madryn/, /rawson/] },
-    { code: '',   name: 'CORDOBA', patterns: [/cordoba/, /\bcba\b/] },
-    { code: '',   name: 'CORRIENTES', patterns: [/corrientes/] },
-    { code: '09', name: 'ENTRE RIOS', patterns: [/entre\s*rios/, /\bparana\b/, /concordia/, /gualeguaychu/] },
-    { code: '',   name: 'FORMOSA', patterns: [/formosa/] },
-    { code: '',   name: 'JUJUY', patterns: [/jujuy/, /san\s*salvador\s*de\s*jujuy/] },
-    { code: '',   name: 'LA PAMPA', patterns: [/la\s*pampa/, /santa\s*rosa/] },
-    { code: '',   name: 'LA RIOJA', patterns: [/la\s*rioja/] },
-    { code: '05', name: 'MENDOZA', patterns: [/mendoza/, /godoy\s*cruz/, /malargue/, /san\s*rafael/] },
-    { code: '',   name: 'MISIONES', patterns: [/misiones/, /posadas/, /obera/, /eldorado/] },
-    { code: '',   name: 'NEUQUEN', patterns: [/neuquen/] },
-    { code: '',   name: 'RIO NEGRO', patterns: [/rio\s*negro/, /bariloche/, /viedma/, /general\s*roca/] },
-    { code: '',   name: 'SALTA', patterns: [/\bsalta\b/] },
-    { code: '',   name: 'SAN JUAN', patterns: [/san\s*juan/] },
-    { code: '',   name: 'SAN LUIS', patterns: [/san\s*luis/] },
-    { code: '',   name: 'SANTA CRUZ', patterns: [/santa\s*cruz/, /rio\s*gallegos/, /\bcaleta\s*olivia\b/] },
-    { code: '10', name: 'SANTA FE', patterns: [/santa\s*fe/, /\brosario\b/, /rafaela/, /reconquista/, /venado\s*tuerto/] },
-    { code: '',   name: 'SANTIAGO DEL ESTERO', patterns: [/santiago\s*del\s*estero/] },
-    { code: '24', name: 'Tierra del Fuego', patterns: [/tierra\s*del\s*fuego/, /ushuaia/, /rio\s*grande/] },
-    { code: '',   name: 'TUCUMAN', patterns: [/tucuman/, /san\s*miguel\s*de\s*tucuman/] }
+    {
+      code: '01',
+      name: 'CAPITAL',
+      patterns: [
+        /capital\s*federal/,
+        /\bcaba\b/,
+        /ciudad\s*autonoma/,
+        /^capital$/,
+        /\bcap\.?\s*fed\b/,
+      ],
+    },
+    {
+      code: '02',
+      name: 'BUENOS AIRES',
+      patterns: [
+        /buenos\s*aires/,
+        /\bbs\s*\.?\s*as\b/,
+        /provincia\s*de\s*buenos\s*aires/,
+        /mar\s*del\s*plata/,
+        /\bla\s*plata\b/,
+        /\bquilmes\b/,
+        /san\s*isidro/,
+        /vicente\s*lopez/,
+        /\blanus\b/,
+        /\bmoron\b/,
+        /\bmoreno\b/,
+        /\badrogue\b/,
+        /florencio\s*varela/,
+        /san\s*francisco\s*solano/,
+        /\bbernal\b/,
+        /\bberisso\b/,
+        /\bavellaneda\b/,
+        /\bwilde\b/,
+        /\bcastelar\b/,
+        /\bmartinez\b/,
+        /guillermo\s*e\.?\s*hudson/,
+        /\bhudson\b/,
+        /bahia\s*blanca/,
+        /tres\s*arroyos/,
+        /punta\s*alta/,
+        /coronel\s*suarez/,
+        /general\s*san\s*martin/,
+        /\blomas\s*de\s*zamora\b/,
+        /\btemperley\b/,
+        /\bbanfield\b/,
+        /\bramos\s*mejia\b/,
+        /\bhaedo\b/,
+        /\bituzaingo\b/,
+        /\bmerlo\b/,
+        /\btigre\b/,
+        /\bsan\s*fernando\b/,
+        /\bpilar\b/,
+        /\bescobar\b/,
+        /\bzarate\b/,
+        /\bcampana\b/,
+        /\bolavarria\b/,
+        /\bnecochea\b/,
+        /\btandil\b/,
+        /\bsan\s*miguel\b(?!\s*de\s*tucuman)/,
+        /\bsan\s*martin\b(?!\s*de\s*los\s*andes)/,
+      ],
+    },
+    { code: '', name: 'CATAMARCA', patterns: [/catamarca/] },
+    { code: '', name: 'CHACO', patterns: [/\bchaco\b/, /resistencia/] },
+    {
+      code: '',
+      name: 'CHUBUT',
+      patterns: [/chubut/, /comodoro\s*rivadavia/, /trelew/, /puerto\s*madryn/, /rawson/],
+    },
+    { code: '', name: 'CORDOBA', patterns: [/cordoba/, /\bcba\b/] },
+    { code: '', name: 'CORRIENTES', patterns: [/corrientes/, /\bgoya\b/] },
+    {
+      code: '09',
+      name: 'ENTRE RIOS',
+      patterns: [
+        /entre\s*rios/,
+        /\bparana\b/,
+        /concordia/,
+        /gualeguaychu/,
+        /\bchajari\b/,
+        /\bnogoya\b/,
+        /\bcolon\b/,
+        /\bvictoria\b/,
+      ],
+    },
+    { code: '', name: 'FORMOSA', patterns: [/formosa/] },
+    { code: '', name: 'JUJUY', patterns: [/jujuy/, /san\s*salvador\s*de\s*jujuy/] },
+    { code: '', name: 'LA PAMPA', patterns: [/la\s*pampa/, /santa\s*rosa/] },
+    { code: '', name: 'LA RIOJA', patterns: [/la\s*rioja/] },
+    {
+      code: '05',
+      name: 'MENDOZA',
+      patterns: [
+        /mendoza/,
+        /godoy\s*cruz/,
+        /malargue/,
+        /san\s*rafael/,
+        /\btunuyan\b/,
+        /\blujan\s*de\s*cuyo\b/,
+        /\bmaipu\b/,
+      ],
+    },
+    { code: '', name: 'MISIONES', patterns: [/misiones/, /posadas/, /obera/, /eldorado/] },
+    { code: '', name: 'NEUQUEN', patterns: [/neuquen/] },
+    {
+      code: '',
+      name: 'RIO NEGRO',
+      patterns: [/rio\s*negro/, /bariloche/, /viedma/, /general\s*roca/],
+    },
+    { code: '', name: 'SALTA', patterns: [/\bsalta\b/] },
+    { code: '', name: 'SAN JUAN', patterns: [/san\s*juan/] },
+    { code: '', name: 'SAN LUIS', patterns: [/san\s*luis/] },
+    {
+      code: '',
+      name: 'SANTA CRUZ',
+      patterns: [/santa\s*cruz/, /rio\s*gallegos/, /\bcaleta\s*olivia\b/],
+    },
+    {
+      code: '10',
+      name: 'SANTA FE',
+      patterns: [
+        /santa\s*fe/,
+        /\brosario\b/,
+        /rafaela/,
+        /reconquista/,
+        /venado\s*tuerto/,
+        /san\s*jose\s*del\s*rincon/,
+        /\bsanto\s*tome\b/,
+      ],
+    },
+    { code: '', name: 'SANTIAGO DEL ESTERO', patterns: [/santiago\s*del\s*estero/] },
+    {
+      code: '24',
+      name: 'Tierra del Fuego',
+      patterns: [/tierra\s*del\s*fuego/, /ushuaia/, /rio\s*grande/],
+    },
+    { code: '', name: 'TUCUMAN', patterns: [/tucuman/, /san\s*miguel\s*de\s*tucuman/] },
   ];
-  // Buscar CAPITAL antes que BUENOS AIRES para resolver ambigüedad (CAPITAL FEDERAL contiene "buenos aires" en algunos formatos).
+  // CAPITAL antes que BUENOS AIRES (ambigüedad "buenos aires" / CABA).
+  // TUCUMAN (san miguel de tucuman) se evalúa después de BA; el lookbehind negativo en SAN MIGUEL evita choque.
   for (const p of PROVINCIAS) {
     if (p.patterns.some((rx) => rx.test(haystack))) {
       return { code: p.code, name: p.name };
     }
   }
   return { code: '', name: '' };
+}
+
+/** Ciudad del cliente, o la primera ciudad no vacía en sucursales (`delivery_addresses`). */
+function resolveCustomerCityForProvincia(city: unknown, deliveryAddressesJson: unknown): string {
+  const main = String(city || '').trim();
+  if (main) return main;
+  let list: any[] = [];
+  if (Array.isArray(deliveryAddressesJson)) {
+    list = deliveryAddressesJson;
+  } else if (typeof deliveryAddressesJson === 'string' && deliveryAddressesJson.trim()) {
+    try {
+      const parsed = JSON.parse(deliveryAddressesJson);
+      if (Array.isArray(parsed)) list = parsed;
+    } catch {
+      /* ignore */
+    }
+  }
+  for (const it of list) {
+    const c = String(it?.city || '').trim();
+    if (c) return c;
+  }
+  return '';
 }
 
 /** Convierte 'YYYY-MM-DD' (o Date) al serial de Excel (días desde 1899-12-30, con bug del año bisiesto 1900). */
@@ -1530,7 +1672,8 @@ export const exportVentasJurisdiccionXlsx = async (req: Request, res: Response) 
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, '') AS razon_social,
           COALESCE(c.city, '') AS city,
-          COALESCE(c.address, '') AS address
+          COALESCE(c.address, '') AS address,
+          c.delivery_addresses AS delivery_addresses
         FROM invoices i
         JOIN orders o ON o.id = i.order_id
         JOIN customers c ON c.id = o.customer_id
@@ -1552,13 +1695,14 @@ export const exportVentasJurisdiccionXlsx = async (req: Request, res: Response) 
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, '') AS razon_social,
           COALESCE(c.city, '') AS city,
-          COALESCE(c.address, '') AS address
+          COALESCE(c.address, '') AS address,
+          c.delivery_addresses AS delivery_addresses
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
         JOIN customers c ON c.id = o.customer_id
         WHERE o.date >= ? AND o.date <= ?${sellerJoinSql}
         GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
-                 c.id, c.business_name, c.name, c.city, c.address
+                 c.id, c.business_name, c.name, c.city, c.address, c.delivery_addresses
       ) AS x
       ORDER BY x.fecha ASC, x.punto_venta ASC, x.cbte_desde ASC
       `,
@@ -1622,7 +1766,8 @@ export const exportVentasJurisdiccionXlsx = async (req: Request, res: Response) 
       const nro = String(Number(r.cbte_desde) || 0).padStart(8, '0');
       const nComp = `${letra}${pv}${nro}`;
 
-      const prov = detectProvincia(String(r.city || ''), String(r.address || ''));
+      const cityForProv = resolveCustomerCityForProvincia(r.city, r.delivery_addresses);
+      const prov = detectProvincia(cityForProv);
       const fechaSerial = toExcelSerialDate(r.fecha);
 
       // Para NC: sin transporte, igual que el modelo del estudio.
