@@ -133,13 +133,27 @@ export const request = async <T = any>(path: string, method: HttpMethod = 'GET',
   }
 };
 
+function axiosErrorMessage(err: unknown, fallback: string): string {
+  if (!axios.isAxiosError(err)) return err instanceof Error ? err.message : fallback;
+  const errorData = err.response?.data;
+  const serverMsg =
+    (typeof errorData?.message === 'string' && errorData.message) ||
+    (typeof errorData?.error === 'string' && errorData.error) ||
+    (typeof errorData === 'string' && errorData);
+  return serverMsg || err.message || fallback;
+}
+
 /** POST con FormData (para subir archivos). No setea Content-Type. */
 export const requestFormData = async <T = any>(path: string, formData: FormData, timeout = 60000): Promise<T> => {
   const url = path.startsWith('http') ? path : `${baseUrl}/${path.replace(/^\//, '')}`;
   const headers: Record<string, string> = { 'Accept': 'application/json' };
   if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
-  const response = await axios.post(url, formData, { headers, timeout });
-  return response.data;
+  try {
+    const response = await axios.post(url, formData, { headers, timeout });
+    return response.data;
+  } catch (err: unknown) {
+    throw new Error(axiosErrorMessage(err, 'Error subiendo el archivo'));
+  }
 };
 
 /** GET que devuelve Blob (para descargar/ver archivos con auth). */

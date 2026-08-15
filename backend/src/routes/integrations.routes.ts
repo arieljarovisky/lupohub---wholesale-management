@@ -78,6 +78,12 @@ import {
   listTiendaNubeCategoryMatches,
   downloadTiendaNubeCategoryImagesZip,
 } from '../controllers/tiendanubeCategoryImages.controller';
+import {
+  getTiendaNubeProductImagesEndpoint,
+  previewTiendaNubeImageMatchesEndpoint,
+  saveTiendaNubeProductImagesEndpoint,
+  uploadTnProductImagesMiddleware,
+} from '../controllers/tiendanubeProductImages.controller';
 import { getTiendaNubeCatalog } from '../controllers/tiendanubeCatalog.controller';
 import {
   getTiendaNubeCatalogConfig,
@@ -190,6 +196,14 @@ router.put('/tiendanube/catalog/config', authMiddleware, saveTiendaNubeCatalogCo
 router.get('/tiendanube/express-tracking-page/config', authMiddleware, getTiendaNubeExpressTrackingPageConfig);
 router.put('/tiendanube/express-tracking-page/config', authMiddleware, saveTiendaNubeExpressTrackingPageConfig);
 router.get('/tiendanube/products/:productId/variants', getTiendaNubeProductVariants);
+router.post('/tiendanube/products/images/match-preview', authMiddleware, previewTiendaNubeImageMatchesEndpoint);
+router.get('/tiendanube/products/:productId/images', authMiddleware, getTiendaNubeProductImagesEndpoint);
+router.post(
+  '/tiendanube/products/:productId/images',
+  authMiddleware,
+  uploadTnProductImagesMiddleware,
+  saveTiendaNubeProductImagesEndpoint
+);
 router.post('/tiendanube/products', createTiendaNubeProduct);
 router.post('/tiendanube/products/:productId/duplicate', duplicateTiendaNubeProduct);
 router.post('/tiendanube/sync', syncProductsFromTiendaNube);

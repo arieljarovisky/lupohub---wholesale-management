@@ -17,9 +17,11 @@ import {
   SquareStack,
   Plus,
   Images,
+  ImagePlus,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { normalizeTiendaNubeProductId, extractTiendaNubeVariantFromUrl } from '../utils/tiendaNubeUrl';
+import { TiendaNubeBulkImagesModal, TiendaNubeProductImagesModal } from './TiendaNubeProductImagesModal';
 
 interface TNStockItem {
   id: string;
@@ -81,6 +83,9 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
   const [createStock, setCreateStock] = useState('0');
   const [createSku, setCreateSku] = useState('');
   const [createSubmitting, setCreateSubmitting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [imagesModalItem, setImagesModalItem] = useState<{ id: string; title: string } | null>(null);
+  const [bulkImagesOpen, setBulkImagesOpen] = useState(false);
   const [categoryImagesModalOpen, setCategoryImagesModalOpen] = useState(false);
   const [categoryImagesName, setCategoryImagesName] = useState('ropa deportiva');
   const [categoryImagesLoading, setCategoryImagesLoading] = useState(false);
@@ -247,6 +252,42 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
       }
     });
 
+  const allVisibleSelected = filteredItems.length > 0 && filteredItems.every((i) => selectedIds.has(i.id));
+  const titleById = new Map<string, string>();
+  for (const i of items) titleById.set(i.id, i.title);
+  for (const i of allItemsForSearch ?? []) titleById.set(i.id, i.title);
+  const selectedTargets = [...selectedIds].map((id) => ({
+    id,
+    title: titleById.get(id) || `Publicación ${id}`,
+  }));
+
+  const toggleSelected = (id: string, checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const toggleSelectVisible = (checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const item of filteredItems) {
+        if (checked) next.add(item.id);
+        else next.delete(item.id);
+      }
+      return next;
+    });
+  };
+
+  const applyThumbnails = (thumbs: Record<string, string>) => {
+    const patch = (list: TNStockItem[]) =>
+      list.map((item) => (thumbs[item.id] ? { ...item, thumbnail: thumbs[item.id] } : item));
+    setItems((prev) => patch(prev));
+    setAllItemsForSearch((prev) => (prev ? patch(prev) : prev));
+  };
+
   const currentPage = searchTerm ? 1 : Math.floor(offset / limit) + 1;
   const totalPages = searchTerm ? 1 : Math.max(1, Math.ceil(total / limit));
 
@@ -273,6 +314,16 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setBulkImagesOpen(true)}
+            disabled={loading}
+            className="bg-slate-700 hover:bg-slate-600 border border-cyan-700/50 text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 disabled:opacity-50 transition-all"
+            title="Actualizar fotos de varias publicaciones a la vez"
+          >
+            <ImagePlus size={18} className="text-cyan-400" />
+            Actualizar fotos{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}
+          </button>
           <button
             type="button"
             onClick={() => {
@@ -427,6 +478,26 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
         </div>
       ) : (
         <div className="space-y-3">
+          <div className="flex items-center justify-between gap-2 px-1">
+            <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={allVisibleSelected}
+                onChange={(e) => toggleSelectVisible(e.target.checked)}
+                className="rounded border-slate-600 bg-slate-900 text-cyan-500 focus:ring-cyan-500/40"
+              />
+              Seleccionar visibles
+            </label>
+            {selectedIds.size > 0 && (
+              <button
+                type="button"
+                onClick={() => setSelectedIds(new Set())}
+                className="text-xs text-slate-500 hover:text-white font-bold"
+              >
+                Limpiar selección ({selectedIds.size})
+              </button>
+            )}
+          </div>
           {filteredItems.map((item) => {
             const isExpanded = expandedItem === item.id;
             const stockColor = item.totalStock === 0 ? 'text-red-400' : item.totalStock < 5 ? 'text-orange-400' : 'text-green-400';
@@ -443,6 +514,14 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
                   onClick={() => setExpandedItem(isExpanded ? null : item.id)}
                 >
                   <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(item.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => toggleSelected(item.id, e.target.checked)}
+                      className="rounded border-slate-600 bg-slate-900 text-cyan-500 focus:ring-cyan-500/40 shrink-0"
+                      title="Seleccionar para actualizar fotos"
+                    />
                     <img
                       src={item.thumbnail}
                       alt={item.title}
@@ -533,6 +612,18 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
                     )}
                     <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                       <div className="flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setImagesModalItem({ id: item.id, title: item.title });
+                          }}
+                          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 border border-cyan-700/50 text-white font-bold transition-colors"
+                          title="Ver y cambiar las fotos de esta publicación"
+                        >
+                          <Images size={18} className="text-cyan-400" />
+                          Fotos
+                        </button>
                         <button
                           type="button"
                           onClick={async (e) => {
@@ -924,6 +1015,26 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
             </button>
           </nav>
         </div>
+      )}
+
+      {imagesModalItem && (
+        <TiendaNubeProductImagesModal
+          productId={imagesModalItem.id}
+          productTitle={imagesModalItem.title}
+          showToast={showToast}
+          onClose={() => setImagesModalItem(null)}
+          onSaved={(thumb) => {
+            if (thumb) applyThumbnails({ [imagesModalItem.id]: thumb });
+          }}
+        />
+      )}
+      {bulkImagesOpen && (
+        <TiendaNubeBulkImagesModal
+          selected={selectedTargets}
+          showToast={showToast}
+          onClose={() => setBulkImagesOpen(false)}
+          onSaved={(thumbs) => applyThumbnails(thumbs)}
+        />
       )}
     </div>
   );
