@@ -8,7 +8,7 @@ import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
 import { getWholesaleStockImpactMeta } from '../utils/orderStockImpact';
 import { orderPedidoImporteDisplay } from '../utils/wholesaleInvoiceHtml';
-import { formatMoneyAr } from '../utils/moneyFormat';
+import { formatMoneyAr, parseMoneyAr } from '../utils/moneyFormat';
 import { formatOrderDate } from '../utils/formatDate';
 import { canonicalizeCityInput, cityDisplayLabel, isCabaCity, normalizeCityKey } from '../utils/cityNormalize';
 import { CityInput } from './CityInput';
@@ -512,7 +512,10 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         ...(role === Role.ADMIN
           ? {
               openingBalance: newOpeningBalance.trim()
-                ? Number(newOpeningBalance.replace(/\./g, '').replace(',', '.'))
+                ? (() => {
+                    const n = parseMoneyAr(newOpeningBalance);
+                    return n == null ? null : Math.round(n * 100) / 100;
+                  })()
                 : null,
               openingBalanceDate: newOpeningBalanceDate.trim() || null
             }
@@ -832,11 +835,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   };
 
   const parseAdjustSaldoInput = (raw: string): number | null => {
-    const trimmed = raw.trim();
-    if (!trimmed) return null;
-    const normalized = trimmed.replace(/\./g, '').replace(',', '.');
-    const n = Number(normalized);
-    return Number.isFinite(n) ? Math.round(n * 100) / 100 : null;
+    const n = parseMoneyAr(raw);
+    return n == null ? null : Math.round(n * 100) / 100;
   };
 
   const handleAdjustSaldo = () => {
@@ -1398,7 +1398,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                       className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all font-mono text-sm"
                       value={newOpeningBalance}
                       onChange={(e) => setNewOpeningBalance(e.target.value)}
-                      placeholder="Ej: 1228093.27"
+                      placeholder="Ej: 1.228.093,27"
                     />
                   </div>
                   <div>
@@ -1538,7 +1538,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                  setNewAccountSellerLabel(selectedCustomer.accountSellerLabel || '');
                  setNewOpeningBalance(
                    selectedCustomer.openingBalance != null && Number.isFinite(selectedCustomer.openingBalance)
-                     ? String(selectedCustomer.openingBalance)
+                     ? formatMoneyAr(selectedCustomer.openingBalance)
                      : ''
                  );
                  setNewOpeningBalanceDate(selectedCustomer.openingBalanceDate || '');
@@ -3748,7 +3748,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                         className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-all font-mono text-sm"
                         value={newOpeningBalance}
                         onChange={(e) => setNewOpeningBalance(e.target.value)}
-                        placeholder="Ej: 1228093.27"
+                        placeholder="Ej: 1.228.093,27"
                       />
                     </div>
                     <div>

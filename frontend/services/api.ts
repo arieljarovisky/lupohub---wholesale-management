@@ -1011,6 +1011,7 @@ export const api = {
     title: string;
     variations: Array<{
       variationId: string;
+      itemId?: string;
       colorValueName: string;
       sizeValueName: string;
       parsedColors: string[];
@@ -1029,6 +1030,7 @@ export const api = {
       variations: Array.isArray(res?.variations)
         ? res.variations.map((v: any) => ({
             variationId: String(v?.variationId ?? ''),
+            itemId: v?.itemId ? String(v.itemId) : undefined,
             colorValueName: String(v?.colorValueName ?? ''),
             sizeValueName: String(v?.sizeValueName ?? ''),
             parsedColors: Array.isArray(v?.parsedColors)
@@ -1987,8 +1989,10 @@ export const api = {
     from?: string;
     to?: string;
     sellerName?: string;
+    /** Si true, lista solo movimientos desde la última vez que el saldo del cliente quedó en cero. */
+    sinceZero?: boolean;
     /**
-     * historial: facturas/NC/recibos del sistema + externos por CUIT (sin import Tango salvo flag activo).
+     * historial: facturas/NC/recibos del sistema + import Tango/Multimedia + externos por CUIT.
      * sistema: solo tablas LupoHub (facturas AFIP, NC y recibos). Default si no se pasa source.
      * tango: solo importados Multimedia (Tango), sin dedupe contra payments.
      */
@@ -1998,7 +2002,8 @@ export const api = {
     if (params?.sellerId) q.set('sellerId', params.sellerId);
     if (params?.from) q.set('from', params.from);
     if (params?.to) q.set('to', params.to);
-    if (params?.source === 'sistema' || params?.source === 'tango') {
+    if (params?.sinceZero) q.set('sinceZero', '1');
+    if (params?.source === 'sistema' || params?.source === 'tango' || params?.source === 'historial') {
       q.set('source', params.source);
     }
     const qs = q.toString() ? `?${q.toString()}` : '';
@@ -4185,11 +4190,10 @@ export const api = {
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   },
 
-  /** Exporta Excel "Ventas por Jurisdicción" (mayorista + TN/ML LupoHub + Facturador ML AFIP PV 22). */
-  exportVentasJurisdiccion: async (params: { desde: string; hasta: string }): Promise<{ incompleteAfipSync?: boolean }> => {
+  /** Exporta Excel "Ventas por Jurisdicción" (solo mayorista; sin TN/ML). */
+  exportVentasJurisdiccion: async (params: { desde: string; hasta: string }): Promise<void> => {
     const qs = new URLSearchParams({ desde: params.desde, hasta: params.hasta }).toString();
-    // Primera sync de PV ML puede demorar (consultas AFIP); timeout alto.
-    const { blob, headers } = await getBlobResponse(`/billing/export-ventas-jurisdiccion?${qs}`, 180000);
+    const blob = await getBlob(`/billing/export-ventas-jurisdiccion?${qs}`);
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -4199,9 +4203,6 @@ export const api = {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
-    const incomplete =
-      String(headers['x-afip-sync-incomplete'] || headers['X-Afip-Sync-Incomplete'] || '') === '1';
-    return { incompleteAfipSync: incomplete };
   },
 
   exportRetPerTxt: async (params?: { desde?: string; hasta?: string; month?: string; customerId?: string; province?: string }): Promise<void> => {

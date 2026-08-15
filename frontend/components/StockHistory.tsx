@@ -14,6 +14,9 @@ interface StockMovement {
   created_at: string;
   sku: string;
   product_name: string;
+  order_id?: string | null;
+  customer_name?: string | null;
+  adjust_user_name?: string | null;
 }
 
 const movementTypeConfig: Record<string, { label: string; color: string; bgColor: string; icon: React.ReactNode }> = {
@@ -172,13 +175,30 @@ const StockHistory: React.FC = () => {
     }
   };
 
+  const movementReferenceLabel = (m: StockMovement) => {
+    const baseRef = (m.reference || '').trim();
+    if (m.movement_type === 'PEDIDO_MAYORISTA') {
+      const parts: string[] = [];
+      if (m.order_id || baseRef) parts.push(m.order_id ? `Pedido: ${m.order_id}` : baseRef);
+      if (m.customer_name) parts.push(`Cliente: ${m.customer_name}`);
+      return parts.join(' | ') || 'Pedido mayorista';
+    }
+    if (m.movement_type === 'AJUSTE_MANUAL') {
+      if (m.adjust_user_name) return `Ajuste por usuario: ${m.adjust_user_name}`;
+      return baseRef || 'Ajuste manual';
+    }
+    return baseRef || '-';
+  };
+
   const filteredMovements = movements.filter(m => {
     if (!searchTerm) return true;
     const search = searchTerm.toLowerCase();
     return (
       m.sku?.toLowerCase().includes(search) ||
       m.product_name?.toLowerCase().includes(search) ||
-      m.reference?.toLowerCase().includes(search)
+      m.reference?.toLowerCase().includes(search) ||
+      m.adjust_user_name?.toLowerCase().includes(search) ||
+      m.customer_name?.toLowerCase().includes(search)
     );
   });
 
@@ -542,8 +562,8 @@ const StockHistory: React.FC = () => {
                         <span className="text-white font-bold font-mono">{movement.new_stock}</span>
                       </td>
                       <td className="p-4">
-                        <span className="text-slate-500 text-xs truncate max-w-[150px] block" title={movement.reference || ''}>
-                          {movement.reference || '-'}
+                        <span className="text-slate-500 text-xs truncate max-w-[150px] block" title={movementReferenceLabel(movement)}>
+                          {movementReferenceLabel(movement)}
                         </span>
                       </td>
                     </tr>

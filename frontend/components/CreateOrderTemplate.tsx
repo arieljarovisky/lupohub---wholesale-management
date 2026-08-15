@@ -78,6 +78,14 @@ function normalizeSizeCode(value: unknown, skuRaw?: string): string {
     const norm = codigoTalleParaSku(fromSku) || fromSku;
     if (/^\d{1,3}$/.test(norm)) return norm;
   }
+  // Concatenado artículo+talle+color (ej. 4090001140997 → 140).
+  if (!sku.includes('-')) {
+    const digits = sku.replace(/\D/g, '');
+    if (digits.length >= 11 && digits.length <= 17) {
+      const talle = digits.slice(-6, -3);
+      if (/^\d{1,3}$/.test(talle)) return talle;
+    }
+  }
   return '';
 }
 
@@ -567,7 +575,18 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       const productCode = resolveDisplayArticleCode(
         baseSku || articleCodeForOrderRow(undefined, rawSku) || rawSku || parentProductId
       );
-      const colorCode = String((item as any).colorCode || '').trim() || colorName;
+      let colorCode = String((item as any).colorCode || '').trim();
+      if (!colorCode && rawSku) {
+        const parts = rawSku.split('-').filter(Boolean);
+        if (parts.length >= 3) colorCode = parts[parts.length - 1].replace(/\D/g, '') || parts[parts.length - 1];
+        else {
+          const digits = rawSku.replace(/\D/g, '');
+          if (!rawSku.includes('-') && digits.length >= 11 && digits.length <= 17) {
+            colorCode = digits.slice(-3);
+          }
+        }
+      }
+      if (!colorCode) colorCode = colorName;
       const colorKey = variantColorKey(colorCode, colorName);
       const key = findHydrationRowKey(rowsByKey, productCode, colorKey, parentProductId);
 
@@ -1467,9 +1486,9 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       </div>
       </div>
 
-      {/* Matriz: fila flexible del grid — ocupa todo el alto restante */}
+      {/* Matriz: fila flexible del grid — ocupa todo el alto restante.
+          No usar `inert` aquí: bloquea el hit-testing del overflow-auto y el scroll deja de funcionar en solo lectura. */}
       <div
-        inert={readOnly || undefined}
         aria-disabled={readOnly || undefined}
         className={`min-h-0 h-full flex flex-col w-full border border-slate-700/70 bg-slate-800/25 overflow-hidden ${
           readOnly ? '[&_input]:cursor-not-allowed [&_button]:cursor-not-allowed' : ''
@@ -1479,7 +1498,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
           <button
             type="button"
             onClick={() => setShowAddModal(true)}
-            className="w-full h-full min-h-[12rem] flex flex-col items-center justify-center gap-4 py-12 px-4 border-2 border-dashed border-slate-600/80 hover:border-blue-500/50 hover:bg-slate-800/60 transition-colors group"
+            disabled={readOnly}
+            className="w-full h-full min-h-[12rem] flex flex-col items-center justify-center gap-4 py-12 px-4 border-2 border-dashed border-slate-600/80 hover:border-blue-500/50 hover:bg-slate-800/60 transition-colors group disabled:pointer-events-none disabled:opacity-60"
           >
             <span className="w-16 h-16 rounded-2xl bg-slate-700/80 group-hover:bg-blue-500/20 flex items-center justify-center transition-colors">
               <Plus size={32} className="text-slate-400 group-hover:text-blue-400" strokeWidth={2} />
@@ -1541,7 +1561,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                           <button
                             type="button"
                             onClick={() => removeGroup(group.productCode)}
-                            className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition touch-manipulation"
+                            disabled={readOnly}
+                            className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition touch-manipulation disabled:opacity-40 disabled:pointer-events-none"
                             aria-label="Quitar artículo"
                           >
                             <Trash2 size={18} />
@@ -1580,8 +1601,9 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                                   type="number"
                                   min={0}
                                   placeholder="0"
+                                  disabled={readOnly}
                                   onWheel={blockWheelOnNumberInput}
-                                  className={`w-9 h-8 bg-slate-700/80 border border-slate-600 rounded-md px-1 py-0.5 text-center text-white text-xs font-mono tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none ${numberInputNoSpinClass}`}
+                                  className={`w-9 h-8 bg-slate-700/80 border border-slate-600 rounded-md px-1 py-0.5 text-center text-white text-xs font-mono tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none disabled:opacity-70 ${numberInputNoSpinClass}`}
                                   onBlur={(e) => {
                                     const v = parseInt(e.target.value, 10);
                                     if (!isNaN(v) && v >= 0) setRowAllQuantities(row.id, v);
@@ -1590,6 +1612,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                                 />
                                 <button
                                   type="button"
+                                  disabled={readOnly}
                                   onClick={(e) => {
                                     const input = (e.currentTarget as HTMLElement).previousElementSibling as HTMLInputElement;
                                     if (input) {
@@ -1597,7 +1620,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                                       if (!isNaN(v) && v >= 0) setRowAllQuantities(row.id, v);
                                     }
                                   }}
-                                  className="shrink-0 w-7 h-8 flex items-center justify-center rounded-md bg-blue-600 hover:bg-blue-500 text-white touch-manipulation"
+                                  className="shrink-0 w-7 h-8 flex items-center justify-center rounded-md bg-blue-600 hover:bg-blue-500 text-white touch-manipulation disabled:opacity-40 disabled:pointer-events-none"
                                   title="Aplicar a todos los talles"
                                   aria-label="Aplicar a todos los talles"
                                 >
@@ -1623,9 +1646,10 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                                       type="number"
                                       min={0}
                                       value={qtyVal === 0 ? '' : qtyVal}
+                                      disabled={readOnly}
                                       onWheel={blockWheelOnNumberInput}
                                       onChange={(e) => updateQuantity(row.id, s.code, e.target.value === '' ? 0 : parseInt(e.target.value, 10))}
-                                      className={`w-10 h-8 mx-auto block border rounded-md px-1 py-0.5 text-center text-white text-xs font-mono tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none ${numberInputNoSpinClass} ${
+                                      className={`w-10 h-8 mx-auto block border rounded-md px-1 py-0.5 text-center text-white text-xs font-mono tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none disabled:opacity-70 ${numberInputNoSpinClass} ${
                                         noStock || exceeds
                                           ? 'bg-red-950/30 border-red-700/70'
                                           : 'bg-slate-700/80 border-slate-600'
@@ -1642,16 +1666,18 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                                 min={0}
                                 step="0.01"
                                 value={row.price}
+                                disabled={readOnly}
                                 onWheel={blockWheelOnNumberInput}
                                 onChange={(e) => updateRowPrice(row.id, e.target.value === '' ? 0 : parseFloat(e.target.value))}
-                                className={`w-[4.5rem] h-8 bg-slate-700/80 border border-slate-600 rounded-md px-1.5 py-0.5 text-right text-emerald-400 font-mono text-xs tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none ${numberInputNoSpinClass}`}
+                                className={`w-[4.5rem] h-8 bg-slate-700/80 border border-slate-600 rounded-md px-1.5 py-0.5 text-right text-emerald-400 font-mono text-xs tabular-nums focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none disabled:opacity-70 ${numberInputNoSpinClass}`}
                               />
                             </td>
                             <td className="py-1.5 px-1">
                               <button
                                 type="button"
                                 onClick={() => removeRow(row.id)}
-                                className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition touch-manipulation"
+                                disabled={readOnly}
+                                className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition touch-manipulation disabled:opacity-40 disabled:pointer-events-none"
                                 aria-label="Quitar fila"
                               >
                                 <Trash2 size={16} />

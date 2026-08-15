@@ -4,10 +4,6 @@ import * as XLSX from 'xlsx';
 import { cityMatchesFilter } from '../utils/cityNormalize';
 import { syncOrderPaymentStatus } from '../services/orderPaymentBalance.service';
 import { sqlInvoiceAmountFromOrderTotal } from '../config/orderPricing';
-import {
-  getMercadoLibreAfipPuntosVenta,
-  syncAfipVouchersForDateRange,
-} from '../services/afipVoucherSync.service';
 
 const SQL_INVOICE_IMPORTE_EXPR = sqlInvoiceAmountFromOrderTotal();
 
@@ -152,12 +148,29 @@ function dateFromYmd(value: any): Date | null {
     const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (m) return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
   }
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    // MySQL DATE suele llegar como medianoche UTC o AR (T03:00Z). Usar componentes UTC
+    // del día civil, no devolver el Date crudo (evita desfase al formatear).
+    return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
+  }
   const ymd = normalizeDate(value);
   const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (m) return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
   return null;
 }
+
+/**
+ * Fecha del comprobante para Arciba RetPer:
+ * - reemisión NC+FA → fecha de emisión de la FA nueva
+ * - factura restaurada (created_at >> fecha pedido) → o.date (created_at es la restauración)
+ * - caso normal → DATE(created_at) = emisión AFIP (no la fecha del pedido)
+ */
+const SQL_RETPER_FAC_FECHA = `CASE
+  WHEN cn_reemit.id IS NOT NULL THEN COALESCE(DATE(i.created_at), DATE(cn_reemit.created_at), o.date)
+  WHEN i.created_at IS NOT NULL AND o.date IS NOT NULL
+    AND DATE(i.created_at) > DATE_ADD(o.date, INTERVAL 3 DAY) THEN o.date
+  ELSE COALESCE(DATE(i.created_at), o.date)
+END`;
 
 /** "20/05/2026" */
 function formatDateEsShort(value: any): string {
@@ -1411,48 +1424,190 @@ export const printBilling = async (req: Request, res: Response) => {
   }
 };
 
-/** Detecta provincia a partir del campo `city` (y opcionalmente `address`) del cliente. */
-function detectProvincia(city: string, address: string = ''): { code: string; name: string } {
-  const haystack = `${city || ''} ${address || ''}`
+/** Detecta provincia a partir de la ciudad/localidad del cliente (no usar calle: "MENDOZA 123" no es Mendoza). */
+function detectProvincia(city: string): { code: string; name: string } {
+  const haystack = String(city || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
-  if (!haystack.trim()) return { code: '', name: '' };
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!haystack) return { code: '', name: '' };
 
-  /** Códigos conocidos según Excel modelo del estudio contable (Tango). El resto va vacío y se completa manual. */
+  /**
+   * Códigos conocidos según Excel modelo del estudio contable (Tango).
+   * El resto deja COD vacío; NOM se completa igual para facilitar la carga manual.
+   * Incluye localidades frecuentes de clientes (GBA, interior) además del nombre de provincia.
+   */
   const PROVINCIAS: Array<{ code: string; name: string; patterns: RegExp[] }> = [
-    { code: '01', name: 'CAPITAL', patterns: [/capital\s*federal/, /\bcaba\b/, /ciudad\s*autonoma/, /^capital$/] },
-    { code: '02', name: 'BUENOS AIRES', patterns: [/buenos\s*aires/, /\bbs\s*\.?\s*as\b/, /provincia\s*de\s*buenos\s*aires/] },
-    { code: '',   name: 'CATAMARCA', patterns: [/catamarca/] },
-    { code: '',   name: 'CHACO', patterns: [/\bchaco\b/, /resistencia/] },
-    { code: '',   name: 'CHUBUT', patterns: [/chubut/, /comodoro\s*rivadavia/, /trelew/, /puerto\s*madryn/, /rawson/] },
-    { code: '',   name: 'CORDOBA', patterns: [/cordoba/, /\bcba\b/] },
-    { code: '',   name: 'CORRIENTES', patterns: [/corrientes/] },
-    { code: '09', name: 'ENTRE RIOS', patterns: [/entre\s*rios/, /\bparana\b/, /concordia/, /gualeguaychu/] },
-    { code: '',   name: 'FORMOSA', patterns: [/formosa/] },
-    { code: '',   name: 'JUJUY', patterns: [/jujuy/, /san\s*salvador\s*de\s*jujuy/] },
-    { code: '',   name: 'LA PAMPA', patterns: [/la\s*pampa/, /santa\s*rosa/] },
-    { code: '',   name: 'LA RIOJA', patterns: [/la\s*rioja/] },
-    { code: '05', name: 'MENDOZA', patterns: [/mendoza/, /godoy\s*cruz/, /malargue/, /san\s*rafael/] },
-    { code: '',   name: 'MISIONES', patterns: [/misiones/, /posadas/, /obera/, /eldorado/] },
-    { code: '',   name: 'NEUQUEN', patterns: [/neuquen/] },
-    { code: '',   name: 'RIO NEGRO', patterns: [/rio\s*negro/, /bariloche/, /viedma/, /general\s*roca/] },
-    { code: '',   name: 'SALTA', patterns: [/\bsalta\b/] },
-    { code: '',   name: 'SAN JUAN', patterns: [/san\s*juan/] },
-    { code: '',   name: 'SAN LUIS', patterns: [/san\s*luis/] },
-    { code: '',   name: 'SANTA CRUZ', patterns: [/santa\s*cruz/, /rio\s*gallegos/, /\bcaleta\s*olivia\b/] },
-    { code: '10', name: 'SANTA FE', patterns: [/santa\s*fe/, /\brosario\b/, /rafaela/, /reconquista/, /venado\s*tuerto/] },
-    { code: '',   name: 'SANTIAGO DEL ESTERO', patterns: [/santiago\s*del\s*estero/] },
-    { code: '24', name: 'Tierra del Fuego', patterns: [/tierra\s*del\s*fuego/, /ushuaia/, /rio\s*grande/] },
-    { code: '',   name: 'TUCUMAN', patterns: [/tucuman/, /san\s*miguel\s*de\s*tucuman/] }
+    {
+      code: '01',
+      name: 'CAPITAL',
+      patterns: [
+        /capital\s*federal/,
+        /\bcaba\b/,
+        /ciudad\s*autonoma/,
+        /^capital$/,
+        /\bcap\.?\s*fed\b/,
+      ],
+    },
+    {
+      code: '02',
+      name: 'BUENOS AIRES',
+      patterns: [
+        /buenos\s*aires/,
+        /\bbs\s*\.?\s*as\b/,
+        /provincia\s*de\s*buenos\s*aires/,
+        /mar\s*del\s*plata/,
+        /\bla\s*plata\b/,
+        /\bquilmes\b/,
+        /san\s*isidro/,
+        /vicente\s*lopez/,
+        /\blanus\b/,
+        /\bmoron\b/,
+        /\bmoreno\b/,
+        /\badrogue\b/,
+        /florencio\s*varela/,
+        /san\s*francisco\s*solano/,
+        /\bbernal\b/,
+        /\bberisso\b/,
+        /\bavellaneda\b/,
+        /\bwilde\b/,
+        /\bcastelar\b/,
+        /\bmartinez\b/,
+        /guillermo\s*e\.?\s*hudson/,
+        /\bhudson\b/,
+        /bahia\s*blanca/,
+        /tres\s*arroyos/,
+        /punta\s*alta/,
+        /coronel\s*suarez/,
+        /general\s*san\s*martin/,
+        /\blomas\s*de\s*zamora\b/,
+        /\btemperley\b/,
+        /\bbanfield\b/,
+        /\bramos\s*mejia\b/,
+        /\bhaedo\b/,
+        /\bituzaingo\b/,
+        /\bmerlo\b/,
+        /\btigre\b/,
+        /\bsan\s*fernando\b/,
+        /\bpilar\b/,
+        /\bescobar\b/,
+        /\bzarate\b/,
+        /\bcampana\b/,
+        /\bolavarria\b/,
+        /\bnecochea\b/,
+        /\btandil\b/,
+        /\bsan\s*miguel\b(?!\s*de\s*tucuman)/,
+        /\bsan\s*martin\b(?!\s*de\s*los\s*andes)/,
+      ],
+    },
+    { code: '', name: 'CATAMARCA', patterns: [/catamarca/] },
+    { code: '', name: 'CHACO', patterns: [/\bchaco\b/, /resistencia/] },
+    {
+      code: '',
+      name: 'CHUBUT',
+      patterns: [/chubut/, /comodoro\s*rivadavia/, /trelew/, /puerto\s*madryn/, /rawson/],
+    },
+    { code: '', name: 'CORDOBA', patterns: [/cordoba/, /\bcba\b/] },
+    { code: '', name: 'CORRIENTES', patterns: [/corrientes/, /\bgoya\b/] },
+    {
+      code: '09',
+      name: 'ENTRE RIOS',
+      patterns: [
+        /entre\s*rios/,
+        /\bparana\b/,
+        /concordia/,
+        /gualeguaychu/,
+        /\bchajari\b/,
+        /\bnogoya\b/,
+        /\bcolon\b/,
+        /\bvictoria\b/,
+      ],
+    },
+    { code: '', name: 'FORMOSA', patterns: [/formosa/] },
+    { code: '', name: 'JUJUY', patterns: [/jujuy/, /san\s*salvador\s*de\s*jujuy/] },
+    { code: '', name: 'LA PAMPA', patterns: [/la\s*pampa/, /santa\s*rosa/] },
+    { code: '', name: 'LA RIOJA', patterns: [/la\s*rioja/] },
+    {
+      code: '05',
+      name: 'MENDOZA',
+      patterns: [
+        /mendoza/,
+        /godoy\s*cruz/,
+        /malargue/,
+        /san\s*rafael/,
+        /\btunuyan\b/,
+        /\blujan\s*de\s*cuyo\b/,
+        /\bmaipu\b/,
+      ],
+    },
+    { code: '', name: 'MISIONES', patterns: [/misiones/, /posadas/, /obera/, /eldorado/] },
+    { code: '', name: 'NEUQUEN', patterns: [/neuquen/] },
+    {
+      code: '',
+      name: 'RIO NEGRO',
+      patterns: [/rio\s*negro/, /bariloche/, /viedma/, /general\s*roca/],
+    },
+    { code: '', name: 'SALTA', patterns: [/\bsalta\b/] },
+    { code: '', name: 'SAN JUAN', patterns: [/san\s*juan/] },
+    { code: '', name: 'SAN LUIS', patterns: [/san\s*luis/] },
+    {
+      code: '',
+      name: 'SANTA CRUZ',
+      patterns: [/santa\s*cruz/, /rio\s*gallegos/, /\bcaleta\s*olivia\b/],
+    },
+    {
+      code: '10',
+      name: 'SANTA FE',
+      patterns: [
+        /santa\s*fe/,
+        /\brosario\b/,
+        /rafaela/,
+        /reconquista/,
+        /venado\s*tuerto/,
+        /san\s*jose\s*del\s*rincon/,
+        /\bsanto\s*tome\b/,
+      ],
+    },
+    { code: '', name: 'SANTIAGO DEL ESTERO', patterns: [/santiago\s*del\s*estero/] },
+    {
+      code: '24',
+      name: 'Tierra del Fuego',
+      patterns: [/tierra\s*del\s*fuego/, /ushuaia/, /rio\s*grande/],
+    },
+    { code: '', name: 'TUCUMAN', patterns: [/tucuman/, /san\s*miguel\s*de\s*tucuman/] },
   ];
-  // Buscar CAPITAL antes que BUENOS AIRES para resolver ambigüedad (CAPITAL FEDERAL contiene "buenos aires" en algunos formatos).
+  // CAPITAL antes que BUENOS AIRES (ambigüedad "buenos aires" / CABA).
+  // TUCUMAN (san miguel de tucuman) se evalúa después de BA; el lookbehind negativo en SAN MIGUEL evita choque.
   for (const p of PROVINCIAS) {
     if (p.patterns.some((rx) => rx.test(haystack))) {
       return { code: p.code, name: p.name };
     }
   }
   return { code: '', name: '' };
+}
+
+/** Ciudad del cliente, o la primera ciudad no vacía en sucursales (`delivery_addresses`). */
+function resolveCustomerCityForProvincia(city: unknown, deliveryAddressesJson: unknown): string {
+  const main = String(city || '').trim();
+  if (main) return main;
+  let list: any[] = [];
+  if (Array.isArray(deliveryAddressesJson)) {
+    list = deliveryAddressesJson;
+  } else if (typeof deliveryAddressesJson === 'string' && deliveryAddressesJson.trim()) {
+    try {
+      const parsed = JSON.parse(deliveryAddressesJson);
+      if (Array.isArray(parsed)) list = parsed;
+    } catch {
+      /* ignore */
+    }
+  }
+  for (const it of list) {
+    const c = String(it?.city || '').trim();
+    if (c) return c;
+  }
+  return '';
 }
 
 /** Convierte 'YYYY-MM-DD' (o Date) al serial de Excel (días desde 1899-12-30, con bug del año bisiesto 1900). */
@@ -1479,8 +1634,7 @@ function letraFromCbteTipo(t: any): string {
 
 /**
  * Exporta el Excel "Ventas por Jurisdicción" con el formato esperado por el estudio contable.
- * Incluye facturas/NC mayoristas + Tienda Nube / ML emitidas en LupoHub (`external_*`)
- * + comprobantes del Facturador Mercado Libre (AFIP PV configurado, default 22).
+ * Solo facturas/NC mayoristas (sin Tienda Nube ni Mercado Libre).
  * Columnas: COD_PROVI, NOM_PROVI, FECHA_EMI (serial), T_COMP (FAC/CDE), N_COMP (A0002000012131),
  *           RAZON_SOC, SIN_IVA, IMP_IVA, IMPUEST, IMPORTE, COD_TRANSP, NOM_TRANSP.
  * NC va con montos en negativo y sin transporte.
@@ -1497,125 +1651,9 @@ export const exportVentasJurisdiccionXlsx = async (req: Request, res: Response) 
     const sellerJoinSql = isSeller ? ' AND c.seller_id = ?' : '';
     const sellerParam = isSeller ? [authUser.id] : [];
 
-    const mlAfipPuntos = getMercadoLibreAfipPuntosVenta();
-    let afipSyncIncomplete = false;
-    if (!isSeller) {
-      try {
-        const syncResult = await syncAfipVouchersForDateRange({ desde, hasta, puntosVenta: mlAfipPuntos });
-        afipSyncIncomplete = !!syncResult.incomplete;
-        if (syncResult.message) {
-          console.log(`[Ventas jurisdicción] ${syncResult.message}`, {
-            scanned: syncResult.scanned,
-            upserted: syncResult.upserted,
-            puntosVenta: syncResult.puntosVenta,
-          });
-        }
-      } catch (syncErr: any) {
-        // No bloqueamos el export mayorista/TN si AFIP ML falla; se exporta lo disponible.
-        console.warn(
-          '[Ventas jurisdicción] Sync AFIP ML (PV facturador) falló:',
-          syncErr?.message || syncErr
-        );
-        afipSyncIncomplete = true;
-      }
-    }
-
-    // Mercado Libre / Tienda Nube viven en external_*; no tienen seller_id → solo ADMIN (y roles no-seller).
-    // Totales externos se tratan como neto AFIP (misma unidad que orders.total / amount_credited mayorista).
-    // ML bulk puede generar N filas con el mismo CAE/PV/nro → agrupamos por comprobante.
-    // Además: comprobantes AFIP del Facturador ML (PV 22 por defecto) desde afip_synced_vouchers.
-    const mlPvPlaceholders = mlAfipPuntos.map(() => '?').join(',');
-    const externalUnionSql = isSeller
-      ? ''
-      : `
-        UNION ALL
-
-        SELECT
-          'FAC' AS tipo,
-          DATE(MAX(ei.created_at)) AS fecha,
-          ei.cbte_tipo,
-          ei.punto_venta,
-          ei.cbte_desde,
-          ei.cbte_hasta,
-          ROUND(SUM(ei.total), 2) AS neto,
-          0 AS otros_impuestos,
-          NULL AS customer_id,
-          CASE
-            WHEN COUNT(DISTINCT NULLIF(TRIM(ei.customer_name), '')) <= 1
-            THEN COALESCE(MAX(NULLIF(TRIM(ei.customer_name), '')), 'Consumidor Final')
-            ELSE 'Consumidor Final'
-          END AS razon_social,
-          '' AS city,
-          '' AS address
-        FROM external_invoices ei
-        WHERE ei.source IN ('TIENDANUBE', 'MERCADOLIBRE')
-          AND DATE(ei.created_at) >= ? AND DATE(ei.created_at) <= ?
-        GROUP BY ei.cae, ei.punto_venta, ei.cbte_tipo, ei.cbte_desde, ei.cbte_hasta
-
-        UNION ALL
-
-        SELECT
-          'CDE' AS tipo,
-          DATE(MAX(ecn.created_at)) AS fecha,
-          ecn.cbte_tipo,
-          ecn.punto_venta,
-          ecn.cbte_desde,
-          ecn.cbte_hasta,
-          ROUND(SUM(ecn.amount_credited), 2) AS neto,
-          0 AS otros_impuestos,
-          NULL AS customer_id,
-          CASE
-            WHEN COUNT(DISTINCT NULLIF(TRIM(ei.customer_name), '')) <= 1
-            THEN COALESCE(MAX(NULLIF(TRIM(ei.customer_name), '')), 'Consumidor Final')
-            ELSE 'Consumidor Final'
-          END AS razon_social,
-          '' AS city,
-          '' AS address
-        FROM external_credit_notes ecn
-        JOIN external_invoices ei ON ei.id = ecn.external_invoice_id
-        WHERE ecn.source IN ('TIENDANUBE', 'MERCADOLIBRE')
-          AND DATE(ecn.created_at) >= ? AND DATE(ecn.created_at) <= ?
-        GROUP BY ecn.cae, ecn.punto_venta, ecn.cbte_tipo, ecn.cbte_desde, ecn.cbte_hasta
-
-        UNION ALL
-
-        -- Facturador Mercado Libre (y otros PV AFIP configurados en AFIP_ML_PTO_VTA).
-        -- Excluye duplicados ya presentes en external_invoices (misma PV/tipo/nro).
-        SELECT
-          CASE
-            WHEN v.cbte_tipo IN (3, 8, 13) THEN 'CDE'
-            ELSE 'FAC'
-          END AS tipo,
-          v.fecha AS fecha,
-          v.cbte_tipo,
-          v.punto_venta,
-          v.cbte_desde,
-          v.cbte_hasta,
-          v.imp_neto AS neto,
-          COALESCE(v.imp_trib, 0) AS otros_impuestos,
-          NULL AS customer_id,
-          CASE
-            WHEN v.doc_nro IS NOT NULL AND CHAR_LENGTH(v.doc_nro) >= 7
-            THEN CONCAT('Doc ', v.doc_nro)
-            ELSE 'Consumidor Final'
-          END AS razon_social,
-          '' AS city,
-          '' AS address
-        FROM afip_synced_vouchers v
-        WHERE v.punto_venta IN (${mlPvPlaceholders})
-          AND v.fecha >= ? AND v.fecha <= ?
-          AND NOT EXISTS (
-            SELECT 1 FROM external_invoices ei
-            WHERE ei.punto_venta = v.punto_venta
-              AND ei.cbte_tipo = v.cbte_tipo
-              AND ei.cbte_desde = v.cbte_desde
-          )
-      `;
-
     const queryParams = [
       desde, hasta, ...sellerParam,
       desde, hasta, ...sellerParam,
-      ...(isSeller ? [] : [desde, hasta, desde, hasta, ...mlAfipPuntos, desde, hasta]),
     ];
 
     const rows = await query(
@@ -1634,7 +1672,8 @@ export const exportVentasJurisdiccionXlsx = async (req: Request, res: Response) 
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, '') AS razon_social,
           COALESCE(c.city, '') AS city,
-          COALESCE(c.address, '') AS address
+          COALESCE(c.address, '') AS address,
+          c.delivery_addresses AS delivery_addresses
         FROM invoices i
         JOIN orders o ON o.id = i.order_id
         JOIN customers c ON c.id = o.customer_id
@@ -1656,14 +1695,14 @@ export const exportVentasJurisdiccionXlsx = async (req: Request, res: Response) 
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, '') AS razon_social,
           COALESCE(c.city, '') AS city,
-          COALESCE(c.address, '') AS address
+          COALESCE(c.address, '') AS address,
+          c.delivery_addresses AS delivery_addresses
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
         JOIN customers c ON c.id = o.customer_id
         WHERE o.date >= ? AND o.date <= ?${sellerJoinSql}
         GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
-                 c.id, c.business_name, c.name, c.city, c.address
-        ${externalUnionSql}
+                 c.id, c.business_name, c.name, c.city, c.address, c.delivery_addresses
       ) AS x
       ORDER BY x.fecha ASC, x.punto_venta ASC, x.cbte_desde ASC
       `,
@@ -1727,7 +1766,8 @@ export const exportVentasJurisdiccionXlsx = async (req: Request, res: Response) 
       const nro = String(Number(r.cbte_desde) || 0).padStart(8, '0');
       const nComp = `${letra}${pv}${nro}`;
 
-      const prov = detectProvincia(String(r.city || ''), String(r.address || ''));
+      const cityForProv = resolveCustomerCityForProvincia(r.city, r.delivery_addresses);
+      const prov = detectProvincia(cityForProv);
       const fechaSerial = toExcelSerialDate(r.fecha);
 
       // Para NC: sin transporte, igual que el modelo del estudio.
@@ -1767,10 +1807,6 @@ export const exportVentasJurisdiccionXlsx = async (req: Request, res: Response) 
     const filename = `VENTAS_JURISDICCION_${yyyymm || 'rango'}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    if (afipSyncIncomplete) {
-      res.setHeader('X-Afip-Sync-Incomplete', '1');
-      res.setHeader('Access-Control-Expose-Headers', 'X-Afip-Sync-Incomplete, Content-Disposition');
-    }
     return res.send(buffer);
   } catch (error: any) {
     console.error('exportVentasJurisdiccionXlsx:', error);
@@ -1800,27 +1836,17 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
     }
     const whereFac: string[] = [];
     const paramsFac: any[] = [];
+    // Filtrar por la misma fecha que va al TXT (emisión AFIP / pedido si fue restauración).
     if (fromDate && toDate) {
-      // Pedido del mes, emisión FA/NC del mes, o reemisión (NC+FA) emitida en el mes.
-      whereFac.push(`(
-        (o.date >= ? AND o.date <= ?)
-        OR (COALESCE(DATE(i.created_at), o.date) >= ? AND COALESCE(DATE(i.created_at), o.date) <= ?)
-        OR EXISTS (
-          SELECT 1 FROM credit_notes cn_m
-          WHERE cn_m.order_id = o.id
-            AND COALESCE(cn_m.superseded_by_reinvoice, 0) = 1
-            AND COALESCE(DATE(cn_m.created_at), DATE(i.created_at), o.date) >= ?
-            AND COALESCE(DATE(cn_m.created_at), DATE(i.created_at), o.date) <= ?
-        )
-      )`);
-      paramsFac.push(fromDate, toDate, fromDate, toDate, fromDate, toDate);
+      whereFac.push(`(${SQL_RETPER_FAC_FECHA}) >= ? AND (${SQL_RETPER_FAC_FECHA}) <= ?`);
+      paramsFac.push(fromDate, toDate);
     } else {
       if (fromDate) {
-        whereFac.push('COALESCE(DATE(i.created_at), o.date) >= ?');
+        whereFac.push(`(${SQL_RETPER_FAC_FECHA}) >= ?`);
         paramsFac.push(fromDate);
       }
       if (toDate) {
-        whereFac.push('COALESCE(DATE(i.created_at), o.date) <= ?');
+        whereFac.push(`(${SQL_RETPER_FAC_FECHA}) <= ?`);
         paramsFac.push(toDate);
       }
     }
@@ -1874,10 +1900,7 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
     const rowsRaw = await query(
       `
       SELECT
-        CASE
-          WHEN cn_reemit.id IS NOT NULL THEN COALESCE(DATE(i.created_at), DATE(cn_reemit.created_at), o.date)
-          ELSE o.date
-        END AS fecha,
+        ${SQL_RETPER_FAC_FECHA} AS fecha,
         i.cbte_tipo,
         i.punto_venta,
         i.cbte_desde,

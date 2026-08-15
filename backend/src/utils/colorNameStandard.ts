@@ -195,3 +195,29 @@ export function isStandardColorName(value: string): boolean {
   const n = normalizeColorNameToStandard(value);
   return (STANDARD_COLOR_NAMES as readonly string[]).includes(n);
 }
+
+/** Grupos de colores equivalentes para emparejar ML/TN vs inventario (ej. Nude ≈ Natural). */
+const COLOR_EQUIVALENCE_GROUPS: string[][] = [
+  ['nude', 'natural', 'natutal', 'rosa nude', 'beige nude'],
+];
+
+/**
+ * true si dos nombres de color representan el mismo color de negocio
+ * (igualdad, contención o alias tipo Nude/Natural).
+ */
+export function colorsAreEquivalent(a: string, b: string): boolean {
+  const na = normKey(cleanRaw(a));
+  const nb = normKey(cleanRaw(b));
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  if (na.includes(nb) || nb.includes(na)) return true;
+  const ca = normKey(normalizeColorNameToStandard(a));
+  const cb = normKey(normalizeColorNameToStandard(b));
+  if (ca && cb && ca === cb) return true;
+  for (const group of COLOR_EQUIVALENCE_GROUPS) {
+    const aIn = group.some((g) => na === g || na.includes(g) || ca === g);
+    const bIn = group.some((g) => nb === g || nb.includes(g) || cb === g);
+    if (aIn && bIn) return true;
+  }
+  return false;
+}

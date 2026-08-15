@@ -1402,33 +1402,44 @@ function resolveTangoImportLayout(headers: string[]): TangoImportLayout | { erro
 /**
  * Parsea un código Tango respetando los caracteres no numéricos del prefijo (ej.: "Q05875", "C01303").
  *
- * El layout real del código en Tango es de ancho fijo:
- *   - Posiciones 0..8 (9 caracteres): código del artículo, padded a la derecha con espacios.
- *     Ej.: "Q05875   ", "C01303   ", "0012501  ", "0587513  "
- *   - Posiciones 9..11 (3 caracteres): talle.
- *   - Posiciones 12..14 (3 caracteres): color.
+ * Dos formatos válidos:
+ * 1) Ancho fijo CON espacios (export Tango):
+ *    - Posiciones 0..8 (9 caracteres): artículo, padded a la derecha con espacios.
+ *      Ej.: "Q05875   ", "4090001  "
+ *    - Posiciones 9..11: talle (3)
+ *    - Posiciones 12..14: color (3)
+ * 2) Concatenado SIN espacios (barras / remitos): artículo + talle(3) + color(3).
+ *    Ej.: "4090001140997" → art 4090001, talle 140, color 997.
+ *    Con prefijo: "Q05875140111" → art Q05875, talle 140, color 111.
  *
- * Versiones anteriores hacían `raw.replace(/\D/g, '')` antes de cortar; eso **eliminaba** los prefijos
- * tipo "Q"/"C" del SKU y producía duplicados (ej. "Q05875" y "0587500" como dos productos distintos).
- * Este parser conserva el prefijo como parte del artículo.
+ * Importante: no aplicar el layout 9+3+3 a strings solo-dígitos sin espacios; eso come el talle
+ * dentro del artículo (4090001140997 → art 409000114, color "7") y agrupa mal los colores.
  *
- * `codigoCompleto` mantiene el código completo *sin espacios* (artículo + talle + color), útil para
- * usarlo como SKU de variante (legible en remitos/facturas).
+ * `codigoCompleto` mantiene el código completo *sin espacios* (artículo + talle + color).
  */
 function parseCodigoTango(codigo: unknown): { articulo: string; talle: string; color: string; codigo13: string; codigoCompleto: string } {
   const raw = (codigo != null ? String(codigo) : '');
-  if (!raw) return { articulo: '', talle: '', color: '', codigo13: '', codigoCompleto: '' };
+  if (!raw.trim()) return { articulo: '', talle: '', color: '', codigo13: '', codigoCompleto: '' };
 
-  const padded = raw.padEnd(15, ' ');
-  let articulo = padded.slice(0, 9).trim();
-  let talle = padded.slice(9, 12).trim();
-  let color = padded.slice(12, 15).trim();
+  let articulo = '';
+  let talle = '';
+  let color = '';
 
-  // Si el formato no respeta el ancho fijo (códigos más cortos o concatenados sin padding) intentamos un fallback.
-  if (!articulo) {
+  if (/\s/.test(raw)) {
+    const padded = raw.padEnd(15, ' ');
+    articulo = padded.slice(0, 9).trim();
+    talle = padded.slice(9, 12).trim();
+    color = padded.slice(12, 15).trim();
+  } else {
     const cleaned = raw.trim();
-    if (cleaned.length >= 13) {
-      // Asumimos formato concatenado: 7 artículo + 3 talle + 3 color (puede tener letra al inicio o no).
+    const m = cleaned.match(/^([A-Za-z]*)(\d+)$/);
+    if (m && m[2].length >= 6) {
+      const letters = m[1];
+      const digits = m[2];
+      color = digits.slice(-3);
+      talle = digits.slice(-6, -3);
+      articulo = letters + digits.slice(0, -6);
+    } else if (cleaned.length >= 6) {
       articulo = cleaned.slice(0, cleaned.length - 6);
       talle = cleaned.slice(cleaned.length - 6, cleaned.length - 3);
       color = cleaned.slice(cleaned.length - 3);
@@ -1718,16 +1729,19 @@ export const importTangoArticles = async (req: Request, res: Response) => {
         let variantId: string;
         if (!existingVariant) {
           variantId = uuidv4();
+          // SKU siempre desde artículo+talle+color resueltos (no confiar en codigo13 si vino mal parseado).
+          const variantSku = `${r.articulo}${r.talle}${r.color}`;
           await execute(
             `INSERT INTO product_variants (id, product_color_id, size_id, sku) VALUES (?, ?, ?, ?)`,
-            [variantId, productColorId, sizeId, r.codigo13]
+            [variantId, productColorId, sizeId, variantSku]
           );
           const qty = r.initialStock ?? 0;
           await execute(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?)`, [variantId, qty]);
           variantsCreated++;
         } else {
           variantId = existingVariant.id as string;
-          await execute(`UPDATE product_variants SET sku = ? WHERE id = ?`, [r.codigo13, variantId]);
+          const variantSku = `${r.articulo}${r.talle}${r.color}`;
+          await execute(`UPDATE product_variants SET sku = ? WHERE id = ?`, [variantSku, variantId]);
           variantsUpdated++;
           if (r.initialStock !== undefined) {
             if (keepStockOnExistingVariants) {
@@ -1748,7 +1762,7 @@ export const importTangoArticles = async (req: Request, res: Response) => {
           }
           const prodRow = await get(`SELECT name FROM products WHERE id = ?`, [productId]);
           const prodName = String((prodRow as any)?.name || r.articulo || '').trim();
-          const descripcionItem = `${prodName} - ${r.codigo13}`.trim();
+          const descripcionItem = `${prodName} - ${r.articulo}${r.talle}${r.color}`.trim();
 
           if (qtyDespacho > 0) {
             const di = await get(
@@ -2093,12 +2107,16 @@ export const addVariantPublication = async (req: Request, res: Response) => {
     if (!exists) return res.status(404).json({ message: 'Variante no encontrada' });
     const id = uuidv4();
     await execute(
-      `INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size) VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE pack_size = VALUES(pack_size)`,
       [id, variantId, platform, String(externalProductId).trim(), extVariantId, pack]
     );
     const row = await get(
-      'SELECT id, variant_id, platform, external_product_id, external_variant_id, pack_size, created_at FROM variant_publications WHERE id = ?',
-      [id]
+      `SELECT id, variant_id, platform, external_product_id, external_variant_id, pack_size, created_at
+       FROM variant_publications
+       WHERE variant_id = ? AND platform = ? AND external_product_id = ? AND external_variant_id = ?`,
+      [variantId, platform, String(externalProductId).trim(), extVariantId]
     );
     try {
       const stockRow = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [variantId]);

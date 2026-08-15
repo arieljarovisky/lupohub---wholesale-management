@@ -32,6 +32,8 @@ export function colorCodeForPrintItem(item: OrderItem, variantSku?: string): str
     const c = parts[parts.length - 1].trim();
     return c.replace(/\D/g, '') || c;
   }
+  const fromConcat = talleColorFromConcatenatedSku(sku);
+  if (fromConcat?.color) return fromConcat.color;
   return '';
 }
 
@@ -182,14 +184,18 @@ export function groupOrderItemsByArticleAndSize(
     const variantId = item.variantId ?? item.productId;
     const localProduct = variantId ? products.find((p: Product) => p.id === variantId) : undefined;
     const variantSku = (localProduct?.sku ?? item.sku ?? '').toString().trim();
-    const completePrint = tryCompletePrintCodeFromSku(variantSku);
     const { sizeCode, colorCode } = sizeAndColorCodesForPrint(item, variantSku, localProduct);
-    const articleCode = articleCodeForPrintGroup(variantSku);
+    const articleCode = articleCodeForPrintGroup(variantSku || String(item.sku ?? ''));
     const sizeKey = sizeKeyForGroup(sizeCode);
     const unit = Number(item.priceAtMoment ?? 0);
-    const groupKey = completePrint
-      ? `${completePrint}|${Math.round(unit * 100)}`
-      : `${articleCode}|${sizeKey}|${colorCode}|${Math.round(unit * 100)}`;
+    // Agrupar siempre por artículo+talle+color del catálogo (no por SKU concatenado,
+    // que puede estar corrupto y fusionar Negro+Nude en el mismo código).
+    const colorKey =
+      String(colorCode || '').trim() ||
+      String(item.colorName || '').trim().toLowerCase() ||
+      String(variantId || item.productId || '').trim() ||
+      '_';
+    const groupKey = `${articleCode}|${sizeKey}|${colorKey}|${Math.round(unit * 100)}`;
 
     const despachoRaw =
       (item as OrderItem & { numeroDespacho?: string; numero_despacho?: string }).numeroDespacho ??
@@ -230,7 +236,7 @@ export function groupOrderItemsByArticleAndSize(
         ...acc.template,
         sizeCode: acc.sizeCode,
         colorCode: acc.colorCode || acc.template.colorCode,
-        sku: undefined,
+        sku: variantSkuGrouped || acc.template.sku,
       },
       products
     );
@@ -635,16 +641,43 @@ export function talleColorFromHyphenatedSku(skuRaw: string): { talle: string; co
   return { talle, color };
 }
 
+/** Talle y color desde SKU concatenado (ej. 4090001140997 → talle 140, color 997). */
+export function talleColorFromConcatenatedSku(skuRaw: string): { talle: string; color: string } | null {
+  const sku = String(skuRaw ?? '').trim();
+  if (!sku || sku.includes('-') || /\s/.test(sku)) return null;
+  const m = sku.match(/^([A-Za-z]*)(\d+)$/);
+  if (!m || m[2].length < 6) return null;
+  const digits = m[2];
+  if (digits.length < 11 || digits.length > 17) return null;
+  const talle = digits.slice(-6, -3);
+  const color = digits.slice(-3);
+  if (!/^\d{1,3}$/.test(talle) || !/^\d{1,3}$/.test(color)) return null;
+  return { talle, color };
+}
+
 function sizeAndColorCodesForPrint(
   item: OrderItem,
   variantSku: string,
   localProduct: Product | undefined
 ): { sizeCode: string; colorCode: string } {
+  // Fuente de verdad: color/talle del pedido (JOIN a colors/sizes). El SKU de variante
+  // puede estar corrupto (ej. Nude 600 con sku …654) y no debe pisar el color real.
+  const itemSize = String(item.sizeCode ?? localProduct?.size ?? '').trim();
+  const itemColor =
+    String(item.colorCode ?? '').trim() ||
+    colorCodeForPrintItem(item, variantSku);
+  if (itemSize && itemColor) {
+    return { sizeCode: itemSize, colorCode: itemColor.replace(/\D/g, '') || itemColor };
+  }
+
+  const itemSku = String(item.sku ?? '').trim();
   const fromSku =
     talleColorFromHyphenatedSku(variantSku) ??
-    talleColorFromHyphenatedSku(String(item.sku ?? '').trim());
-  const sizeCode = fromSku?.talle ?? String(item.sizeCode ?? localProduct?.size ?? '').trim();
-  const colorCode = fromSku?.color ?? colorCodeForPrintItem(item, variantSku);
+    talleColorFromHyphenatedSku(itemSku) ??
+    talleColorFromConcatenatedSku(variantSku) ??
+    talleColorFromConcatenatedSku(itemSku);
+  const sizeCode = itemSize || fromSku?.talle || '';
+  const colorCode = (itemColor || fromSku?.color || '').replace(/\D/g, '') || itemColor || fromSku?.color || '';
   return { sizeCode, colorCode };
 }
 
@@ -659,16 +692,26 @@ export function printCodeForOrderItem(item: OrderItem, products: Product[]): str
     return printCodeForTrifilSku(variantSku || rawItemSku);
   }
 
+  const { sizeCode, colorCode } = sizeAndColorCodesForPrint(item, variantSku, localProduct);
+  const articleFromSku = articleCodeForPrintGroup(variantSku || rawItemSku);
+  if (colorCode && sizeCode) {
+    const built = printCodeArticleSizeColor(articleFromSku, sizeCode, colorCode);
+    if (built) return built;
+  }
+
+  // Fallback: SKU ya concatenado solo si su sufijo de color coincide (o no hay color confiable).
   const complete =
     tryCompletePrintCodeFromSku(rawItemSku) ?? tryCompletePrintCodeFromSku(variantSku);
-  if (complete) return complete;
+  if (complete) {
+    if (!colorCode) return complete;
+    const suffix = complete.slice(-3).replace(/^0+/, '') || complete.slice(-3);
+    const want = String(colorCode).replace(/\D/g, '').replace(/^0+/, '') || colorCode;
+    if (suffix === want || complete.slice(-3) === String(colorCode).padStart(3, '0').slice(-3)) {
+      return complete;
+    }
+  }
 
-  const { sizeCode, colorCode } = sizeAndColorCodesForPrint(item, variantSku, localProduct);
-  const built = printCodeArticleSizeColor(
-    articleCodeForPrintGroup(variantSku || rawItemSku),
-    sizeCode,
-    colorCode
-  );
+  const built = printCodeArticleSizeColor(articleFromSku, sizeCode, colorCode);
   if (built) return built;
   return normalizeSkuForPrint(rawItemSku || variantSku);
 }

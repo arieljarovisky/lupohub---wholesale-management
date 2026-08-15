@@ -52,6 +52,8 @@ const formatYmdLocal = (d: Date) => {
 };
 
 type MassExportRangePreset =
+  | 'all'
+  | 'since_zero'
   | 'current_month'
   | 'last_month'
   | 'last_3_months'
@@ -60,6 +62,8 @@ type MassExportRangePreset =
   | 'ytd';
 
 const MASS_EXPORT_RANGE_PRESETS: { id: MassExportRangePreset; label: string }[] = [
+  { id: 'since_zero', label: 'Desde saldo en cero' },
+  { id: 'all', label: 'Todo el historial' },
   { id: 'current_month', label: 'Mes en curso' },
   { id: 'last_month', label: 'Mes anterior' },
   { id: 'last_3_months', label: 'Últimos 3 meses' },
@@ -76,6 +80,9 @@ function massExportRangeForPreset(preset: MassExportRangePreset): { from: string
     new Date(anchor.getFullYear(), anchor.getMonth() + delta, 1);
 
   switch (preset) {
+    case 'all':
+    case 'since_zero':
+      return { from: '', to: '' };
     case 'current_month':
       return { from: formatYmdLocal(monthStart(today)), to };
     case 'last_month': {
@@ -126,8 +133,9 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
   const [massExportMode, setMassExportMode] = useState<'saldos' | 'commissionDetail'>('saldos');
   const [massExportFrom, setMassExportFrom] = useState<string>('');
   const [massExportTo, setMassExportTo] = useState<string>('');
+  const [massExportSinceZero, setMassExportSinceZero] = useState(true);
   const [massExportError, setMassExportError] = useState<string>('');
-  const [massExportSaldosSource, setMassExportSaldosSource] = useState<'historial' | 'sistema' | 'tango'>('sistema');
+  const [massExportSaldosSource, setMassExportSaldosSource] = useState<'historial' | 'sistema' | 'tango'>('historial');
   const [massExportSellerIds, setMassExportSellerIds] = useState<string[]>([]);
 
   const sellers = useMemo(() => users.filter((u) => u.role === Role.SELLER), [users]);
@@ -222,10 +230,20 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
   };
 
   const openMassExportModal = (mode: 'saldos' | 'commissionDetail') => {
-    const { from, to } = massExportRangeForPreset('current_month');
+    // Saldos: por defecto desde el último saldo en cero (detalle de la deuda abierta).
+    // Comisiones: mes en curso.
+    if (mode === 'saldos') {
+      setMassExportFrom('');
+      setMassExportTo('');
+      setMassExportSinceZero(true);
+      setMassExportSaldosSource('historial');
+    } else {
+      const { from, to } = massExportRangeForPreset('current_month');
+      setMassExportFrom(from);
+      setMassExportTo(to);
+      setMassExportSinceZero(false);
+    }
     setMassExportMode(mode);
-    setMassExportFrom(from);
-    setMassExportTo(to);
     setMassExportSellerIds(sellers.map((s) => s.id));
     setMassExportError('');
     setMassExportModalOpen(true);
@@ -241,23 +259,26 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
     const { from, to } = massExportRangeForPreset(preset);
     setMassExportFrom(from);
     setMassExportTo(to);
+    setMassExportSinceZero(preset === 'since_zero');
     setMassExportError('');
   };
 
   const activeMassExportPreset = useMemo((): MassExportRangePreset | null => {
+    if (massExportSinceZero) return 'since_zero';
     const from = massExportFrom.trim();
     const to = massExportTo.trim();
-    if (!from || !to) return null;
+    if (!from && !to) return 'all';
     for (const p of MASS_EXPORT_RANGE_PRESETS) {
+      if (p.id === 'all' || p.id === 'since_zero') continue;
       const r = massExportRangeForPreset(p.id);
       if (r.from === from && r.to === to) return p.id;
     }
     return null;
-  }, [massExportFrom, massExportTo]);
+  }, [massExportFrom, massExportTo, massExportSinceZero]);
 
   const runMassExport = async () => {
-    const from = massExportFrom.trim();
-    const to = massExportTo.trim();
+    const from = massExportSinceZero ? '' : massExportFrom.trim();
+    const to = massExportSinceZero ? '' : massExportTo.trim();
     const validationError = validateMassExportDates(from, to);
     if (validationError) {
       setMassExportError(validationError);
@@ -276,6 +297,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
           sellerName: seller.name,
           from: from || undefined,
           to: to || undefined,
+          sinceZero: massExportSinceZero || undefined,
           source: massExportSaldosSource
         });
       }
@@ -691,7 +713,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
               <h3 className="text-white font-black text-lg">Descarga masiva por vendedor</h3>
               <p className="text-slate-400 text-sm mt-1">
                 {massExportMode === 'saldos'
-                  ? 'Elegí vendedores y rango de fechas. Se descarga un Excel por cada vendedor seleccionado.'
+                  ? 'Elegí vendedores y, si querés, un rango. Por defecto se incluye todo el historial (facturas, pedidos, NC y recibos) de cada cliente.'
                   : 'Elegí vendedores y rango de fechas. Se arma un detalle de comisiones por cada uno.'}
               </p>
             </div>
@@ -776,9 +798,13 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
                 <label className="block text-xs font-bold uppercase tracking-wide text-slate-400 mb-1">Desde</label>
                 <input
                   type="date"
-                  value={massExportFrom}
-                  onChange={(e) => setMassExportFrom(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500"
+                  value={massExportSinceZero ? '' : massExportFrom}
+                  disabled={massExporting || massExportSinceZero}
+                  onChange={(e) => {
+                    setMassExportSinceZero(false);
+                    setMassExportFrom(e.target.value);
+                  }}
+                  className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
                 />
               </div>
 
@@ -786,21 +812,41 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
                 <label className="block text-xs font-bold uppercase tracking-wide text-slate-400 mb-1">Hasta</label>
                 <input
                   type="date"
-                  value={massExportTo}
-                  onChange={(e) => setMassExportTo(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500"
+                  value={massExportSinceZero ? '' : massExportTo}
+                  disabled={massExporting || massExportSinceZero}
+                  onChange={(e) => {
+                    setMassExportSinceZero(false);
+                    setMassExportTo(e.target.value);
+                  }}
+                  className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
                 />
               </div>
 
               {massExportMode === 'saldos' && (
                 <p className="text-[11px] text-slate-500 leading-snug">
-                  El detalle respeta el rango «desde» / «hasta». La columna Saldo termina en el saldo pendiente a cobrar (deuda actual, no solo del mes).
+                  {massExportSinceZero
+                    ? '«Desde saldo en cero»: por cada cliente lista solo los movimientos desde la última vez que el saldo quedó en 0 (la deuda abierta actual).'
+                    : 'Con fechas vacías («Todo el historial») lista todo. Si filtrás un rango, solo aparecen movimientos de ese período; el saldo verde sigue siendo la deuda actual.'}
                 </p>
               )}
 
               {massExportMode === 'saldos' ? (
                 <div className="space-y-2">
                   <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Tipo de saldos por cliente</p>
+                  <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="massExportSaldosSource"
+                      className="accent-emerald-500"
+                      checked={massExportSaldosSource === 'historial'}
+                      onChange={() => {
+                        setMassExportSaldosSource('historial');
+                        setMassExportFrom('');
+                        setMassExportTo('');
+                      }}
+                    />
+                    Historial completo (LupoHub + facturas/recibos importados de Tango)
+                  </label>
                   <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
                     <input
                       type="radio"
@@ -815,22 +861,23 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
                     <input
                       type="radio"
                       name="massExportSaldosSource"
-                      className="accent-emerald-500"
-                      checked={massExportSaldosSource === 'historial'}
-                      onChange={() => setMassExportSaldosSource('historial')}
-                    />
-                    Historial completo (sistema + externos por CUIT; sin import Tango)
-                  </label>
-                  <label className="flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="massExportSaldosSource"
                       className="accent-amber-500"
                       checked={massExportSaldosSource === 'tango'}
-                      onChange={() => setMassExportSaldosSource('tango')}
+                      onChange={() => {
+                        setMassExportSaldosSource('tango');
+                        setMassExportFrom('');
+                        setMassExportTo('');
+                      }}
                     />
                     Solo importado de Tango (Multimedia)
                   </label>
+                  {massExportSaldosSource === 'historial' || massExportSaldosSource === 'tango' ? (
+                    <p className="text-[11px] text-amber-200/90 leading-snug">
+                      {massExportSaldosSource === 'historial'
+                        ? 'Incluye las FAC/REC de Tango de cada cliente (historial completo; sin filtro de fechas).'
+                        : 'Se listan todas las facturas/recibos importados del cliente (se ignora el rango de fechas).'}
+                    </p>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -920,6 +967,7 @@ function SellerDetailView({
   const [savingCustomerCommissionId, setSavingCustomerCommissionId] = useState<string | null>(null);
   const [exportFrom, setExportFrom] = useState<string>('');
   const [exportTo, setExportTo] = useState<string>('');
+  const [exportSinceZero, setExportSinceZero] = useState(true);
   const [commissionExporting, setCommissionExporting] = useState(false);
   const [exportSaldosLoading, setExportSaldosLoading] = useState<'idle' | 'historial' | 'sistema' | 'tango'>('idle');
   const downloadCommissionDetailExcel = async () => {
@@ -951,24 +999,49 @@ function SellerDetailView({
           Actualizar saldos
         </button>
         <div className="inline-flex flex-col gap-1 px-3 py-2 rounded-xl border border-slate-700 bg-slate-900/60 text-slate-300 text-sm">
+          <label className="flex items-center gap-2 text-xs text-slate-200 cursor-pointer">
+            <input
+              type="checkbox"
+              className="accent-emerald-500"
+              checked={exportSinceZero}
+              onChange={(e) => {
+                setExportSinceZero(e.target.checked);
+                if (e.target.checked) {
+                  setExportFrom('');
+                  setExportTo('');
+                }
+              }}
+            />
+            Desde saldo en cero (deuda abierta)
+          </label>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-slate-400">Desde</span>
             <input
               type="date"
-              value={exportFrom}
-              onChange={(e) => setExportFrom(e.target.value)}
-              className="bg-slate-800 border border-slate-600 rounded-lg px-2 py-1 text-xs text-white outline-none focus:ring-2 focus:ring-blue-500"
+              value={exportSinceZero ? '' : exportFrom}
+              disabled={exportSinceZero}
+              onChange={(e) => {
+                setExportSinceZero(false);
+                setExportFrom(e.target.value);
+              }}
+              className="bg-slate-800 border border-slate-600 rounded-lg px-2 py-1 text-xs text-white outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
             />
             <span className="text-slate-400">Hasta</span>
             <input
               type="date"
-              value={exportTo}
-              onChange={(e) => setExportTo(e.target.value)}
-              className="bg-slate-800 border border-slate-600 rounded-lg px-2 py-1 text-xs text-white outline-none focus:ring-2 focus:ring-blue-500"
+              value={exportSinceZero ? '' : exportTo}
+              disabled={exportSinceZero}
+              onChange={(e) => {
+                setExportSinceZero(false);
+                setExportTo(e.target.value);
+              }}
+              className="bg-slate-800 border border-slate-600 rounded-lg px-2 py-1 text-xs text-white outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
             />
           </div>
           <span className="text-[10px] text-slate-500 max-w-md leading-snug">
-            El detalle solo incluye movimientos entre «desde» y «hasta». La columna Saldo cierra en el saldo pendiente (fila verde).
+            {exportSinceZero
+              ? 'Lista solo movimientos desde la última vez que el cliente quedó en 0.'
+              : 'Fechas vacías = historial completo. Con rango, solo movimientos de ese período.'}
           </span>
         </div>
         <button
@@ -980,8 +1053,9 @@ function SellerDetailView({
               await api.exportSaldosPendientesPorCliente({
                 sellerId: seller.id,
                 sellerName: seller.name,
-                from: exportFrom || undefined,
-                to: exportTo || undefined,
+                from: exportSinceZero ? undefined : exportFrom || undefined,
+                to: exportSinceZero ? undefined : exportTo || undefined,
+                sinceZero: exportSinceZero || undefined,
                 source: 'sistema'
               });
             } catch {
@@ -1005,8 +1079,7 @@ function SellerDetailView({
               await api.exportSaldosPendientesPorCliente({
                 sellerId: seller.id,
                 sellerName: seller.name,
-                from: exportFrom || undefined,
-                to: exportTo || undefined,
+                sinceZero: exportSinceZero || undefined,
                 source: 'historial'
               });
             } catch {
@@ -1016,10 +1089,10 @@ function SellerDetailView({
             }
           }}
           className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-600 text-slate-200 hover:text-white hover:bg-slate-800 text-sm font-semibold transition disabled:opacity-50"
-          title="Facturas, notas de crédito y recibos del sistema más comprobantes externos por CUIT (sin import Tango)"
+          title="LupoHub (AFIP) + facturas/recibos importados de Tango + externos por CUIT"
         >
           {exportSaldosLoading === 'historial' ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-          Excel por cliente · historial
+          Excel por cliente · historial (con Tango)
         </button>
         <button
           type="button"
@@ -1030,8 +1103,7 @@ function SellerDetailView({
               await api.exportSaldosPendientesPorCliente({
                 sellerId: seller.id,
                 sellerName: seller.name,
-                from: exportFrom || undefined,
-                to: exportTo || undefined,
+                sinceZero: exportSinceZero || undefined,
                 source: 'tango'
               });
             } catch {
@@ -1041,7 +1113,7 @@ function SellerDetailView({
             }
           }}
           className="inline-flex items-center gap-2 px-3 py-2 rounded-xl border border-amber-700/60 text-amber-300 hover:text-white hover:bg-amber-700/20 text-sm font-semibold transition disabled:opacity-50"
-          title="Solo movimientos importados de Tango (Multimedia): facturas, NC y recibos importados"
+          title="Historial importado de Tango/Multimedia (opcional: desde último saldo en cero)"
         >
           {exportSaldosLoading === 'tango' ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
           Excel por cliente · solo Tango

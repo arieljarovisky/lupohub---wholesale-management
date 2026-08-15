@@ -100,6 +100,11 @@ export function resolveDisplayArticleCode(requestedCode: string): string {
   }
   const digits = req.replace(/\D/g, '');
   if (!digits) return req;
+  // SKU concatenado artículo+talle+color: solo el artículo (ej. 4090001140997 → 4090001).
+  if (!req.includes('-') && digits.length >= 11 && digits.length <= 17) {
+    const art = digits.slice(0, -6);
+    return art.length <= 7 ? art.padStart(7, '0') : art;
+  }
   return digits.length <= 7 ? digits.padStart(7, '0') : digits;
 }
 
@@ -121,6 +126,11 @@ export function articleCodeForOrderRow(parentProductSku: string | undefined, var
   const digits = sku.replace(/\D/g, '');
   // Variante Tango mal parseada (1275-11170112): no usar los primeros 7 dígitos.
   if (parts.length === 2 && digits.length > 9) return '';
+  // Concatenado artículo+talle+color (ej. 4090001140997 → 4090001).
+  if (!sku.includes('-') && digits.length >= 11 && digits.length <= 17 && /^\d+$/.test(sku.replace(/\s/g, ''))) {
+    const art = digits.slice(0, -6);
+    return art.length <= 7 ? art.padStart(7, '0') : art;
+  }
   if (digits.length >= 7 && digits.length <= 9) return digits.slice(0, 7);
   return resolveDisplayArticleCode(sku);
 }

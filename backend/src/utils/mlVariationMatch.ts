@@ -1,6 +1,7 @@
-/** Empareja variaciones de un ítem ML por variationId / SKU (color+talle solo sin SKU local). */
+/** Empareja variaciones de un ítem ML por variationId / SKU / color+talle (con guardas). */
 
 import { codigoTalleParaSku, nombreTalleDesdeCodigo, TALLE_CODIGO_A_NOMBRE } from '../talles-tango';
+import { colorsAreEquivalent } from './colorNameStandard';
 
 export type MlVariantMatchLink = {
   variationId?: string | null;
@@ -12,6 +13,28 @@ export type MlVariantMatchLink = {
 export function normSkuForMlStockMatch(s: string): string {
   const d = String(s ?? '').replace(/\D/g, '');
   return (d.replace(/^0+/, '') || '0').toUpperCase();
+}
+
+/**
+ * Prefijo de artículo comparable entre `0069102-140-280` y `0069102140280`.
+ * Evita cruces entre artículos distintos en el mismo MLA.
+ */
+export function articleDigitsFromSku(sku: string): string {
+  const s = String(sku ?? '').trim();
+  if (!s) return '';
+  const dashed = s.match(/^([A-Za-z0-9]+)-(\d{2,4})-/);
+  if (dashed) return normSkuForMlStockMatch(dashed[1]);
+  const digits = s.replace(/\D/g, '');
+  // artículo(7) + talle(3) + color(3) = 13, o artículo más corto + 6
+  if (digits.length >= 13) return normSkuForMlStockMatch(digits.slice(0, -6));
+  if (digits.length >= 10) return normSkuForMlStockMatch(digits.slice(0, -6));
+  return normSkuForMlStockMatch(digits);
+}
+
+export function sameArticleSku(localRaw: string, remoteRaw: string): boolean {
+  const a = articleDigitsFromSku(localRaw);
+  const b = articleDigitsFromSku(remoteRaw);
+  return !!a && !!b && a !== '0' && b !== '0' && a === b;
 }
 
 export function normTextForMlStockMatch(s: string): string {
@@ -91,19 +114,45 @@ export function skusCompatible(localRaw: string, remoteRaw: string): boolean {
 }
 
 function colorCompatible(localColor: string, remoteColor: string): boolean {
-  const a = normTextForMlStockMatch(localColor);
-  const b = normTextForMlStockMatch(remoteColor);
-  if (!a || !b) return false;
-  return a === b || a.includes(b) || b.includes(a);
+  return colorsAreEquivalent(localColor, remoteColor);
+}
+
+/**
+ * Completa color/talle faltantes desde un SKU Lupo (artículo+talle+color).
+ * Si ML ya trae COLOR y SIZE en atributos, esos mandan: en familias UP el seller_sku
+ * a veces queda cruzado entre variantes (ej. Blanco G con SKU de Nude P).
+ */
+export function reconcileMlColorSizeWithLupoSku(
+  sku: string,
+  color: string,
+  size: string
+): { color: string; size: string } {
+  const mlColor = String(color || '').trim();
+  const mlSize = String(size || '').trim();
+  // Atributos completos de la publicación: no pisar con SKU (puede estar desfasado).
+  if (mlColor && mlSize) {
+    return { color: mlColor, size: mlSize };
+  }
+
+  const digits = String(sku || '').replace(/\D/g, '');
+  if (digits.length < 13) return { color: mlColor, size: mlSize };
+  const sizeCode = digits.slice(-6, -3);
+  if (!sizeCode || (!TALLE_CODIGO_A_NOMBRE[sizeCode] && !/^\d{3}$/.test(sizeCode))) {
+    return { color: mlColor, size: mlSize };
+  }
+  if (!mlSize) return { color: mlColor, size: sizeCode };
+  if (sizesCompatible(mlSize, sizeCode)) return { color: mlColor, size: mlSize };
+  return { color: mlColor, size: mlSize };
 }
 
 /**
  * Empareja la variación ML correcta.
- * Prioridad: variationId guardado (vínculo explícito) → SKU exacto → color+talle solo sin SKU local.
+ * Prioridad: variationId guardado → SKU exacto → color+talle (con guardas de artículo).
  *
- * El ID que el usuario guardó al vincular manda: no se descarta por SKU distinto/vacío en ML
- * (antes eso dejaba ML en "—" y borraba el vínculo tras sync).
- * color+talle solo sin SKU local: evita que dos artículos del mismo MLA se pisen.
+ * El ID que el usuario guardó al vincular manda.
+ * color+talle se permite si ML no trae SKU usable, o si el SKU remoto es del mismo artículo
+ * (evita el cruce 0067102↔0073304 en un MLA compartido, pero permite sync cuando
+ * el SKU de ML está vacío / en otro formato y el vínculo no tiene variation_id).
  */
 export function matchMlVariationForVariantLink(variations: any[], link: MlVariantMatchLink): any | null {
   if (!Array.isArray(variations) || variations.length === 0) return null;
@@ -140,20 +189,33 @@ export function matchMlVariationForVariantLink(variations: any[], link: MlVarian
     }
   }
 
-  // 3) color + talle: NUNCA si la variante local tiene SKU.
-  if (rawLocalSku) {
-    return null;
-  }
-
+  // 3) color + talle
   const colorN = String(link.color ?? '').trim();
   const sizeRaw = String(link.size ?? '').trim();
-  if (colorN && sizeRaw) {
-    const byAttrs = variations.filter((v: any) => {
-      const { color, size } = mlVariationColorSizeFromApi(v);
-      return colorCompatible(colorN, color) && sizesCompatible(sizeRaw, size);
-    });
-    if (byAttrs.length === 1) return byAttrs[0];
+  if (!colorN || !sizeRaw) return null;
+
+  let pool = variations;
+  if (rawLocalSku) {
+    const remotesWithSku = variations.filter((v: any) => !!mlVariationSkuFromApi(v).trim());
+    // Si hay SKUs remotos y ninguno matcheó en (2), solo considerar:
+    // - variaciones sin SKU, o
+    // - SKU del mismo artículo (formato distinto).
+    // Si todas tienen SKU de otro artículo → abortar (evita pisar stock ajeno).
+    if (remotesWithSku.length > 0) {
+      pool = variations.filter((v: any) => {
+        const remoteSku = mlVariationSkuFromApi(v).trim();
+        if (!remoteSku) return true;
+        return sameArticleSku(rawLocalSku, remoteSku);
+      });
+      if (pool.length === 0) return null;
+    }
   }
+
+  const byAttrs = pool.filter((v: any) => {
+    const { color, size } = mlVariationColorSizeFromApi(v);
+    return colorCompatible(colorN, color) && sizesCompatible(sizeRaw, size);
+  });
+  if (byAttrs.length === 1) return byAttrs[0];
 
   return null;
 }

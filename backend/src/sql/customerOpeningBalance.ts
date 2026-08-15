@@ -39,7 +39,27 @@ export const SQL_OPENING_AFIP_CN_DATE_WHERE = `(
 
 export function parseOpeningBalanceInput(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null;
-  const n = typeof v === 'number' ? v : Number(String(v).replace(/\./g, '').replace(',', '.'));
+  if (typeof v === 'number') {
+    return Number.isFinite(v) ? Math.round(v * 100) / 100 : null;
+  }
+  const s = String(v).trim().replace(/\s/g, '').replace(/\$/g, '');
+  if (!s) return null;
+  const hasComma = s.includes(',');
+  const hasDot = s.includes('.');
+  let n: number;
+  if (hasComma && hasDot) {
+    // AR: 1.234.567,89
+    n = Number(s.replace(/\./g, '').replace(',', '.'));
+  } else if (hasComma) {
+    // AR: 1234,56 — la coma es decimal, no se borra
+    n = Number(s.replace(',', '.'));
+  } else if (hasDot && /^-?\d{1,3}(\.\d{3})+$/.test(s)) {
+    // AR miles sin decimales: 1.500 / 1.228.093
+    n = Number(s.replace(/\./g, ''));
+  } else {
+    // US / ya normalizado: 1234.56 (no quitar el punto)
+    n = Number(s);
+  }
   if (!Number.isFinite(n)) return null;
   return Math.round(n * 100) / 100;
 }
