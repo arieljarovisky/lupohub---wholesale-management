@@ -73,6 +73,7 @@ import { exportMercadoLibreToTiendaNube } from '../controllers/mlToTiendaNubeExp
 import { getVariantChannelPrices, bulkUpdateChannelPrices } from '../controllers/channelPrices.controller';
 import { getChannelMargins, exportChannelMarginsXlsx } from '../controllers/channelMargins.controller';
 import { exportTiendaNubeSalesReportXlsx } from '../controllers/tiendanubeSalesReport.controller';
+import { exportTiendaNubeProductsCsv } from '../controllers/tiendanubeProductsCsvExport.controller';
 import { exportMercadoLibreSalesReportXlsx } from '../controllers/mercadolibreSalesReport.controller';
 import { getMercadoLibreReviews, exportMercadoLibreReviewsXlsx } from '../controllers/mercadolibreReviews.controller';
 import {
@@ -191,6 +192,7 @@ router.patch('/tiendanube/orders/:orderId/express-tracking/status', authMiddlewa
 router.get('/tiendanube/stock', getTiendaNubeStock);
 router.get('/tiendanube/stock/totals', getTiendaNubeStockTotals);
 router.get('/tiendanube/sales-report-export', authMiddleware, exportTiendaNubeSalesReportXlsx);
+router.get('/tiendanube/products-csv-export', authMiddleware, exportTiendaNubeProductsCsv);
 router.get('/tiendanube/category-images/preview', authMiddleware, listTiendaNubeCategoryMatches);
 router.get('/tiendanube/category-images/download', authMiddleware, downloadTiendaNubeCategoryImagesZip);
 router.get('/tiendanube/catalog', authMiddleware, getTiendaNubeCatalog);

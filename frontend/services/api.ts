@@ -2747,6 +2747,25 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
+  /** CSV de productos TN: product_id,name,sku,url (una fila por producto). */
+  exportTiendaNubeProductsCsv: async (params?: { published?: 'true' | 'false' | 'all' }): Promise<void> => {
+    const query = new URLSearchParams();
+    if (params?.published) query.set('published', params.published);
+    const blob = await getBlob(
+      `/integrations/tiendanube/products-csv-export${query.toString() ? '?' + query.toString() : ''}`,
+      180000
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    a.download = `productos_tiendanube_${stamp}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
   /** Enviar stock solo de variantes seleccionadas a Tienda Nube */
   syncSelectedStockToTiendaNube: async (variantIds: string[]): Promise<{ message: string; updated: number; errors: number; total: number; logs: string[] }> => {
     return handleRequest(async () => {

@@ -367,6 +367,7 @@ const Settings: React.FC<SettingsProps> = ({
   const [mlReportFrom, setMlReportFrom] = useState(() => ymdDaysAgo(30));
   const [mlReportTo, setMlReportTo] = useState(() => ymdToday());
   const [tnSalesReportLoading, setTnSalesReportLoading] = useState(false);
+  const [tnProductsCsvLoading, setTnProductsCsvLoading] = useState(false);
   const [tnSalesFrom, setTnSalesFrom] = useState(() => {
     const d = new Date();
     d.setDate(1);
@@ -949,6 +950,18 @@ const Settings: React.FC<SettingsProps> = ({
       showToast('error', e?.message || 'Error al generar el reporte de ventas de Tienda Nube');
     } finally {
       setTnSalesReportLoading(false);
+    }
+  };
+
+  const handleExportTnProductsCsv = async () => {
+    setTnProductsCsvLoading(true);
+    try {
+      await api.exportTiendaNubeProductsCsv({ published: 'true' });
+      showToast('success', 'CSV de productos de Tienda Nube descargado.');
+    } catch (e: any) {
+      showToast('error', e?.message || 'Error al exportar productos de Tienda Nube');
+    } finally {
+      setTnProductsCsvLoading(false);
     }
   };
 
@@ -2896,6 +2909,28 @@ const Settings: React.FC<SettingsProps> = ({
                           className="mt-1 w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-slate-100 text-xs"
                         />
                       </div>
+                    </div>
+                    <div className="rounded-xl border border-emerald-900/50 bg-emerald-950/10 p-3 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <FileSpreadsheet size={14} className="text-emerald-400" />
+                        <p className="text-emerald-200 text-xs font-black uppercase tracking-wide">
+                          CSV productos (product_id, name, sku, url)
+                        </p>
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        Exporta todos los productos publicados de Tienda Nube en el formato{' '}
+                        <code className="text-emerald-300/90">product_id,name,sku,url</code> (una fila por producto).
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleExportTnProductsCsv}
+                        disabled={tnProductsCsvLoading}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-white text-xs font-bold transition-all flex items-center gap-2 disabled:opacity-50"
+                        title="Descargar CSV de productos Tienda Nube"
+                      >
+                        {tnProductsCsvLoading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                        DESCARGAR CSV PRODUCTOS
+                      </button>
                     </div>
                     <p className="text-[10px] text-slate-500">
                       Sincronizar stock / SKU / normalizar talles y colores. SKU: usa el código de LupoHub (ej. 0051003-130-280), no notación científica.
