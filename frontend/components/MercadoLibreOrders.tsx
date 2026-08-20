@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Package, User, Truck, ChevronLeft, ChevronRight, Loader2, Zap, Calendar, Search, X, Clock, CheckCircle, XCircle, ChevronDown, ExternalLink, ShoppingCart, MessageCircle, Download } from 'lucide-react';
+import { RefreshCw, Package, User, Truck, ChevronLeft, ChevronRight, Loader2, Zap, Calendar, Search, X, Clock, CheckCircle, XCircle, ChevronDown, ExternalLink, ShoppingCart, MessageCircle, Download, Star } from 'lucide-react';
 import { api } from '../services/api';
 import { openExternalInvoicePdf } from '../utils/externalInvoicePdf';
 import MercadoLibreQuestions from './MercadoLibreQuestions';
+import MercadoLibreReviews from './MercadoLibreReviews';
 
 interface MercadoLibreOrder {
   id: number;
@@ -43,7 +44,7 @@ interface MercadoLibreOrder {
   };
 }
 
-type MlSection = 'orders' | 'questions';
+type MlSection = 'orders' | 'questions' | 'reviews';
 
 interface MercadoLibreOrdersProps {
   defaultSection?: MlSection;
@@ -368,10 +369,24 @@ const MercadoLibreOrders: React.FC<MercadoLibreOrdersProps> = ({ defaultSection 
           <MessageCircle size={16} />
           Preguntas
         </button>
+        <button
+          type="button"
+          onClick={() => switchSection('reviews')}
+          className={`px-4 py-2.5 rounded-t-xl text-sm font-bold transition-colors flex items-center gap-1.5 ${
+            mlSection === 'reviews'
+              ? 'bg-slate-800 text-amber-200 border border-b-0 border-amber-600/50'
+              : 'text-slate-500 hover:text-amber-300/90'
+          }`}
+        >
+          <Star size={16} />
+          Opiniones
+        </button>
       </div>
 
       {mlSection === 'questions' ? (
         <MercadoLibreQuestions />
+      ) : mlSection === 'reviews' ? (
+        <MercadoLibreReviews />
       ) : (
       <>
       {/* Header */}

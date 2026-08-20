@@ -74,6 +74,7 @@ import { getVariantChannelPrices, bulkUpdateChannelPrices } from '../controllers
 import { getChannelMargins, exportChannelMarginsXlsx } from '../controllers/channelMargins.controller';
 import { exportTiendaNubeSalesReportXlsx } from '../controllers/tiendanubeSalesReport.controller';
 import { exportMercadoLibreSalesReportXlsx } from '../controllers/mercadolibreSalesReport.controller';
+import { getMercadoLibreReviews, exportMercadoLibreReviewsXlsx } from '../controllers/mercadolibreReviews.controller';
 import {
   listTiendaNubeCategoryMatches,
   downloadTiendaNubeCategoryImagesZip,
@@ -125,6 +126,8 @@ router.get('/mercadolibre/test', testMercadoLibreConnection);
 router.get('/mercadolibre/debug', debugMercadoLibreItem);
 router.get('/mercadolibre/orders', getMercadoLibreOrders);
 router.get('/mercadolibre/questions', getMercadoLibreQuestions);
+router.get('/mercadolibre/reviews', authMiddleware, getMercadoLibreReviews);
+router.get('/mercadolibre/reviews-export', authMiddleware, exportMercadoLibreReviewsXlsx);
 router.get('/mercadolibre/stock', getMercadoLibreStock);
 router.get('/mercadolibre/stock/totals', getMercadoLibreStockTotals);
 /** Métricas Mercado Ads (Product Ads): anunciantes, campañas y anuncios por publicación. */

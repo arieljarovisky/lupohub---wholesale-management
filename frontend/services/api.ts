@@ -3230,6 +3230,97 @@ export const api = {
     }, { questions: [], total: 0, offset: 0, limit: 20 }, 'getMercadoLibreQuestions');
   },
 
+  /** Opiniones/reseñas de publicaciones ML del vendedor (API /reviews/item/{id}). */
+  getMercadoLibreReviews: async (params?: {
+    offset?: number;
+    limit?: number;
+    q?: string;
+    min_rate?: number;
+    include_closed?: boolean;
+    only_with_reviews?: boolean;
+    refresh?: boolean;
+  }): Promise<{
+    items: Array<{
+      itemId: string;
+      title: string;
+      permalink: string | null;
+      status: string | null;
+      thumbnail: string | null;
+      catalogProductId: string | null;
+      ratingAverage: number | null;
+      reviewsCount: number;
+      ratingLevels: {
+        oneStar: number;
+        twoStar: number;
+        threeStar: number;
+        fourStar: number;
+        fiveStar: number;
+      };
+      reviews: Array<{
+        id: string | number;
+        title: string;
+        content: string;
+        rate: number | null;
+        status: string;
+        dateCreated: string | null;
+        buyingDate: string | null;
+        likes: number;
+        dislikes: number;
+        relevance: number | null;
+        attributes: Array<{ id?: string; name?: string; value_id?: string; value_name?: string }>;
+      }>;
+    }>;
+    total: number;
+    offset: number;
+    limit: number;
+    summary: {
+      publicationsWithReviews: number;
+      reviewsReturned: number;
+      ratingAverageGlobal: number | null;
+      scannedUpTo: number;
+    };
+  }> => {
+    const queryParams = new URLSearchParams();
+    if (params?.offset !== undefined) queryParams.append('offset', String(params.offset));
+    if (params?.limit !== undefined) queryParams.append('limit', String(params.limit));
+    if (params?.q) queryParams.append('q', params.q);
+    if (params?.min_rate != null) queryParams.append('min_rate', String(params.min_rate));
+    if (params?.include_closed) queryParams.append('include_closed', '1');
+    if (params?.only_with_reviews === false) queryParams.append('only_with_reviews', '0');
+    if (params?.refresh) queryParams.append('refresh', '1');
+    const queryString = queryParams.toString();
+    return await request(
+      `/integrations/mercadolibre/reviews${queryString ? '?' + queryString : ''}`,
+      'GET',
+      undefined,
+      undefined,
+      300000
+    );
+  },
+
+  /** Excel con opiniones de publicaciones Mercado Libre. */
+  exportMercadoLibreReviews: async (params?: {
+    include_closed?: boolean;
+    only_with_reviews?: boolean;
+  }): Promise<void> => {
+    const query = new URLSearchParams();
+    if (params?.include_closed) query.set('include_closed', '1');
+    if (params?.only_with_reviews === false) query.set('only_with_reviews', '0');
+    const blob = await getBlob(
+      `/integrations/mercadolibre/reviews-export${query.toString() ? '?' + query.toString() : ''}`,
+      300000
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    a.download = `opiniones_mercadolibre_${stamp}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
   invoiceMercadoLibreOrdersBulk: async (payload: { orderIds: Array<string | number>; cbteTipo?: 1 | 6 }): Promise<{
     message: string;
     summary: { total: number; invoiced: number; alreadyInvoiced: number; skippedUnpaid: number; errors: number };
