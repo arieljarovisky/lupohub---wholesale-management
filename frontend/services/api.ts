@@ -3425,6 +3425,68 @@ export const api = {
     }, { totalProducts: 0, totalStock: 0, lowStockCount: 0, noStockCount: 0 }, 'getTiendaNubeStockTotals');
   },
 
+  getTiendaNubeProductImages: async (productId: string | number): Promise<{
+    productId: string;
+    title: string;
+    permalink: string;
+    images: Array<{ id: number; src: string; position: number }>;
+  }> => {
+    return await request(
+      `/integrations/tiendanube/products/${encodeURIComponent(String(productId))}/images`,
+      'GET',
+      undefined,
+      undefined,
+      60000
+    );
+  },
+
+  saveTiendaNubeProductImages: async (
+    productId: string | number,
+    opts: {
+      items: Array<{ id?: number; fileIndex?: number }>;
+      files?: File[];
+      keepExisting?: boolean;
+    }
+  ): Promise<{
+    productId: string;
+    title: string;
+    permalink: string;
+    images: Array<{ id: number; src: string; position: number }>;
+    message?: string;
+  }> => {
+    const form = new FormData();
+    form.append('items', JSON.stringify(opts.items || []));
+    if (opts.keepExisting) form.append('keepExisting', 'true');
+    for (const file of opts.files || []) form.append('files', file);
+    return await requestFormData(
+      `/integrations/tiendanube/products/${encodeURIComponent(String(productId))}/images`,
+      form,
+      180000
+    );
+  },
+
+  previewTiendaNubeImageMatches: async (payload: {
+    paths: string[];
+    productIds?: string[];
+  }): Promise<{
+    matches: Array<{
+      productId: string;
+      title: string;
+      imageCount: number;
+      files: Array<{ path: string; seq: number }>;
+    }>;
+    unmatched: Array<{ path: string; reason: string }>;
+    ambiguous: Array<{ path: string; productIds: string[]; titles: string[] }>;
+  }> => {
+    return await request(
+      '/integrations/tiendanube/products/images/match-preview',
+      'POST',
+      payload,
+      undefined,
+      180000
+    );
+  },
+
   // Stock de Mercado Libre
   getMercadoLibreStock: async (params?: { offset?: number; limit?: number; status?: string }): Promise<{ items: any[]; total: number }> => {
     return handleRequest(async () => {
