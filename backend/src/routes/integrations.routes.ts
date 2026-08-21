@@ -75,6 +75,7 @@ import { getChannelMargins, exportChannelMarginsXlsx } from '../controllers/chan
 import { exportTiendaNubeSalesReportXlsx } from '../controllers/tiendanubeSalesReport.controller';
 import { exportTiendaNubeProductsCsv } from '../controllers/tiendanubeProductsCsvExport.controller';
 import { exportMercadoLibreSalesReportXlsx } from '../controllers/mercadolibreSalesReport.controller';
+import { exportMarketingTopProductsXlsx } from '../controllers/marketingTopProductsExport.controller';
 import { getMercadoLibreReviews, exportMercadoLibreReviewsXlsx } from '../controllers/mercadolibreReviews.controller';
 import {
   listTiendaNubeCategoryMatches,
@@ -193,6 +194,8 @@ router.get('/tiendanube/stock', getTiendaNubeStock);
 router.get('/tiendanube/stock/totals', getTiendaNubeStockTotals);
 router.get('/tiendanube/sales-report-export', authMiddleware, exportTiendaNubeSalesReportXlsx);
 router.get('/tiendanube/products-csv-export', authMiddleware, exportTiendaNubeProductsCsv);
+/** Marketing: más vendidos con unidades por plataforma (TN / ML / Mayorista). */
+router.get('/marketing/top-products-export', authMiddleware, exportMarketingTopProductsXlsx);
 router.get('/tiendanube/category-images/preview', authMiddleware, listTiendaNubeCategoryMatches);
 router.get('/tiendanube/category-images/download', authMiddleware, downloadTiendaNubeCategoryImagesZip);
 router.get('/tiendanube/catalog', authMiddleware, getTiendaNubeCatalog);

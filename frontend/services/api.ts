@@ -2747,6 +2747,27 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
+  /** Marketing: más vendidos con unidades por plataforma (Excel). */
+  exportMarketingTopProductsReport: async (params: {
+    from: string;
+    to: string;
+    channels?: 'all' | 'tn' | 'ml' | 'mayorista' | 'tn_ml';
+  }): Promise<void> => {
+    const query = new URLSearchParams();
+    query.set('from', params.from);
+    query.set('to', params.to);
+    if (params.channels) query.set('channels', params.channels);
+    const blob = await getBlob(`/integrations/marketing/top-products-export?${query.toString()}`, 180000);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `mas_vendidos_por_plataforma_${params.from}_a_${params.to}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
   /** CSV de productos TN: product_id,name,sku,url (una fila por producto). */
   exportTiendaNubeProductsCsv: async (params?: { published?: 'true' | 'false' | 'all' }): Promise<void> => {
     const query = new URLSearchParams();

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Award, Loader2, RefreshCw, BarChart3, Package, AlertTriangle, Search } from 'lucide-react';
+import { Award, Loader2, RefreshCw, BarChart3, Package, AlertTriangle, Search, Download } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { api } from '../services/api';
 import { Order, OrderStatus } from '../types';
@@ -85,6 +85,7 @@ const MarketingTopProducts: React.FC = () => {
   const [stockSearch, setStockSearch] = useState('');
   const [stockSortBy, setStockSortBy] = useState<StockSortBy>('stock');
   const [stockSortDir, setStockSortDir] = useState<SortDir>('asc');
+  const [exporting, setExporting] = useState(false);
 
   const getDateRange = (days: number) => {
     const to = new Date();
@@ -147,18 +148,41 @@ const MarketingTopProducts: React.FC = () => {
     loadData();
   }, [dateRange]);
 
+  const handleExportReport = async () => {
+    const dates = getDateRange(parseInt(dateRange, 10));
+    setExporting(true);
+    try {
+      await api.exportMarketingTopProductsReport({
+        from: dates.from,
+        to: dates.to,
+        channels: channelFilter
+      });
+      showToast('success', 'Reporte de más vendidos descargado');
+    } catch (e: any) {
+      console.error('Error exportando más vendidos:', e);
+      showToast('error', e?.message || 'Error exportando el reporte');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const topProducts = useMemo(() => {
     const dates = getDateRange(parseInt(dateRange, 10));
     const { includeTn, includeMl, includeMay } = channelsForFilter(channelFilter);
-    const sales: Record<string, { name: string; qty: number; rev: number; channels: Set<string> }> = {};
+    const sales: Record<
+      string,
+      { name: string; qty: number; rev: number; qtyTn: number; qtyMl: number; qtyMay: number; channels: Set<string> }
+    > = {};
 
     if (includeTn) {
       tnOrders.filter((o) => o.paymentStatus === 'paid').forEach((order) => {
         (order.products || []).forEach((p: any) => {
           const key = p.name || p.sku || 'Producto';
-          if (!sales[key]) sales[key] = { name: key, qty: 0, rev: 0, channels: new Set() };
-          sales[key].qty += p.quantity || 1;
-          sales[key].rev += parseAmount(p.price) * (p.quantity || 1);
+          if (!sales[key]) sales[key] = { name: key, qty: 0, rev: 0, qtyTn: 0, qtyMl: 0, qtyMay: 0, channels: new Set() };
+          const q = p.quantity || 1;
+          sales[key].qty += q;
+          sales[key].qtyTn += q;
+          sales[key].rev += parseAmount(p.price) * q;
           sales[key].channels.add('TN');
         });
       });
@@ -168,9 +192,11 @@ const MarketingTopProducts: React.FC = () => {
       mlOrders.filter((o) => o.status === 'paid').forEach((order) => {
         (order.items || []).forEach((item: any) => {
           const key = item.title || item.sku || 'Producto';
-          if (!sales[key]) sales[key] = { name: key, qty: 0, rev: 0, channels: new Set() };
-          sales[key].qty += item.quantity || 1;
-          sales[key].rev += parseAmount(item.unitPrice) * (item.quantity || 1);
+          if (!sales[key]) sales[key] = { name: key, qty: 0, rev: 0, qtyTn: 0, qtyMl: 0, qtyMay: 0, channels: new Set() };
+          const q = item.quantity || 1;
+          sales[key].qty += q;
+          sales[key].qtyMl += q;
+          sales[key].rev += parseAmount(item.unitPrice) * q;
           sales[key].channels.add('ML');
         });
       });
@@ -187,9 +213,10 @@ const MarketingTopProducts: React.FC = () => {
         .forEach((order) => {
           (order.items || []).forEach((item) => {
             const key = item.productName || item.sku || 'Producto';
-            if (!sales[key]) sales[key] = { name: key, qty: 0, rev: 0, channels: new Set() };
+            if (!sales[key]) sales[key] = { name: key, qty: 0, rev: 0, qtyTn: 0, qtyMl: 0, qtyMay: 0, channels: new Set() };
             const qty = item.quantity || 1;
             sales[key].qty += qty;
+            sales[key].qtyMay += qty;
             sales[key].rev += parseAmount(item.priceAtMoment) * qty;
             sales[key].channels.add('Mayorista');
           });
@@ -325,6 +352,16 @@ const MarketingTopProducts: React.FC = () => {
             >
               <RefreshCw size={18} />
             </button>
+            <button
+              type="button"
+              onClick={handleExportReport}
+              disabled={exporting}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-600/90 hover:bg-emerald-500 text-white text-sm font-medium transition disabled:opacity-60 disabled:cursor-not-allowed"
+              title="Exportar reporte detallado por plataforma"
+            >
+              {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+              {exporting ? 'Exportando…' : 'Exportar reporte'}
+            </button>
           </div>
         </div>
 
@@ -357,7 +394,19 @@ const MarketingTopProducts: React.FC = () => {
                         <p className="text-white text-sm truncate" title={p.name}>
                           {p.name}
                         </p>
-                        <p className="text-[10px] text-slate-500">{p.channels}</p>
+                        <p className="text-[10px] text-slate-500">
+                          {p.channels}
+                          {(p.qtyTn > 0 || p.qtyMl > 0 || p.qtyMay > 0) && (
+                            <span className="text-slate-600">
+                              {' · '}
+                              {p.qtyTn > 0 && `TN ${p.qtyTn}`}
+                              {p.qtyTn > 0 && (p.qtyMl > 0 || p.qtyMay > 0) && ' · '}
+                              {p.qtyMl > 0 && `ML ${p.qtyMl}`}
+                              {p.qtyMl > 0 && p.qtyMay > 0 && ' · '}
+                              {p.qtyMay > 0 && `May ${p.qtyMay}`}
+                            </span>
+                          )}
+                        </p>
                       </div>
                       <div className="text-right shrink-0">
                         <p className="text-white font-bold text-sm">{p.qty} uds</p>
