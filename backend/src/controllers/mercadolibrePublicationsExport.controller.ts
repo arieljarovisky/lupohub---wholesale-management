@@ -1,8 +1,9 @@
 import { Request, Response } from 'express';
 import axios from 'axios';
 import ExcelJS from 'exceljs';
-import { query, get } from '../database/db';
+import { query } from '../database/db';
 import { getValidMLToken, normalizeMercadoLibreItemId } from './integrations.controller';
+import { lookupFobPrice, resolveFobPriceList } from '../utils/channelMarginUtils';
 
 const ML_SYNC_MAX_ITEMS = Math.max(100, parseInt(process.env.ML_SYNC_MAX_ITEMS || '5000', 10));
 const ADS_LOOKBACK_DAYS = 30;
@@ -547,36 +548,9 @@ export const exportMercadolibrePublicationsXlsx = async (req: Request, res: Resp
       });
     }
 
-    /** Precio FOB por producto: lista de precios cuyo nombre contiene "fob" (ej. "precios FOB") o env LUPOHUB_FOB_PRICE_LIST_ID. */
-    let fobListName = '';
+    const fobInfo = await resolveFobPriceList();
+    const fobListName = fobInfo.name;
     const fobListIdEnv = (process.env.LUPOHUB_FOB_PRICE_LIST_ID || '').trim();
-    let fobListId: string | null = null;
-    if (fobListIdEnv) {
-      const exists = await get('SELECT id, name FROM price_lists WHERE id = ?', [fobListIdEnv]);
-      if (exists?.id) {
-        fobListId = String(exists.id);
-        fobListName = (exists as any).name || '';
-      }
-    }
-    if (!fobListId) {
-      const pl = await get(
-        `SELECT id, name FROM price_lists WHERE LOWER(TRIM(name)) LIKE '%fob%' ORDER BY CASE WHEN LOWER(TRIM(name)) = 'precios fob' THEN 0 ELSE 1 END, name LIMIT 1`
-      );
-      if (pl?.id) {
-        fobListId = String(pl.id);
-        fobListName = String((pl as any).name || '');
-      }
-    }
-    const fobPriceRows = fobListId
-      ? ((await query(`SELECT product_id, price FROM price_list_items WHERE price_list_id = ?`, [fobListId])) as Array<{
-          product_id: string;
-          price: string | number | null;
-        }>)
-      : [];
-    const fobByProductId = new Map<string, number>();
-    for (const fr of fobPriceRows) {
-      fobByProductId.set(String(fr.product_id), Number(fr.price) || 0);
-    }
 
     const productMeta = new Map<
       string,
@@ -806,9 +780,9 @@ export const exportMercadolibrePublicationsXlsx = async (req: Request, res: Resp
       let fobCost: number | null = null;
       if (key.startsWith('p:')) {
         const pid = key.slice(2);
-        fobCost = fobByProductId.has(pid) ? fobByProductId.get(pid)! : null;
+        fobCost = lookupFobPrice(fobInfo, pid, agg.codigo);
       } else {
-        fobCost = null;
+        fobCost = lookupFobPrice(fobInfo, null, agg.codigo);
       }
       let inversion = 0;
       for (const iid of agg.ml_item_ids) {

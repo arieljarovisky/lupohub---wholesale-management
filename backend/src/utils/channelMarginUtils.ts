@@ -1,15 +1,37 @@
 import axios from 'axios';
 import { query, get } from '../database/db';
+import { currentMonthNameEs } from './argentinaDate';
 
 export type FobPriceListInfo = {
   id: string | null;
   name: string;
   byProductId: Map<string, number>;
+  bySku: Map<string, number>;
 };
 
-/** Lista FOB: env LUPOHUB_FOB_PRICE_LIST_ID o nombre que contenga "fob". */
+export type FobYieldMetrics = {
+  fob: number | null;
+  avgPrice: number | null;
+  costFob: number | null;
+  profit: number | null;
+  yieldOnCost: number | null;
+  yieldOnSale: number | null;
+};
+
+function roundMoney(v: number): number {
+  return Math.round(v * 100) / 100;
+}
+
+function skuKey(raw: unknown): string {
+  return String(raw || '')
+    .trim()
+    .toUpperCase();
+}
+
+/** Lista FOB: env LUPOHUB_FOB_PRICE_LIST_ID, o la del mes actual (p. ej. «Precios Fob Agosto»), o la FOB más reciente. */
 export async function resolveFobPriceList(): Promise<FobPriceListInfo> {
   const byProductId = new Map<string, number>();
+  const bySku = new Map<string, number>();
   let id: string | null = null;
   let name = '';
 
@@ -22,9 +44,16 @@ export async function resolveFobPriceList(): Promise<FobPriceListInfo> {
     }
   }
   if (!id) {
+    const month = currentMonthNameEs();
     const pl = await get(
       `SELECT id, name FROM price_lists WHERE LOWER(TRIM(name)) LIKE '%fob%'
-       ORDER BY CASE WHEN LOWER(TRIM(name)) = 'precios fob' THEN 0 ELSE 1 END, name LIMIT 1`
+       ORDER BY
+         CASE WHEN ? <> '' AND LOWER(name) LIKE ? THEN 0 ELSE 1 END,
+         CASE WHEN LOWER(TRIM(name)) = 'precios fob' THEN 0 ELSE 1 END,
+         updated_at DESC,
+         name
+       LIMIT 1`,
+      [month, month ? `%${month}%` : '%']
     );
     if (pl?.id) {
       id = String(pl.id);
@@ -32,14 +61,52 @@ export async function resolveFobPriceList(): Promise<FobPriceListInfo> {
     }
   }
   if (id) {
-    const rows = (await query(`SELECT product_id, price FROM price_list_items WHERE price_list_id = ?`, [
-      id,
-    ])) as Array<{ product_id: string; price: string | number | null }>;
+    const rows = (await query(
+      `SELECT pli.product_id, pli.price, p.sku
+       FROM price_list_items pli
+       LEFT JOIN products p ON p.id = pli.product_id
+       WHERE pli.price_list_id = ?`,
+      [id]
+    )) as Array<{ product_id: string; price: string | number | null; sku: string | null }>;
     for (const r of rows) {
-      byProductId.set(String(r.product_id), Number(r.price) || 0);
+      const price = Number(r.price);
+      if (!Number.isFinite(price)) continue;
+      byProductId.set(String(r.product_id), price);
+      const sku = skuKey(r.sku);
+      if (sku) bySku.set(sku, price);
     }
   }
-  return { id, name, byProductId };
+  return { id, name, byProductId, bySku };
+}
+
+export function lookupFobPrice(
+  info: FobPriceListInfo,
+  productId?: string | null,
+  sku?: string | null
+): number | null {
+  if (productId && info.byProductId.has(productId)) {
+    const n = info.byProductId.get(productId)!;
+    return Number.isFinite(n) ? n : null;
+  }
+  const key = skuKey(sku);
+  if (key && info.bySku.has(key)) {
+    const n = info.bySku.get(key)!;
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/** Ganancia y rendimiento vs FOB: (ingresos − FOB × unidades) / (FOB × unidades). */
+export function calcFobYield(revenue: number, units: number, fob: number | null): FobYieldMetrics {
+  const avgPrice = units > 0 && Number.isFinite(revenue) ? roundMoney(revenue / units) : null;
+  if (fob == null || !Number.isFinite(fob) || units <= 0) {
+    return { fob, avgPrice, costFob: null, profit: null, yieldOnCost: null, yieldOnSale: null };
+  }
+  const costFob = roundMoney(fob * units);
+  const profit = roundMoney(Number(revenue) - costFob);
+  const yieldOnCost = costFob > 0 ? roundMoney((profit / costFob) * 100) : null;
+  const yieldOnSale = Number(revenue) > 0 ? roundMoney((profit / Number(revenue)) * 100) : null;
+  return { fob, avgPrice, costFob, profit, yieldOnCost, yieldOnSale };
 }
 
 /** IVA sobre tasas (ej. 21% → multiplicador 1.21). Las tasas TN suelen mostrarse como «X% + IVA». */

@@ -319,7 +319,10 @@ const MarketingTopProducts: React.FC = () => {
               <Award className="text-emerald-400" size={22} />
               Artículos más vendidos
             </h2>
-            <p className="text-slate-400 text-sm mt-1">{CHANNEL_FILTER_DESC[channelFilter]}</p>
+            <p className="text-slate-400 text-sm mt-1">
+              {CHANNEL_FILTER_DESC[channelFilter]} El Excel incluye FOB de agosto, rendimiento sobre
+              costo y ganancia (ingresos − FOB × unidades).
+            </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <select
@@ -357,7 +360,7 @@ const MarketingTopProducts: React.FC = () => {
               onClick={handleExportReport}
               disabled={exporting}
               className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-600/90 hover:bg-emerald-500 text-white text-sm font-medium transition disabled:opacity-60 disabled:cursor-not-allowed"
-              title="Exportar reporte detallado por plataforma"
+              title="Exportar Excel con unidades por plataforma, FOB de agosto, rendimiento y ganancia"
             >
               {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
               {exporting ? 'Exportando…' : 'Exportar reporte'}

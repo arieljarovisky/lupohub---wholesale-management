@@ -8,6 +8,7 @@ import { query, get } from '../database/db';
 import { getValidMLToken } from './integrations.controller';
 import {
   resolveFobPriceList,
+  lookupFobPrice,
   resolveTnFeePreset,
   listTnFeePresets,
   calcTnSaleFeeFromPreset,
@@ -310,8 +311,7 @@ async function computeChannelMargins(opts: ComputeMarginsOpts = {}) {
       allVariantIdsByProduct.get(pr.product_id)?.length ||
       Number(pr.variant_count) ||
       variantIds.length;
-    const fobRaw = fobInfo.byProductId.get(pr.product_id);
-    const fob = fobRaw != null && Number.isFinite(fobRaw) ? Number(fobRaw) : null;
+    const fob = lookupFobPrice(fobInfo, pr.product_id, pr.base_sku);
 
     const repMl = vars.find((v) => resolveVariantLinks(v, pubLinks).hasMl);
     const hasTnLink = vars.some((v) => resolveVariantLinks(v, pubLinks).hasTn);

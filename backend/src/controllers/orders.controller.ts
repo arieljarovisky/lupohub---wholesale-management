@@ -19,6 +19,7 @@ import {
   syncAllOrderPaymentStatusForCustomer,
   syncOrderPaymentStatus,
 } from '../services/orderPaymentBalance.service';
+import { calcFobYield, lookupFobPrice, resolveFobPriceList } from '../utils/channelMarginUtils';
 
 /** Evita dos POST simultáneos al mismo pedido; el segundo espera el mismo resultado AFIP. */
 const emitFacturaInFlight = new Map<string, Promise<Record<string, unknown>>>();
@@ -3134,10 +3135,48 @@ export const exportTopWholesaleProductsMetricsXlsx = async (req: Request, res: R
       subtotal: number;
     }>;
 
+    const fobInfo = await resolveFobPriceList();
+    const withYield = rows.map((r) => {
+      const units = Number(r.units_ordered || 0);
+      const revenue = Number(r.subtotal || 0);
+      const fob = lookupFobPrice(fobInfo, r.product_id, r.product_code);
+      return {
+        ...r,
+        units,
+        revenue,
+        ...calcFobYield(revenue, units, fob),
+      };
+    });
+    const withFob = withYield.filter((r) => r.costFob != null);
+    const totalCostFob = withFob.reduce((a, r) => a + (r.costFob || 0), 0);
+    const totalProfit = withFob.reduce((a, r) => a + (r.profit || 0), 0);
+    const totalRevWithFob = withFob.reduce((a, r) => a + r.revenue, 0);
+    const totalYieldOnCost = totalCostFob > 0 ? Math.round((totalProfit / totalCostFob) * 10000) / 100 : null;
+
     const wb = new ExcelJS.Workbook();
     wb.creator = 'LupoHub';
     wb.created = new Date();
+    const wsResumen = wb.addWorksheet('Resumen');
+    wsResumen.columns = [{ width: 42 }, { width: 28 }];
+    wsResumen.addRow(['Top pedidos mayorista — rendimiento FOB', '']);
+    wsResumen.mergeCells(1, 1, 1, 2);
+    wsResumen.addRow(['Lista FOB', fobInfo.name || 'Sin lista FOB']);
+    wsResumen.addRow(['Artículos', withYield.length]);
+    wsResumen.addRow(['Artículos con FOB', withFob.length]);
+    wsResumen.addRow(['Artículos sin FOB', withYield.length - withFob.length]);
+    wsResumen.addRow(['Facturación (con FOB)', totalRevWithFob]);
+    wsResumen.addRow(['Costo FOB', totalCostFob]);
+    wsResumen.addRow(['Ganancia (facturación − FOB × uds)', totalProfit]);
+    wsResumen.addRow(['Rendimiento sobre costo FOB %', totalYieldOnCost]);
+    wsResumen.getCell('A1').font = { bold: true, size: 13 };
+    for (let r = 2; r <= 9; r++) wsResumen.getCell(`A${r}`).font = { bold: true };
+    wsResumen.getCell('B6').numFmt = '#,##0.00';
+    wsResumen.getCell('B7').numFmt = '#,##0.00';
+    wsResumen.getCell('B8').numFmt = '#,##0.00';
+    wsResumen.getCell('B9').numFmt = '0.00"%"';
+
     const ws = wb.addWorksheet('Top pedidos mayorista');
+    const fobHeader = fobInfo.name ? `FOB (${fobInfo.name})` : 'FOB';
     ws.columns = [
       { header: 'Ranking', key: 'rank', width: 10 },
       { header: 'Código', key: 'code', width: 18 },
@@ -3145,26 +3184,44 @@ export const exportTopWholesaleProductsMetricsXlsx = async (req: Request, res: R
       { header: 'Unidades pedidas', key: 'units', width: 18 },
       { header: 'Pedidos', key: 'orders', width: 12 },
       { header: 'Clientes', key: 'customers', width: 12 },
-      { header: 'Subtotal', key: 'subtotal', width: 16 }
+      { header: 'Subtotal', key: 'subtotal', width: 16 },
+      { header: fobHeader, key: 'fob', width: 16 },
+      { header: 'Precio prom.', key: 'avgPrice', width: 14 },
+      { header: 'Costo FOB', key: 'costFob', width: 14 },
+      { header: 'Ganancia', key: 'profit', width: 14 },
+      { header: 'Rendimiento % (sobre costo)', key: 'yieldOnCost', width: 22 },
+      { header: 'Margen % (sobre venta)', key: 'yieldOnSale', width: 20 }
     ];
     ws.getRow(1).font = { bold: true };
     ws.views = [{ state: 'frozen', ySplit: 1 }];
 
-    rows.forEach((r, idx) => {
+    withYield.forEach((r, idx) => {
       ws.addRow({
         rank: idx + 1,
         code: r.product_code ?? '',
         name: r.product_name ?? '',
-        units: Number(r.units_ordered || 0),
+        units: r.units,
         orders: Number(r.orders_count || 0),
         customers: Number(r.customers_count || 0),
-        subtotal: Number(r.subtotal || 0)
+        subtotal: r.revenue,
+        fob: r.fob,
+        avgPrice: r.avgPrice,
+        costFob: r.costFob,
+        profit: r.profit,
+        yieldOnCost: r.yieldOnCost,
+        yieldOnSale: r.yieldOnSale
       });
     });
     ws.getColumn('D').numFmt = '#,##0';
     ws.getColumn('E').numFmt = '#,##0';
     ws.getColumn('F').numFmt = '#,##0';
     ws.getColumn('G').numFmt = '#,##0.00';
+    ws.getColumn('H').numFmt = '#,##0.00';
+    ws.getColumn('I').numFmt = '#,##0.00';
+    ws.getColumn('J').numFmt = '#,##0.00';
+    ws.getColumn('K').numFmt = '#,##0.00';
+    ws.getColumn('L').numFmt = '0.00"%"';
+    ws.getColumn('M').numFmt = '0.00"%"';
 
     const out = await wb.xlsx.writeBuffer();
     const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out as ArrayBufferLike));

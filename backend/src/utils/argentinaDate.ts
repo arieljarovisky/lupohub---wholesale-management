@@ -1,8 +1,29 @@
 const AR_TZ = 'America/Argentina/Buenos_Aires';
 
+const MONTHS_ES = [
+  'enero',
+  'febrero',
+  'marzo',
+  'abril',
+  'mayo',
+  'junio',
+  'julio',
+  'agosto',
+  'septiembre',
+  'octubre',
+  'noviembre',
+  'diciembre',
+] as const;
+
 /** Fecha local Argentina YYYY-MM-DD (emisión AFIP / “hoy”). */
 export function todayYmdArgentina(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: AR_TZ }).format(new Date());
+}
+
+/** Nombre del mes actual en español (hora Argentina), p. ej. «agosto». */
+export function currentMonthNameEs(): string {
+  const mm = Number(todayYmdArgentina().slice(5, 7));
+  return MONTHS_ES[mm - 1] ?? '';
 }
 
 /** Timestamp MySQL `YYYY-MM-DD HH:mm:ss` en hora Argentina. */

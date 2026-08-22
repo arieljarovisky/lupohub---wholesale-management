@@ -3139,6 +3139,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                         setWholesaleMetricsExporting(false);
                       }}
                       disabled={wholesaleMetricsExporting}
+                      title="Excel de artículos más pedidos, con FOB de agosto, rendimiento y ganancia"
                       className="w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm text-fuchsia-100 hover:bg-fuchsia-500/10 disabled:opacity-50"
                     >
                       {wholesaleMetricsExporting ? <Loader2 size={16} className="animate-spin shrink-0" /> : <FileSpreadsheet size={16} className="text-fuchsia-400 shrink-0" />}

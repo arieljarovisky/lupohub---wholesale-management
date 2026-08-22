@@ -3,6 +3,7 @@ import axios from 'axios';
 import ExcelJS from 'exceljs';
 import { get, query } from '../database/db';
 import { getValidMLToken, normalizeMercadoLibreItemId } from './integrations.controller';
+import { calcFobYield, lookupFobPrice, resolveFobPriceList } from '../utils/channelMarginUtils';
 
 const TN_USER_AGENT = process.env.TIENDA_NUBE_USER_AGENT || 'LupoHub (support@lupo.ar)';
 
@@ -643,14 +644,26 @@ export const exportMarketingTopProductsXlsx = async (req: Request, res: Response
       if (meta.nombre) row.nombre = meta.nombre;
     }
 
+    const fobInfo = await resolveFobPriceList();
+
     const rows = Array.from(aggByKey.values())
       .map((r) => {
         const qtyTotal = r.qtyTn + r.qtyMl + r.qtyMay;
         const revTotal = r.revTn + r.revMl + r.revMay;
-        return { ...r, qtyTotal, revTotal };
+        const fob = lookupFobPrice(fobInfo, r.productId, r.codigo);
+        const yieldMetrics = calcFobYield(revTotal, qtyTotal, fob);
+        return { ...r, qtyTotal, revTotal, ...yieldMetrics };
       })
       .filter((r) => r.qtyTotal > 0)
       .sort((a, b) => b.qtyTotal - a.qtyTotal || b.revTotal - a.revTotal);
+
+    const withFob = rows.filter((r) => r.costFob != null);
+    const missingFob = rows.filter((r) => r.fob == null);
+    const totalCostFob = withFob.reduce((a, r) => a + (r.costFob || 0), 0);
+    const totalProfit = withFob.reduce((a, r) => a + (r.profit || 0), 0);
+    const totalRevWithFob = withFob.reduce((a, r) => a + r.revTotal, 0);
+    const totalYieldOnCost = totalCostFob > 0 ? Math.round((totalProfit / totalCostFob) * 10000) / 100 : null;
+    const totalYieldOnSale = totalRevWithFob > 0 ? Math.round((totalProfit / totalRevWithFob) * 10000) / 100 : null;
 
     const wb = new ExcelJS.Workbook();
     wb.creator = 'LupoHub';
@@ -665,7 +678,7 @@ export const exportMarketingTopProductsXlsx = async (req: Request, res: Response
     };
 
     const wsResumen = wb.addWorksheet('Resumen');
-    wsResumen.columns = [{ width: 40 }, { width: 28 }];
+    wsResumen.columns = [{ width: 42 }, { width: 72 }];
     wsResumen.addRow(['Más vendidos — unidades por plataforma', '']);
     wsResumen.mergeCells(1, 1, 1, 2);
     wsResumen.addRow(['Período desde', from]);
@@ -680,13 +693,29 @@ export const exportMarketingTopProductsXlsx = async (req: Request, res: Response
     wsResumen.addRow(['Unidades Mayorista', rows.reduce((a, r) => a + r.qtyMay, 0)]);
     wsResumen.addRow(['Unidades totales', rows.reduce((a, r) => a + r.qtyTotal, 0)]);
     wsResumen.addRow(['Ingresos totales (aprox)', rows.reduce((a, r) => a + r.revTotal, 0)]);
+    wsResumen.addRow(['Lista FOB', fobInfo.name || 'Sin lista FOB']);
+    wsResumen.addRow(['Artículos con FOB', withFob.length]);
+    wsResumen.addRow(['Artículos sin FOB', missingFob.length]);
+    wsResumen.addRow(['Costo FOB (artículos con precio)', totalCostFob]);
+    wsResumen.addRow(['Ganancia (ingresos − FOB × uds)', totalProfit]);
+    wsResumen.addRow(['Rendimiento sobre costo FOB %', totalYieldOnCost]);
+    wsResumen.addRow(['Margen sobre venta %', totalYieldOnSale]);
+    wsResumen.addRow([
+      'Nota rendimiento',
+      'Ganancia = ingresos brutos − FOB × unidades. En ML/TN no se descuentan comisiones de plataforma.'
+    ]);
     wsResumen.getCell('A1').font = { bold: true, size: 13 };
-    for (let r = 2; r <= 13; r++) wsResumen.getCell(`A${r}`).font = { bold: true };
-    for (const cell of ['B9', 'B10', 'B11', 'B12']) wsResumen.getCell(cell).numFmt = '#,##0';
+    for (let r = 2; r <= 21; r++) wsResumen.getCell(`A${r}`).font = { bold: true };
+    for (const cell of ['B9', 'B10', 'B11', 'B12', 'B15', 'B16']) wsResumen.getCell(cell).numFmt = '#,##0';
     wsResumen.getCell('B13').numFmt = '#,##0.00';
+    wsResumen.getCell('B17').numFmt = '#,##0.00';
+    wsResumen.getCell('B18').numFmt = '#,##0.00';
+    wsResumen.getCell('B19').numFmt = '0.00"%"';
+    wsResumen.getCell('B20').numFmt = '0.00"%"';
 
     const ws = wb.addWorksheet('Más vendidos');
     ws.views = [{ state: 'frozen', ySplit: 1 }];
+    const fobHeader = fobInfo.name ? `FOB (${fobInfo.name})` : 'FOB';
     ws.columns = [
       { header: 'Ranking', key: 'rank', width: 10 },
       { header: 'Código', key: 'codigo', width: 16 },
@@ -699,6 +728,12 @@ export const exportMarketingTopProductsXlsx = async (req: Request, res: Response
       { header: 'Ingresos ML', key: 'revMl', width: 14 },
       { header: 'Ingresos Mayorista', key: 'revMay', width: 16 },
       { header: 'Ingresos Total', key: 'revTotal', width: 14 },
+      { header: fobHeader, key: 'fob', width: 16 },
+      { header: 'Precio prom.', key: 'avgPrice', width: 14 },
+      { header: 'Costo FOB', key: 'costFob', width: 14 },
+      { header: 'Ganancia', key: 'profit', width: 14 },
+      { header: 'Rendimiento % (sobre costo)', key: 'yieldOnCost', width: 22 },
+      { header: 'Margen % (sobre venta)', key: 'yieldOnSale', width: 20 },
       { header: 'Órdenes TN', key: 'ordersTn', width: 12 },
       { header: 'Órdenes ML', key: 'ordersMl', width: 12 },
       { header: 'Pedidos May.', key: 'ordersMay', width: 12 },
@@ -721,6 +756,12 @@ export const exportMarketingTopProductsXlsx = async (req: Request, res: Response
         revMl: r.revMl,
         revMay: r.revMay,
         revTotal: r.revTotal,
+        fob: r.fob,
+        avgPrice: r.avgPrice,
+        costFob: r.costFob,
+        profit: r.profit,
+        yieldOnCost: r.yieldOnCost,
+        yieldOnSale: r.yieldOnSale,
         ordersTn: r.ordersTn,
         ordersMl: r.ordersMl,
         ordersMay: r.ordersMay,
@@ -731,11 +772,14 @@ export const exportMarketingTopProductsXlsx = async (req: Request, res: Response
     });
 
     for (let i = 2; i <= ws.rowCount; i++) {
-      for (const col of ['D', 'E', 'F', 'G', 'L', 'M', 'N', 'O']) {
+      for (const col of ['D', 'E', 'F', 'G', 'R', 'S', 'T', 'U']) {
         ws.getCell(`${col}${i}`).numFmt = '#,##0';
       }
-      for (const col of ['H', 'I', 'J', 'K']) {
+      for (const col of ['H', 'I', 'J', 'K', 'L', 'M', 'N', 'O']) {
         ws.getCell(`${col}${i}`).numFmt = '#,##0.00';
+      }
+      for (const col of ['P', 'Q']) {
+        ws.getCell(`${col}${i}`).numFmt = '0.00"%"';
       }
     }
 
