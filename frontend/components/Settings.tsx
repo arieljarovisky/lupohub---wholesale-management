@@ -3254,6 +3254,9 @@ const Settings: React.FC<SettingsProps> = ({
                         </div>
                       )}
                       <label className="block text-[10px] font-black text-slate-500 uppercase mb-1">Instrucciones extra para la IA (opcional)</label>
+                      <p className="text-slate-500 text-[11px] mb-1">
+                        La guía de talles Lupo (boxers, slips, fajas, corpiños, bombachas y medias) ya está incluida: si preguntan qué talle pedir, la IA recomienda con esa tabla.
+                      </p>
                       <textarea
                         value={mlQuestionsAiExtraPrompt}
                         onChange={(e) => setMlQuestionsAiExtraPrompt(e.target.value)}

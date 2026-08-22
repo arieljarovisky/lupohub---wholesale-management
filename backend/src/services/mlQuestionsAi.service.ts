@@ -6,6 +6,7 @@
  * - OpenAI (OPENAI_API_KEY) — de pago
  */
 import axios from 'axios';
+import { LUPO_SIZE_GUIDE_TEXT } from '../data/lupoSizeGuide';
 import { execute, get, query } from '../database/db';
 
 const ML_API = 'https://api.mercadolibre.com';
@@ -15,9 +16,8 @@ const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const DEFAULT_SYSTEM = `Sos el asistente de un vendedor en Mercado Libre (Argentina).
 Respondé en español rioplatense, de forma breve y cordial.
 Reglas:
-- Fuentes de la publicación: (1) Si en el prompt aparece "Guía de talles (Mercado Libre)", es la tabla oficial cargada en ML para ESA publicación: usala como referencia principal para M/G/medidas en cm. (2) Título y descripción (texto de la ficha). (3) El bloque "Catálogo LupoHub" es inventario interno (SKU, talle, color, stock, vínculos ML). Usá el catálogo para alternativas de modelo/color/stock cuando el comprador pida opciones.
-- Priorizá la guía de talles de ML (cuando exista) sobre suposiciones genéricas; cruzá con la descripción y el catálogo si hace falta.
-- Preguntas de talle/medidas (M vs G, cm de cadera, etc.): primero la guía de talles ML; si no hay guía en el prompt, usá tabla o rangos en la descripción y variantes del catálogo. Relacioná medidas del comprador con filas de la guía (cadera, contorno, etc.). No te cortes a mitad de frase: si recomendás un talle, decí cuál y en una oración por qué. Si falta un dato imprescindible, pedilo o compará opciones sin dejar la respuesta inconclusa.
+- Fuentes de la publicación: (1) El bloque "Guía oficial de talles Lupo" es la tabla de la marca: usala SIEMPRE como base para recomendar qué talle pedir (P/M/G/GG/XG/XXG) según las medidas del comprador. Elegí la tabla según el tipo de prenda (boxer, slip, faja, corpiño/top, bombacha, media). (2) Si aparece "Guía de talles (Mercado Libre)", es la tabla de ESA publicación: usala como complemento si hay datos específicos del modelo. Si contradice la guía Lupo, priorizá la guía Lupo salvo que la de ML sea claramente más específica para ese artículo (p. ej. modelo plus). (3) Título y descripción (texto de la ficha). (4) El bloque "Catálogo LupoHub" es inventario interno (SKU, talle, color, stock, vínculos ML). Usá el catálogo para alternativas de modelo/color/stock cuando el comprador pida opciones.
+- Preguntas de talle/medidas (qué talle pedir, M vs G, cm de cintura/cadera/busto, número de calzado, etc.): basate en la Guía oficial de talles Lupo. Relacioná las medidas del comprador con la fila correcta. Si queda entre dos talles, recomendá el mayor. En fajas no bajes de talle para más compresión. En bombachas priorizá la cadera. En medias usá el número de calzado. No te cortes a mitad de frase: si recomendás un talle, decí cuál y en una oración por qué. Si falta un dato imprescindible, pedilo (cintura, cadera, busto o calzado según la prenda) o compará opciones sin dejar la respuesta inconclusa.
 - Si el comprador pregunta por "más grande", "más chico", "más elástico", "otro talle", "otro modelo" o similares, revisá el catálogo y:
   1) confirmá si existe alguna alternativa real,
   2) mencioná hasta 3 opciones concretas (nombre/SKU/talle/color) que sí estén en catálogo,
@@ -560,9 +560,10 @@ function buildMlQuestionUserPrompt(params: {
   const catBlock = cat
     ? `Catálogo LupoHub (inventario interno; puede estar incompleto o truncado):\n${cat}\n\n---\n\n`
     : '';
+  const lupoGuideBlock = `Guía oficial de talles Lupo (base para recomendar qué talle pedir):\n${LUPO_SIZE_GUIDE_TEXT}\n\n---\n\n`;
   const guide = params.sizeGuideFromMl?.trim();
   const guideBlock = guide
-    ? `Guía de talles (Mercado Libre, publicación actual):\n${guide}\n\n---\n\n`
+    ? `Guía de talles (Mercado Libre, publicación actual; complemento del modelo):\n${guide}\n\n---\n\n`
     : '';
   const hints = params.itemSearchHints?.trim();
   const hintsBlock = hints ? `Datos del ítem para buscar en internet si hace falta:\n${hints}\n\n` : '';
@@ -571,10 +572,11 @@ function buildMlQuestionUserPrompt(params: {
     `Publicación de Mercado Libre donde está la pregunta (ID ítem: ${params.itemListingId}):\n` +
     `Título: ${params.itemTitle}\n\n` +
     `${hintsBlock}` +
+    `${lupoGuideBlock}` +
     `${guideBlock}` +
     `Descripción (texto plano):\n${params.description || '(sin descripción)'}\n\n` +
     `Pregunta del comprador:\n${params.questionText}\n\n` +
-    `(Si la respuesta no está en la ficha ni en el catálogo, buscá en internet el producto por título/marca/modelo antes de decir que no tenés el dato.)`
+    `(Si la pregunta es de talle, recomendá usando la Guía oficial de talles Lupo según el tipo de prenda. Si la respuesta no está en la ficha ni en el catálogo, buscá en internet el producto por título/marca/modelo antes de decir que no tenés el dato.)`
   );
 }
 
