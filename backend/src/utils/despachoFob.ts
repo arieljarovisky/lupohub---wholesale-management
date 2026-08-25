@@ -4,8 +4,17 @@ import { lookupFobPrice, resolveFobPriceListByName, type FobPriceListInfo } from
 /** Lista de precios FOB usada en despachos de importación. */
 export const DESPACHO_FOB_PRICE_LIST_NAME = 'Precios Fob Marzo';
 
+/** La lista está cargada en pesos; el FOB de despachos se expresa en USD. */
+export const DESPACHO_FOB_ARS_PER_USD = 1500;
+
 function roundMoney(v: number): number {
   return Math.round(v * 100) / 100;
+}
+
+function fobArsToUsd(priceArs: number | null): number | null {
+  if (priceArs == null || !Number.isFinite(priceArs)) return null;
+  if (DESPACHO_FOB_ARS_PER_USD <= 0) return roundMoney(priceArs);
+  return roundMoney(priceArs / DESPACHO_FOB_ARS_PER_USD);
 }
 
 export function lookupDespachoItemFob(
@@ -13,11 +22,12 @@ export function lookupDespachoItemFob(
   item: { product_id?: string | null; product_sku?: string | null; variant_sku?: string | null }
 ): number | null {
   const fromProduct = lookupFobPrice(info, item.product_id, item.product_sku);
-  if (fromProduct != null) return fromProduct;
+  if (fromProduct != null) return fobArsToUsd(fromProduct);
   const variantSku = String(item.variant_sku || '').trim();
   if (!variantSku) return null;
   const base = variantSku.includes('-') ? variantSku.split('-')[0] : variantSku;
-  return lookupFobPrice(info, null, base) ?? lookupFobPrice(info, null, variantSku);
+  const fromSku = lookupFobPrice(info, null, base) ?? lookupFobPrice(info, null, variantSku);
+  return fobArsToUsd(fromSku);
 }
 
 export async function loadDespachoFobList(): Promise<FobPriceListInfo> {
