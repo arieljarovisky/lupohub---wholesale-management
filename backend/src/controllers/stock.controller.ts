@@ -1773,7 +1773,8 @@ export const importStockFromExcel = async (req: Request, res: Response) => {
     for (const row of rawRows) {
       const codigo = (row.codigo ?? row.CODIGO ?? row.Codigo ?? '').toString().trim();
       const colorRaw = row.color ?? row.COLOR ?? row.Color;
-      const colorStr = colorRaw != null ? String(colorRaw).trim() : '';
+      let colorStr = colorRaw != null ? String(colorRaw).trim() : '';
+      if (/^\d{4}$/.test(colorStr)) colorStr = colorStr.slice(0, 3);
       if (!codigo || !colorStr) continue;
 
       for (const sizeCode of EXCEL_SIZE_COLUMNS) {
@@ -1868,7 +1869,9 @@ export const importStockGridToDespacho = async (req: Request, res: Response) => 
         .trim();
       const colorRaw =
         row.color ?? row.COLOR ?? row.Color ?? row['CODIGO COLOR'] ?? row['COD. COLOR'];
-      const colorStr = colorRaw != null ? String(colorRaw).trim() : '';
+      // Planilla a veces trae 4 dígitos (1110, 2800): usar solo los 3 primeros (111, 280).
+      let colorStr = colorRaw != null ? String(colorRaw).trim() : '';
+      if (/^\d{4}$/.test(colorStr)) colorStr = colorStr.slice(0, 3);
       const codigo = padArticleCodeTo7(codigoRaw) || codigoRaw;
       if (!codigo || !colorStr) continue;
 

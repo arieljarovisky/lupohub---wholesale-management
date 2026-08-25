@@ -106,6 +106,17 @@ export function padArticleCodeTo7(s: string): string {
 }
 
 /**
+ * En planillas Lupo el color a veces viene con 4 dígitos (ej. 1110, 2800):
+ * el último es basura de Excel → usar solo los 3 primeros (111, 280).
+ */
+export function normalizeExcelColorCode(color: string): string {
+  const t = String(color ?? '').trim();
+  if (!t) return '';
+  if (/^\d{4}$/.test(t)) return t.slice(0, 3);
+  return t;
+}
+
+/**
  * Importación matriz de pedidos: no rellena a 7 dígitos.
  * Si la celda es solo números, deja el código “natural” sin ceros a la izquierda (ej. 22684, no 0022684).
  */
@@ -121,47 +132,88 @@ export function normalizeArticleCodeForMatrixImport(s: string): string {
   return t;
 }
 
+/** Normaliza encabezado de Excel (BOM, acentos, espacios raros). */
+function normalizeExcelHeader(h: unknown): string {
+  return String(h ?? '')
+    .replace(/^\uFEFF/, '')
+    .replace(/[\u200B-\u200D\u2060]/g, '')
+    .trim()
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function findStockGridHeaderRow(rows: (string | number)[][]): {
+  headerRowIndex: number;
+  codigoCol: number;
+  colorCol: number;
+  originalHeaders: string[];
+  normHeaders: string[];
+} | null {
+  const codigoCandidates = ['CODIGO', 'COD', 'ARTICULO', 'MODELO', 'SKU BASE', 'SKU'];
+  const colorCandidates = ['COLOR', 'COL', 'CODIGO COLOR', 'COD. COLOR', 'COD COLOR'];
+  const scanLimit = Math.min(rows.length, 30);
+
+  for (let r = 0; r < scanLimit; r++) {
+    const originalHeaders = (rows[r] || []).map((h) =>
+      String(h ?? '')
+        .replace(/^\uFEFF/, '')
+        .replace(/[\u200B-\u200D\u2060]/g, '')
+        .trim()
+    );
+    const normHeaders = originalHeaders.map(normalizeExcelHeader);
+
+    let codigoCol = -1;
+    for (const cand of codigoCandidates) {
+      const idx = normHeaders.findIndex((h) => h === cand);
+      if (idx >= 0) {
+        codigoCol = idx;
+        break;
+      }
+    }
+
+    let colorCol = -1;
+    for (const cand of colorCandidates) {
+      const idx = normHeaders.findIndex((h) => h === cand || h.startsWith(cand + ' '));
+      if (idx >= 0) {
+        colorCol = idx;
+        break;
+      }
+    }
+
+    if (codigoCol >= 0 && colorCol >= 0) {
+      return { headerRowIndex: r, codigoCol, colorCol, originalHeaders, normHeaders };
+    }
+  }
+  return null;
+}
+
 /** Parsea Excel de stock: CODIGO + COLOR + columnas de talles (P, M, G… y/o 10, 12, 130 - P, etc.). */
 export async function parseStockExcel(file: File): Promise<Array<Record<string, unknown>>> {
   const data = new Uint8Array(await file.arrayBuffer());
   const workbook = XLSX.read(data, { type: 'array' });
-  const sheetName = workbook.SheetNames[0];
-  if (!sheetName) return [];
-  const sheet = workbook.Sheets[sheetName];
-  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as (string | number)[][];
-  if (rows.length < 2) return [];
+  if (!workbook.SheetNames.length) return [];
 
-  const originalHeaders = (rows[0] || []).map((h) => String(h ?? '').trim());
-  const normHeaders = originalHeaders.map((h) =>
-    h
-      .toUpperCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/\s+/g, ' ')
-      .trim()
-  );
-
-  const codigoCandidates = ['CODIGO', 'COD', 'ARTICULO', 'MODELO', 'SKU BASE', 'SKU'];
-  let codigoCol = -1;
-  for (const cand of codigoCandidates) {
-    const idx = normHeaders.findIndex((h) => h === cand);
-    if (idx >= 0) {
-      codigoCol = idx;
+  // Preferir la primera hoja que tenga cabecera CODIGO+COLOR (a veces la hoja 1 está vacía).
+  let rows: (string | number)[][] = [];
+  let headerMeta: ReturnType<typeof findStockGridHeaderRow> = null;
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    if (!sheet) continue;
+    const candidate = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as (string | number)[][];
+    if (candidate.length < 2) continue;
+    const found = findStockGridHeaderRow(candidate);
+    if (found) {
+      rows = candidate;
+      headerMeta = found;
       break;
     }
   }
+  if (!headerMeta || rows.length < 2) return [];
 
-  const colorCandidates = ['COLOR', 'COL', 'CODIGO COLOR', 'COD. COLOR', 'COD COLOR'];
-  let colorCol = -1;
-  for (const cand of colorCandidates) {
-    const idx = normHeaders.findIndex((h) => h === cand || h.startsWith(cand + ' '));
-    if (idx >= 0) {
-      colorCol = idx;
-      break;
-    }
-  }
-
-  if (codigoCol < 0 || colorCol < 0) return [];
+  const { headerRowIndex, codigoCol, colorCol, originalHeaders, normHeaders } = headerMeta;
 
   const metaExclude = new Set(
     [
@@ -217,13 +269,17 @@ export async function parseStockExcel(file: File): Promise<Array<Record<string, 
 
   let lastCodigo = '';
   const out: Array<Record<string, unknown>> = [];
-  for (let i = 1; i < rows.length; i++) {
+  for (let i = headerRowIndex + 1; i < rows.length; i++) {
     const row = rows[i] || [];
     const rawCodigo = row[codigoCol];
     const codigo = rawCodigo != null && String(rawCodigo).trim() !== '' ? String(rawCodigo).trim() : lastCodigo;
     if (codigo) lastCodigo = codigo;
     const rawColor = row[colorCol];
-    const color = rawColor != null ? String(rawColor).trim() : '';
+    // Excel a veces guarda 001 como número 1; no descartar ceros como "vacío".
+    const color =
+      rawColor === null || rawColor === undefined || String(rawColor).trim() === ''
+        ? ''
+        : normalizeExcelColorCode(String(rawColor).trim());
     if (!codigo || !color) continue;
     const obj: Record<string, unknown> = { codigo: padArticleCodeTo7(codigo), color };
     for (const { key, index } of sizeCols) {
