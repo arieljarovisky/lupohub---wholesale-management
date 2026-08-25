@@ -2419,6 +2419,23 @@ export const api = {
     }, customer, 'createCustomer');
   },
 
+  /** Crea cliente sin fallback offline (lanza si falla). Usar para cliente ocasional al confirmar pedido. */
+  createCustomerStrict: async (payload: {
+    id?: string;
+    sellerId?: string;
+    name?: string;
+    businessName?: string;
+    email?: string;
+    address?: string;
+    city?: string;
+    cuit?: string;
+    condicionIva?: string;
+    priceListId?: string | null;
+  }): Promise<Customer> => {
+    const created = await request<any>('/customers', 'POST', payload);
+    return mapCustomerFromApi(created);
+  },
+
   /** Importar clientes en lote (desde Excel). Se exige razón social y CUIT. No duplica por CUIT ni email. */
   importCustomers: async (customers: Array<{ name?: string; businessName?: string; email?: string; address?: string; city?: string; cuit?: string; phone?: string; condicionIva?: string }>, sellerId?: string): Promise<{ created: number; skipped?: number; errors: { row: number; email?: string; message: string }[] }> => {
     return request<any>('/customers/import', 'POST', { customers, sellerId: sellerId || undefined });

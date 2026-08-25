@@ -670,15 +670,15 @@ export const createCustomer = async (req: Request, res: Response) => {
     };
     const name = (body.name ?? '').toString().trim();
     const businessName = (body.businessName ?? '').toString().trim();
-    const email = (body.email ?? '').toString().trim();
+    let email = (body.email ?? '').toString().trim();
     if (!businessName && !name) {
       return res.status(400).json({ message: 'Razón social o nombre de contacto es requerido' });
     }
-    if (!email) {
-      return res.status(400).json({ message: 'El email es requerido' });
-    }
-
     const id = body.id && body.id.trim() ? body.id.trim() : uuidv4();
+    // Cliente ocasional / sin ficha previa: email sintético si no se informa
+    if (!email) {
+      email = `ocasional+${id.replace(/-/g, '').slice(0, 12)}@lupohub.local`;
+    }
     const sellerId = body.sellerId?.trim() || null;
     const address = (body.address ?? '').toString().trim() || null;
     const city = canonicalizeCityInput(body.city);

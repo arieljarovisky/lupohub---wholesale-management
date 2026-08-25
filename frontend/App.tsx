@@ -1372,6 +1372,9 @@ const App: React.FC = () => {
                     setMyCustomer((prev) => (prev ? { ...prev, ...updated } : null));
                   }
                 }}
+                onCustomerCreated={(created) => {
+                  setCustomers((prev) => (prev.some((c) => c.id === created.id) ? prev : [...prev, created]));
+                }}
               />
               </div>
             </Suspense>

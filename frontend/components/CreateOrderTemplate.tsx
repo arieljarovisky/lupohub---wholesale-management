@@ -33,7 +33,18 @@ interface CreateOrderTemplateProps {
   onMatrixImportDone?: () => void | Promise<void>;
   /** Tras guardar la lista de precios en la ficha del cliente (actualizar estado en App). */
   onCustomerUpdated?: (customer: Customer) => void;
+  /** Tras crear un cliente ocasional al confirmar el pedido. */
+  onCustomerCreated?: (customer: Customer) => void;
 }
+
+const CONDICIONES_IVA_OCASIONAL = [
+  'Consumidor Final',
+  'IVA Responsable Inscripto',
+  'Responsable Monotributo',
+  'IVA Sujeto Exento',
+  'IVA No Alcanzado',
+  'Sujeto No Categorizado',
+];
 
 /** Una fila de la plantilla: un artículo (código) + un color, con cantidades por talle. */
 interface TemplateRow {
@@ -271,10 +282,16 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   readOnly = false,
   onMatrixImportDone,
   onCustomerUpdated,
+  onCustomerCreated,
 }) => {
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [clientFilter, setClientFilter] = useState('');
   const [clientDropdownOpen, setClientDropdownOpen] = useState(false);
+  const [occasionalMode, setOccasionalMode] = useState(false);
+  const [occasionalName, setOccasionalName] = useState('');
+  const [occasionalCuit, setOccasionalCuit] = useState('');
+  const [occasionalCondicionIva, setOccasionalCondicionIva] = useState('Consumidor Final');
+  const [occasionalEmail, setOccasionalEmail] = useState('');
   const clientDropdownRef = useRef<HTMLDivElement>(null);
   const matrixFileRef = useRef<HTMLInputElement>(null);
   const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0]);
@@ -652,6 +669,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   }, [selectedPriceListId, products]);
 
   useEffect(() => {
+    if (occasionalMode) return;
     if (customers.length === 1 && !selectedCustomerId) {
       setSelectedCustomerId(customers[0].id);
       applyCustomerPriceList(customers[0].id);
@@ -661,7 +679,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       setSelectedCustomerId(customers[0].id);
       applyCustomerPriceList(customers[0].id);
     }
-  }, [customers, selectedCustomerId, isCustomerLocked, applyCustomerPriceList]);
+  }, [customers, selectedCustomerId, isCustomerLocked, applyCustomerPriceList, occasionalMode]);
 
   useEffect(() => {
     api.getSizes().then(list => {
@@ -1120,8 +1138,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     return sum;
   }, [rows]);
 
-  const buildOrderPayload = (): Order | null => {
-    if (!selectedCustomerId || rows.length === 0) return null;
+  const buildOrderPayload = (customerId: string): Order | null => {
+    if (!customerId || rows.length === 0) return null;
     const items: Array<{ variantId: string; quantity: number; priceAtMoment: number; isBackorder: boolean }> = [];
     for (const r of rows) {
       for (const [sizeCode, qty] of Object.entries(r.quantitiesBySize)) {
@@ -1147,7 +1165,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       })();
     return {
       id: orderId,
-      customerId: selectedCustomerId,
+      customerId,
       sellerId: initialOrder?.sellerId ?? duplicateFromOrder?.sellerId ?? sellerId ?? null,
       items: items.map(i => ({ ...i, productId: undefined })),
       total,
@@ -1163,8 +1181,58 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
 
   const handleSave = async () => {
     if (savingOrderLockRef.current || savingOrder) return;
-    const order = buildOrderPayload();
+    if (readOnly || initialOrder) {
+      // En edición no se permite cambiar a ocasional; usa el cliente del pedido.
+      if (!selectedCustomerId) {
+        showToast('error', 'Seleccioná un cliente.');
+        return;
+      }
+    }
+
+    let customerId = selectedCustomerId;
+
+    if (occasionalMode && !initialOrder) {
+      const name = occasionalName.trim();
+      if (!name) {
+        showToast('error', 'Indicá el nombre o razón social del comprador.');
+        return;
+      }
+      const cuitDigits = occasionalCuit.replace(/\D/g, '');
+      if (occasionalCondicionIva === 'IVA Responsable Inscripto' && cuitDigits.length < 10) {
+        showToast('error', 'Para Responsable Inscripto (Factura A) el CUIT es obligatorio.');
+        return;
+      }
+      savingOrderLockRef.current = true;
+      setSavingOrder(true);
+      try {
+        const created = await api.createCustomerStrict({
+          id: `C-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+          name: '',
+          businessName: name,
+          email: occasionalEmail.trim() || undefined,
+          address: '',
+          city: '',
+          cuit: cuitDigits || undefined,
+          condicionIva: occasionalCondicionIva || 'Consumidor Final',
+          sellerId: role === Role.SELLER ? (sellerId || undefined) : undefined,
+          priceListId: selectedPriceListId || undefined,
+        });
+        onCustomerCreated?.(created);
+        customerId = created.id;
+        setSelectedCustomerId(created.id);
+        setOccasionalMode(false);
+      } catch (err: any) {
+        savingOrderLockRef.current = false;
+        setSavingOrder(false);
+        showToast('error', err?.message || 'No se pudo crear el comprador ocasional.');
+        return;
+      }
+    }
+
+    const order = buildOrderPayload(customerId);
     if (!order) {
+      savingOrderLockRef.current = false;
+      setSavingOrder(false);
       showToast('error', 'Agregá al menos una cantidad en algún talle.');
       return;
     }
@@ -1186,6 +1254,12 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     return n;
   }, [rows]);
 
+  const canConfirmOrder =
+    (occasionalMode ? !!occasionalName.trim() : !!selectedCustomerId) &&
+    rows.length > 0 &&
+    totalUnits > 0 &&
+    !savingOrder;
+
   /** True si alguna fila pide más de lo que hay en stock (se carga como pendiente). */
   const hasExceededStock = useMemo(() => {
     return rows.some(r =>
@@ -1202,7 +1276,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-        if (rows.length > 0 && selectedCustomerId && totalUnits > 0) {
+        const hasBuyer = occasionalMode ? !!occasionalName.trim() : !!selectedCustomerId;
+        if (rows.length > 0 && hasBuyer && totalUnits > 0) {
           e.preventDefault();
           if (!savingOrder && !savingOrderLockRef.current) handleSaveRef.current();
         }
@@ -1210,7 +1285,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [rows, selectedCustomerId, totalUnits, hasExceededStock, savingOrder]);
+  }, [rows, selectedCustomerId, occasionalMode, occasionalName, totalUnits, hasExceededStock, savingOrder]);
 
   /** Agrupar filas por prefijo de artículo (orden de aparición). */
   const groups = useMemo(() => {
@@ -1359,10 +1434,80 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         )}
 
         <div className={`min-w-0 ${showPriceListSelector ? 'col-span-2 md:col-span-2 xl:col-span-4' : 'col-span-2 md:col-span-2 xl:col-span-5'}`}>
-          <label className="block text-[10px] font-semibold text-slate-500 mb-0.5">Cliente</label>
+          <div className="flex items-center justify-between gap-2 mb-0.5">
+            <label className="block text-[10px] font-semibold text-slate-500">Cliente</label>
+            {!isCustomerLocked && !initialOrder && !readOnly && (
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !occasionalMode;
+                  setOccasionalMode(next);
+                  if (next) {
+                    setSelectedCustomerId('');
+                    setClientFilter('');
+                    setClientDropdownOpen(false);
+                  } else {
+                    setOccasionalName('');
+                    setOccasionalCuit('');
+                    setOccasionalCondicionIva('Consumidor Final');
+                    setOccasionalEmail('');
+                  }
+                }}
+                className={`text-[10px] font-semibold px-2 py-0.5 rounded-md border transition touch-manipulation ${
+                  occasionalMode
+                    ? 'border-amber-500/60 bg-amber-500/15 text-amber-200'
+                    : 'border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-500'
+                }`}
+              >
+                {occasionalMode ? 'Elegir de la lista' : 'Sin ficha / ocasional'}
+              </button>
+            )}
+          </div>
           {isCustomerLocked ? (
             <div className={`${orderFieldClass} flex items-center truncate`}>
               {customers.find(c => c.id === selectedCustomerId)?.businessName || customers[0]?.businessName || 'Mi cuenta'}
+            </div>
+          ) : occasionalMode ? (
+            <div className="space-y-1.5 rounded-lg border border-amber-500/30 bg-slate-900/80 p-2">
+              <input
+                type="text"
+                className={orderFieldClass}
+                value={occasionalName}
+                onChange={(e) => setOccasionalName(e.target.value)}
+                placeholder="Nombre o razón social *"
+                aria-label="Nombre o razón social del comprador"
+              />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                <input
+                  type="text"
+                  className={orderFieldClass}
+                  value={occasionalCuit}
+                  onChange={(e) => setOccasionalCuit(e.target.value)}
+                  placeholder="CUIT (opcional; obligatorio para Factura A)"
+                  aria-label="CUIT"
+                />
+                <select
+                  className={orderFieldClass}
+                  value={occasionalCondicionIva}
+                  onChange={(e) => setOccasionalCondicionIva(e.target.value)}
+                  aria-label="Condición IVA"
+                >
+                  {CONDICIONES_IVA_OCASIONAL.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+              <input
+                type="email"
+                className={orderFieldClass}
+                value={occasionalEmail}
+                onChange={(e) => setOccasionalEmail(e.target.value)}
+                placeholder="Email (opcional)"
+                aria-label="Email del comprador"
+              />
+              <p className="text-[10px] text-slate-500 leading-snug">
+                Se crea una ficha mínima al confirmar. Sin CUIT se factura como Consumidor Final (B).
+              </p>
             </div>
           ) : (
             <div ref={clientDropdownRef} className="relative">
@@ -1388,6 +1533,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                         onMouseDown={(e) => {
                           e.preventDefault();
                           priceListUserOverrideRef.current = false;
+                          setOccasionalMode(false);
                           setSelectedCustomerId(c.id);
                           applyCustomerPriceList(c.id);
                           setClientFilter('');
@@ -1723,7 +1869,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
             )}
             <button
               type="button"
-              disabled={!selectedCustomerId || rows.length === 0 || totalUnits === 0 || savingOrder}
+              disabled={!canConfirmOrder}
               onClick={handleSave}
               className="w-full sm:w-auto sm:min-w-[200px] shrink-0 h-10 px-5 rounded-lg font-bold flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-sm shadow-md shadow-blue-900/30 disabled:opacity-60 transition touch-manipulation"
             >
