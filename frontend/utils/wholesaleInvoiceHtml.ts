@@ -837,7 +837,13 @@ export function buildWholesaleFacturaHtml(params: {
   const customerRemitoTrim = (customer?.remitoNumber ?? '').toString().trim();
   const remitoNumber = manualRemitoTrim || orderRemitoTrim || customerRemitoTrim;
   const saleConditionRaw = (manual?.saleCondition ?? customer?.saleCondition ?? '').toString().trim().toLowerCase();
-  const saleCondition = saleConditionRaw.includes('60') ? '60 días' : '30 días';
+  const saleCondition = saleConditionRaw.includes('contado') || saleConditionRaw.includes('efectivo')
+    ? 'Contado'
+    : saleConditionRaw.includes('60')
+      ? '60 días'
+      : saleConditionRaw.includes('30')
+        ? '30 días'
+        : (saleConditionRaw ? (manual?.saleCondition ?? customer?.saleCondition ?? 'Contado').toString().trim() : 'Contado');
   const dirCliente = clienteDir || '';
   const ptoVta = String(inv.puntoVta ?? '').padStart(5, '0');
   const compNro = String(inv.cbteDesde ?? '').padStart(8, '0');
@@ -1148,7 +1154,11 @@ export function buildWholesaleCreditNoteHtml(params: {
     .filter(Boolean);
   const transporteNombreNc = transportesClienteNc.length ? transportesClienteNc.join(', ') : '';
   const saleConditionRawNc = (customer?.saleCondition ?? '').toString().trim().toLowerCase();
-  const saleConditionNc = saleConditionRawNc.includes('60') ? '60 días' : '30 días';
+  const saleConditionNc = saleConditionRawNc.includes('contado') || saleConditionRawNc.includes('efectivo')
+    ? 'Contado'
+    : saleConditionRawNc.includes('60')
+      ? '60 días'
+      : '30 días';
   const ptoVtaNc = String(nc.puntoVta ?? '').padStart(5, '0');
   const compNroNc = String(nc.cbteDesde ?? '').padStart(8, '0');
   const letraNc = cbteTipoNc === 3 ? 'A' : cbteTipoNc === 13 ? 'C' : 'B';
@@ -1408,7 +1418,11 @@ export function buildWholesaleDebitNoteHtml(params: {
     .filter(Boolean);
   const transporteNombreNd = transportesClienteNd.length ? transportesClienteNd.join(', ') : '';
   const saleConditionRawNd = (customer?.saleCondition ?? '').toString().trim().toLowerCase();
-  const saleConditionNd = saleConditionRawNd.includes('60') ? '60 días' : '30 días';
+  const saleConditionNd = saleConditionRawNd.includes('contado') || saleConditionRawNd.includes('efectivo')
+    ? 'Contado'
+    : saleConditionRawNd.includes('60')
+      ? '60 días'
+      : '30 días';
   const ptoVtaNd = String(nd.puntoVta ?? '').padStart(5, '0');
   const compNroNd = String(nd.cbteDesde ?? '').padStart(8, '0');
   const letraNd = cbteTipoNd === 2 ? 'A' : cbteTipoNd === 12 ? 'C' : 'B';

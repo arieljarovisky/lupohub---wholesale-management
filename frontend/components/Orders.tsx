@@ -119,7 +119,17 @@ interface OrdersProps {
   refreshOrders?: () => void;
 }
 
-const CONDICIONES_VENTA_FACTURA = ['30 días', '60 días'] as const;
+const CONDICIONES_VENTA_FACTURA = ['Contado', '30 días', '60 días'] as const;
+type CondicionVentaFactura = (typeof CONDICIONES_VENTA_FACTURA)[number];
+
+function normalizeCondicionVentaFactura(raw: unknown, fallback: CondicionVentaFactura = 'Contado'): CondicionVentaFactura {
+  const s = String(raw ?? '').trim().toLowerCase();
+  if (!s) return fallback;
+  if (s.includes('contado') || s.includes('efectivo')) return 'Contado';
+  if (s.includes('60')) return '60 días';
+  if (s.includes('30')) return '30 días';
+  return fallback;
+}
 const FACTURA_MANUAL_DATA_KEY = 'lupo_factura_manual_data_by_order';
 /** Valor de `remitoEntregaId` cuando se usa la dirección principal del cliente (no una sucursal). */
 const REMITO_ENTREGA_PRINCIPAL = '__principal__';
@@ -400,7 +410,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [showEmitirFacturaModal, setShowEmitirFacturaModal] = useState(false);
   const [orderToEmitFactura, setOrderToEmitFactura] = useState<Order | null>(null);
   const [emitirFacturaTipo, setEmitirFacturaTipo] = useState<'auto' | 'A' | 'B'>('auto');
-  const [emitirFacturaSaleCondition, setEmitirFacturaSaleCondition] = useState<'30 días' | '60 días'>('30 días');
+  const [emitirFacturaSaleCondition, setEmitirFacturaSaleCondition] = useState<CondicionVentaFactura>('Contado');
   const [ncOrder, setNcOrder] = useState<Order | null>(null);
   const [orderCreditNotes, setOrderCreditNotes] = useState<CreditNote[]>([]);
   const [ncTipo, setNcTipo] = useState<'total' | 'item' | 'items'>('total');
@@ -426,7 +436,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [facturaPreviewOrder, setFacturaPreviewOrder] = useState<Order | null>(null);
   const [facturaTransportNumber, setFacturaTransportNumber] = useState('');
   const [facturaRemitoNumber, setFacturaRemitoNumber] = useState('');
-  const [facturaSaleCondition, setFacturaSaleCondition] = useState<'30 días' | '60 días'>('30 días');
+  const [facturaSaleCondition, setFacturaSaleCondition] = useState<CondicionVentaFactura>('Contado');
   /** '' = imprimir todos los transportes asignados al cliente (si hay más de uno). */
   const [facturaTransporteId, setFacturaTransporteId] = useState('');
   const [emitirFacturaTransporteId, setEmitirFacturaTransporteId] = useState('');
@@ -1425,8 +1435,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     if (!order.invoice) return;
     const customer = customers.find(c => c.id === order.customerId);
     const prev = manualFacturaDataByOrder[order.id];
-    const initialSaleCondition: '30 días' | '60 días' =
-      String(prev?.saleCondition ?? customer?.saleCondition ?? '').toLowerCase().includes('60') ? '60 días' : '30 días';
+    const initialSaleCondition = normalizeCondicionVentaFactura(
+      prev?.saleCondition ?? customer?.saleCondition,
+      order.paymentStatus === 'pagado' ? 'Contado' : '30 días'
+    );
     const manual = prev ?? {
       transportNumber: (customer?.transportNumber ?? '').toString().trim(),
       remitoNumber: (customer?.remitoNumber ?? '').toString().trim(),
@@ -1442,7 +1454,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const manualRemitoTyped = (manual.remitoNumber ?? '').toString().trim();
     const orderRemito = order.remitoNumber != null ? String(order.remitoNumber) : '';
     setFacturaRemitoNumber(manualRemitoTyped || orderRemito);
-    setFacturaSaleCondition(String(manual.saleCondition ?? '').toLowerCase().includes('60') ? '60 días' : '30 días');
+    setFacturaSaleCondition(normalizeCondicionVentaFactura(manual.saleCondition, initialSaleCondition));
     setFacturaTransporteId(pickInitialTransporteId(prev, transporteOpts));
   };
 
@@ -1453,7 +1465,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const manual: ManualFacturaFields = {
       transportNumber: facturaTransportNumber.trim(),
       remitoNumber: facturaRemitoNumber.trim(),
-      saleCondition: facturaSaleCondition.trim() || '30 días',
+      saleCondition: facturaSaleCondition.trim() || 'Contado',
     };
     if (facturaTransporteId) {
       const t = transporteOpts.find((o) => o.id === facturaTransporteId);
@@ -2223,8 +2235,17 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                           e.stopPropagation();
                           setOrderToEmitFactura(order);
                           setEmitirFacturaTipo('auto');
-                          const prevSale = manualFacturaDataByOrder[order.id]?.saleCondition?.toLowerCase() || '';
-                          setEmitirFacturaSaleCondition(prevSale.includes('60') ? '60 días' : '30 días');
+                          const prevSale = manualFacturaDataByOrder[order.id]?.saleCondition
+                            || customers.find((c) => c.id === order.customerId)?.saleCondition
+                            || '';
+                          setEmitirFacturaSaleCondition(
+                            normalizeCondicionVentaFactura(
+                              prevSale,
+                              order.paymentStatus === 'pagado' || order.status === OrderStatus.CONTROLLED
+                                ? 'Contado'
+                                : '30 días'
+                            )
+                          );
                           const custEmit = customers.find((c) => c.id === order.customerId);
                           const optsEmit = transporteOptionsForCustomer(custEmit, transportes);
                           setEmitirFacturaTransporteId(pickInitialTransporteId(manualFacturaDataByOrder[order.id], optsEmit));
@@ -2709,11 +2730,12 @@ const Orders: React.FC<OrdersProps> = React.memo(({
             <div className="mb-4">
               <select
                 value={emitirFacturaSaleCondition}
-                onChange={(e) => setEmitirFacturaSaleCondition((e.target.value === '60 días' ? '60 días' : '30 días'))}
+                onChange={(e) => setEmitirFacturaSaleCondition(normalizeCondicionVentaFactura(e.target.value))}
                 className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-emerald-500 outline-none"
               >
-                <option value="30 días">30 días</option>
-                <option value="60 días">60 días</option>
+                {CONDICIONES_VENTA_FACTURA.map((opt) => (
+                  <option key={opt} value={opt}>{opt}</option>
+                ))}
               </select>
             </div>
             {(() => {
