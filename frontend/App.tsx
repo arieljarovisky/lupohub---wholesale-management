@@ -1028,6 +1028,11 @@ const App: React.FC = () => {
       { id: 'facturacion', label: 'Facturación', icon: DollarSign, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'settings', label: 'Configuración', icon: SettingsIcon, roles: [Role.ADMIN, Role.WAREHOUSE] },
     ]},
+    ...(isCompanyFinanceUser(currentUser.email)
+      ? [{ title: 'Finanzas', items: [
+          { id: COMPANY_FINANCE_VIEW, label: 'Resultados empresa', icon: Wallet, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER, Role.DEPOSITO] },
+        ]}]
+      : []),
   ];
 
   const nowMs = Date.now();
