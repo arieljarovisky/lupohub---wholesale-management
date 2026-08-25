@@ -28,10 +28,61 @@ function skuKey(raw: unknown): string {
     .toUpperCase();
 }
 
-/** Lista FOB: env LUPOHUB_FOB_PRICE_LIST_ID, o la del mes actual (p. ej. «Precios Fob Agosto»), o la FOB más reciente. */
-export async function resolveFobPriceList(): Promise<FobPriceListInfo> {
+async function loadFobMaps(listId: string): Promise<{ byProductId: Map<string, number>; bySku: Map<string, number> }> {
   const byProductId = new Map<string, number>();
   const bySku = new Map<string, number>();
+  const rows = (await query(
+    `SELECT pli.product_id, pli.price, p.sku
+     FROM price_list_items pli
+     LEFT JOIN products p ON p.id = pli.product_id
+     WHERE pli.price_list_id = ?`,
+    [listId]
+  )) as Array<{ product_id: string; price: string | number | null; sku: string | null }>;
+  for (const r of rows) {
+    const price = Number(r.price);
+    if (!Number.isFinite(price)) continue;
+    byProductId.set(String(r.product_id), price);
+    const sku = skuKey(r.sku);
+    if (sku) bySku.set(sku, price);
+  }
+  return { byProductId, bySku };
+}
+
+/** Lista FOB por nombre exacto (p. ej. «Precios Fob Marzo») o la que contenga esas palabras. */
+export async function resolveFobPriceListByName(preferredName: string): Promise<FobPriceListInfo> {
+  const wanted = String(preferredName || '').trim();
+  if (!wanted) return resolveFobPriceList();
+
+  let pl = await get(
+    `SELECT id, name FROM price_lists WHERE LOWER(TRIM(name)) = LOWER(?) LIMIT 1`,
+    [wanted]
+  );
+  if (!pl?.id) {
+    const tokens = wanted
+      .toLowerCase()
+      .split(/\s+/)
+      .map((t) => t.trim())
+      .filter((t) => t.length >= 3);
+    if (tokens.length > 0) {
+      const likes = tokens.map(() => 'LOWER(name) LIKE ?').join(' AND ');
+      pl = await get(
+        `SELECT id, name FROM price_lists WHERE ${likes} ORDER BY updated_at DESC, name LIMIT 1`,
+        tokens.map((t) => `%${t}%`)
+      );
+    }
+  }
+  if (!pl?.id) {
+    return { id: null, name: wanted, byProductId: new Map(), bySku: new Map() };
+  }
+
+  const id = String(pl.id);
+  const name = String((pl as { name?: string }).name || wanted);
+  const maps = await loadFobMaps(id);
+  return { id, name, ...maps };
+}
+
+/** Lista FOB: env LUPOHUB_FOB_PRICE_LIST_ID, o la del mes actual (p. ej. «Precios Fob Agosto»), o la FOB más reciente. */
+export async function resolveFobPriceList(): Promise<FobPriceListInfo> {
   let id: string | null = null;
   let name = '';
 
@@ -61,22 +112,10 @@ export async function resolveFobPriceList(): Promise<FobPriceListInfo> {
     }
   }
   if (id) {
-    const rows = (await query(
-      `SELECT pli.product_id, pli.price, p.sku
-       FROM price_list_items pli
-       LEFT JOIN products p ON p.id = pli.product_id
-       WHERE pli.price_list_id = ?`,
-      [id]
-    )) as Array<{ product_id: string; price: string | number | null; sku: string | null }>;
-    for (const r of rows) {
-      const price = Number(r.price);
-      if (!Number.isFinite(price)) continue;
-      byProductId.set(String(r.product_id), price);
-      const sku = skuKey(r.sku);
-      if (sku) bySku.set(sku, price);
-    }
+    const maps = await loadFobMaps(id);
+    return { id, name, ...maps };
   }
-  return { id, name, byProductId, bySku };
+  return { id: null, name: '', byProductId: new Map(), bySku: new Map() };
 }
 
 export function lookupFobPrice(

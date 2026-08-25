@@ -5,6 +5,7 @@ import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { tnPutWithRetry } from '../utils/tiendanubeClient';
 import { skuToCanonicalString } from '../utils/skuString';
+import { persistDespachoFobFromList } from '../utils/despachoFob';
 import { codigoTalleParaSku, nombreTalleDesdeCodigo, TALLE_CODIGO_A_NOMBRE } from '../talles-tango';
 import {
   canonicalNumericColorCode,
@@ -1939,6 +1940,8 @@ export const importStockGridToDespacho = async (req: Request, res: Response) => 
         taggedProducts.add(productId);
       }
     }
+
+    await persistDespachoFobFromList(despacho.id);
 
     res.json({
       message: 'Importación de planilla al despacho completada',

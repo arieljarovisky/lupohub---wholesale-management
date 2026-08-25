@@ -23,6 +23,7 @@ interface Despacho {
   notas: string;
   total_items: number;
   total_unidades: number;
+  fob_list_name?: string | null;
   items?: any[];
 }
 
@@ -569,8 +570,17 @@ const Despachos: React.FC = () => {
           <div className="flex items-center gap-2">
             <DollarSign size={18} className="text-green-400" />
             <div>
-              <p className="text-xl font-black text-green-400">${((stats.total_fob || 0) / 1000).toFixed(0)}K</p>
+              <p className="text-xl font-black text-green-400">
+                {Number(stats.total_fob) >= 1000
+                  ? `$${(Number(stats.total_fob) / 1000).toFixed(0)}K`
+                  : formatCurrency(Number(stats.total_fob) || 0, 'USD')}
+              </p>
               <p className="text-[10px] text-slate-500 uppercase">Total FOB</p>
+              {stats.fob_list_name && (
+                <p className="text-[9px] text-slate-600 mt-0.5 truncate max-w-[120px]" title={stats.fob_list_name}>
+                  {stats.fob_list_name}
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -671,12 +681,10 @@ const Despachos: React.FC = () => {
                       <p className="text-slate-500 text-xs uppercase">Unidades</p>
                       <p className="text-white font-black text-xl">{despacho.total_unidades || 0}</p>
                     </div>
-                    {despacho.valor_fob && (
-                      <div className="text-right">
-                        <p className="text-slate-500 text-xs uppercase">FOB</p>
-                        <p className="text-green-400 font-bold">{formatCurrency(despacho.valor_fob, despacho.moneda)}</p>
-                      </div>
-                    )}
+                    <div className="text-right">
+                      <p className="text-slate-500 text-xs uppercase">FOB</p>
+                      <p className="text-green-400 font-bold">{formatCurrency(Number(despacho.valor_fob) || 0, despacho.moneda)}</p>
+                    </div>
                     <div className="flex gap-2">
                       <button
                         onClick={() => handleViewDetail(despacho)}
@@ -895,7 +903,10 @@ const Despachos: React.FC = () => {
                 </div>
                 <div className="bg-slate-800/50 rounded-xl p-4">
                   <p className="text-xs text-slate-500 uppercase">Valor FOB</p>
-                  <p className="text-green-400 font-bold">{formatCurrency(selectedDespacho.valor_fob, selectedDespacho.moneda)}</p>
+                  <p className="text-green-400 font-bold">{formatCurrency(Number(selectedDespacho.valor_fob) || 0, selectedDespacho.moneda)}</p>
+                  {selectedDespacho.fob_list_name && (
+                    <p className="text-[10px] text-slate-500 mt-1">{selectedDespacho.fob_list_name}</p>
+                  )}
                 </div>
                 <div className="bg-slate-800/50 rounded-xl p-4">
                   <p className="text-xs text-slate-500 uppercase">Valor CIF</p>
@@ -1017,7 +1028,8 @@ const Despachos: React.FC = () => {
                           <th className="text-left text-xs text-slate-500 font-bold uppercase p-3">Producto</th>
                           <th className="text-left text-xs text-slate-500 font-bold uppercase p-3">SKU</th>
                           <th className="text-right text-xs text-slate-500 font-bold uppercase p-3">Cantidad</th>
-                          <th className="text-right text-xs text-slate-500 font-bold uppercase p-3">Costo Unit.</th>
+                          <th className="text-right text-xs text-slate-500 font-bold uppercase p-3">FOB unit.</th>
+                          <th className="text-right text-xs text-slate-500 font-bold uppercase p-3">FOB línea</th>
                           <th className="text-right text-xs text-slate-500 font-bold uppercase p-3">Acciones</th>
                         </tr>
                       </thead>
@@ -1027,7 +1039,16 @@ const Despachos: React.FC = () => {
                             <td className="p-3 text-white">{item.product_name || item.descripcion_item || '-'}</td>
                             <td className="p-3 text-slate-400 font-mono text-sm">{item.variant_sku || item.product_sku || '-'}</td>
                             <td className="p-3 text-right text-white font-bold">{item.cantidad}</td>
-                            <td className="p-3 text-right text-green-400">{item.costo_unitario ? `$${item.costo_unitario}` : '-'}</td>
+                            <td className="p-3 text-right text-green-400">
+                              {item.precio_fob != null || item.costo_unitario
+                                ? formatCurrency(Number(item.precio_fob ?? item.costo_unitario), selectedDespacho.moneda)
+                                : '-'}
+                            </td>
+                            <td className="p-3 text-right text-green-300">
+                              {item.costo_linea != null
+                                ? formatCurrency(Number(item.costo_linea), selectedDespacho.moneda)
+                                : '-'}
+                            </td>
                             <td className="p-3 text-right">
                               <button
                                 onClick={() => handleRemoveItem(item.id)}

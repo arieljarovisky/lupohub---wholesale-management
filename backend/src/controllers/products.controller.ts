@@ -22,6 +22,7 @@ import { syncStockToExternalPlatforms, updateMercadoLibreSku, updateTiendaNubeSk
 import { skuToCanonicalString } from '../utils/skuString';
 import { runMergeDuplicateProductsBySku, nameEmbedsOwnSkuCode, mergeManualIntoKeeper, mergeManualVariantPair } from '../services/mergeDuplicateProductsBySku';
 import { touchProductUpdatedAtByVariantId } from '../utils/touchProductUpdatedAt';
+import { persistDespachoFobFromList } from '../utils/despachoFob';
 
 export const getProducts = async (req: Request, res: Response) => {
   try {
@@ -1795,6 +1796,10 @@ export const importTangoArticles = async (req: Request, res: Response) => {
       } catch (err: any) {
         errors.push(`Fila ${r.codigo13}: ${err?.message || 'Error'}`);
       }
+    }
+
+    if (despachoLink?.id) {
+      await persistDespachoFobFromList(despachoLink.id);
     }
 
     res.json({
