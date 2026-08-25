@@ -90,25 +90,25 @@ const PnlLine: React.FC<PnlLineProps> = ({
   pct,
 }) => (
   <li
-    className={`flex justify-between items-start gap-3 px-4 py-2.5 ${
+    className={`flex justify-between items-start gap-2 sm:gap-3 px-2 sm:px-4 py-2 sm:py-2.5 ${
       section ? 'bg-slate-800/50 border-y border-slate-700/80' : 'border-b border-slate-800/60'
     }`}
-    style={{ paddingLeft: 16 + indent * 16 }}
+    style={{ paddingLeft: 8 + indent * 12 }}
   >
-    <span className={`text-sm ${bold || section ? 'font-bold text-white' : 'text-slate-300'}`}>
+    <span className={`text-xs sm:text-sm ${bold || section ? 'font-bold text-white' : 'text-slate-300'} min-w-0`}>
       {label}
-      {hint ? <span className="block text-[10px] font-normal text-slate-500 mt-0.5">{hint}</span> : null}
+      {hint ? <span className="hidden sm:block text-[10px] font-normal text-slate-500 mt-0.5">{hint}</span> : null}
     </span>
     <span className="text-right shrink-0">
       <span
-        className={`font-mono ${bold || section ? 'font-black' : ''} ${
+        className={`font-mono text-xs sm:text-sm ${bold || section ? 'font-black' : ''} ${
           invert ? 'text-red-400' : moneyClass(value)
         }`}
       >
         {invert ? `−${fmt(value)}` : fmt(value)}
       </span>
       {pct != null && Number.isFinite(pct) ? (
-        <span className="block text-[10px] text-slate-500 font-mono">{fmtPct(pct)}</span>
+        <span className="block text-[9px] sm:text-[10px] text-slate-500 font-mono">{fmtPct(pct)}</span>
       ) : null}
     </span>
   </li>
@@ -423,79 +423,79 @@ const CompanyFinance: React.FC = () => {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-10">
-      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 sm:gap-4">
         <div>
-          <h2 className="text-2xl font-black text-white flex items-center gap-2">
-            <Wallet className="text-violet-400" size={28} />
+          <h2 className="text-xl sm:text-2xl font-black text-white flex items-center gap-2">
+            <Wallet className="text-violet-400 shrink-0" size={24} />
             Resultados de la empresa
           </h2>
-          <p className="text-slate-400 text-sm mt-1">
+          <p className="text-slate-400 text-xs sm:text-sm mt-1 hidden sm:block">
             Estado de resultados: ventas mayoristas y minoristas, costo FOB, márgenes, comisiones y gastos.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-1.5 sm:gap-2">
           <button
             type="button"
             onClick={handleExportExcel}
             disabled={!summary || loading || exporting}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs sm:text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-            Excel
+            {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+            <span className="hidden sm:inline">Excel</span>
           </button>
           <button
             type="button"
             onClick={openCreateFixed}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-orange-700/90 hover:bg-orange-600 text-white text-sm font-bold"
+            className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-orange-700/90 hover:bg-orange-600 text-white text-xs sm:text-sm font-bold"
           >
-            <Repeat size={16} /> Gasto fijo
+            <Repeat size={14} /> <span className="hidden sm:inline">Gasto</span> fijo
           </button>
           <button
             type="button"
             onClick={() => openCreate('expense')}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-red-600/90 hover:bg-red-500 text-white text-sm font-bold"
+            className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-red-600/90 hover:bg-red-500 text-white text-xs sm:text-sm font-bold"
           >
-            <Plus size={16} /> Gasto
+            <Plus size={14} /> Gasto
           </button>
           <button
             type="button"
             onClick={() => openCreate('income')}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600/90 hover:bg-emerald-500 text-white text-sm font-bold"
+            className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-2 sm:py-2.5 rounded-xl bg-emerald-600/90 hover:bg-emerald-500 text-white text-xs sm:text-sm font-bold"
           >
-            <Plus size={16} /> Ingreso
+            <Plus size={14} /> Ingreso
           </button>
         </div>
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-3 flex-wrap items-end bg-slate-800/40 border border-slate-700 rounded-xl p-4">
-        <div>
-          <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1">Desde</label>
+      <div className="flex flex-row gap-2 sm:gap-3 flex-wrap items-end bg-slate-800/40 border border-slate-700 rounded-xl p-2.5 sm:p-4">
+        <div className="flex-1 min-w-[100px]">
+          <label className="text-[9px] sm:text-[10px] uppercase text-slate-500 font-bold block mb-1">Desde</label>
           <input
             type="date"
             value={range.from}
             onChange={(e) => setRange((r) => ({ ...r, from: e.target.value }))}
-            className="rounded-lg bg-slate-900 border border-slate-600 text-white text-sm px-3 py-2"
+            className="rounded-lg bg-slate-900 border border-slate-600 text-white text-xs sm:text-sm px-2 sm:px-3 py-1.5 sm:py-2 w-full"
           />
         </div>
-        <div>
-          <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1">Hasta</label>
+        <div className="flex-1 min-w-[100px]">
+          <label className="text-[9px] sm:text-[10px] uppercase text-slate-500 font-bold block mb-1">Hasta</label>
           <input
             type="date"
             value={range.to}
             onChange={(e) => setRange((r) => ({ ...r, to: e.target.value }))}
-            className="rounded-lg bg-slate-900 border border-slate-600 text-white text-sm px-3 py-2"
+            className="rounded-lg bg-slate-900 border border-slate-600 text-white text-xs sm:text-sm px-2 sm:px-3 py-1.5 sm:py-2 w-full"
           />
         </div>
-        <div>
-          <label className="text-[10px] uppercase text-slate-500 font-bold block mb-1">Tipo</label>
+        <div className="flex-1 min-w-[100px]">
+          <label className="text-[9px] sm:text-[10px] uppercase text-slate-500 font-bold block mb-1">Tipo</label>
           <select
             value={filterType}
             onChange={(e) => setFilterType(e.target.value as typeof filterType)}
-            className="rounded-lg bg-slate-900 border border-slate-600 text-white text-sm px-3 py-2 min-w-[140px]"
+            className="rounded-lg bg-slate-900 border border-slate-600 text-white text-xs sm:text-sm px-2 sm:px-3 py-1.5 sm:py-2 w-full"
           >
             <option value="all">Todos</option>
-            <option value="expense">Solo gastos</option>
-            <option value="income">Solo ingresos</option>
+            <option value="expense">Gastos</option>
+            <option value="income">Ingresos</option>
           </select>
         </div>
       </div>
@@ -506,79 +506,78 @@ const CompanyFinance: React.FC = () => {
         </div>
       ) : summary ? (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-            <div className="rounded-xl border border-emerald-800/40 bg-emerald-950/30 p-4">
-              <p className="text-xs text-slate-500 uppercase font-bold">Ventas totales</p>
-              <p className="text-2xl font-black text-emerald-400 mt-1">
+          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4">
+            <div className="rounded-xl border border-emerald-800/40 bg-emerald-950/30 p-3 sm:p-4">
+              <p className="text-[10px] sm:text-xs text-slate-500 uppercase font-bold">Ventas totales</p>
+              <p className="text-lg sm:text-2xl font-black text-emerald-400 mt-1">
                 {fmt(summary.totalSales ?? summary.totalIncome)}
               </p>
-              <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+              <p className="text-[9px] sm:text-[10px] text-slate-500 mt-1 leading-relaxed hidden sm:block">
                 Mayorista {fmt(summary.channels?.wholesale.revenue ?? summary.ordersRevenue ?? 0)} · ML{' '}
                 {fmt(summary.mlSales ?? 0)} · TN {fmt(summary.tnSales ?? 0)}
               </p>
             </div>
-            <div className="rounded-xl border border-orange-800/40 bg-orange-950/30 p-4">
-              <p className="text-xs text-slate-500 uppercase font-bold">Costo mercadería (FOB)</p>
-              <p className="text-2xl font-black text-orange-300 mt-1">{fmt(summary.totalCogs ?? 0)}</p>
-              <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+            <div className="rounded-xl border border-orange-800/40 bg-orange-950/30 p-3 sm:p-4">
+              <p className="text-[10px] sm:text-xs text-slate-500 uppercase font-bold">Costo FOB</p>
+              <p className="text-lg sm:text-2xl font-black text-orange-300 mt-1">{fmt(summary.totalCogs ?? 0)}</p>
+              <p className="text-[9px] sm:text-[10px] text-slate-500 mt-1 leading-relaxed hidden sm:block">
                 Lista {summary.fobListName || 'FOB'} · cobertura may.{' '}
                 {fmtPct(summary.cogsCoverage?.wholesalePct)}
               </p>
             </div>
-            <div className="rounded-xl border border-violet-800/40 bg-violet-950/30 p-4">
-              <p className="text-xs text-slate-500 uppercase font-bold flex items-center gap-1">
-                <Percent size={14} className="text-violet-400" />
+            <div className="rounded-xl border border-violet-800/40 bg-violet-950/30 p-3 sm:p-4">
+              <p className="text-[10px] sm:text-xs text-slate-500 uppercase font-bold flex items-center gap-1">
+                <Percent size={14} className="text-violet-400 hidden sm:block" />
                 Margen bruto
               </p>
-              <p className={`text-2xl font-black mt-1 ${moneyClass(summary.grossProfit ?? 0)}`}>
+              <p className={`text-lg sm:text-2xl font-black mt-1 ${moneyClass(summary.grossProfit ?? 0)}`}>
                 {fmt(summary.grossProfit ?? 0)}
               </p>
-              <p className="text-[10px] text-slate-500 mt-1">{fmtPct(summary.grossMarginPct)} sobre ventas</p>
+              <p className="text-[9px] sm:text-[10px] text-slate-500 mt-1">{fmtPct(summary.grossMarginPct)}</p>
             </div>
             <div
-              className={`rounded-xl border p-4 ${
+              className={`rounded-xl border p-3 sm:p-4 ${
                 summary.netResult >= 0
                   ? 'border-emerald-700/50 bg-emerald-950/20'
                   : 'border-red-700/50 bg-red-950/20'
               }`}
             >
-              <p className="text-xs text-slate-500 uppercase font-bold flex items-center gap-1">
+              <p className="text-[10px] sm:text-xs text-slate-500 uppercase font-bold flex items-center gap-1">
                 {summary.netResult >= 0 ? (
-                  <TrendingUp size={14} className="text-emerald-400" />
+                  <TrendingUp size={14} className="text-emerald-400 hidden sm:block" />
                 ) : (
-                  <TrendingDown size={14} className="text-red-400" />
+                  <TrendingDown size={14} className="text-red-400 hidden sm:block" />
                 )}
                 Resultado neto
               </p>
-              <p className={`text-2xl font-black mt-1 ${moneyClass(summary.netResult)}`}>
+              <p className={`text-lg sm:text-2xl font-black mt-1 ${moneyClass(summary.netResult)}`}>
                 {fmt(summary.netResult)}
               </p>
-              <p className="text-[10px] text-slate-500 mt-1">
-                {fmtPct(summary.netMarginPct)} ·{' '}
-                {summary.netResult >= 0 ? 'ganancia del período' : 'pérdida del período'}
+              <p className="text-[9px] sm:text-[10px] text-slate-500 mt-1">
+                {fmtPct(summary.netMarginPct)}
               </p>
             </div>
-            <div className="rounded-xl border border-amber-800/40 bg-amber-950/20 p-4">
-              <p className="text-xs text-slate-500 uppercase font-bold flex items-center gap-1">
-                <AlertCircle size={14} className="text-amber-400" />
+            <div className="rounded-xl border border-amber-800/40 bg-amber-950/20 p-3 sm:p-4">
+              <p className="text-[10px] sm:text-xs text-slate-500 uppercase font-bold flex items-center gap-1">
+                <AlertCircle size={14} className="text-amber-400 hidden sm:block" />
                 Por cobrar
               </p>
-              <p className="text-2xl font-black text-amber-300 mt-1">
+              <p className="text-lg sm:text-2xl font-black text-amber-300 mt-1">
                 {fmt(summary.pendingInvoicesTotal ?? 0)}
               </p>
-              <p className="text-[10px] text-slate-500 mt-1">
-                {summary.pendingInvoicesCount ?? 0} factura(s) mayoristas sin cobrar
+              <p className="text-[9px] sm:text-[10px] text-slate-500 mt-1">
+                {summary.pendingInvoicesCount ?? 0} fact. sin cobrar
               </p>
             </div>
-            <div className="rounded-xl border border-cyan-800/40 bg-cyan-950/20 p-4">
-              <p className="text-xs text-slate-500 uppercase font-bold flex items-center gap-1">
-                <Warehouse size={14} className="text-cyan-400" />
+            <div className="rounded-xl border border-cyan-800/40 bg-cyan-950/20 p-3 sm:p-4">
+              <p className="text-[10px] sm:text-xs text-slate-500 uppercase font-bold flex items-center gap-1">
+                <Warehouse size={14} className="text-cyan-400 hidden sm:block" />
                 Depósito FOB
               </p>
-              <p className="text-2xl font-black text-cyan-300 mt-1">
+              <p className="text-lg sm:text-2xl font-black text-cyan-300 mt-1">
                 {fmt(summary.inventory?.value ?? 0)}
               </p>
-              <p className="text-[10px] text-slate-500 mt-1">
+              <p className="text-[9px] sm:text-[10px] text-slate-500 mt-1">
                 {(summary.inventory?.units ?? 0).toLocaleString('es-AR')} u. ·{' '}
                 {summary.inventory?.articleCount ?? summary.inventory?.skuCount ?? 0} art.
               </p>
@@ -586,8 +585,8 @@ const CompanyFinance: React.FC = () => {
           </div>
 
           <div className="rounded-xl border border-slate-700 overflow-hidden bg-slate-900/40">
-            <div className="px-4 py-3 bg-slate-800/80 border-b border-slate-700 text-sm font-bold text-white flex items-center gap-2">
-              <Landmark size={16} className="text-violet-400" />
+            <div className="px-3 sm:px-4 py-2 sm:py-3 bg-slate-800/80 border-b border-slate-700 text-xs sm:text-sm font-bold text-white flex items-center gap-2">
+              <Landmark size={16} className="text-violet-400 shrink-0" />
               Estado de resultados
             </div>
             <ul>
@@ -714,7 +713,7 @@ const CompanyFinance: React.FC = () => {
                 pct={summary.netMarginPct}
               />
             </ul>
-            <p className="px-4 py-3 text-[10px] text-slate-500 leading-relaxed flex gap-2">
+            <p className="px-3 sm:px-4 py-2 sm:py-3 text-[9px] sm:text-[10px] text-slate-500 leading-relaxed hidden sm:flex gap-2">
               <Info size={12} className="shrink-0 mt-0.5 text-slate-600" />
               <span>
                 {summary.methodology?.wholesale} {summary.methodology?.retail}{' '}
@@ -724,7 +723,7 @@ const CompanyFinance: React.FC = () => {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
             {[
               {
                 title: 'Mayorista',
@@ -795,54 +794,56 @@ const CompanyFinance: React.FC = () => {
             ))}
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
             <div className="rounded-xl border border-sky-800/30 bg-slate-900/40 overflow-hidden">
-              <div className="px-4 py-3 bg-sky-950/40 border-b border-sky-900/40 text-sm font-bold text-sky-300 flex items-center gap-2">
-                <FileText size={16} /> Facturado AFIP
+              <div className="px-3 sm:px-4 py-2 sm:py-3 bg-sky-950/40 border-b border-sky-900/40 text-xs sm:text-sm font-bold text-sky-300 flex items-center gap-2">
+                <FileText size={16} className="shrink-0" /> Facturado AFIP
               </div>
-              <ul className="divide-y divide-slate-800/80 text-sm">
-                <li className="flex justify-between items-center p-3">
-                  <span className="text-slate-300">Total con IVA</span>
+              <ul className="divide-y divide-slate-800/80 text-xs sm:text-sm">
+                <li className="flex justify-between items-center p-2 sm:p-3">
+                  <span className="text-slate-300">Total c/IVA</span>
                   <span className="font-mono text-sky-300">{fmt(summary.invoicedTotal ?? 0)}</span>
                 </li>
-                <li className="flex justify-between items-center p-3">
-                  <span className="text-slate-400">Neto / IVA 21%</span>
-                  <span className="font-mono text-slate-300">
-                    {fmt(summary.invoicedNet ?? 0)} · {fmt(summary.invoicedIva ?? 0)}
+                <li className="flex justify-between items-center p-2 sm:p-3">
+                  <span className="text-slate-400">Neto / IVA</span>
+                  <span className="font-mono text-slate-300 text-right">
+                    <span className="block sm:inline">{fmt(summary.invoicedNet ?? 0)}</span>
+                    <span className="hidden sm:inline"> · </span>
+                    <span className="block sm:inline text-slate-400">{fmt(summary.invoicedIva ?? 0)}</span>
                   </span>
                 </li>
-                <li className="flex justify-between items-center p-3">
+                <li className="flex justify-between items-center p-2 sm:p-3">
                   <span className="text-slate-300">Mayorista ({summary.invoicedWholesaleCount ?? 0})</span>
                   <span className="font-mono text-sky-300">{fmt(summary.invoicedWholesaleTotal ?? 0)}</span>
                 </li>
-                <li className="flex justify-between items-center p-3">
-                  <span className="text-slate-300">Mercado Libre ({summary.invoicedMlCount ?? 0})</span>
+                <li className="flex justify-between items-center p-2 sm:p-3">
+                  <span className="text-slate-300">ML ({summary.invoicedMlCount ?? 0})</span>
                   <span className="font-mono text-sky-300">{fmt(summary.invoicedMlTotal ?? 0)}</span>
                 </li>
-                <li className="flex justify-between items-center p-3">
-                  <span className="text-slate-300">Tienda Nube ({summary.invoicedTnCount ?? 0})</span>
+                <li className="flex justify-between items-center p-2 sm:p-3">
+                  <span className="text-slate-300">TN ({summary.invoicedTnCount ?? 0})</span>
                   <span className="font-mono text-sky-300">{fmt(summary.invoicedTnTotal ?? 0)}</span>
                 </li>
               </ul>
             </div>
 
             <div className="rounded-xl border border-emerald-800/30 bg-slate-900/40 overflow-hidden">
-              <div className="px-4 py-3 bg-emerald-950/40 border-b border-emerald-900/40 text-sm font-bold text-emerald-300 flex items-center gap-2">
-                <Wallet size={16} /> Cobranza y caja
+              <div className="px-3 sm:px-4 py-2 sm:py-3 bg-emerald-950/40 border-b border-emerald-900/40 text-xs sm:text-sm font-bold text-emerald-300 flex items-center gap-2">
+                <Wallet size={16} className="shrink-0" /> Cobranza y caja
               </div>
-              <ul className="divide-y divide-slate-800/80 text-sm">
-                <li className="flex justify-between items-center p-3">
-                  <span className="text-slate-300">Recibos cobrados ({summary.receiptsCount ?? 0})</span>
+              <ul className="divide-y divide-slate-800/80 text-xs sm:text-sm">
+                <li className="flex justify-between items-center p-2 sm:p-3">
+                  <span className="text-slate-300">Recibos ({summary.receiptsCount ?? 0})</span>
                   <span className="font-mono text-emerald-400">{fmt(summary.receiptsTotal ?? 0)}</span>
                 </li>
-                <li className="flex justify-between items-center p-3">
-                  <span className="text-slate-300">Ventas mayoristas (devengado)</span>
+                <li className="flex justify-between items-center p-2 sm:p-3">
+                  <span className="text-slate-300">Ventas may. (dev.)</span>
                   <span className="font-mono text-slate-200">
                     {fmt(summary.channels?.wholesale.revenue ?? 0)}
                   </span>
                 </li>
-                <li className="flex justify-between items-center p-3">
-                  <span className="text-slate-400 text-xs">Diferencia cobrado vs vendido</span>
+                <li className="flex justify-between items-center p-2 sm:p-3">
+                  <span className="text-slate-400 text-[10px] sm:text-xs">Dif. cobrado vs vendido</span>
                   <span
                     className={`font-mono ${moneyClass(
                       (summary.receiptsTotal ?? 0) - (summary.channels?.wholesale.revenue ?? 0)
@@ -852,47 +853,47 @@ const CompanyFinance: React.FC = () => {
                   </span>
                 </li>
               </ul>
-              <p className="px-4 pb-3 text-[10px] text-slate-600">
+              <p className="px-3 sm:px-4 pb-2 sm:pb-3 text-[9px] sm:text-[10px] text-slate-600 hidden sm:block">
                 Los recibos son plata que entra; las ventas mayoristas son lo facturable del período.
               </p>
             </div>
 
             <div className="rounded-xl border border-orange-800/30 bg-slate-900/40 overflow-hidden">
-              <div className="px-4 py-3 bg-orange-950/40 border-b border-orange-900/40 text-sm font-bold text-orange-300 flex items-center gap-2">
-                <Package size={16} /> Stock y compras
+              <div className="px-3 sm:px-4 py-2 sm:py-3 bg-orange-950/40 border-b border-orange-900/40 text-xs sm:text-sm font-bold text-orange-300 flex items-center gap-2">
+                <Package size={16} className="shrink-0" /> Stock y compras
               </div>
-              <ul className="divide-y divide-slate-800/80 text-sm">
-                <li className="flex justify-between items-center p-3">
+              <ul className="divide-y divide-slate-800/80 text-xs sm:text-sm">
+                <li className="flex justify-between items-center p-2 sm:p-3">
                   <span className="text-slate-300">Inventario a FOB</span>
                   <span className="font-mono text-orange-300">{fmt(summary.inventory?.value ?? 0)}</span>
                 </li>
-                <li className="flex justify-between items-center p-3">
-                  <span className="text-slate-400">Unidades en stock</span>
+                <li className="flex justify-between items-center p-2 sm:p-3">
+                  <span className="text-slate-400">Unidades</span>
                   <span className="font-mono text-slate-300">
                     {(summary.inventory?.unitsWithFob ?? 0).toLocaleString('es-AR')} /{' '}
                     {(summary.inventory?.units ?? 0).toLocaleString('es-AR')}
                   </span>
                 </li>
-                <li className="flex justify-between items-center p-3">
+                <li className="flex justify-between items-center p-2 sm:p-3">
                   <span className="text-slate-300">
-                    Despachos del período ({summary.despachosCount ?? 0})
+                    Despachos ({summary.despachosCount ?? 0})
                   </span>
                   <span className="font-mono text-orange-300">{fmt(summary.despachosCost ?? 0)}</span>
                 </li>
               </ul>
-              <p className="px-4 pb-3 text-[10px] text-slate-600">
-                Los despachos son compras de mercadería (activo), no un gasto del resultado. El gasto es el CMV al vender.
+              <p className="px-3 sm:px-4 pb-2 sm:pb-3 text-[9px] sm:text-[10px] text-slate-600 hidden sm:block">
+                Los despachos son compras de mercadería (activo), no un gasto del resultado.
               </p>
             </div>
           </div>
 
           <div className="rounded-xl border border-cyan-800/40 overflow-hidden bg-slate-900/40">
-            <div className="px-4 py-3 bg-cyan-950/40 border-b border-cyan-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="px-3 sm:px-4 py-2 sm:py-3 bg-cyan-950/40 border-b border-cyan-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3">
               <div>
-                <p className="text-sm font-bold text-cyan-200 flex items-center gap-2">
-                  <Warehouse size={16} /> Mercadería de depósito valorizada
+                <p className="text-xs sm:text-sm font-bold text-cyan-200 flex items-center gap-2">
+                  <Warehouse size={16} className="shrink-0" /> Mercadería de depósito
                 </p>
-                <p className="text-[10px] text-slate-500 mt-0.5">
+                <p className="text-[9px] sm:text-[10px] text-slate-500 mt-0.5 hidden sm:block">
                   Stock actual a FOB ({summary.inventory?.fobListName || 'lista FOB'}). No es del período: es lo que hay hoy en depósito.
                 </p>
               </div>
@@ -902,35 +903,35 @@ const CompanyFinance: React.FC = () => {
                   type="search"
                   value={stockSearch}
                   onChange={(e) => setStockSearch(e.target.value)}
-                  placeholder="Buscar SKU, artículo o rubro"
-                  className="rounded-lg bg-slate-900 border border-slate-600 text-white text-sm pl-8 pr-3 py-2 w-full sm:w-64"
+                  placeholder="Buscar..."
+                  className="rounded-lg bg-slate-900 border border-slate-600 text-white text-xs sm:text-sm pl-8 pr-3 py-1.5 sm:py-2 w-full sm:w-64"
                 />
               </div>
             </div>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-slate-800/80 border-b border-slate-800 text-center text-xs">
-              <div className="bg-slate-900/60 p-3">
-                <p className="text-slate-500 uppercase font-bold text-[10px]">Valor FOB</p>
-                <p className="font-mono text-cyan-300 mt-1 text-lg font-black">{fmt(summary.inventory?.value ?? 0)}</p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-slate-800/80 border-b border-slate-800 text-center text-xs">
+              <div className="bg-slate-900/60 p-2 sm:p-3">
+                <p className="text-slate-500 uppercase font-bold text-[9px] sm:text-[10px]">Valor FOB</p>
+                <p className="font-mono text-cyan-300 mt-1 text-sm sm:text-lg font-black">{fmt(summary.inventory?.value ?? 0)}</p>
               </div>
-              <div className="bg-slate-900/60 p-3">
-                <p className="text-slate-500 uppercase font-bold text-[10px]">Unidades</p>
-                <p className="font-mono text-white mt-1 text-lg font-black">
+              <div className="bg-slate-900/60 p-2 sm:p-3">
+                <p className="text-slate-500 uppercase font-bold text-[9px] sm:text-[10px]">Unidades</p>
+                <p className="font-mono text-white mt-1 text-sm sm:text-lg font-black">
                   {(summary.inventory?.units ?? 0).toLocaleString('es-AR')}
                 </p>
               </div>
-              <div className="bg-slate-900/60 p-3">
-                <p className="text-slate-500 uppercase font-bold text-[10px]">Artículos</p>
-                <p className="font-mono text-white mt-1 text-lg font-black">
+              <div className="bg-slate-900/60 p-2 sm:p-3">
+                <p className="text-slate-500 uppercase font-bold text-[9px] sm:text-[10px]">Artículos</p>
+                <p className="font-mono text-white mt-1 text-sm sm:text-lg font-black">
                   {(summary.inventory?.articleCount ?? summary.inventory?.skuCount ?? 0).toLocaleString('es-AR')}
                 </p>
               </div>
-              <div className="bg-slate-900/60 p-3">
-                <p className="text-slate-500 uppercase font-bold text-[10px]">Con precio FOB</p>
-                <p className="font-mono text-emerald-400 mt-1 text-lg font-black">
+              <div className="bg-slate-900/60 p-2 sm:p-3">
+                <p className="text-slate-500 uppercase font-bold text-[9px] sm:text-[10px]">Con FOB</p>
+                <p className="font-mono text-emerald-400 mt-1 text-sm sm:text-lg font-black">
                   {fmtPct(summary.inventory?.coveragePct)}
                 </p>
                 {(summary.inventory?.unitsWithoutFob ?? 0) > 0 && (
-                  <p className="text-[10px] text-amber-400/80 mt-0.5">
+                  <p className="text-[9px] sm:text-[10px] text-amber-400/80 mt-0.5 hidden sm:block">
                     {(summary.inventory?.unitsWithoutFob ?? 0).toLocaleString('es-AR')} u. sin FOB
                   </p>
                 )}
@@ -1092,19 +1093,21 @@ const CompanyFinance: React.FC = () => {
         </>
       ) : null}
 
-      <div className="rounded-xl border border-sky-800/50 overflow-hidden">
-        <div className="px-4 py-3 bg-sky-950/40 border-b border-sky-900/50 flex flex-wrap items-center justify-between gap-2">
-          <span className="text-sm font-bold text-sky-200 flex items-center gap-2">
-            <CreditCard size={16} className="text-sky-400" /> Mercado Pago
+          <div className="rounded-xl border border-sky-800/50 overflow-hidden">
+        <div className="px-3 sm:px-4 py-2 sm:py-3 bg-sky-950/40 border-b border-sky-900/50 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs sm:text-sm font-bold text-sky-200 flex items-center gap-2">
+            <CreditCard size={16} className="text-sky-400 shrink-0" /> Mercado Pago
           </span>
           {mpData?.connected && mpData.summary && (
-            <span className="text-xs text-slate-400 font-mono">
-              Neto período:{' '}
+            <span className="text-[10px] sm:text-xs text-slate-400 font-mono">
+              Neto:{' '}
               <span className={mpData.summary.netIn >= 0 ? 'text-emerald-400' : 'text-red-400'}>
                 {fmt(mpData.summary.netIn)}
               </span>
-              {' · '}
-              {mpData.summary.count} mov.
+              <span className="hidden sm:inline">
+                {' · '}
+                {mpData.summary.count} mov.
+              </span>
             </span>
           )}
         </div>
@@ -1125,22 +1128,22 @@ const CompanyFinance: React.FC = () => {
         ) : (
           <>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-px bg-slate-800/80 border-b border-slate-800 text-center text-xs">
-              <div className="bg-slate-900/60 p-3">
-                <p className="text-slate-500 uppercase font-bold text-[10px]">Cobros brutos</p>
-                <p className="font-mono text-emerald-400 mt-1">{fmt(mpData.summary.grossIn)}</p>
+              <div className="bg-slate-900/60 p-2 sm:p-3">
+                <p className="text-slate-500 uppercase font-bold text-[9px] sm:text-[10px]">Cobros</p>
+                <p className="font-mono text-emerald-400 mt-1 text-xs sm:text-sm">{fmt(mpData.summary.grossIn)}</p>
               </div>
-              <div className="bg-slate-900/60 p-3">
-                <p className="text-slate-500 uppercase font-bold text-[10px]">Comisiones MP</p>
-                <p className="font-mono text-red-400 mt-1">{fmt(mpData.summary.fees)}</p>
+              <div className="bg-slate-900/60 p-2 sm:p-3">
+                <p className="text-slate-500 uppercase font-bold text-[9px] sm:text-[10px]">Comisiones</p>
+                <p className="font-mono text-red-400 mt-1 text-xs sm:text-sm">{fmt(mpData.summary.fees)}</p>
               </div>
-              <div className="bg-slate-900/60 p-3">
-                <p className="text-slate-500 uppercase font-bold text-[10px]">Reembolsos</p>
-                <p className="font-mono text-amber-400 mt-1">{fmt(mpData.summary.refunds)}</p>
+              <div className="bg-slate-900/60 p-2 sm:p-3">
+                <p className="text-slate-500 uppercase font-bold text-[9px] sm:text-[10px]">Reembolsos</p>
+                <p className="font-mono text-amber-400 mt-1 text-xs sm:text-sm">{fmt(mpData.summary.refunds)}</p>
               </div>
-              <div className="bg-slate-900/60 p-3">
-                <p className="text-slate-500 uppercase font-bold text-[10px]">Neto</p>
+              <div className="bg-slate-900/60 p-2 sm:p-3">
+                <p className="text-slate-500 uppercase font-bold text-[9px] sm:text-[10px]">Neto</p>
                 <p
-                  className={`font-mono mt-1 ${
+                  className={`font-mono mt-1 text-xs sm:text-sm ${
                     mpData.summary.netIn >= 0 ? 'text-emerald-400' : 'text-red-400'
                   }`}
                 >
