@@ -694,11 +694,10 @@ export const createCustomer = async (req: Request, res: Response) => {
     const accountSellerLabel = (body.accountSellerLabel ?? '').toString().trim() || null;
     const deliveryJson = normalizeDeliveryAddressesForDb(body.deliveryAddresses);
 
-    // Guardar nombre de contacto y razón social en columnas separadas:
-    // - Si solo se carga razón social, "name" queda NULL y "business_name" tiene el valor.
-    // - Si solo se carga nombre de contacto, "business_name" toma ese valor.
-    const sqlName = name || null;
-    const sqlBusinessName = businessName || name || null;
+    // Guardar nombre de contacto y razón social en columnas separadas.
+    // `customers.name` es NOT NULL en schema: si solo hay razón social, replicarla en name.
+    const sqlBusinessName = businessName || name || 'Sin nombre';
+    const sqlName = name || sqlBusinessName;
 
     const sellerCommissionPct =
       body.sellerCommissionPercentage !== undefined
@@ -730,7 +729,10 @@ export const createCustomer = async (req: Request, res: Response) => {
     if (error.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ message: 'Ya existe un cliente con ese ID' });
     }
-    res.status(500).json({ message: 'Error creando cliente' });
+    const detail = error?.sqlMessage || error?.message;
+    res.status(500).json({
+      message: detail ? `Error creando cliente: ${detail}` : 'Error creando cliente'
+    });
   }
 };
 

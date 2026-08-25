@@ -1207,7 +1207,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       try {
         const created = await api.createCustomerStrict({
           id: `C-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-          name: '',
+          name,
           businessName: name,
           email: occasionalEmail.trim() || undefined,
           address: '',
