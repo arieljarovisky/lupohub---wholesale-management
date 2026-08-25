@@ -1096,7 +1096,7 @@ const CompanyFinance: React.FC = () => {
           <div className="rounded-xl border border-sky-800/50 overflow-hidden">
         <div className="px-3 sm:px-4 py-2 sm:py-3 bg-sky-950/40 border-b border-sky-900/50 flex flex-wrap items-center justify-between gap-2">
           <span className="text-xs sm:text-sm font-bold text-sky-200 flex items-center gap-2">
-            <CreditCard size={16} className="text-sky-400 shrink-0" /> Mercado Pago
+            <CreditCard size={16} className="text-sky-400 shrink-0" /> Mercado Pago — Cobros recibidos
           </span>
           {mpData?.connected && mpData.summary && (
             <span className="text-[10px] sm:text-xs text-slate-400 font-mono">
