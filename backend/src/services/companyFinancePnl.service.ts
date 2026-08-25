@@ -1,7 +1,7 @@
 import { get, query } from '../database/db';
 import { round2 } from '../utils/companyFinanceFixed';
 import { resolveFobPriceList, type FobPriceListInfo } from '../utils/channelMarginUtils';
-import { lookupDespachoItemFob } from '../utils/despachoFob';
+import { lookupDespachoItemFobArs } from '../utils/despachoFob';
 
 const WHOLESALE_STATUSES = [
   'Confirmado',
@@ -68,7 +68,7 @@ export function fobForItem(
   productSku?: string | null,
   variantSku?: string | null
 ): number | null {
-  return lookupDespachoItemFob(info, {
+  return lookupDespachoItemFobArs(info, {
     product_id: productId,
     product_sku: productSku,
     variant_sku: variantSku,

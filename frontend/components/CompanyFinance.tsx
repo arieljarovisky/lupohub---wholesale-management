@@ -20,9 +20,11 @@ import {
   Percent,
   Landmark,
   Info,
+  Download,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
+import { exportCompanyFinanceExcel } from '../utils/companyFinanceExcel';
 
 type FinanceEntry = {
   id: string;
@@ -135,6 +137,7 @@ const CompanyFinance: React.FC = () => {
   const [fixedExpenses, setFixedExpenses] = useState<FixedExpense[]>([]);
   const [mpData, setMpData] = useState<MpData | null>(null);
   const [mpLoading, setMpLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [form, setForm] = useState({
     entryType: 'expense' as 'expense' | 'income',
     category: 'sueldo',
@@ -358,6 +361,35 @@ const CompanyFinance: React.FC = () => {
     }
   };
 
+  const handleExportExcel = async () => {
+    if (!summary) {
+      showToast('warning', 'Esperá a que cargue el resumen');
+      return;
+    }
+    setExporting(true);
+    try {
+      const list = await api.getCompanyFinanceEntries({ from: range.from, to: range.to });
+      await exportCompanyFinanceExcel({
+        summary,
+        entries: (list.entries as FinanceEntry[]).map((e) => ({
+          entryDate: e.entryDate,
+          entryType: e.entryType,
+          category: e.category,
+          amount: e.amount,
+          description: e.description,
+        })),
+        fixedExpenses,
+        mpData,
+        categoryLabel,
+      });
+      showToast('success', 'Excel descargado');
+    } catch (e: unknown) {
+      showToast('error', e instanceof Error ? e.message : 'No se pudo exportar el Excel');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const categoryLabel = (id: string) => {
     const all = [...(access?.expenseCategories || []), ...(access?.incomeCategories || [])];
     return all.find((c) => c.id === id)?.label || id;
@@ -384,6 +416,15 @@ const CompanyFinance: React.FC = () => {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            disabled={!summary || loading || exporting}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+            Excel
+          </button>
           <button
             type="button"
             onClick={openCreateFixed}

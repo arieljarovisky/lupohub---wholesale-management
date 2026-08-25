@@ -17,17 +17,24 @@ function fobArsToUsd(priceArs: number | null): number | null {
   return roundMoney(priceArs / DESPACHO_FOB_ARS_PER_USD);
 }
 
-export function lookupDespachoItemFob(
+export function lookupDespachoItemFobArs(
   info: FobPriceListInfo,
   item: { product_id?: string | null; product_sku?: string | null; variant_sku?: string | null }
 ): number | null {
   const fromProduct = lookupFobPrice(info, item.product_id, item.product_sku);
-  if (fromProduct != null) return fobArsToUsd(fromProduct);
+  if (fromProduct != null) return fromProduct;
   const variantSku = String(item.variant_sku || '').trim();
   if (!variantSku) return null;
   const base = variantSku.includes('-') ? variantSku.split('-')[0] : variantSku;
-  const fromSku = lookupFobPrice(info, null, base) ?? lookupFobPrice(info, null, variantSku);
-  return fobArsToUsd(fromSku);
+  return lookupFobPrice(info, null, base) ?? lookupFobPrice(info, null, variantSku);
+}
+
+/** FOB unitario en USD (lista en pesos ÷ 1500). Usar en despachos. */
+export function lookupDespachoItemFob(
+  info: FobPriceListInfo,
+  item: { product_id?: string | null; product_sku?: string | null; variant_sku?: string | null }
+): number | null {
+  return fobArsToUsd(lookupDespachoItemFobArs(info, item));
 }
 
 export async function loadDespachoFobList(): Promise<FobPriceListInfo> {
