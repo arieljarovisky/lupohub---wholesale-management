@@ -368,6 +368,19 @@ export type MarketingLeadMetrics = {
   };
 };
 
+export type CompanyFinanceChannelEconomics = {
+  revenue: number;
+  cogs: number;
+  fees: number;
+  units: number;
+  unitsWithFob: number;
+  orderCount: number;
+  grossProfit: number;
+  contribution: number;
+  grossMarginPct: number | null;
+  contributionMarginPct: number | null;
+};
+
 export const api = {
   login: async (email: string, password: string): Promise<{ user: User; token: string | null }> => {
     return await request<{ user: User; token: string | null }>(`/auth/login`, 'POST', { email, password });
@@ -458,21 +471,40 @@ export const api = {
   }): Promise<{
     from: string;
     to: string;
+    methodology?: {
+      wholesale: string;
+      retail: string;
+      cogs: string;
+      commissions: string;
+    };
+    fobListId?: string | null;
+    fobListName?: string | null;
     manualIncome: number;
     ordersRevenue: number;
+    wholesaleRevenueNet?: number;
+    wholesaleRevenueWithIva?: number;
+    wholesaleCreditNotes?: number;
     receiptsTotal: number;
     receiptsCount: number;
     mlSales: number;
     mlFees: number;
+    mlCogs?: number;
+    mlUnits?: number;
+    mlUnitsWithFob?: number;
     mlOrderCount: number;
     mlConnected: boolean;
     mlNote?: string;
     tnSales: number;
     tnFees: number;
+    tnCogs?: number;
+    tnUnits?: number;
+    tnUnitsWithFob?: number;
     tnOrderCount: number;
     tnConnected: boolean;
     tnNote?: string;
     channelFees: number;
+    sellerCommissions?: number;
+    sellerCommissionReceipts?: number;
     despachosCost: number;
     despachosCount: number;
     manualExpenses: number;
@@ -488,12 +520,62 @@ export const api = {
       monthsApplied: number;
       periodTotal: number;
     }>;
+    totalSales?: number;
+    totalCogs?: number;
+    grossProfit?: number;
+    grossMarginPct?: number | null;
+    commercialCosts?: number;
+    contributionMargin?: number;
+    contributionMarginPct?: number | null;
+    operatingExpenses?: number;
     totalIncome: number;
     totalExpenses: number;
     netResult: number;
+    netMarginPct?: number | null;
     profitOrLoss: 'profit' | 'loss';
     expenseCount: number;
     incomeCount: number;
+    channels?: {
+      wholesale: CompanyFinanceChannelEconomics;
+      mercadoLibre: CompanyFinanceChannelEconomics;
+      tiendaNube: CompanyFinanceChannelEconomics;
+      retail: CompanyFinanceChannelEconomics;
+      otherIncome: CompanyFinanceChannelEconomics;
+      consolidated: CompanyFinanceChannelEconomics;
+    };
+    opexByCategory?: Array<{ category: string; categoryLabel: string; total: number }>;
+    inventory?: {
+      units: number;
+      unitsWithFob: number;
+      unitsWithoutFob?: number;
+      value: number;
+      skuCount: number;
+      articleCount?: number;
+      coveragePct: number | null;
+      fobListName: string | null;
+      articles?: Array<{
+        productId: string;
+        sku: string;
+        name: string;
+        category: string;
+        units: number;
+        unitsWithFob: number;
+        fob: number | null;
+        value: number;
+      }>;
+      byCategory?: Array<{
+        category: string;
+        units: number;
+        unitsWithFob: number;
+        value: number;
+        articleCount: number;
+      }>;
+    };
+    cogsCoverage?: {
+      wholesalePct: number | null;
+      mlPct: number | null;
+      tnPct: number | null;
+    };
     invoicedTotal: number;
     invoicedNet: number;
     invoicedIva: number;
@@ -525,7 +607,7 @@ export const api = {
     if (params.to) q.set('to', params.to);
     if (params.includeOrders) q.set('includeOrders', '1');
     if (params.includeChannels === false) q.set('includeChannels', '0');
-    return await request(`/company-finance/summary?${q.toString()}`, 'GET');
+    return await request(`/company-finance/summary?${q.toString()}`, 'GET', undefined, undefined, 120000);
   },
 
   getCompanyFinanceMercadoPagoMovements: async (params: {

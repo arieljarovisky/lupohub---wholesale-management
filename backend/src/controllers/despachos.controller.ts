@@ -1,6 +1,11 @@
 import { Request, Response } from 'express';
 import { query, execute, get } from '../database/db';
 import { v4 as uuidv4 } from 'uuid';
+import {
+  applyFobToDespachoItems,
+  persistDespachoFobFromList,
+  sumItemsFob
+} from '../utils/despachoFob';
 
 const getStockTotalByProductId = async (productId: string): Promise<number> => {
   const stockRow = await get(
@@ -38,6 +43,7 @@ async function incrementVariantDepotStock(variantId: string, cantidadNum: number
 // Obtener todos los despachos
 export const getDespachos = async (req: Request, res: Response) => {
   try {
+    const fobInfo = await persistDespachoFobFromList();
     const { estado, desde, hasta, limit = '50', offset = '0' } = req.query;
     
     let whereClause = '1=1';
@@ -75,7 +81,9 @@ export const getDespachos = async (req: Request, res: Response) => {
 
     res.json({
       despachos,
-      total: countResult?.total || 0
+      total: countResult?.total || 0,
+      fob_list_id: fobInfo.id,
+      fob_list_name: fobInfo.name || null
     });
   } catch (error: any) {
     console.error('Error fetching despachos:', error);
@@ -88,6 +96,7 @@ export const getDespachoById = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
 
+    const fobInfo = await persistDespachoFobFromList(id);
     const despacho = await get(`SELECT * FROM despachos WHERE id = ?`, [id]);
     
     if (!despacho) {
@@ -95,7 +104,7 @@ export const getDespachoById = async (req: Request, res: Response) => {
     }
 
     // Obtener items del despacho (color name viene de colors, no de product_colors)
-    const items = await query(`
+    const itemsRaw = await query(`
       SELECT 
         di.*,
         p.name as product_name,
@@ -111,8 +120,14 @@ export const getDespachoById = async (req: Request, res: Response) => {
       ORDER BY di.created_at
     `, [id]);
 
+    const items = applyFobToDespachoItems(itemsRaw as Record<string, unknown>[], fobInfo);
+    const valorFob = sumItemsFob(items as Array<{ costo_linea?: number | null; precio_fob?: number | null; cantidad?: number }>);
+
     res.json({
       ...despacho,
+      valor_fob: valorFob,
+      fob_list_id: fobInfo.id,
+      fob_list_name: fobInfo.name || null,
       items
     });
   } catch (error: any) {
@@ -177,6 +192,8 @@ export const createDespacho = async (req: Request, res: Response) => {
         await execute(`UPDATE products SET ultimo_despacho_id = ?, pais_origen = ? WHERE id = ?`, [despachoId, pais_origen, item.product_id]);
       }
     }
+
+    await persistDespachoFobFromList(despachoId);
 
     res.status(201).json({ 
       message: 'Despacho creado exitosamente',
@@ -309,6 +326,8 @@ export const addDespachoItem = async (req: Request, res: Response) => {
       await execute(`UPDATE products SET ultimo_despacho_id = ?, pais_origen = ? WHERE id = ?`, [id, despacho.pais_origen, resolvedProductId]);
     }
 
+    await persistDespachoFobFromList(id);
+
     res.status(201).json({ 
       message: 'Item agregado al despacho',
       id: itemId,
@@ -326,6 +345,7 @@ export const removeDespachoItem = async (req: Request, res: Response) => {
     const { id, itemId } = req.params;
 
     await execute(`DELETE FROM despacho_items WHERE id = ? AND despacho_id = ?`, [itemId, id]);
+    await persistDespachoFobFromList(id);
 
     res.json({ message: 'Item eliminado del despacho' });
   } catch (error: any) {
@@ -414,6 +434,8 @@ export const asignarDespachoAProducto = async (req: Request, res: Response) => {
       pais,
       product.id
     ]);
+
+    await persistDespachoFobFromList(despacho.id);
 
     res.status(201).json({
       message: `Se asignó el despacho ${despacho.numero_despacho} al producto "${product.name}" (${product.sku}).`,
@@ -520,6 +542,8 @@ export const asignarDespachoATodos = async (req: Request, res: Response) => {
       ]);
     }
 
+    await persistDespachoFobFromList(despachoId);
+
     res.status(201).json({
       message: creadoNuevo
         ? `Se creó el despacho "${numero_despacho}" y se asignó a ${productos.length} producto(s).`
@@ -581,6 +605,7 @@ export const getProductosSinDespacho = async (req: Request, res: Response) => {
 // Estadísticas de despachos
 export const getDespachoStats = async (req: Request, res: Response) => {
   try {
+    const fobInfo = await persistDespachoFobFromList();
     const stats = await get(`
       SELECT 
         COUNT(*) as total_despachos,
@@ -610,7 +635,9 @@ export const getDespachoStats = async (req: Request, res: Response) => {
     res.json({
       ...stats,
       ...itemsStats,
-      por_pais: porPais
+      por_pais: porPais,
+      fob_list_id: fobInfo.id,
+      fob_list_name: fobInfo.name || null
     });
   } catch (error: any) {
     console.error('Error fetching despacho stats:', error);

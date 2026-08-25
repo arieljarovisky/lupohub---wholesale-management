@@ -17,9 +17,16 @@ import {
   Repeat,
   CreditCard,
   FileText,
+  Percent,
+  Landmark,
+  Info,
+  Download,
+  Warehouse,
+  Search,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
+import { exportCompanyFinanceExcel } from '../utils/companyFinanceExcel';
 
 type FinanceEntry = {
   id: string;
@@ -50,6 +57,63 @@ type MpData = Awaited<ReturnType<typeof api.getCompanyFinanceMercadoPagoMovement
 const fmt = (n: number) =>
   n.toLocaleString('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 });
 
+const fmtDec = (n: number) =>
+  n.toLocaleString('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+const fmtPct = (n: number | null | undefined) =>
+  n == null || !Number.isFinite(n) ? '—' : `${n.toLocaleString('es-AR', { maximumFractionDigits: 1 })}%`;
+
+const moneyClass = (n: number, invert = false) => {
+  const positive = invert ? n < 0 : n >= 0;
+  return positive ? 'text-emerald-400' : 'text-red-400';
+};
+
+type PnlLineProps = {
+  label: string;
+  value: number;
+  hint?: string;
+  indent?: number;
+  bold?: boolean;
+  section?: boolean;
+  invert?: boolean;
+  pct?: number | null;
+};
+
+const PnlLine: React.FC<PnlLineProps> = ({
+  label,
+  value,
+  hint,
+  indent = 0,
+  bold,
+  section,
+  invert,
+  pct,
+}) => (
+  <li
+    className={`flex justify-between items-start gap-3 px-4 py-2.5 ${
+      section ? 'bg-slate-800/50 border-y border-slate-700/80' : 'border-b border-slate-800/60'
+    }`}
+    style={{ paddingLeft: 16 + indent * 16 }}
+  >
+    <span className={`text-sm ${bold || section ? 'font-bold text-white' : 'text-slate-300'}`}>
+      {label}
+      {hint ? <span className="block text-[10px] font-normal text-slate-500 mt-0.5">{hint}</span> : null}
+    </span>
+    <span className="text-right shrink-0">
+      <span
+        className={`font-mono ${bold || section ? 'font-black' : ''} ${
+          invert ? 'text-red-400' : moneyClass(value)
+        }`}
+      >
+        {invert ? `−${fmt(value)}` : fmt(value)}
+      </span>
+      {pct != null && Number.isFinite(pct) ? (
+        <span className="block text-[10px] text-slate-500 font-mono">{fmtPct(pct)}</span>
+      ) : null}
+    </span>
+  </li>
+);
+
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
 const monthRange = () => {
@@ -71,7 +135,6 @@ const CompanyFinance: React.FC = () => {
   const [entries, setEntries] = useState<FinanceEntry[]>([]);
   const [range, setRange] = useState(() => monthRange());
   const [filterType, setFilterType] = useState<'all' | 'expense' | 'income'>('all');
-  const [includeOrders, setIncludeOrders] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [fixedFormOpen, setFixedFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -79,6 +142,8 @@ const CompanyFinance: React.FC = () => {
   const [fixedExpenses, setFixedExpenses] = useState<FixedExpense[]>([]);
   const [mpData, setMpData] = useState<MpData | null>(null);
   const [mpLoading, setMpLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [stockSearch, setStockSearch] = useState('');
   const [form, setForm] = useState({
     entryType: 'expense' as 'expense' | 'income',
     category: 'sueldo',
@@ -100,6 +165,18 @@ const CompanyFinance: React.FC = () => {
     return form.entryType === 'expense' ? access.expenseCategories : access.incomeCategories;
   }, [access, form.entryType]);
 
+  const warehouseArticles = useMemo(() => {
+    const list = summary?.inventory?.articles || [];
+    const q = stockSearch.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter(
+      (a) =>
+        a.sku.toLowerCase().includes(q) ||
+        a.name.toLowerCase().includes(q) ||
+        a.category.toLowerCase().includes(q)
+    );
+  }, [summary, stockSearch]);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -112,7 +189,7 @@ const CompanyFinance: React.FC = () => {
       }
       setAccess(acc);
       const [sum, list, fixed] = await Promise.all([
-        api.getCompanyFinanceSummary({ from: range.from, to: range.to, includeOrders }),
+        api.getCompanyFinanceSummary({ from: range.from, to: range.to }),
         api.getCompanyFinanceEntries({ from: range.from, to: range.to, type: filterType === 'all' ? undefined : filterType }),
         api.getCompanyFinanceFixedExpenses(),
       ]);
@@ -130,7 +207,7 @@ const CompanyFinance: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [range.from, range.to, filterType, includeOrders, showToast]);
+  }, [range.from, range.to, filterType, showToast]);
 
   useEffect(() => {
     load();
@@ -302,6 +379,35 @@ const CompanyFinance: React.FC = () => {
     }
   };
 
+  const handleExportExcel = async () => {
+    if (!summary) {
+      showToast('warning', 'Esperá a que cargue el resumen');
+      return;
+    }
+    setExporting(true);
+    try {
+      const list = await api.getCompanyFinanceEntries({ from: range.from, to: range.to });
+      await exportCompanyFinanceExcel({
+        summary,
+        entries: (list.entries as FinanceEntry[]).map((e) => ({
+          entryDate: e.entryDate,
+          entryType: e.entryType,
+          category: e.category,
+          amount: e.amount,
+          description: e.description,
+        })),
+        fixedExpenses,
+        mpData,
+        categoryLabel,
+      });
+      showToast('success', 'Excel descargado');
+    } catch (e: unknown) {
+      showToast('error', e instanceof Error ? e.message : 'No se pudo exportar el Excel');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const categoryLabel = (id: string) => {
     const all = [...(access?.expenseCategories || []), ...(access?.incomeCategories || [])];
     return all.find((c) => c.id === id)?.label || id;
@@ -316,7 +422,7 @@ const CompanyFinance: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6 max-w-6xl mx-auto pb-10">
+    <div className="space-y-6 max-w-7xl mx-auto pb-10">
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
         <div>
           <h2 className="text-2xl font-black text-white flex items-center gap-2">
@@ -324,10 +430,19 @@ const CompanyFinance: React.FC = () => {
             Resultados de la empresa
           </h2>
           <p className="text-slate-400 text-sm mt-1">
-            Recibos, ventas Mercado Libre y Tienda Nube, movimientos Mercado Pago, despachos y facturas pendientes.
+            Estado de resultados: ventas mayoristas y minoristas, costo FOB, márgenes, comisiones y gastos.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={handleExportExcel}
+            disabled={!summary || loading || exporting}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+            Excel
+          </button>
           <button
             type="button"
             onClick={openCreateFixed}
@@ -383,15 +498,6 @@ const CompanyFinance: React.FC = () => {
             <option value="income">Solo ingresos</option>
           </select>
         </div>
-        <label className="flex items-center gap-2 text-sm text-slate-300 pb-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={includeOrders}
-            onChange={(e) => setIncludeOrders(e.target.checked)}
-            className="rounded"
-          />
-          Incluir referencia pedidos mayoristas (sin facturar)
-        </label>
       </div>
 
       {loading ? (
@@ -400,41 +506,34 @@ const CompanyFinance: React.FC = () => {
         </div>
       ) : summary ? (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
             <div className="rounded-xl border border-emerald-800/40 bg-emerald-950/30 p-4">
-              <p className="text-xs text-slate-500 uppercase font-bold">Ingresos totales</p>
-              <p className="text-2xl font-black text-emerald-400 mt-1">{fmt(summary.totalIncome)}</p>
+              <p className="text-xs text-slate-500 uppercase font-bold">Ventas totales</p>
+              <p className="text-2xl font-black text-emerald-400 mt-1">
+                {fmt(summary.totalSales ?? summary.totalIncome)}
+              </p>
               <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
-                Recibos {fmt(summary.receiptsTotal ?? 0)} · ML {fmt(summary.mlSales ?? 0)} · TN{' '}
-                {fmt(summary.tnSales ?? 0)}
-                {(summary.manualIncome ?? 0) > 0 ? ` · manual ${fmt(summary.manualIncome)}` : ''}
+                Mayorista {fmt(summary.channels?.wholesale.revenue ?? summary.ordersRevenue ?? 0)} · ML{' '}
+                {fmt(summary.mlSales ?? 0)} · TN {fmt(summary.tnSales ?? 0)}
               </p>
             </div>
-            <div className="rounded-xl border border-sky-800/40 bg-sky-950/30 p-4">
+            <div className="rounded-xl border border-orange-800/40 bg-orange-950/30 p-4">
+              <p className="text-xs text-slate-500 uppercase font-bold">Costo mercadería (FOB)</p>
+              <p className="text-2xl font-black text-orange-300 mt-1">{fmt(summary.totalCogs ?? 0)}</p>
+              <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                Lista {summary.fobListName || 'FOB'} · cobertura may.{' '}
+                {fmtPct(summary.cogsCoverage?.wholesalePct)}
+              </p>
+            </div>
+            <div className="rounded-xl border border-violet-800/40 bg-violet-950/30 p-4">
               <p className="text-xs text-slate-500 uppercase font-bold flex items-center gap-1">
-                <FileText size={14} className="text-sky-400" />
-                Facturado AFIP
+                <Percent size={14} className="text-violet-400" />
+                Margen bruto
               </p>
-              <p className="text-2xl font-black text-sky-300 mt-1">
-                {fmt(summary.invoicedTotal ?? 0)}
+              <p className={`text-2xl font-black mt-1 ${moneyClass(summary.grossProfit ?? 0)}`}>
+                {fmt(summary.grossProfit ?? 0)}
               </p>
-              <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
-                {summary.invoicedCount ?? 0} factura(s) · neto {fmt(summary.invoicedNet ?? 0)} · IVA{' '}
-                {fmt(summary.invoicedIva ?? 0)}
-              </p>
-              <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
-                Mayorista {fmt(summary.invoicedWholesaleTotal ?? 0)} · ML {fmt(summary.invoicedMlTotal ?? 0)} · TN{' '}
-                {fmt(summary.invoicedTnTotal ?? 0)}
-              </p>
-            </div>
-            <div className="rounded-xl border border-red-800/40 bg-red-950/30 p-4">
-              <p className="text-xs text-slate-500 uppercase font-bold">Gastos totales</p>
-              <p className="text-2xl font-black text-red-400 mt-1">{fmt(summary.totalExpenses)}</p>
-              <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
-                Despachos {fmt(summary.despachosCost ?? 0)} · Fijos {fmt(summary.fixedMonthlyExpenses ?? 0)} · ML{' '}
-                {fmt(summary.mlFees ?? 0)} · TN {fmt(summary.tnFees ?? 0)}
-                {(summary.manualExpenses ?? 0) > 0 ? ` · otros ${fmt(summary.manualExpenses)}` : ''}
-              </p>
+              <p className="text-[10px] text-slate-500 mt-1">{fmtPct(summary.grossMarginPct)} sobre ventas</p>
             </div>
             <div
               className={`rounded-xl border p-4 ${
@@ -451,159 +550,470 @@ const CompanyFinance: React.FC = () => {
                 )}
                 Resultado neto
               </p>
-              <p
-                className={`text-2xl font-black mt-1 ${
-                  summary.netResult >= 0 ? 'text-emerald-400' : 'text-red-400'
-                }`}
-              >
+              <p className={`text-2xl font-black mt-1 ${moneyClass(summary.netResult)}`}>
                 {fmt(summary.netResult)}
               </p>
               <p className="text-[10px] text-slate-500 mt-1">
-                {summary.netResult >= 0 ? 'Ganancia del período' : 'Pérdida del período'}
+                {fmtPct(summary.netMarginPct)} ·{' '}
+                {summary.netResult >= 0 ? 'ganancia del período' : 'pérdida del período'}
               </p>
             </div>
             <div className="rounded-xl border border-amber-800/40 bg-amber-950/20 p-4">
               <p className="text-xs text-slate-500 uppercase font-bold flex items-center gap-1">
                 <AlertCircle size={14} className="text-amber-400" />
-                Pagos pendientes
+                Por cobrar
               </p>
               <p className="text-2xl font-black text-amber-300 mt-1">
                 {fmt(summary.pendingInvoicesTotal ?? 0)}
               </p>
               <p className="text-[10px] text-slate-500 mt-1">
-                {summary.pendingInvoicesCount ?? 0} factura(s) sin cobrar
+                {summary.pendingInvoicesCount ?? 0} factura(s) mayoristas sin cobrar
+              </p>
+            </div>
+            <div className="rounded-xl border border-cyan-800/40 bg-cyan-950/20 p-4">
+              <p className="text-xs text-slate-500 uppercase font-bold flex items-center gap-1">
+                <Warehouse size={14} className="text-cyan-400" />
+                Depósito FOB
+              </p>
+              <p className="text-2xl font-black text-cyan-300 mt-1">
+                {fmt(summary.inventory?.value ?? 0)}
+              </p>
+              <p className="text-[10px] text-slate-500 mt-1">
+                {(summary.inventory?.units ?? 0).toLocaleString('es-AR')} u. ·{' '}
+                {summary.inventory?.articleCount ?? summary.inventory?.skuCount ?? 0} art.
               </p>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="rounded-xl border border-emerald-800/30 bg-slate-900/40 overflow-hidden">
-              <div className="px-4 py-3 bg-emerald-950/40 border-b border-emerald-900/40 text-sm font-bold text-emerald-300 flex items-center gap-2">
-                <ArrowUpCircle size={16} /> Ganancias del período
-              </div>
-              <ul className="divide-y divide-slate-800/80 text-sm">
-                <li className="flex justify-between items-center p-3">
-                  <span className="text-slate-300 flex items-center gap-2">
-                    <Receipt size={14} className="text-emerald-500" />
-                    Recibos ({summary.receiptsCount ?? 0})
-                  </span>
-                  <span className="font-mono text-emerald-400">{fmt(summary.receiptsTotal ?? 0)}</span>
-                </li>
-                <li className="flex justify-between items-center p-3">
-                  <span className="text-slate-300 flex items-center gap-2">
-                    <ShoppingBag size={14} className="text-yellow-500" />
-                    Mercado Libre ({summary.mlOrderCount ?? 0} órdenes)
-                  </span>
-                  <span className="font-mono text-emerald-400">{fmt(summary.mlSales ?? 0)}</span>
-                </li>
-                <li className="flex justify-between items-center p-3">
-                  <span className="text-slate-300 flex items-center gap-2">
-                    <Store size={14} className="text-violet-400" />
-                    Tienda Nube ({summary.tnOrderCount ?? 0} órdenes)
-                  </span>
-                  <span className="font-mono text-emerald-400">{fmt(summary.tnSales ?? 0)}</span>
-                </li>
-                {(summary.manualIncome ?? 0) > 0 && (
-                  <li className="flex justify-between items-center p-3">
-                    <span className="text-slate-300">Ingresos manuales</span>
-                    <span className="font-mono text-emerald-400">{fmt(summary.manualIncome)}</span>
-                  </li>
-                )}
-                {includeOrders && (summary.ordersRevenue ?? 0) > 0 && (
-                  <li className="flex justify-between items-center p-3 text-slate-500">
-                    <span>Ref. pedidos mayoristas</span>
-                    <span className="font-mono">{fmt(summary.ordersRevenue)}</span>
-                  </li>
-                )}
-              </ul>
-              {(summary.mlNote || summary.tnNote) && (
-                <p className="px-4 pb-3 text-[10px] text-slate-600">
-                  {summary.mlNote}
-                  {summary.mlNote && summary.tnNote ? ' · ' : ''}
-                  {summary.tnNote}
-                </p>
-              )}
+          <div className="rounded-xl border border-slate-700 overflow-hidden bg-slate-900/40">
+            <div className="px-4 py-3 bg-slate-800/80 border-b border-slate-700 text-sm font-bold text-white flex items-center gap-2">
+              <Landmark size={16} className="text-violet-400" />
+              Estado de resultados
             </div>
+            <ul>
+              <PnlLine
+                section
+                bold
+                label="Ventas"
+                value={summary.totalSales ?? summary.totalIncome}
+              />
+              <PnlLine
+                indent={1}
+                label="Mayorista"
+                value={summary.channels?.wholesale.revenue ?? summary.ordersRevenue ?? 0}
+                hint={`${summary.channels?.wholesale.orderCount ?? 0} pedidos · sin IVA · IVA incl. ${fmt(summary.wholesaleRevenueWithIva ?? 0)}`}
+              />
+              <PnlLine
+                indent={1}
+                label="Mercado Libre (minorista)"
+                value={summary.mlSales ?? 0}
+                hint={`${summary.mlOrderCount ?? 0} órdenes pagadas`}
+              />
+              <PnlLine
+                indent={1}
+                label="Tienda Nube (minorista)"
+                value={summary.tnSales ?? 0}
+                hint={`${summary.tnOrderCount ?? 0} órdenes pagadas`}
+              />
+              {(summary.manualIncome ?? 0) > 0 && (
+                <PnlLine indent={1} label="Otros ingresos" value={summary.manualIncome} />
+              )}
+              <PnlLine
+                section
+                invert
+                label="Costo de mercadería vendida (FOB)"
+                value={summary.totalCogs ?? 0}
+                hint={summary.methodology?.cogs}
+              />
+              <PnlLine
+                indent={1}
+                invert
+                label="CMV mayorista"
+                value={summary.channels?.wholesale.cogs ?? 0}
+                hint={`${summary.channels?.wholesale.unitsWithFob ?? 0} / ${summary.channels?.wholesale.units ?? 0} u. con FOB (${fmtPct(summary.cogsCoverage?.wholesalePct)})`}
+              />
+              <PnlLine
+                indent={1}
+                invert
+                label="CMV Mercado Libre"
+                value={summary.channels?.mercadoLibre.cogs ?? summary.mlCogs ?? 0}
+                hint={`${summary.mlUnitsWithFob ?? 0} / ${summary.mlUnits ?? 0} u. (${fmtPct(summary.cogsCoverage?.mlPct)})`}
+              />
+              <PnlLine
+                indent={1}
+                invert
+                label="CMV Tienda Nube"
+                value={summary.channels?.tiendaNube.cogs ?? summary.tnCogs ?? 0}
+                hint={`${summary.tnUnitsWithFob ?? 0} / ${summary.tnUnits ?? 0} u. (${fmtPct(summary.cogsCoverage?.tnPct)})`}
+              />
+              <PnlLine
+                section
+                bold
+                label="Margen bruto"
+                value={summary.grossProfit ?? 0}
+                pct={summary.grossMarginPct}
+              />
+              <PnlLine
+                section
+                invert
+                label="Costos de canal y comerciales"
+                value={summary.commercialCosts ?? 0}
+              />
+              <PnlLine indent={1} invert label="Comisiones Mercado Libre" value={summary.mlFees ?? 0} />
+              <PnlLine indent={1} invert label="Comisiones Tienda Nube" value={summary.tnFees ?? 0} />
+              <PnlLine
+                indent={1}
+                invert
+                label="Comisiones vendedores"
+                value={summary.sellerCommissions ?? 0}
+                hint={`Sobre ${summary.sellerCommissionReceipts ?? 0} recibos cobrados (neto de IVA)`}
+              />
+              <PnlLine
+                section
+                bold
+                label="Margen de contribución"
+                value={summary.contributionMargin ?? 0}
+                pct={summary.contributionMarginPct}
+              />
+              <PnlLine
+                section
+                invert
+                label="Gastos operativos"
+                value={summary.operatingExpenses ?? 0}
+              />
+              {(summary.opexByCategory || []).map((row) => (
+                <PnlLine
+                  key={row.category}
+                  indent={1}
+                  invert
+                  label={row.categoryLabel}
+                  value={row.total}
+                />
+              ))}
+              {(summary.opexByCategory || []).length === 0 && (
+                <>
+                  <PnlLine
+                    indent={1}
+                    invert
+                    label="Gastos fijos mensuales"
+                    value={summary.fixedMonthlyExpenses ?? 0}
+                  />
+                  <PnlLine
+                    indent={1}
+                    invert
+                    label="Gastos puntuales"
+                    value={summary.manualExpenses ?? 0}
+                  />
+                </>
+              )}
+              <PnlLine
+                section
+                bold
+                label="Resultado neto del período"
+                value={summary.netResult}
+                pct={summary.netMarginPct}
+              />
+            </ul>
+            <p className="px-4 py-3 text-[10px] text-slate-500 leading-relaxed flex gap-2">
+              <Info size={12} className="shrink-0 mt-0.5 text-slate-600" />
+              <span>
+                {summary.methodology?.wholesale} {summary.methodology?.retail}{' '}
+                {summary.methodology?.commissions} Los despachos de importación y los recibos cobrados
+                no entran al resultado: figuran abajo como compras de stock y cobranza.
+              </span>
+            </p>
+          </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+            {[
+              {
+                title: 'Mayorista',
+                icon: <Receipt size={16} className="text-emerald-400" />,
+                ch: summary.channels?.wholesale,
+                extra: `IVA incl. ${fmt(summary.wholesaleRevenueWithIva ?? 0)}`,
+              },
+              {
+                title: 'Mercado Libre',
+                icon: <ShoppingBag size={16} className="text-yellow-500" />,
+                ch: summary.channels?.mercadoLibre,
+                extra: summary.mlNote,
+              },
+              {
+                title: 'Tienda Nube',
+                icon: <Store size={16} className="text-violet-400" />,
+                ch: summary.channels?.tiendaNube,
+                extra: summary.tnNote,
+              },
+              {
+                title: 'Minorista (ML + TN)',
+                icon: <ShoppingBag size={16} className="text-sky-400" />,
+                ch: summary.channels?.retail,
+                extra: 'Canales de venta al público',
+              },
+            ].map((card) => (
+              <div key={card.title} className="rounded-xl border border-slate-700 bg-slate-900/40 overflow-hidden">
+                <div className="px-4 py-3 border-b border-slate-800 text-sm font-bold text-white flex items-center gap-2">
+                  {card.icon}
+                  {card.title}
+                </div>
+                <ul className="text-sm divide-y divide-slate-800/80">
+                  <li className="flex justify-between p-3">
+                    <span className="text-slate-400">Ventas</span>
+                    <span className="font-mono text-emerald-400">{fmt(card.ch?.revenue ?? 0)}</span>
+                  </li>
+                  <li className="flex justify-between p-3">
+                    <span className="text-slate-400">Costo FOB</span>
+                    <span className="font-mono text-red-400">{fmt(card.ch?.cogs ?? 0)}</span>
+                  </li>
+                  <li className="flex justify-between p-3">
+                    <span className="text-slate-400">Margen bruto</span>
+                    <span className={`font-mono ${moneyClass(card.ch?.grossProfit ?? 0)}`}>
+                      {fmt(card.ch?.grossProfit ?? 0)}
+                      <span className="block text-[10px] text-slate-500 text-right">
+                        {fmtPct(card.ch?.grossMarginPct)}
+                      </span>
+                    </span>
+                  </li>
+                  <li className="flex justify-between p-3">
+                    <span className="text-slate-400">Comisiones canal</span>
+                    <span className="font-mono text-red-400">{fmt(card.ch?.fees ?? 0)}</span>
+                  </li>
+                  <li className="flex justify-between p-3">
+                    <span className="text-slate-300 font-bold">Contribución</span>
+                    <span className={`font-mono font-black ${moneyClass(card.ch?.contribution ?? 0)}`}>
+                      {fmt(card.ch?.contribution ?? 0)}
+                      <span className="block text-[10px] text-slate-500 font-normal text-right">
+                        {fmtPct(card.ch?.contributionMarginPct)}
+                      </span>
+                    </span>
+                  </li>
+                </ul>
+                {card.extra ? (
+                  <p className="px-4 pb-3 text-[10px] text-slate-600">{card.extra}</p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="rounded-xl border border-sky-800/30 bg-slate-900/40 overflow-hidden">
               <div className="px-4 py-3 bg-sky-950/40 border-b border-sky-900/40 text-sm font-bold text-sky-300 flex items-center gap-2">
-                <FileText size={16} /> Facturado AFIP del período
+                <FileText size={16} /> Facturado AFIP
               </div>
               <ul className="divide-y divide-slate-800/80 text-sm">
                 <li className="flex justify-between items-center p-3">
-                  <span className="text-slate-300 flex items-center gap-2">
-                    <Receipt size={14} className="text-sky-400" />
-                    Mayorista / LupoHub ({summary.invoicedWholesaleCount ?? 0})
+                  <span className="text-slate-300">Total con IVA</span>
+                  <span className="font-mono text-sky-300">{fmt(summary.invoicedTotal ?? 0)}</span>
+                </li>
+                <li className="flex justify-between items-center p-3">
+                  <span className="text-slate-400">Neto / IVA 21%</span>
+                  <span className="font-mono text-slate-300">
+                    {fmt(summary.invoicedNet ?? 0)} · {fmt(summary.invoicedIva ?? 0)}
                   </span>
+                </li>
+                <li className="flex justify-between items-center p-3">
+                  <span className="text-slate-300">Mayorista ({summary.invoicedWholesaleCount ?? 0})</span>
                   <span className="font-mono text-sky-300">{fmt(summary.invoicedWholesaleTotal ?? 0)}</span>
                 </li>
                 <li className="flex justify-between items-center p-3">
-                  <span className="text-slate-300 flex items-center gap-2">
-                    <ShoppingBag size={14} className="text-yellow-500" />
-                    Mercado Libre ({summary.invoicedMlCount ?? 0})
-                  </span>
+                  <span className="text-slate-300">Mercado Libre ({summary.invoicedMlCount ?? 0})</span>
                   <span className="font-mono text-sky-300">{fmt(summary.invoicedMlTotal ?? 0)}</span>
                 </li>
                 <li className="flex justify-between items-center p-3">
-                  <span className="text-slate-300 flex items-center gap-2">
-                    <Store size={14} className="text-violet-400" />
-                    Tienda Nube ({summary.invoicedTnCount ?? 0})
-                  </span>
+                  <span className="text-slate-300">Tienda Nube ({summary.invoicedTnCount ?? 0})</span>
                   <span className="font-mono text-sky-300">{fmt(summary.invoicedTnTotal ?? 0)}</span>
                 </li>
               </ul>
-              <p className="px-4 pb-3 text-[10px] text-slate-600 leading-relaxed">
-                Comprobantes con CAE emitidos en el período (mayorista + facturación masiva ML/TN). Neto con IVA 21%.
-              </p>
             </div>
 
-            <div className="rounded-xl border border-red-800/30 bg-slate-900/40 overflow-hidden">
-              <div className="px-4 py-3 bg-red-950/40 border-b border-red-900/40 text-sm font-bold text-red-300 flex items-center gap-2">
-                <ArrowDownCircle size={16} /> Gastos del período
+            <div className="rounded-xl border border-emerald-800/30 bg-slate-900/40 overflow-hidden">
+              <div className="px-4 py-3 bg-emerald-950/40 border-b border-emerald-900/40 text-sm font-bold text-emerald-300 flex items-center gap-2">
+                <Wallet size={16} /> Cobranza y caja
               </div>
               <ul className="divide-y divide-slate-800/80 text-sm">
                 <li className="flex justify-between items-center p-3">
-                  <span className="text-slate-300 flex items-center gap-2">
-                    <Package size={14} className="text-orange-400" />
-                    Despachos importación ({summary.despachosCount ?? 0})
+                  <span className="text-slate-300">Recibos cobrados ({summary.receiptsCount ?? 0})</span>
+                  <span className="font-mono text-emerald-400">{fmt(summary.receiptsTotal ?? 0)}</span>
+                </li>
+                <li className="flex justify-between items-center p-3">
+                  <span className="text-slate-300">Ventas mayoristas (devengado)</span>
+                  <span className="font-mono text-slate-200">
+                    {fmt(summary.channels?.wholesale.revenue ?? 0)}
                   </span>
-                  <span className="font-mono text-red-400">{fmt(summary.despachosCost ?? 0)}</span>
                 </li>
                 <li className="flex justify-between items-center p-3">
-                  <span className="text-slate-300">Comisiones Mercado Libre</span>
-                  <span className="font-mono text-red-400">{fmt(summary.mlFees ?? 0)}</span>
-                </li>
-                <li className="flex justify-between items-center p-3">
-                  <span className="text-slate-300">Comisiones Tienda Nube</span>
-                  <span className="font-mono text-red-400">{fmt(summary.tnFees ?? 0)}</span>
-                </li>
-                <li className="flex justify-between items-center p-3">
-                  <span className="text-slate-300 flex items-center gap-2">
-                    <Repeat size={14} className="text-orange-400" />
-                    Gastos fijos mensuales
-                    {(summary.monthsInPeriod ?? 1) > 1 && (
-                      <span className="text-[10px] text-slate-600">
-                        ({summary.monthsInPeriod} meses)
-                      </span>
-                    )}
+                  <span className="text-slate-400 text-xs">Diferencia cobrado vs vendido</span>
+                  <span
+                    className={`font-mono ${moneyClass(
+                      (summary.receiptsTotal ?? 0) - (summary.channels?.wholesale.revenue ?? 0)
+                    )}`}
+                  >
+                    {fmt((summary.receiptsTotal ?? 0) - (summary.channels?.wholesale.revenue ?? 0))}
                   </span>
-                  <span className="font-mono text-red-400">{fmt(summary.fixedMonthlyExpenses ?? 0)}</span>
                 </li>
-                {(summary.fixedMonthlySubtotal ?? 0) > 0 && (
-                  <li className="px-3 pb-2 text-[10px] text-slate-600">
-                    Base mensual activa: {fmt(summary.fixedMonthlySubtotal ?? 0)}/mes
-                  </li>
-                )}
-                {(summary.manualExpenses ?? 0) > 0 && (
-                  <li className="flex justify-between items-center p-3">
-                    <span className="text-slate-300">Gastos operativos manuales</span>
-                    <span className="font-mono text-red-400">{fmt(summary.manualExpenses)}</span>
-                  </li>
-                )}
               </ul>
               <p className="px-4 pb-3 text-[10px] text-slate-600">
-                {summary.expenseCount} gasto(s) manual(es) en el período
+                Los recibos son plata que entra; las ventas mayoristas son lo facturable del período.
               </p>
+            </div>
+
+            <div className="rounded-xl border border-orange-800/30 bg-slate-900/40 overflow-hidden">
+              <div className="px-4 py-3 bg-orange-950/40 border-b border-orange-900/40 text-sm font-bold text-orange-300 flex items-center gap-2">
+                <Package size={16} /> Stock y compras
+              </div>
+              <ul className="divide-y divide-slate-800/80 text-sm">
+                <li className="flex justify-between items-center p-3">
+                  <span className="text-slate-300">Inventario a FOB</span>
+                  <span className="font-mono text-orange-300">{fmt(summary.inventory?.value ?? 0)}</span>
+                </li>
+                <li className="flex justify-between items-center p-3">
+                  <span className="text-slate-400">Unidades en stock</span>
+                  <span className="font-mono text-slate-300">
+                    {(summary.inventory?.unitsWithFob ?? 0).toLocaleString('es-AR')} /{' '}
+                    {(summary.inventory?.units ?? 0).toLocaleString('es-AR')}
+                  </span>
+                </li>
+                <li className="flex justify-between items-center p-3">
+                  <span className="text-slate-300">
+                    Despachos del período ({summary.despachosCount ?? 0})
+                  </span>
+                  <span className="font-mono text-orange-300">{fmt(summary.despachosCost ?? 0)}</span>
+                </li>
+              </ul>
+              <p className="px-4 pb-3 text-[10px] text-slate-600">
+                Los despachos son compras de mercadería (activo), no un gasto del resultado. El gasto es el CMV al vender.
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-cyan-800/40 overflow-hidden bg-slate-900/40">
+            <div className="px-4 py-3 bg-cyan-950/40 border-b border-cyan-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-bold text-cyan-200 flex items-center gap-2">
+                  <Warehouse size={16} /> Mercadería de depósito valorizada
+                </p>
+                <p className="text-[10px] text-slate-500 mt-0.5">
+                  Stock actual a FOB ({summary.inventory?.fobListName || 'lista FOB'}). No es del período: es lo que hay hoy en depósito.
+                </p>
+              </div>
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                <input
+                  type="search"
+                  value={stockSearch}
+                  onChange={(e) => setStockSearch(e.target.value)}
+                  placeholder="Buscar SKU, artículo o rubro"
+                  className="rounded-lg bg-slate-900 border border-slate-600 text-white text-sm pl-8 pr-3 py-2 w-full sm:w-64"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-slate-800/80 border-b border-slate-800 text-center text-xs">
+              <div className="bg-slate-900/60 p-3">
+                <p className="text-slate-500 uppercase font-bold text-[10px]">Valor FOB</p>
+                <p className="font-mono text-cyan-300 mt-1 text-lg font-black">{fmt(summary.inventory?.value ?? 0)}</p>
+              </div>
+              <div className="bg-slate-900/60 p-3">
+                <p className="text-slate-500 uppercase font-bold text-[10px]">Unidades</p>
+                <p className="font-mono text-white mt-1 text-lg font-black">
+                  {(summary.inventory?.units ?? 0).toLocaleString('es-AR')}
+                </p>
+              </div>
+              <div className="bg-slate-900/60 p-3">
+                <p className="text-slate-500 uppercase font-bold text-[10px]">Artículos</p>
+                <p className="font-mono text-white mt-1 text-lg font-black">
+                  {(summary.inventory?.articleCount ?? summary.inventory?.skuCount ?? 0).toLocaleString('es-AR')}
+                </p>
+              </div>
+              <div className="bg-slate-900/60 p-3">
+                <p className="text-slate-500 uppercase font-bold text-[10px]">Con precio FOB</p>
+                <p className="font-mono text-emerald-400 mt-1 text-lg font-black">
+                  {fmtPct(summary.inventory?.coveragePct)}
+                </p>
+                {(summary.inventory?.unitsWithoutFob ?? 0) > 0 && (
+                  <p className="text-[10px] text-amber-400/80 mt-0.5">
+                    {(summary.inventory?.unitsWithoutFob ?? 0).toLocaleString('es-AR')} u. sin FOB
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {(summary.inventory?.byCategory?.length ?? 0) > 0 && (
+              <div className="overflow-x-auto border-b border-slate-800">
+                <table className="w-full text-sm min-w-[640px]">
+                  <thead>
+                    <tr className="text-left text-slate-500 text-[10px] uppercase border-b border-slate-800">
+                      <th className="p-3">Rubro</th>
+                      <th className="p-3 text-right">Artículos</th>
+                      <th className="p-3 text-right">Unidades</th>
+                      <th className="p-3 text-right">Valor FOB</th>
+                      <th className="p-3 text-right">% depósito</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {summary.inventory?.byCategory?.map((row) => (
+                      <tr key={row.category} className="border-b border-slate-800/60">
+                        <td className="p-3 text-slate-200">{row.category}</td>
+                        <td className="p-3 text-right font-mono text-slate-400">{row.articleCount}</td>
+                        <td className="p-3 text-right font-mono text-slate-300">
+                          {row.units.toLocaleString('es-AR')}
+                        </td>
+                        <td className="p-3 text-right font-mono text-cyan-300">{fmt(row.value)}</td>
+                        <td className="p-3 text-right font-mono text-slate-500">
+                          {(summary.inventory?.value ?? 0) > 0
+                            ? fmtPct((row.value / (summary.inventory?.value ?? 1)) * 100)
+                            : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="overflow-x-auto max-h-[28rem]">
+              <table className="w-full text-sm min-w-[720px]">
+                <thead className="sticky top-0 bg-slate-900/95 z-10">
+                  <tr className="text-left text-slate-500 text-[10px] uppercase border-b border-slate-800">
+                    <th className="p-3">SKU</th>
+                    <th className="p-3">Artículo</th>
+                    <th className="p-3">Rubro</th>
+                    <th className="p-3 text-right">Unidades</th>
+                    <th className="p-3 text-right">FOB unit.</th>
+                    <th className="p-3 text-right">Valor FOB</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {warehouseArticles.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="p-8 text-center text-slate-500 text-sm">
+                        {stockSearch.trim()
+                          ? 'No hay artículos que coincidan con la búsqueda.'
+                          : 'No hay stock en depósito.'}
+                      </td>
+                    </tr>
+                  ) : (
+                    warehouseArticles.map((row) => (
+                      <tr key={row.productId} className="border-b border-slate-800/60 hover:bg-slate-800/30">
+                        <td className="p-3 font-mono text-slate-400 text-xs">{row.sku}</td>
+                        <td className="p-3 text-slate-200">{row.name}</td>
+                        <td className="p-3 text-slate-500">{row.category}</td>
+                        <td className="p-3 text-right font-mono text-slate-300">
+                          {row.units.toLocaleString('es-AR')}
+                          {row.units > row.unitsWithFob ? (
+                            <span className="block text-[10px] text-amber-400/80">
+                              {row.unitsWithFob.toLocaleString('es-AR')} con FOB
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="p-3 text-right font-mono text-slate-400">
+                          {row.fob != null ? fmtDec(row.fob) : '—'}
+                        </td>
+                        <td className="p-3 text-right font-mono font-bold text-cyan-300">{fmt(row.value)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
 
