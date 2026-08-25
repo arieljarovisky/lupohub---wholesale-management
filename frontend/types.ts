@@ -242,6 +242,11 @@ export interface Order {
   includeInSaldo?: boolean;
   /** Si true, este pedido no debe impactar stock (facturación administrativa). */
   noStockImpact?: boolean;
+  /**
+   * Venta showroom / mostrador: al crear, queda Controlado con picked=qty, pagado y stock descontado
+   * (sin pasar por picking de depósito) para poder emitir AFIP de inmediato.
+   */
+  showroomSale?: boolean;
   /** Descontado en inventario (movimiento PEDIDO_MAYORISTA). */
   mayoristaStockApplied?: boolean;
   /** Stock ya devuelto al inventario (restauración manual o cancelación). */

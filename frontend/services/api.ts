@@ -1704,6 +1704,11 @@ export const api = {
     return await request<any>(`/orders/${orderId}/emitir-factura`, 'POST', body ?? {}, undefined, AFIP_EMIT_TIMEOUT_MS);
   },
 
+  /** Marca pedido como showroom listo para AFIP (picked=qty, Controlado, pagado, stock). */
+  markShowroomReady: async (orderId: string): Promise<Order> => {
+    return await request<Order>(`/orders/${encodeURIComponent(orderId)}/mark-showroom-ready`, 'POST');
+  },
+
   /** Obtiene los datos de la factura AFIP asociada a un pedido (si existe). */
   getOrderInvoice: async (
     orderId: string

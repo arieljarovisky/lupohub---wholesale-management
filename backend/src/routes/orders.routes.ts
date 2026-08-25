@@ -3,6 +3,7 @@ import {
   getOrders,
   getLinkableOrdersForPayment,
   createOrder,
+  markShowroomReady,
   updateOrderStatus,
   updateOrder,
   deleteOrder,
@@ -34,6 +35,7 @@ router.get('/', getOrders);
 router.get('/linkable-for-payment', authMiddleware, getLinkableOrdersForPayment);
 router.post('/import-matrix', authMiddleware, importOrdersFromMatrix);
 router.post('/', createOrder);
+router.post('/:id/mark-showroom-ready', authMiddleware, markShowroomReady);
 router.patch('/:id/payment-status', authMiddleware, patchOrderPaymentStatus);
 router.patch('/:id/include-in-saldo', authMiddleware, patchOrderIncludeInSaldo);
 router.post('/:id/apply-mayorista-stock', authMiddleware, applyMayoristaStockDeduction);

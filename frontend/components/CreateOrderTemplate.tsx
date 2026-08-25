@@ -292,6 +292,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const [occasionalCuit, setOccasionalCuit] = useState('');
   const [occasionalCondicionIva, setOccasionalCondicionIva] = useState('Consumidor Final');
   const [occasionalEmail, setOccasionalEmail] = useState('');
+  /** Entrega inmediata: listo para AFIP sin picking. Por defecto activo con comprador sin ficha. */
+  const [showroomSale, setShowroomSale] = useState(false);
   const clientDropdownRef = useRef<HTMLDivElement>(null);
   const matrixFileRef = useRef<HTMLInputElement>(null);
   const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0]);
@@ -1169,13 +1171,16 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       sellerId: initialOrder?.sellerId ?? duplicateFromOrder?.sellerId ?? sellerId ?? null,
       items: items.map(i => ({ ...i, productId: undefined })),
       total,
-      // Solo ADMIN/Depósito pueden dejarlo confirmado directo.
-      status:
-        (role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO)
+      status: showroomSale
+        ? OrderStatus.CONTROLLED
+        : (role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO)
           ? OrderStatus.CONFIRMED
           : OrderStatus.PENDING_ADMIN_CONFIRMATION,
       date: orderDate,
       notes: orderNotes.trim() || undefined,
+      ...(showroomSale
+        ? { showroomSale: true as const, paymentStatus: 'pagado' as const }
+        : {}),
     };
   };
 
@@ -1446,6 +1451,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                     setSelectedCustomerId('');
                     setClientFilter('');
                     setClientDropdownOpen(false);
+                    setShowroomSale(true);
                   } else {
                     setOccasionalName('');
                     setOccasionalCuit('');
@@ -1459,7 +1465,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                     : 'border-slate-600 text-slate-400 hover:text-slate-200 hover:border-slate-500'
                 }`}
               >
-                {occasionalMode ? 'Elegir de la lista' : 'Sin ficha / ocasional'}
+                {occasionalMode ? 'Elegir de la lista' : 'Showroom / sin ficha'}
               </button>
             )}
           </div>
@@ -1547,6 +1553,20 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
                 </ul>
               )}
             </div>
+          )}
+          {!isCustomerLocked && !initialOrder && !readOnly && (
+            <label className="mt-1.5 flex items-start gap-2 text-[10px] text-slate-400 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                className="mt-0.5 rounded border-slate-600 bg-slate-800 text-amber-500 shrink-0"
+                checked={showroomSale}
+                onChange={(e) => setShowroomSale(e.target.checked)}
+              />
+              <span>
+                <span className="font-semibold text-slate-300">Venta showroom</span>
+                {' — '}entrega inmediata, marcada pagada y lista para facturar AFIP (sin picking de depósito).
+              </span>
+            </label>
           )}
         </div>
 
@@ -1873,7 +1893,12 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
               onClick={handleSave}
               className="w-full sm:w-auto sm:min-w-[200px] shrink-0 h-10 px-5 rounded-lg font-bold flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 text-white text-sm shadow-md shadow-blue-900/30 disabled:opacity-60 transition touch-manipulation"
             >
-              <Save size={18} /> {savingOrder ? 'Guardando...' : 'Confirmar pedido'}
+              <Save size={18} />{' '}
+              {savingOrder
+                ? 'Guardando...'
+                : showroomSale
+                  ? 'Confirmar venta showroom'
+                  : 'Confirmar pedido'}
             </button>
           </div>
         </footer>

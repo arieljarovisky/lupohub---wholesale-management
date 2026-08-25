@@ -394,6 +394,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     logoUrl: string;
   } | null>(null);
   const [emitiendoFacturaId, setEmitiendoFacturaId] = useState<string | null>(null);
+  const [markingShowroomId, setMarkingShowroomId] = useState<string | null>(null);
   const [applyingMayoristaStockId, setApplyingMayoristaStockId] = useState<string | null>(null);
   const [restoringMayoristaStockId, setRestoringMayoristaStockId] = useState<string | null>(null);
   const [showEmitirFacturaModal, setShowEmitirFacturaModal] = useState(false);
@@ -2175,8 +2176,48 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   )}
                   {afipConfigured && canEmitirFactura && !order.invoice && (() => {
                     const tipoFactura = getTipoFacturaParaCliente(order);
+                    const listoAfip = orderPuedeEmitirFacturaTrasPicking(order);
                     return (
                     <>
+                      {!listoAfip && order.status !== OrderStatus.CANCELLED && (
+                        <OrderCardActionButton
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            showConfirm({
+                              title: 'Venta showroom',
+                              message:
+                                '¿Marcar este pedido como entrega inmediata? Se toma toda la cantidad pedida como entregada, se descuenta stock, queda pagado y listo para emitir AFIP (sin picking de depósito).',
+                              confirmLabel: 'Listo para facturar',
+                              onConfirm: () => {
+                                setMarkingShowroomId(order.id);
+                                api
+                                  .markShowroomReady(order.id)
+                                  .then(() => {
+                                    showToast('success', 'Pedido listo para facturar (showroom).');
+                                    refreshOrders?.();
+                                  })
+                                  .catch((err: any) =>
+                                    showToast(
+                                      'error',
+                                      err?.message || err?.response?.data?.message || 'No se pudo marcar showroom'
+                                    )
+                                  )
+                                  .finally(() => setMarkingShowroomId(null));
+                              },
+                            });
+                          }}
+                          disabled={!!markingShowroomId}
+                          title="Showroom: saltear picking y dejar listo para AFIP"
+                          icon={
+                            markingShowroomId === order.id ? (
+                              <Clock size={16} className="animate-pulse" />
+                            ) : (
+                              <PackageCheck size={16} />
+                            )
+                          }
+                          label="Showroom"
+                        />
+                      )}
                       <OrderCardActionButton
                         onClick={(e) => {
                           e.stopPropagation();
@@ -2189,10 +2230,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                           setEmitirFacturaTransporteId(pickInitialTransporteId(manualFacturaDataByOrder[order.id], optsEmit));
                           setShowEmitirFacturaModal(true);
                         }}
-                        disabled={!!emitiendoFacturaId || !orderPuedeEmitirFacturaTrasPicking(order)}
+                        disabled={!!emitiendoFacturaId || !listoAfip}
                         title={
-                          !orderPuedeEmitirFacturaTrasPicking(order)
-                            ? 'Completá picking y pasá el pedido a control antes de emitir AFIP'
+                          !listoAfip
+                            ? 'Completá picking o usá «Showroom» para venta de mostrador'
                             : `Emitir factura AFIP (Factura ${tipoFactura} según el cliente)`
                         }
                         icon={emitiendoFacturaId === order.id ? <Clock size={16} className="animate-pulse" /> : <Receipt size={16} />}
@@ -2598,10 +2639,49 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-2xl p-6" onClick={e => e.stopPropagation()}>
             <h3 className="text-lg font-bold text-white mb-1">Emitir factura electrónica AFIP</h3>
             <p className="text-xs text-sky-200/95 mb-3 rounded-lg border border-sky-800/50 bg-sky-950/35 px-3 py-2 leading-snug">
-              Solo podés emitir después del picking: el pedido debe estar en <strong className="text-white">Falta controlar</strong>,{' '}
-              <strong className="text-white">Controlado</strong> o <strong className="text-white">Despachado</strong>. El neto AFIP
-              coincide con lo pickeado.
+              Pedidos de depósito: emití después del picking (
+              <strong className="text-white">Falta controlar</strong> / <strong className="text-white">Controlado</strong> /{' '}
+              <strong className="text-white">Despachado</strong>). Ventas de showroom: usá el botón{' '}
+              <strong className="text-white">Showroom</strong> en la tarjeta para saltear picking y facturar.
             </p>
+            {!orderPuedeEmitirFacturaTrasPicking(orderToEmitFactura) && (
+              <div className="mb-4 rounded-xl border border-amber-700/50 bg-amber-950/30 px-3 py-3 space-y-2">
+                <p className="text-xs text-amber-100/95 leading-snug">
+                  Este pedido todavía no pasó por control. Si fue venta de showroom (ya entregado y cobrado), marcálo listo para facturar.
+                </p>
+                <button
+                  type="button"
+                  disabled={!!markingShowroomId}
+                  onClick={() => {
+                    const oid = orderToEmitFactura.id;
+                    setMarkingShowroomId(oid);
+                    api
+                      .markShowroomReady(oid)
+                      .then(() => {
+                        showToast('success', 'Listo para facturar. Ya podés emitir.');
+                        setOrderToEmitFactura((prev) =>
+                          prev && prev.id === oid
+                            ? { ...prev, status: OrderStatus.CONTROLLED, paymentStatus: 'pagado' }
+                            : prev
+                        );
+                        refreshOrders?.();
+                      })
+                      .catch((err: any) =>
+                        showToast(
+                          'error',
+                          err?.message || err?.response?.data?.message || 'No se pudo marcar showroom'
+                        )
+                      )
+                      .finally(() => setMarkingShowroomId(null));
+                  }}
+                  className="w-full sm:w-auto px-4 py-2 rounded-xl text-sm font-bold bg-amber-600 hover:bg-amber-500 text-white disabled:opacity-50"
+                >
+                  {markingShowroomId === orderToEmitFactura.id
+                    ? 'Marcando…'
+                    : 'Marcar showroom y habilitar emisión'}
+                </button>
+              </div>
+            )}
             <p className="text-sm text-slate-400 mb-4">Pedido #{orderToEmitFactura.id} — {orderToEmitFactura.customerBusinessName || getCustomerName(orderToEmitFactura)}</p>
             <p className="text-xs text-slate-500 mb-4">
               Condición IVA del cliente: {customers.find(c => c.id === orderToEmitFactura.customerId)?.condicionIva || 'No informada'}.

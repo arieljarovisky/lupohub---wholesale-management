@@ -891,14 +891,31 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
     }
   };
   const sqlDate = toSqlDate(newOrder.date);
-  const paymentStatus =
+  let paymentStatus =
     (newOrder as any).paymentStatus === 'pagado' || (newOrder as any).paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
   const noStockImpact = (newOrder as any).noStockImpact === true || (newOrder as any).no_stock_impact === 1 ? 1 : 0;
   const createdBy = user?.id ?? null;
   const requestedStatus = String(newOrder.status || 'Borrador');
+  /** Venta showroom / mostrador: entrega inmediata, sin picking de depósito; queda lista para AFIP. */
+  const isShowroomSale =
+    (newOrder as any).showroomSale === true ||
+    (newOrder as any).showroom_sale === true;
+  const canCreateShowroom =
+    user?.role === 'ADMIN' || user?.role === 'WAREHOUSE' || user?.role === 'DEPOSITO' || user?.role === 'SELLER';
+  if (isShowroomSale && !canCreateShowroom) {
+    const err: any = new Error('No tenés permiso para crear ventas showroom');
+    err.statusCode = 403;
+    throw err;
+  }
   const shouldStayPendingAdmin =
-    requestedStatus === 'Confirmado' && (user?.role === 'SELLER' || user?.role === 'CUSTOMER');
-  const statusToSave = shouldStayPendingAdmin ? 'Pendiente confirmación admin' : requestedStatus;
+    !isShowroomSale &&
+    requestedStatus === 'Confirmado' &&
+    (user?.role === 'SELLER' || user?.role === 'CUSTOMER');
+  let statusToSave = shouldStayPendingAdmin ? 'Pendiente confirmación admin' : requestedStatus;
+  if (isShowroomSale) {
+    statusToSave = 'Controlado';
+    paymentStatus = 'pagado';
+  }
   const matrixImportLabelRaw = (newOrder as any).matrixImportLabel ?? (newOrder as any).matrix_import_label;
   const matrixImportLabelForSql =
     matrixImportLabelRaw != null && String(matrixImportLabelRaw).trim()
@@ -994,9 +1011,10 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
     for (const pr of preparedRows) {
       for (const alloc of pr.allocations) {
         if (!alloc.quantity || alloc.quantity <= 0) continue;
+        const pickedQty = isShowroomSale ? alloc.quantity : 0;
         await conn.execute(
           `INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [uuidv4(), orderId, pr.variantId, alloc.quantity, 0, pr.item.priceAtMoment ?? 0, pr.sellAsPack, alloc.despachoId]
+          [uuidv4(), orderId, pr.variantId, alloc.quantity, pickedQty, pr.item.priceAtMoment ?? 0, pr.sellAsPack, alloc.despachoId]
         );
         insertedItems += 1;
       }
@@ -1021,7 +1039,19 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
     conn.release();
   }
 
-  // No descontar al confirmar: ahora se descuenta cuando finaliza picking.
+  // Showroom: descontar stock ya (equivalente a haber terminado picking).
+  // Pedidos normales: se descuenta al pasar a Falta controlar / Controlado / Despachado.
+  if (isShowroomSale && !noStockImpact) {
+    try {
+      const { deductStockForOrder } = await import('./stock.controller');
+      const result = await deductStockForOrder(orderId);
+      if (!result.success) {
+        console.error('Showroom: errores descontando stock:', result.errors);
+      }
+    } catch (stockErr) {
+      console.error('Showroom: falló descuento de stock:', stockErr);
+    }
+  }
 
   return buildPersistedOrderResponse(orderId, newOrder, despachoWarnings);
 }
@@ -1038,6 +1068,56 @@ export const createOrder = async (req: any, res: any) => {
     if (code === 400) return res.status(400).json({ message: error.message || 'Solicitud inválida' });
     if (code === 403) return res.status(403).json({ message: error.message || 'Prohibido' });
     res.status(500).json({ message: 'Error creating order' });
+  }
+};
+
+/**
+ * Marca un pedido existente como venta showroom lista para AFIP:
+ * picked = quantity en todas las líneas, status Controlado, payment pagado, descuenta stock.
+ */
+export const markShowroomReady = async (req: any, res: any) => {
+  const { id } = req.params;
+  const user = req.user;
+  if (!user || (user.role !== 'ADMIN' && user.role !== 'WAREHOUSE' && user.role !== 'DEPOSITO')) {
+    return res.status(403).json({ message: 'Solo ADMIN o Depósito pueden marcar showroom' });
+  }
+  if (!id) return res.status(400).json({ message: 'ID de pedido inválido' });
+  try {
+    const orderRow = await get(
+      'SELECT id, status, no_stock_impact, payment_status FROM orders WHERE id = ?',
+      [id]
+    );
+    if (!orderRow) return res.status(404).json({ message: 'Pedido no encontrado' });
+    if (String(orderRow.status || '') === 'Cancelado') {
+      return res.status(400).json({ message: 'No se puede marcar un pedido cancelado' });
+    }
+    const existingInv = await get('SELECT id FROM invoices WHERE order_id = ?', [id]);
+    if (existingInv) {
+      return res.status(409).json({ message: 'Este pedido ya tiene factura emitida' });
+    }
+
+    await execute(
+      `UPDATE order_items SET picked = quantity WHERE order_id = ?`,
+      [id]
+    );
+    await execute(
+      `UPDATE orders SET status = ?, payment_status = 'pagado', picked_by = COALESCE(picked_by, ?) WHERE id = ?`,
+      ['Controlado', user.id, id]
+    );
+
+    if (!Number(orderRow.no_stock_impact) && !(await isMayoristaStockDeductedForWholesale(id))) {
+      const { deductStockForOrder } = await import('./stock.controller');
+      const result = await deductStockForOrder(id);
+      if (!result.success) {
+        console.error('markShowroomReady stock:', result.errors);
+      }
+    }
+
+    const orderResponse = await buildPersistedOrderResponse(id, { id, customerId: '', items: [], total: 0, status: 'Controlado' as any, date: '' }, []);
+    res.json({ ...orderResponse, message: 'Pedido listo para facturar (showroom)' });
+  } catch (error: any) {
+    console.error('markShowroomReady:', error);
+    res.status(500).json({ message: error?.message || 'Error marcando showroom' });
   }
 };
 
