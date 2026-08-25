@@ -7,7 +7,13 @@ import {
   fetchListingSaleFeeAmount,
   getMlPaymentCptPercent,
   resolveTnFeePreset,
+  type FobPriceListInfo,
 } from '../utils/channelMarginUtils';
+import {
+  fobForItem,
+  skuFromMlItem,
+  type MlProductIndex,
+} from './companyFinancePnl.service';
 
 const TN_USER_AGENT = process.env.TIENDA_NUBE_USER_AGENT || 'LupoHub (support@lupo.ar)';
 
@@ -129,10 +135,23 @@ export async function sumInvoicedInRange(from: string, to: string): Promise<Afip
   };
 }
 
+const SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT = `(
+  (
+    COALESCE(p.notes, '') NOT LIKE '%comisión vendedor%'
+    AND COALESCE(p.notes, '') NOT LIKE '%comision vendedor%'
+  )
+  OR EXISTS (SELECT 1 FROM payment_invoices pi_comm WHERE pi_comm.payment_id = p.id)
+  OR EXISTS (SELECT 1 FROM payment_orders po_comm WHERE po_comm.payment_id = p.id)
+  OR (p.invoice_id IS NOT NULL AND TRIM(COALESCE(p.invoice_id, '')) <> '')
+  OR (p.order_id IS NOT NULL AND TRIM(COALESCE(p.order_id, '')) <> '')
+)`;
+
 export async function sumReceiptsInRange(from: string, to: string): Promise<{ total: number; count: number }> {
   const row = (await get(
-    `SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS cnt
-     FROM payments WHERE date >= ? AND date <= ?`,
+    `SELECT COALESCE(SUM(p.amount), 0) AS total, COUNT(*) AS cnt
+     FROM payments p
+     WHERE p.date >= ? AND p.date <= ?
+       AND ${SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT}`,
     [from, to]
   )) as { total: string | number; cnt: number } | undefined;
   return { total: round2(Number(row?.total ?? 0)), count: Number(row?.cnt ?? 0) };
@@ -201,20 +220,46 @@ async function fetchTnOrdersInRange(from: string, to: string): Promise<Record<st
   return rawOrders;
 }
 
+export type ChannelSalesAgg = {
+  sales: number;
+  fees: number;
+  orderCount: number;
+  connected: boolean;
+  note?: string;
+  cogs: number;
+  units: number;
+  unitsWithFob: number;
+};
+
 export async function aggregateTiendaNubeInRange(
   from: string,
-  to: string
-): Promise<{ sales: number; fees: number; orderCount: number; connected: boolean; note?: string }> {
+  to: string,
+  fobInfo?: FobPriceListInfo
+): Promise<ChannelSalesAgg> {
+  const empty = (connected: boolean, note?: string): ChannelSalesAgg => ({
+    sales: 0,
+    fees: 0,
+    orderCount: 0,
+    connected,
+    note,
+    cogs: 0,
+    units: 0,
+    unitsWithFob: 0,
+  });
+
   const orders = await fetchTnOrdersInRange(from, to);
   if (orders.length === 0) {
     const integration = await get(`SELECT id FROM integrations WHERE platform = 'tiendanube' LIMIT 1`);
-    return { sales: 0, fees: 0, orderCount: 0, connected: !!integration };
+    return empty(!!integration);
   }
 
   const preset = resolveTnFeePreset();
   let sales = 0;
   let fees = 0;
   let orderCount = 0;
+  let cogs = 0;
+  let units = 0;
+  let unitsWithFob = 0;
 
   for (const order of orders) {
     if (!isTnOrderPaid(order)) continue;
@@ -225,6 +270,19 @@ export async function aggregateTiendaNubeInRange(
     sales += total;
     fees += calcTnSaleFeeFromPreset(total, preset).total;
     orderCount += 1;
+
+    const lines = Array.isArray(order.products) ? order.products : [];
+    for (const p of lines as Array<Record<string, unknown>>) {
+      const qty = Math.max(0, Number(p?.quantity ?? p?.qty ?? 0) || 0);
+      if (qty <= 0) continue;
+      units += qty;
+      if (!fobInfo) continue;
+      const sku = String(p?.sku ?? p?.variant_sku ?? '').trim();
+      const fob = fobForItem(fobInfo, null, sku, sku);
+      if (fob == null) continue;
+      unitsWithFob += qty;
+      cogs += fob * qty;
+    }
   }
 
   return {
@@ -233,6 +291,9 @@ export async function aggregateTiendaNubeInRange(
     orderCount,
     connected: true,
     note: `Comisiones TN estimadas (${preset.label})`,
+    cogs: round2(cogs),
+    units: Math.round(units),
+    unitsWithFob: Math.round(unitsWithFob),
   };
 }
 
@@ -265,11 +326,21 @@ async function multigetMlItems(
 
 export async function aggregateMercadoLibreInRange(
   from: string,
-  to: string
-): Promise<{ sales: number; fees: number; orderCount: number; connected: boolean; note?: string }> {
+  to: string,
+  fobInfo?: FobPriceListInfo,
+  mlIndex?: MlProductIndex
+): Promise<ChannelSalesAgg> {
   const mlToken = await getValidMLToken();
   if (!mlToken?.access_token || !mlToken?.user_id) {
-    return { sales: 0, fees: 0, orderCount: 0, connected: false };
+    return {
+      sales: 0,
+      fees: 0,
+      orderCount: 0,
+      connected: false,
+      cogs: 0,
+      units: 0,
+      unitsWithFob: 0,
+    };
   }
 
   const cptPercent = getMlPaymentCptPercent();
@@ -322,10 +393,14 @@ export async function aggregateMercadoLibreInRange(
   const itemsMap = await multigetMlItems(mlToken.access_token, itemIds);
   let sales = 0;
   let fees = 0;
+  let cogs = 0;
+  let units = 0;
+  let unitsWithFob = 0;
 
   for (const line of lines) {
     const subtotal = line.unitPrice * line.qty;
     sales += subtotal;
+    units += line.qty;
     const item = itemsMap.get(line.itemId);
     if (item) {
       const listingFee = await fetchListingSaleFeeAmount(
@@ -337,6 +412,16 @@ export async function aggregateMercadoLibreInRange(
       fees += listingFee * line.qty;
     }
     fees += calcMlPaymentCpt(subtotal, cptPercent);
+
+    if (fobInfo) {
+      const linked = mlIndex?.get(String(line.itemId).trim().toUpperCase());
+      const sku = linked?.sku || skuFromMlItem(item);
+      const fob = fobForItem(fobInfo, linked?.productId, sku, sku);
+      if (fob != null) {
+        unitsWithFob += line.qty;
+        cogs += fob * line.qty;
+      }
+    }
   }
 
   return {
@@ -345,6 +430,9 @@ export async function aggregateMercadoLibreInRange(
     orderCount,
     connected: true,
     note: `Comisiones ML estimadas (listing_prices + CPT ${cptPercent}%)`,
+    cogs: round2(cogs),
+    units: Math.round(units),
+    unitsWithFob: Math.round(unitsWithFob),
   };
 }
 

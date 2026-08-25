@@ -10,6 +10,15 @@ import {
   sumInvoicedInRange,
   sumReceiptsInRange,
 } from '../services/companyFinanceAggregates.service';
+import {
+  coveragePct,
+  finishChannelEconomics,
+  loadCompanyFobList,
+  loadMlItemProductIndex,
+  sumInventoryAtFob,
+  sumSellerCommissionsInRange,
+  sumWholesaleSalesAndCogs,
+} from '../services/companyFinancePnl.service';
 import { fetchMercadoPagoMovements } from '../services/mercadopagoFinance.service';
 import {
   countCalendarMonthsInRange,
@@ -474,18 +483,6 @@ export const deleteCompanyFinanceFixedExpense = async (req: Request, res: Respon
   }
 };
 
-async function wholesaleOrdersRevenue(from: string, to: string): Promise<number> {
-  const row = (await get(
-    `SELECT COALESCE(SUM(o.total), 0) AS total
-     FROM orders o
-     WHERE o.date >= ? AND o.date <= ?
-       AND o.status IN ('Confirmado', 'Preparando', 'Falta controlar', 'Controlado', 'Despachado')
-       AND (o.archived IS NULL OR o.archived = 0)`,
-    [from, to]
-  )) as { total: string | number } | undefined;
-  return Math.round(Number(row?.total ?? 0) * 100) / 100;
-}
-
 export const getCompanyFinanceMercadoPagoMovements = async (req: Request, res: Response) => {
   try {
     if (!assertFinanceAccess(req, res)) return;
@@ -514,7 +511,6 @@ export const getCompanyFinanceSummary = async (req: Request, res: Response) => {
   try {
     if (!assertFinanceAccess(req, res)) return;
     const { from, to } = parseDateRange(req);
-    const includeOrders = req.query.includeOrders === '1' || req.query.includeOrders === 'true';
     const includeChannels =
       req.query.includeChannels !== '0' && req.query.includeChannels !== 'false';
 
@@ -556,42 +552,108 @@ export const getCompanyFinanceSummary = async (req: Request, res: Response) => {
       [from, to]
     )) as Array<{ month: string; entryType: string; total: number }>;
 
-    const [receipts, despachos, pendingInvoices, fixedAgg, channelAgg, invoiced] = await Promise.all([
-      sumReceiptsInRange(from, to),
-      sumDespachosCostInRange(from, to),
-      listPendingInvoices(200),
-      computeFixedExpensesForPeriod(from, to),
-      includeChannels
-        ? Promise.all([
-            aggregateMercadoLibreInRange(from, to),
-            aggregateTiendaNubeInRange(from, to),
-          ])
-        : Promise.resolve([
-            { sales: 0, fees: 0, orderCount: 0, connected: false, note: undefined as string | undefined },
-            { sales: 0, fees: 0, orderCount: 0, connected: false, note: undefined as string | undefined },
-          ]),
-      sumInvoicedInRange(from, to),
+    const [fobInfo, mlIndex] = await Promise.all([
+      loadCompanyFobList(),
+      includeChannels ? loadMlItemProductIndex() : Promise.resolve(undefined),
     ]);
 
+    const [receipts, despachos, pendingInvoices, fixedAgg, channelAgg, invoiced, wholesale, commissions, inventory] =
+      await Promise.all([
+        sumReceiptsInRange(from, to),
+        sumDespachosCostInRange(from, to),
+        listPendingInvoices(200),
+        computeFixedExpensesForPeriod(from, to),
+        includeChannels
+          ? Promise.all([
+              aggregateMercadoLibreInRange(from, to, fobInfo, mlIndex),
+              aggregateTiendaNubeInRange(from, to, fobInfo),
+            ])
+          : Promise.resolve([
+              {
+                sales: 0,
+                fees: 0,
+                orderCount: 0,
+                connected: false,
+                note: undefined as string | undefined,
+                cogs: 0,
+                units: 0,
+                unitsWithFob: 0,
+              },
+              {
+                sales: 0,
+                fees: 0,
+                orderCount: 0,
+                connected: false,
+                note: undefined as string | undefined,
+                cogs: 0,
+                units: 0,
+                unitsWithFob: 0,
+              },
+            ]),
+        sumInvoicedInRange(from, to),
+        sumWholesaleSalesAndCogs(from, to, fobInfo),
+        sumSellerCommissionsInRange(from, to),
+        sumInventoryAtFob(fobInfo),
+      ]);
+
     const [mlAgg, tnAgg] = channelAgg;
-    const ordersRevenue = includeOrders ? await wholesaleOrdersRevenue(from, to) : 0;
-    const manualIncome = Math.round(Number(totals?.manualIncome ?? 0) * 100) / 100;
-    const manualExpenses = Math.round(Number(totals?.totalExpenses ?? 0) * 100) / 100;
+    const manualIncome = round2(Number(totals?.manualIncome ?? 0));
+    const manualExpenses = round2(Number(totals?.totalExpenses ?? 0));
+
+    const wholesaleEco = wholesale.economics;
+    const mlEco = finishChannelEconomics({
+      revenue: mlAgg.sales,
+      cogs: mlAgg.cogs,
+      fees: mlAgg.fees,
+      units: mlAgg.units,
+      unitsWithFob: mlAgg.unitsWithFob,
+      orderCount: mlAgg.orderCount,
+    });
+    const tnEco = finishChannelEconomics({
+      revenue: tnAgg.sales,
+      cogs: tnAgg.cogs,
+      fees: tnAgg.fees,
+      units: tnAgg.units,
+      unitsWithFob: tnAgg.unitsWithFob,
+      orderCount: tnAgg.orderCount,
+    });
+    const retailEco = finishChannelEconomics({
+      revenue: mlEco.revenue + tnEco.revenue,
+      cogs: mlEco.cogs + tnEco.cogs,
+      fees: mlEco.fees + tnEco.fees,
+      units: mlEco.units + tnEco.units,
+      unitsWithFob: mlEco.unitsWithFob + tnEco.unitsWithFob,
+      orderCount: mlEco.orderCount + tnEco.orderCount,
+    });
 
     const receiptsTotal = receipts.total;
     const mlSales = mlAgg.sales;
     const tnSales = tnAgg.sales;
-    const channelFees = Math.round((mlAgg.fees + tnAgg.fees) * 100) / 100;
+    const channelFees = round2(mlAgg.fees + tnAgg.fees);
     const despachosCost = despachos.total;
-
-    const totalIncome = Math.round(
-      (receiptsTotal + mlSales + tnSales + manualIncome + ordersRevenue) * 100
-    ) / 100;
+    const sellerCommissions = commissions.total;
+    const ordersRevenue = wholesaleEco.revenue;
     const fixedMonthlyExpenses = fixedAgg.fixedMonthlyExpenses;
-    const totalExpenses = Math.round(
-      (manualExpenses + despachosCost + channelFees + fixedMonthlyExpenses) * 100
-    ) / 100;
-    const netResult = Math.round((totalIncome - totalExpenses) * 100) / 100;
+
+    const totalSales = round2(wholesaleEco.revenue + mlSales + tnSales + manualIncome);
+    const totalCogs = round2(wholesaleEco.cogs + mlEco.cogs + tnEco.cogs);
+    const grossProfit = round2(totalSales - totalCogs);
+    const commercialCosts = round2(channelFees + sellerCommissions);
+    const contributionMargin = round2(grossProfit - commercialCosts);
+    const operatingExpenses = round2(manualExpenses + fixedMonthlyExpenses);
+    const netResult = round2(contributionMargin - operatingExpenses);
+
+    const totalIncome = totalSales;
+    const totalExpenses = round2(totalCogs + commercialCosts + operatingExpenses);
+
+    const opexByCategory = new Map<string, number>();
+    for (const item of fixedAgg.fixedExpenseItems) {
+      opexByCategory.set(item.category, round2((opexByCategory.get(item.category) || 0) + item.periodTotal));
+    }
+    for (const row of byCategory) {
+      if (row.entryType !== 'expense') continue;
+      opexByCategory.set(row.category, round2((opexByCategory.get(row.category) || 0) + Number(row.total)));
+    }
 
     const categoryLabels: Record<string, string> = {};
     for (const c of [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES]) {
@@ -601,21 +663,40 @@ export const getCompanyFinanceSummary = async (req: Request, res: Response) => {
     res.json({
       from,
       to,
+      methodology: {
+        wholesale: 'Pedidos mayoristas confirmados o posteriores, neto de notas de crédito. Sin IVA.',
+        retail: 'Órdenes pagadas de Mercado Libre y Tienda Nube (importe de la API, IVA incluido).',
+        cogs: `Costo de mercadería vendida según lista FOB${fobInfo.name ? ` «${fobInfo.name}»` : ''}. Los despachos del período son compras de stock, no gasto del resultado.`,
+        commissions: 'Comisiones de vendedores sobre recibos cobrados (neto de IVA). Comisiones ML/TN estimadas.',
+      },
+      fobListId: fobInfo.id,
+      fobListName: fobInfo.name || null,
       manualIncome,
       ordersRevenue,
+      wholesaleRevenueNet: wholesale.revenueNet,
+      wholesaleRevenueWithIva: wholesale.revenueWithIva,
+      wholesaleCreditNotes: wholesale.creditNotes,
       receiptsTotal,
       receiptsCount: receipts.count,
       mlSales,
       mlFees: mlAgg.fees,
+      mlCogs: mlEco.cogs,
+      mlUnits: mlEco.units,
+      mlUnitsWithFob: mlEco.unitsWithFob,
       mlOrderCount: mlAgg.orderCount,
       mlConnected: mlAgg.connected,
       mlNote: mlAgg.note,
       tnSales,
       tnFees: tnAgg.fees,
+      tnCogs: tnEco.cogs,
+      tnUnits: tnEco.units,
+      tnUnitsWithFob: tnEco.unitsWithFob,
       tnOrderCount: tnAgg.orderCount,
       tnConnected: tnAgg.connected,
       tnNote: tnAgg.note,
       channelFees,
+      sellerCommissions,
+      sellerCommissionReceipts: commissions.receiptCount,
       despachosCost,
       despachosCount: despachos.count,
       manualExpenses,
@@ -626,12 +707,53 @@ export const getCompanyFinanceSummary = async (req: Request, res: Response) => {
         ...item,
         categoryLabel: categoryLabels[item.category] || item.category,
       })),
+      totalSales,
+      totalCogs,
+      grossProfit,
+      grossMarginPct: totalSales > 0 ? round2((grossProfit / totalSales) * 100) : null,
+      commercialCosts,
+      contributionMargin,
+      contributionMarginPct: totalSales > 0 ? round2((contributionMargin / totalSales) * 100) : null,
+      operatingExpenses,
       totalIncome,
       totalExpenses,
       netResult,
+      netMarginPct: totalSales > 0 ? round2((netResult / totalSales) * 100) : null,
       profitOrLoss: netResult >= 0 ? 'profit' : 'loss',
       expenseCount: Number(totals?.expenseCount ?? 0),
       incomeCount: Number(totals?.incomeCount ?? 0),
+      channels: {
+        wholesale: wholesaleEco,
+        mercadoLibre: mlEco,
+        tiendaNube: tnEco,
+        retail: retailEco,
+        otherIncome: finishChannelEconomics({ revenue: manualIncome, cogs: 0 }),
+        consolidated: finishChannelEconomics({
+          revenue: totalSales,
+          cogs: totalCogs,
+          fees: commercialCosts,
+          units: wholesaleEco.units + retailEco.units,
+          unitsWithFob: wholesaleEco.unitsWithFob + retailEco.unitsWithFob,
+          orderCount: wholesaleEco.orderCount + retailEco.orderCount,
+        }),
+      },
+      opexByCategory: [...opexByCategory.entries()]
+        .map(([category, total]) => ({
+          category,
+          categoryLabel: categoryLabels[category] || category,
+          total,
+        }))
+        .sort((a, b) => b.total - a.total),
+      inventory: {
+        ...inventory,
+        coveragePct: coveragePct(inventory.unitsWithFob, inventory.units),
+        fobListName: fobInfo.name || null,
+      },
+      cogsCoverage: {
+        wholesalePct: coveragePct(wholesaleEco.unitsWithFob, wholesaleEco.units),
+        mlPct: coveragePct(mlEco.unitsWithFob, mlEco.units),
+        tnPct: coveragePct(tnEco.unitsWithFob, tnEco.units),
+      },
       invoicedTotal: invoiced.total,
       invoicedNet: invoiced.net,
       invoicedIva: invoiced.iva,
@@ -650,12 +772,12 @@ export const getCompanyFinanceSummary = async (req: Request, res: Response) => {
       pendingInvoices: pendingInvoices.items,
       byCategory: (byCategory || []).map((r) => ({
         ...r,
-        total: Math.round(Number(r.total) * 100) / 100,
+        total: round2(Number(r.total)),
         categoryLabel: categoryLabels[r.category] || r.category,
       })),
       byMonth: (byMonth || []).map((r) => ({
         ...r,
-        total: Math.round(Number(r.total) * 100) / 100,
+        total: round2(Number(r.total)),
       })),
     });
   } catch (error: unknown) {
