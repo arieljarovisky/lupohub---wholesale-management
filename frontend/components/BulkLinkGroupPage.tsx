@@ -2794,6 +2794,14 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                             <span className="text-slate-600 mx-1">·</span>
                             {v.color}
                           </p>
+                          <p
+                            className={`text-[11px] font-semibold pl-0.5 ${
+                              Number(v.stock ?? 0) > 0 ? 'text-emerald-400' : 'text-slate-500'
+                            }`}
+                            title="Stock actual en Lupo Hub"
+                          >
+                            Stock Lupo Hub: {Number(v.stock ?? 0)}
+                          </p>
                         </div>
                       </td>
                       <td className="p-3 align-top min-w-[220px]">
@@ -3259,7 +3267,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                   >
                     {unifyOptions.map((v) => (
                       <option key={v.variantId} value={v.variantId}>
-                        {formatOptionLabel(v)} · {v.sku}
+                        {formatOptionLabel(v)} · {v.sku} · stock {Number(v.stock ?? 0)}
                       </option>
                     ))}
                   </select>
@@ -3276,7 +3284,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                       .filter((v) => v.variantId !== unifyAbsorbId)
                       .map((v) => (
                         <option key={v.variantId} value={v.variantId}>
-                          {formatOptionLabel(v)} · {v.sku}
+                          {formatOptionLabel(v)} · {v.sku} · stock {Number(v.stock ?? 0)}
                         </option>
                       ))}
                   </select>
