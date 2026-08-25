@@ -238,50 +238,118 @@ export async function sumSellerCommissionsInRange(
   };
 }
 
-export async function sumInventoryAtFob(fobInfo: FobPriceListInfo): Promise<{
+export type InventoryArticleRow = {
+  productId: string;
+  sku: string;
+  name: string;
+  category: string;
+  units: number;
+  unitsWithFob: number;
+  fob: number | null;
+  value: number;
+};
+
+export type InventoryCategoryRow = {
+  category: string;
   units: number;
   unitsWithFob: number;
   value: number;
+  articleCount: number;
+};
+
+export async function sumInventoryAtFob(fobInfo: FobPriceListInfo): Promise<{
+  units: number;
+  unitsWithFob: number;
+  unitsWithoutFob: number;
+  value: number;
   skuCount: number;
+  articleCount: number;
+  articles: InventoryArticleRow[];
+  byCategory: InventoryCategoryRow[];
 }> {
   const rows = (await query(
     `SELECT
        COALESCE(s.stock, 0) AS stock,
        p.id AS productId,
        p.sku AS productSku,
+       p.name AS productName,
+       COALESCE(NULLIF(TRIM(p.category), ''), 'Sin rubro') AS category,
        pv.sku AS variantSku
      FROM stocks s
      INNER JOIN product_variants pv ON pv.id = s.variant_id
      INNER JOIN product_colors pc ON pc.id = pv.product_color_id
      INNER JOIN products p ON p.id = pc.product_id
-     WHERE COALESCE(s.stock, 0) > 0`
+     WHERE COALESCE(s.stock, 0) > 0
+       AND COALESCE(pv.inventory_hidden, 0) = 0`
   )) as Array<{
     stock: number;
     productId: string;
     productSku: string | null;
+    productName: string | null;
+    category: string | null;
     variantSku: string | null;
   }>;
 
+  const byProduct = new Map<string, InventoryArticleRow>();
   let units = 0;
   let unitsWithFob = 0;
   let value = 0;
-  const skus = new Set<string>();
+
   for (const r of rows) {
     const qty = Math.max(0, Number(r.stock) || 0);
     if (qty <= 0) continue;
     units += qty;
-    const sku = String(r.productSku || r.variantSku || r.productId);
-    skus.add(sku);
+    const productId = String(r.productId);
+    const prev = byProduct.get(productId) || {
+      productId,
+      sku: String(r.productSku || r.variantSku || productId),
+      name: String(r.productName || r.productSku || 'Artículo'),
+      category: String(r.category || 'Sin rubro'),
+      units: 0,
+      unitsWithFob: 0,
+      fob: null as number | null,
+      value: 0,
+    };
+    prev.units += qty;
     const fob = fobForItem(fobInfo, r.productId, r.productSku, r.variantSku);
-    if (fob == null) continue;
-    unitsWithFob += qty;
-    value += fob * qty;
+    if (fob != null) {
+      unitsWithFob += qty;
+      prev.unitsWithFob += qty;
+      prev.fob = fob;
+      prev.value = round2(prev.value + fob * qty);
+      value += fob * qty;
+    }
+    byProduct.set(productId, prev);
   }
+
+  const articles = [...byProduct.values()].sort((a, b) => b.value - a.value || b.units - a.units);
+  for (const a of articles) a.units = Math.round(a.units);
+
+  const catMap = new Map<string, InventoryCategoryRow>();
+  for (const a of articles) {
+    const prev = catMap.get(a.category) || {
+      category: a.category,
+      units: 0,
+      unitsWithFob: 0,
+      value: 0,
+      articleCount: 0,
+    };
+    prev.units += a.units;
+    prev.unitsWithFob += a.unitsWithFob;
+    prev.value = round2(prev.value + a.value);
+    prev.articleCount += 1;
+    catMap.set(a.category, prev);
+  }
+
   return {
     units: Math.round(units),
     unitsWithFob: Math.round(unitsWithFob),
+    unitsWithoutFob: Math.round(units - unitsWithFob),
     value: round2(value),
-    skuCount: skus.size,
+    skuCount: articles.length,
+    articleCount: articles.length,
+    articles,
+    byCategory: [...catMap.values()].sort((a, b) => b.value - a.value),
   };
 }
 

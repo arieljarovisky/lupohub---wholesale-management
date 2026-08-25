@@ -21,6 +21,8 @@ import {
   Landmark,
   Info,
   Download,
+  Warehouse,
+  Search,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
@@ -54,6 +56,9 @@ type MpData = Awaited<ReturnType<typeof api.getCompanyFinanceMercadoPagoMovement
 
 const fmt = (n: number) =>
   n.toLocaleString('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 });
+
+const fmtDec = (n: number) =>
+  n.toLocaleString('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 const fmtPct = (n: number | null | undefined) =>
   n == null || !Number.isFinite(n) ? '—' : `${n.toLocaleString('es-AR', { maximumFractionDigits: 1 })}%`;
@@ -138,6 +143,7 @@ const CompanyFinance: React.FC = () => {
   const [mpData, setMpData] = useState<MpData | null>(null);
   const [mpLoading, setMpLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [stockSearch, setStockSearch] = useState('');
   const [form, setForm] = useState({
     entryType: 'expense' as 'expense' | 'income',
     category: 'sueldo',
@@ -158,6 +164,18 @@ const CompanyFinance: React.FC = () => {
     if (!access) return [];
     return form.entryType === 'expense' ? access.expenseCategories : access.incomeCategories;
   }, [access, form.entryType]);
+
+  const warehouseArticles = useMemo(() => {
+    const list = summary?.inventory?.articles || [];
+    const q = stockSearch.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter(
+      (a) =>
+        a.sku.toLowerCase().includes(q) ||
+        a.name.toLowerCase().includes(q) ||
+        a.category.toLowerCase().includes(q)
+    );
+  }, [summary, stockSearch]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -488,7 +506,7 @@ const CompanyFinance: React.FC = () => {
         </div>
       ) : summary ? (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
             <div className="rounded-xl border border-emerald-800/40 bg-emerald-950/30 p-4">
               <p className="text-xs text-slate-500 uppercase font-bold">Ventas totales</p>
               <p className="text-2xl font-black text-emerald-400 mt-1">
@@ -550,6 +568,19 @@ const CompanyFinance: React.FC = () => {
               </p>
               <p className="text-[10px] text-slate-500 mt-1">
                 {summary.pendingInvoicesCount ?? 0} factura(s) mayoristas sin cobrar
+              </p>
+            </div>
+            <div className="rounded-xl border border-cyan-800/40 bg-cyan-950/20 p-4">
+              <p className="text-xs text-slate-500 uppercase font-bold flex items-center gap-1">
+                <Warehouse size={14} className="text-cyan-400" />
+                Depósito FOB
+              </p>
+              <p className="text-2xl font-black text-cyan-300 mt-1">
+                {fmt(summary.inventory?.value ?? 0)}
+              </p>
+              <p className="text-[10px] text-slate-500 mt-1">
+                {(summary.inventory?.units ?? 0).toLocaleString('es-AR')} u. ·{' '}
+                {summary.inventory?.articleCount ?? summary.inventory?.skuCount ?? 0} art.
               </p>
             </div>
           </div>
@@ -852,6 +883,137 @@ const CompanyFinance: React.FC = () => {
               <p className="px-4 pb-3 text-[10px] text-slate-600">
                 Los despachos son compras de mercadería (activo), no un gasto del resultado. El gasto es el CMV al vender.
               </p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-cyan-800/40 overflow-hidden bg-slate-900/40">
+            <div className="px-4 py-3 bg-cyan-950/40 border-b border-cyan-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-bold text-cyan-200 flex items-center gap-2">
+                  <Warehouse size={16} /> Mercadería de depósito valorizada
+                </p>
+                <p className="text-[10px] text-slate-500 mt-0.5">
+                  Stock actual a FOB ({summary.inventory?.fobListName || 'lista FOB'}). No es del período: es lo que hay hoy en depósito.
+                </p>
+              </div>
+              <div className="relative">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                <input
+                  type="search"
+                  value={stockSearch}
+                  onChange={(e) => setStockSearch(e.target.value)}
+                  placeholder="Buscar SKU, artículo o rubro"
+                  className="rounded-lg bg-slate-900 border border-slate-600 text-white text-sm pl-8 pr-3 py-2 w-full sm:w-64"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-slate-800/80 border-b border-slate-800 text-center text-xs">
+              <div className="bg-slate-900/60 p-3">
+                <p className="text-slate-500 uppercase font-bold text-[10px]">Valor FOB</p>
+                <p className="font-mono text-cyan-300 mt-1 text-lg font-black">{fmt(summary.inventory?.value ?? 0)}</p>
+              </div>
+              <div className="bg-slate-900/60 p-3">
+                <p className="text-slate-500 uppercase font-bold text-[10px]">Unidades</p>
+                <p className="font-mono text-white mt-1 text-lg font-black">
+                  {(summary.inventory?.units ?? 0).toLocaleString('es-AR')}
+                </p>
+              </div>
+              <div className="bg-slate-900/60 p-3">
+                <p className="text-slate-500 uppercase font-bold text-[10px]">Artículos</p>
+                <p className="font-mono text-white mt-1 text-lg font-black">
+                  {(summary.inventory?.articleCount ?? summary.inventory?.skuCount ?? 0).toLocaleString('es-AR')}
+                </p>
+              </div>
+              <div className="bg-slate-900/60 p-3">
+                <p className="text-slate-500 uppercase font-bold text-[10px]">Con precio FOB</p>
+                <p className="font-mono text-emerald-400 mt-1 text-lg font-black">
+                  {fmtPct(summary.inventory?.coveragePct)}
+                </p>
+                {(summary.inventory?.unitsWithoutFob ?? 0) > 0 && (
+                  <p className="text-[10px] text-amber-400/80 mt-0.5">
+                    {(summary.inventory?.unitsWithoutFob ?? 0).toLocaleString('es-AR')} u. sin FOB
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {(summary.inventory?.byCategory?.length ?? 0) > 0 && (
+              <div className="overflow-x-auto border-b border-slate-800">
+                <table className="w-full text-sm min-w-[640px]">
+                  <thead>
+                    <tr className="text-left text-slate-500 text-[10px] uppercase border-b border-slate-800">
+                      <th className="p-3">Rubro</th>
+                      <th className="p-3 text-right">Artículos</th>
+                      <th className="p-3 text-right">Unidades</th>
+                      <th className="p-3 text-right">Valor FOB</th>
+                      <th className="p-3 text-right">% depósito</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {summary.inventory?.byCategory?.map((row) => (
+                      <tr key={row.category} className="border-b border-slate-800/60">
+                        <td className="p-3 text-slate-200">{row.category}</td>
+                        <td className="p-3 text-right font-mono text-slate-400">{row.articleCount}</td>
+                        <td className="p-3 text-right font-mono text-slate-300">
+                          {row.units.toLocaleString('es-AR')}
+                        </td>
+                        <td className="p-3 text-right font-mono text-cyan-300">{fmt(row.value)}</td>
+                        <td className="p-3 text-right font-mono text-slate-500">
+                          {(summary.inventory?.value ?? 0) > 0
+                            ? fmtPct((row.value / (summary.inventory?.value ?? 1)) * 100)
+                            : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="overflow-x-auto max-h-[28rem]">
+              <table className="w-full text-sm min-w-[720px]">
+                <thead className="sticky top-0 bg-slate-900/95 z-10">
+                  <tr className="text-left text-slate-500 text-[10px] uppercase border-b border-slate-800">
+                    <th className="p-3">SKU</th>
+                    <th className="p-3">Artículo</th>
+                    <th className="p-3">Rubro</th>
+                    <th className="p-3 text-right">Unidades</th>
+                    <th className="p-3 text-right">FOB unit.</th>
+                    <th className="p-3 text-right">Valor FOB</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {warehouseArticles.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="p-8 text-center text-slate-500 text-sm">
+                        {stockSearch.trim()
+                          ? 'No hay artículos que coincidan con la búsqueda.'
+                          : 'No hay stock en depósito.'}
+                      </td>
+                    </tr>
+                  ) : (
+                    warehouseArticles.map((row) => (
+                      <tr key={row.productId} className="border-b border-slate-800/60 hover:bg-slate-800/30">
+                        <td className="p-3 font-mono text-slate-400 text-xs">{row.sku}</td>
+                        <td className="p-3 text-slate-200">{row.name}</td>
+                        <td className="p-3 text-slate-500">{row.category}</td>
+                        <td className="p-3 text-right font-mono text-slate-300">
+                          {row.units.toLocaleString('es-AR')}
+                          {row.units > row.unitsWithFob ? (
+                            <span className="block text-[10px] text-amber-400/80">
+                              {row.unitsWithFob.toLocaleString('es-AR')} con FOB
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="p-3 text-right font-mono text-slate-400">
+                          {row.fob != null ? fmtDec(row.fob) : '—'}
+                        </td>
+                        <td className="p-3 text-right font-mono font-bold text-cyan-300">{fmt(row.value)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
 

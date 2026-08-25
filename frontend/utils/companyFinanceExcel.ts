@@ -81,10 +81,29 @@ export type CompanyFinanceExcelSummary = {
   inventory?: {
     units: number;
     unitsWithFob: number;
+    unitsWithoutFob?: number;
     value: number;
     skuCount: number;
+    articleCount?: number;
     coveragePct: number | null;
     fobListName: string | null;
+    articles?: Array<{
+      productId: string;
+      sku: string;
+      name: string;
+      category: string;
+      units: number;
+      unitsWithFob: number;
+      fob: number | null;
+      value: number;
+    }>;
+    byCategory?: Array<{
+      category: string;
+      units: number;
+      unitsWithFob: number;
+      value: number;
+      articleCount: number;
+    }>;
   };
   cogsCoverage?: { wholesalePct: number | null; mlPct: number | null; tnPct: number | null };
   invoicedTotal: number;
@@ -322,7 +341,8 @@ function addTableSheet(
   rows: Array<Array<string | number | null>>,
   moneyCols: number[],
   pctCols: number[] = [],
-  intCols: number[] = []
+  intCols: number[] = [],
+  leftCols: number[] = []
 ) {
   const ws = wb.addWorksheet(name.slice(0, 31));
   const colCount = headers.length;
@@ -357,10 +377,11 @@ function addTableSheet(
       cell.value = v ?? '';
       cell.font = { name: FONT, size: 10, color: { argb: 'FF0F172A' } };
       cell.border = BORDER;
+      const left = c === 0 || leftCols.includes(c + 1);
       cell.alignment = {
         vertical: 'middle',
-        horizontal: c === 0 ? 'left' : 'right',
-        wrapText: c === 0,
+        horizontal: left ? 'left' : 'right',
+        wrapText: left,
       };
       if (i % 2 === 1) cell.fill = fill('FFF8FAFC');
       if (moneyCols.includes(c + 1) && typeof v === 'number') cell.numFmt = MONEY;
@@ -673,6 +694,46 @@ export async function exportCompanyFinanceExcel(opts: {
   buildPnlSheet(wb, summary);
   buildChannelsSheet(wb, summary);
   buildPositionSheet(wb, summary);
+
+  const inv = summary.inventory;
+  addTableSheet(
+    wb,
+    'Depósito rubros',
+    'Mercadería de depósito valorizada a FOB',
+    `Stock actual · lista ${inv?.fobListName || 'FOB'} · valor ${n(inv?.value).toLocaleString('es-AR')} · ${(inv?.units ?? 0).toLocaleString('es-AR')} unidades`,
+    ['Rubro', 'Artículos', 'Unidades', 'U. con FOB', 'Valor FOB', '% del depósito'],
+    (inv?.byCategory || []).map((row) => [
+      row.category,
+      n(row.articleCount),
+      n(row.units),
+      n(row.unitsWithFob),
+      n(row.value),
+      n(inv?.value) > 0 ? n(row.value) / n(inv?.value) : null,
+    ]),
+    [5],
+    [6],
+    [2, 3, 4]
+  );
+  addTableSheet(
+    wb,
+    'Depósito artículos',
+    'Mercadería de depósito por artículo',
+    `Valorizada a FOB (${inv?.fobListName || 'lista FOB'}) · ${inv?.articleCount ?? inv?.skuCount ?? 0} artículos con stock`,
+    ['SKU', 'Artículo', 'Rubro', 'Unidades', 'U. con FOB', 'FOB unitario', 'Valor FOB'],
+    (inv?.articles || []).map((row) => [
+      row.sku,
+      row.name,
+      row.category,
+      n(row.units),
+      n(row.unitsWithFob),
+      row.fob,
+      n(row.value),
+    ]),
+    [6, 7],
+    [],
+    [4, 5],
+    [2, 3]
+  );
 
   const periodItem = (id: string) => summary.fixedExpenseItems.find((i) => i.id === id);
   addTableSheet(

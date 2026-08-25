@@ -547,10 +547,29 @@ export const api = {
     inventory?: {
       units: number;
       unitsWithFob: number;
+      unitsWithoutFob?: number;
       value: number;
       skuCount: number;
+      articleCount?: number;
       coveragePct: number | null;
       fobListName: string | null;
+      articles?: Array<{
+        productId: string;
+        sku: string;
+        name: string;
+        category: string;
+        units: number;
+        unitsWithFob: number;
+        fob: number | null;
+        value: number;
+      }>;
+      byCategory?: Array<{
+        category: string;
+        units: number;
+        unitsWithFob: number;
+        value: number;
+        articleCount: number;
+      }>;
     };
     cogsCoverage?: {
       wholesalePct: number | null;
