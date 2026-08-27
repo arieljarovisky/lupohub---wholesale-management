@@ -281,8 +281,13 @@ const MercadoLibreQuestions: React.FC = () => {
     }
   };
 
-  const itemUrl = (itemId: string) =>
-    `https://www.mercadolibre.com.ar/p/${encodeURIComponent(itemId)}`;
+  /** Preguntas traen item_id (MLA123), no ID de catálogo (/p/...). */
+  const itemUrl = (itemId: string) => {
+    const id = itemId.trim();
+    const m = id.match(/^([A-Za-z]{3})-?(\d+)$/);
+    if (m) return `https://articulo.mercadolibre.com.ar/${m[1].toUpperCase()}-${m[2]}`;
+    return `https://articulo.mercadolibre.com.ar/${encodeURIComponent(id)}`;
+  };
 
   const totalPages = Math.max(1, Math.ceil(total / limit));
   const currentPage = Math.floor(offset / limit) + 1;
