@@ -15,15 +15,19 @@ function isTasksOwner(req: Request): boolean {
 
 export const getMyUserTasks = async (req: Request, res: Response) => {
   try {
-    const email = normalizeEmail((req as any)?.user?.email);
+    const rawEmail = (req as any)?.user?.email;
+    const email = normalizeEmail(rawEmail);
     if (!email) return res.status(401).json({ message: 'Sesión inválida' });
+    
+    // Usar UTC_TIMESTAMP para comparación consistente (expires_at se guarda en UTC)
     const rows = await query(
       `SELECT id, message, assigned_to_email AS assignedToEmail, created_by_email AS createdByEmail, expires_at AS expiresAt, created_at AS createdAt
        FROM user_tasks
-       WHERE assigned_to_email = ? AND expires_at > NOW()
+       WHERE LOWER(assigned_to_email) = LOWER(?) AND expires_at > UTC_TIMESTAMP()
        ORDER BY expires_at ASC, created_at DESC`,
       [email]
     );
+    
     res.json(rows);
   } catch (error: any) {
     console.error('getMyUserTasks:', error);
@@ -57,9 +61,16 @@ export const createAssignedUserTask = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'assignedToEmail inválido' });
     }
     if (!expiresAt) return res.status(400).json({ message: 'expiresAt es obligatorio' });
-    const expiresDate = new Date(expiresAt);
+    
+    // El input datetime-local envía formato YYYY-MM-DDTHH:mm sin timezone
+    // El usuario está en Argentina (UTC-3), así que interpretamos la fecha en esa zona
+    const expiresDateStr = expiresAt.includes('T') ? expiresAt : `${expiresAt}T00:00`;
+    const expiresDate = new Date(expiresDateStr + ':00-03:00');
     if (isNaN(expiresDate.getTime())) return res.status(400).json({ message: 'expiresAt inválido' });
     if (expiresDate.getTime() <= Date.now()) return res.status(400).json({ message: 'La fecha de fin debe ser futura' });
+    
+    // Convertir a formato MySQL DATETIME en UTC para evitar problemas de timezone
+    const expiresDateUtc = expiresDate.toISOString().slice(0, 19).replace('T', ' ');
 
     const id = uuidv4();
     const creator = (req as any)?.user || {};
@@ -68,7 +79,7 @@ export const createAssignedUserTask = async (req: Request, res: Response) => {
     await execute(
       `INSERT INTO user_tasks (id, message, assigned_to_email, created_by_user_id, created_by_email, expires_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      [id, message, assignedToEmail, createdByUserId, createdByEmail, expiresDate]
+      [id, message, assignedToEmail, createdByUserId, createdByEmail, expiresDateUtc]
     );
     const created = await get(
       `SELECT id, message, assigned_to_email AS assignedToEmail, created_by_email AS createdByEmail, expires_at AS expiresAt, created_at AS createdAt
