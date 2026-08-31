@@ -599,6 +599,23 @@ export const api = {
       amountWithIva: number;
       orderStatus: string;
     }>;
+    wholesaleOrdersInvoicedCount: number;
+    wholesaleOrdersInvoicedNet: number;
+    wholesaleOrdersUninvoicedCount: number;
+    wholesaleOrdersUninvoicedNet: number;
+    wholesaleOrdersTotalCount: number;
+    wholesaleOrdersTotalNet: number;
+    periodWholesaleOrders?: Array<{
+      orderId: string;
+      orderDate: string;
+      customerName: string;
+      orderStatus: string;
+      paymentStatus: string;
+      net: number;
+      netWithIva: number;
+      invoiced: boolean;
+      invoiceLabel: string | null;
+    }>;
     byCategory: Array<{ entryType: string; category: string; categoryLabel: string; total: number; count: number }>;
     byMonth: Array<{ month: string; entryType: string; total: number }>;
   }> => {

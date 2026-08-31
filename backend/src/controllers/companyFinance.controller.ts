@@ -6,9 +6,11 @@ import {
   aggregateMercadoLibreInRange,
   aggregateTiendaNubeInRange,
   listPendingInvoices,
+  listWholesaleOrdersInPeriod,
   sumDespachosCostInRange,
   sumInvoicedInRange,
   sumReceiptsInRange,
+  sumWholesaleOrdersInvoiceBreakdown,
 } from '../services/companyFinanceAggregates.service';
 import {
   coveragePct,
@@ -513,6 +515,7 @@ export const getCompanyFinanceSummary = async (req: Request, res: Response) => {
     const { from, to } = parseDateRange(req);
     const includeChannels =
       req.query.includeChannels !== '0' && req.query.includeChannels !== 'false';
+    const includeOrders = req.query.includeOrders === '1' || req.query.includeOrders === 'true';
 
     const totals = (await get(
       `SELECT
@@ -557,7 +560,7 @@ export const getCompanyFinanceSummary = async (req: Request, res: Response) => {
       includeChannels ? loadMlItemProductIndex() : Promise.resolve(undefined),
     ]);
 
-    const [receipts, despachos, pendingInvoices, fixedAgg, channelAgg, invoiced, wholesale, commissions, inventory] =
+    const [receipts, despachos, pendingInvoices, fixedAgg, channelAgg, invoiced, wholesale, commissions, inventory, wholesaleOrdersBreakdown] =
       await Promise.all([
         sumReceiptsInRange(from, to),
         sumDespachosCostInRange(from, to),
@@ -594,7 +597,12 @@ export const getCompanyFinanceSummary = async (req: Request, res: Response) => {
         sumWholesaleSalesAndCogs(from, to, fobInfo),
         sumSellerCommissionsInRange(from, to),
         sumInventoryAtFob(fobInfo),
+        sumWholesaleOrdersInvoiceBreakdown(from, to),
       ]);
+
+    const periodWholesaleOrders = includeOrders
+      ? await listWholesaleOrdersInPeriod(from, to, 500)
+      : undefined;
 
     const [mlAgg, tnAgg] = channelAgg;
     const manualIncome = round2(Number(totals?.manualIncome ?? 0));
@@ -770,6 +778,13 @@ export const getCompanyFinanceSummary = async (req: Request, res: Response) => {
       pendingInvoicesTotal: pendingInvoices.totalPending,
       pendingInvoicesCount: pendingInvoices.items.length,
       pendingInvoices: pendingInvoices.items,
+      wholesaleOrdersInvoicedCount: wholesaleOrdersBreakdown.invoicedCount,
+      wholesaleOrdersInvoicedNet: wholesaleOrdersBreakdown.invoicedNet,
+      wholesaleOrdersUninvoicedCount: wholesaleOrdersBreakdown.uninvoicedCount,
+      wholesaleOrdersUninvoicedNet: wholesaleOrdersBreakdown.uninvoicedNet,
+      wholesaleOrdersTotalCount: wholesaleOrdersBreakdown.totalCount,
+      wholesaleOrdersTotalNet: wholesaleOrdersBreakdown.totalNet,
+      ...(periodWholesaleOrders ? { periodWholesaleOrders } : {}),
       byCategory: (byCategory || []).map((r) => ({
         ...r,
         total: round2(Number(r.total)),

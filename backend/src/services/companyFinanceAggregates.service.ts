@@ -12,6 +12,7 @@ import {
 import {
   fobForItem,
   skuFromMlItem,
+  WHOLESALE_STATUSES,
   type MlProductIndex,
 } from './companyFinancePnl.service';
 
@@ -434,6 +435,137 @@ export async function aggregateMercadoLibreInRange(
     units: Math.round(units),
     unitsWithFob: Math.round(unitsWithFob),
   };
+}
+
+export type WholesaleOrdersInvoiceBreakdown = {
+  invoicedCount: number;
+  invoicedNet: number;
+  uninvoicedCount: number;
+  uninvoicedNet: number;
+  totalCount: number;
+  totalNet: number;
+};
+
+export type PeriodWholesaleOrderRow = {
+  orderId: string;
+  orderDate: string;
+  customerName: string;
+  orderStatus: string;
+  paymentStatus: string;
+  net: number;
+  netWithIva: number;
+  invoiced: boolean;
+  invoiceLabel: string | null;
+};
+
+const WHOLESALE_STATUS_PLACEHOLDERS = WHOLESALE_STATUSES.map(() => '?').join(',');
+
+function wholesalePeriodParams(from: string, to: string): unknown[] {
+  return [from, to, ...WHOLESALE_STATUSES];
+}
+
+/**
+ * Pedidos mayoristas del período (fecha del pedido), desglosados por factura AFIP.
+ * Misma base que ventas mayoristas en el P&L: estados confirmados+, no archivados, neto de NC.
+ */
+export async function sumWholesaleOrdersInvoiceBreakdown(
+  from: string,
+  to: string
+): Promise<WholesaleOrdersInvoiceBreakdown> {
+  const row = (await get(
+    `SELECT
+       COALESCE(SUM(CASE WHEN i.id IS NOT NULL THEN 1 ELSE 0 END), 0) AS invoicedCount,
+       COALESCE(SUM(CASE WHEN i.id IS NOT NULL THEN GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) ELSE 0 END), 0) AS invoicedNet,
+       COALESCE(SUM(CASE WHEN i.id IS NULL THEN 1 ELSE 0 END), 0) AS uninvoicedCount,
+       COALESCE(SUM(CASE WHEN i.id IS NULL THEN GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) ELSE 0 END), 0) AS uninvoicedNet,
+       COUNT(*) AS totalCount,
+       COALESCE(SUM(GREATEST(0, o.total - COALESCE(cn.cn_total, 0))), 0) AS totalNet
+     FROM orders o
+     LEFT JOIN (
+       SELECT order_id, SUM(amount_credited) AS cn_total
+       FROM credit_notes
+       GROUP BY order_id
+     ) cn ON cn.order_id = o.id
+     LEFT JOIN invoices i ON i.order_id = o.id
+     WHERE o.date >= ? AND o.date <= ?
+       AND o.status IN (${WHOLESALE_STATUS_PLACEHOLDERS})
+       AND (o.archived IS NULL OR o.archived = 0)`,
+    wholesalePeriodParams(from, to)
+  )) as {
+    invoicedCount: number;
+    invoicedNet: string | number;
+    uninvoicedCount: number;
+    uninvoicedNet: string | number;
+    totalCount: number;
+    totalNet: string | number;
+  } | undefined;
+
+  return {
+    invoicedCount: Number(row?.invoicedCount ?? 0),
+    invoicedNet: round2(Number(row?.invoicedNet ?? 0)),
+    uninvoicedCount: Number(row?.uninvoicedCount ?? 0),
+    uninvoicedNet: round2(Number(row?.uninvoicedNet ?? 0)),
+    totalCount: Number(row?.totalCount ?? 0),
+    totalNet: round2(Number(row?.totalNet ?? 0)),
+  };
+}
+
+export async function listWholesaleOrdersInPeriod(
+  from: string,
+  to: string,
+  limit = 500
+): Promise<PeriodWholesaleOrderRow[]> {
+  const rows = (await query(
+    `SELECT
+       o.id AS orderId,
+       DATE_FORMAT(o.date, '%Y-%m-%d') AS orderDate,
+       COALESCE(c.business_name, c.name, '') AS customerName,
+       o.status AS orderStatus,
+       COALESCE(o.payment_status, 'pendiente') AS paymentStatus,
+       GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) AS net,
+       ROUND(GREATEST(0, o.total - COALESCE(cn.cn_total, 0)) * 1.21, 2) AS netWithIva,
+       CASE WHEN i.id IS NOT NULL THEN 1 ELSE 0 END AS invoiced,
+       CASE
+         WHEN i.id IS NOT NULL THEN CONCAT(i.punto_venta, '-', LPAD(i.cbte_tipo, 2, '0'), '-', i.cbte_desde)
+         ELSE NULL
+       END AS invoiceLabel
+     FROM orders o
+     INNER JOIN customers c ON c.id = o.customer_id
+     LEFT JOIN (
+       SELECT order_id, SUM(amount_credited) AS cn_total
+       FROM credit_notes
+       GROUP BY order_id
+     ) cn ON cn.order_id = o.id
+     LEFT JOIN invoices i ON i.order_id = o.id
+     WHERE o.date >= ? AND o.date <= ?
+       AND o.status IN (${WHOLESALE_STATUS_PLACEHOLDERS})
+       AND (o.archived IS NULL OR o.archived = 0)
+     ORDER BY o.date DESC, o.id DESC
+     LIMIT ?`,
+    [...wholesalePeriodParams(from, to), Math.min(500, Math.max(1, limit))]
+  )) as Array<{
+    orderId: string;
+    orderDate: string;
+    customerName: string;
+    orderStatus: string;
+    paymentStatus: string;
+    net: string | number;
+    netWithIva: string | number;
+    invoiced: number;
+    invoiceLabel: string | null;
+  }>;
+
+  return rows.map((r) => ({
+    orderId: r.orderId,
+    orderDate: r.orderDate,
+    customerName: r.customerName,
+    orderStatus: r.orderStatus,
+    paymentStatus: r.paymentStatus,
+    net: round2(Number(r.net)),
+    netWithIva: round2(Number(r.netWithIva)),
+    invoiced: Number(r.invoiced) === 1,
+    invoiceLabel: r.invoiceLabel,
+  }));
 }
 
 export type PendingInvoiceRow = {

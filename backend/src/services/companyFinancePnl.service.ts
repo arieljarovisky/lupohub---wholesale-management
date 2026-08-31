@@ -3,13 +3,13 @@ import { round2 } from '../utils/companyFinanceFixed';
 import { resolveFobPriceList, type FobPriceListInfo } from '../utils/channelMarginUtils';
 import { lookupDespachoItemFobArs } from '../utils/despachoFob';
 
-const WHOLESALE_STATUSES = [
+export const WHOLESALE_STATUSES = [
   'Confirmado',
   'Preparando',
   'Falta controlar',
   'Controlado',
   'Despachado',
-];
+] as const;
 
 const SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT = `(
   (
