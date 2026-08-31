@@ -17,6 +17,7 @@ import {
   finishChannelEconomics,
   loadCompanyFobList,
   loadMlItemProductIndex,
+  loadTnVariantProductIndex,
   sumInventoryAtFob,
   sumSellerCommissionsInRange,
   sumWholesaleSalesAndCogs,
@@ -555,9 +556,10 @@ export const getCompanyFinanceSummary = async (req: Request, res: Response) => {
       [from, to]
     )) as Array<{ month: string; entryType: string; total: number }>;
 
-    const [fobInfo, mlIndex] = await Promise.all([
+    const [fobInfo, mlIndex, tnIndex] = await Promise.all([
       loadCompanyFobList(),
       includeChannels ? loadMlItemProductIndex() : Promise.resolve(undefined),
+      includeChannels ? loadTnVariantProductIndex() : Promise.resolve(undefined),
     ]);
 
     const [receipts, despachos, pendingInvoices, fixedAgg, channelAgg, invoiced, wholesale, commissions, inventory, wholesaleOrdersBreakdown] =
@@ -569,7 +571,7 @@ export const getCompanyFinanceSummary = async (req: Request, res: Response) => {
         includeChannels
           ? Promise.all([
               aggregateMercadoLibreInRange(from, to, fobInfo, mlIndex),
-              aggregateTiendaNubeInRange(from, to, fobInfo),
+              aggregateTiendaNubeInRange(from, to, fobInfo, tnIndex),
             ])
           : Promise.resolve([
               {

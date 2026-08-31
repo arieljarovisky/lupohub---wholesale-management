@@ -81,6 +81,104 @@ export async function loadCompanyFobList(): Promise<FobPriceListInfo> {
 
 export type MlProductIndex = Map<string, { productId: string; sku: string }>;
 
+export type TnLinkedProduct = {
+  productId: string;
+  productSku: string;
+  variantSku: string;
+};
+
+export type TnProductIndex = {
+  byVariantId: Map<string, TnLinkedProduct>;
+  byProductId: Map<string, TnLinkedProduct>;
+};
+
+function tnLinkedProduct(
+  productId: string,
+  productSku: string | null | undefined,
+  variantSku: string | null | undefined
+): TnLinkedProduct {
+  const sku = String(productSku || '').trim();
+  const vSku = String(variantSku || sku).trim();
+  return { productId: String(productId), productSku: sku, variantSku: vSku };
+}
+
+export async function loadTnVariantProductIndex(): Promise<TnProductIndex> {
+  const byVariantId = new Map<string, TnLinkedProduct>();
+  const byProductId = new Map<string, TnLinkedProduct>();
+
+  const rows = (await query(
+    `SELECT p.id AS productId,
+            TRIM(COALESCE(p.sku, '')) AS productSku,
+            TRIM(COALESCE(pv.external_sku, pv.sku, '')) AS variantSku,
+            NULLIF(TRIM(p.tienda_nube_id), '') AS tnProductId,
+            NULLIF(TRIM(pv.tienda_nube_variant_id), '') AS tnVariantId
+     FROM product_variants pv
+     JOIN product_colors pc ON pc.id = pv.product_color_id
+     JOIN products p ON p.id = pc.product_id
+     WHERE NULLIF(TRIM(p.tienda_nube_id), '') IS NOT NULL
+        OR NULLIF(TRIM(pv.tienda_nube_variant_id), '') IS NOT NULL`
+  )) as Array<{
+    productId: string;
+    productSku: string;
+    variantSku: string;
+    tnProductId: string | null;
+    tnVariantId: string | null;
+  }>;
+
+  for (const r of rows) {
+    const value = tnLinkedProduct(r.productId, r.productSku, r.variantSku);
+    if (r.tnVariantId) byVariantId.set(String(r.tnVariantId).trim(), value);
+    if (r.tnProductId) {
+      const key = String(r.tnProductId).trim();
+      if (!byProductId.has(key)) byProductId.set(key, value);
+    }
+  }
+
+  const pubRows = (await query(
+    `SELECT vp.external_product_id, vp.external_variant_id,
+            p.id AS productId,
+            TRIM(COALESCE(p.sku, '')) AS productSku,
+            TRIM(COALESCE(pv.external_sku, pv.sku, '')) AS variantSku
+     FROM variant_publications vp
+     JOIN product_variants pv ON pv.id = vp.variant_id
+     JOIN product_colors pc ON pc.id = pv.product_color_id
+     JOIN products p ON p.id = pc.product_id
+     WHERE vp.platform = 'tiendanube'`
+  )) as Array<{
+    external_product_id: string;
+    external_variant_id: string | null;
+    productId: string;
+    productSku: string;
+    variantSku: string;
+  }>;
+
+  for (const r of pubRows) {
+    const value = tnLinkedProduct(r.productId, r.productSku, r.variantSku);
+    const ev = String(r.external_variant_id || '').trim();
+    const ep = String(r.external_product_id || '').trim();
+    if (ev) byVariantId.set(ev, value);
+    if (ep && !byProductId.has(ep)) byProductId.set(ep, value);
+  }
+
+  return { byVariantId, byProductId };
+}
+
+export function resolveTnOrderLineProduct(
+  tnIndex: TnProductIndex | undefined,
+  line: Record<string, unknown>
+): TnLinkedProduct | null {
+  if (!tnIndex) return null;
+  const tnVariantId = String(line.variant_id ?? line.variantId ?? '').trim();
+  const tnProductId = String(line.product_id ?? line.productId ?? '').trim();
+  if (tnVariantId && tnIndex.byVariantId.has(tnVariantId)) {
+    return tnIndex.byVariantId.get(tnVariantId)!;
+  }
+  if (tnProductId && tnIndex.byProductId.has(tnProductId)) {
+    return tnIndex.byProductId.get(tnProductId)!;
+  }
+  return null;
+}
+
 export async function loadMlItemProductIndex(): Promise<MlProductIndex> {
   const rows = (await query(
     `SELECT p.id AS productId, p.sku AS sku,

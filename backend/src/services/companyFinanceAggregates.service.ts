@@ -11,9 +11,11 @@ import {
 } from '../utils/channelMarginUtils';
 import {
   fobForItem,
+  resolveTnOrderLineProduct,
   skuFromMlItem,
   WHOLESALE_STATUSES,
   type MlProductIndex,
+  type TnProductIndex,
 } from './companyFinancePnl.service';
 
 const TN_USER_AGENT = process.env.TIENDA_NUBE_USER_AGENT || 'LupoHub (support@lupo.ar)';
@@ -235,7 +237,8 @@ export type ChannelSalesAgg = {
 export async function aggregateTiendaNubeInRange(
   from: string,
   to: string,
-  fobInfo?: FobPriceListInfo
+  fobInfo?: FobPriceListInfo,
+  tnIndex?: TnProductIndex
 ): Promise<ChannelSalesAgg> {
   const empty = (connected: boolean, note?: string): ChannelSalesAgg => ({
     sales: 0,
@@ -278,8 +281,14 @@ export async function aggregateTiendaNubeInRange(
       if (qty <= 0) continue;
       units += qty;
       if (!fobInfo) continue;
-      const sku = String(p?.sku ?? p?.variant_sku ?? '').trim();
-      const fob = fobForItem(fobInfo, null, sku, sku);
+      const linked = resolveTnOrderLineProduct(tnIndex, p);
+      const orderSku = String(p?.sku ?? p?.variant_sku ?? '').trim();
+      const fob = fobForItem(
+        fobInfo,
+        linked?.productId ?? null,
+        linked?.productSku || orderSku,
+        linked?.variantSku || orderSku
+      );
       if (fob == null) continue;
       unitsWithFob += qty;
       cogs += fob * qty;
