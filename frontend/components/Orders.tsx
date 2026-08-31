@@ -13,6 +13,7 @@ import {
   buildWholesaleFacturaHtml,
   buildWholesaleCreditNoteHtml,
   buildWholesaleDebitNoteHtml,
+  injectWholesalePreviewBanner,
   normalizeSkuForPrint,
   mergeServerInvoiceIntoOrder,
   orderNetoFromItemsForAfip as orderNetoFromItems,
@@ -1250,13 +1251,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     });
   };
 
-  const injectPreviewBanner = (html: string) => {
-    if (!html) return html;
-    return html.replace(
-      '<body>',
-      '<body><div style="position:sticky;top:0;z-index:9999;background:#7f1d1d;color:#fff;padding:10px 14px;font:700 12px Arial,Helvetica,sans-serif;letter-spacing:.03em;text-transform:uppercase;text-align:center;">Vista previa sin validez fiscal - aun no emitida en AFIP</div>'
-    );
-  };
+  const injectPreviewBanner = injectWholesalePreviewBanner;
 
   const openHtmlPreviewWindow = (html: string) => {
     if (!html) {

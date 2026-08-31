@@ -8,6 +8,46 @@ import { ORDER_PRICES_INCLUDE_IVA, IVA_RATE, IVA_MULTIPLIER, orderGrossToAfipNet
 import { formatMoneyAr } from './moneyFormat';
 import { codigoTalleParaSku, nombreTalleDesdeCodigo } from './tallesTango';
 
+/** Paginación al imprimir / guardar PDF (facturas con muchas líneas). */
+const WHOLESALE_PRINT_PAGINATION_CSS = `
+      thead { display: table-header-group; }
+      tbody tr { page-break-inside: avoid; break-inside: avoid; }
+      .topbar, .period-row, .boxrow { page-break-inside: avoid; break-inside: avoid; }
+      .bottom-block, .summary { page-break-inside: avoid; break-inside: avoid; }
+      @media print {
+        .sheet { min-height: auto; padding: 0; width: auto; }
+        .lupohub-preview-banner {
+          position: static !important;
+          page-break-after: avoid;
+          break-after: avoid;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+        .no-print { display: none !important; }
+      }`;
+
+/** Banner de vista previa (sin validez fiscal). Evita position:sticky, que tapa ítems al imprimir. */
+export function injectWholesalePreviewBanner(html: string): string {
+  if (!html) return html;
+  const bannerCss = `
+      .lupohub-preview-banner {
+        background: #7f1d1d;
+        color: #fff;
+        padding: 10px 14px;
+        font: 700 12px Arial, Helvetica, sans-serif;
+        letter-spacing: .03em;
+        text-transform: uppercase;
+        text-align: center;
+      }`;
+  const withCss = html.includes('.lupohub-preview-banner')
+    ? html
+    : html.replace('</style>', `${bannerCss}</style>`);
+  return withCss.replace(
+    /<body([^>]*)>/i,
+    `<body$1><div class="lupohub-preview-banner">Vista previa sin validez fiscal — aún no emitida en AFIP</div>`
+  );
+}
+
 export type FacturaRemitente = Record<string, unknown> & {
   businessName?: string;
   address?: string;
@@ -928,7 +968,7 @@ export function buildWholesaleFacturaHtml(params: {
       .qr-wrap img { width: 84px; height: 84px; display: block; margin: 0 auto; }
       .qr-label { margin-top: 3px; font-size: 8px; line-height: 1.1; }
       .no-print { margin-top: 14px; display: flex; gap: 10px; }
-      @media print { .no-print { display: none !important; } }
+      ${WHOLESALE_PRINT_PAGINATION_CSS}
     </style></head><body>
       <div class="sheet">
         <div class="original">ORIGINAL</div>
@@ -1209,7 +1249,7 @@ export function buildWholesaleCreditNoteHtml(params: {
       .footer { margin-top: 12px; font-size: 10px; }
       .bottom-block { margin-top: auto; }
       .no-print { margin-top: 14px; display: flex; gap: 10px; }
-      @media print { .no-print { display: none !important; } }
+      ${WHOLESALE_PRINT_PAGINATION_CSS}
     </style></head><body>
       <div class="sheet">
         <div class="original">ORIGINAL</div>
@@ -1471,7 +1511,7 @@ export function buildWholesaleDebitNoteHtml(params: {
       .footer { margin-top: 12px; font-size: 10px; }
       .bottom-block { margin-top: auto; }
       .no-print { margin-top: 14px; display: flex; gap: 10px; }
-      @media print { .no-print { display: none !important; } }
+      ${WHOLESALE_PRINT_PAGINATION_CSS}
     </style></head><body>
       <div class="sheet">
         <div class="original">ORIGINAL</div>
@@ -1756,7 +1796,7 @@ export function buildExternalChannelFacturaHtml(params: {
       .qr-label { margin-top: 3px; font-size: 8px; line-height: 1.1; }
       .channel-ref { margin-top: 8px; font-size: 10px; color: #444; }
       .no-print { margin-top: 14px; display: flex; gap: 10px; }
-      @media print { .no-print { display: none !important; } }
+      ${WHOLESALE_PRINT_PAGINATION_CSS}
     </style></head><body>
       <div class="sheet">
         <div class="original">ORIGINAL</div>
