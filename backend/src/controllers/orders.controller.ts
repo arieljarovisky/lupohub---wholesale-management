@@ -303,7 +303,7 @@ async function getOrderItemsForExport(orderId: string): Promise<
             COALESCE(p.name, 'Mercadería') AS product_name,
             COALESCE(pv.sku, '') AS sku,
             COALESCE(c.name, '') AS color_name,
-            COALESCE(s.code, '') AS size_code
+            COALESCE(s.size_code, s.name, '') AS size_code
      FROM order_items oi
      LEFT JOIN product_variants pv ON pv.id = oi.variant_id
      LEFT JOIN products p ON p.id = pv.product_id
