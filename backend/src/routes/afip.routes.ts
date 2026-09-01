@@ -65,25 +65,7 @@ router.get('/consultar-comprobante', authMiddleware, (req: Request, res: Respons
     });
 });
 
-/** Catálogos WSFEX para Factura E: paises | monedas | incoterms */
-router.get('/exportacion/:tipo', authMiddleware, async (req: Request, res: Response) => {
-  const tipo = (req.params.tipo || '').toLowerCase() as 'paises' | 'monedas' | 'incoterms' | 'umed' | 'tipo_expo';
-  if (!['paises', 'monedas', 'incoterms', 'umed', 'tipo_expo'].includes(tipo)) {
-    return res.status(400).json({ error: 'tipo debe ser paises, monedas, incoterms, umed o tipo_expo' });
-  }
-  if (!isAfipConfigured()) {
-    return res.status(400).json({ error: 'AFIP no está configurado.' });
-  }
-  try {
-    const data = await getWsfexParametros(tipo);
-    return res.json({ tipo, data, puntoVentaExport: getAfipExportPuntoVenta() });
-  } catch (err: any) {
-    const message = err?.message || String(err) || 'Error consultando parámetros WSFEX.';
-    if (!res.headersSent) return res.status(400).json({ error: message });
-  }
-});
-
-/** Diagnóstico WSFEX: PV exportación y último comprobante E autorizado. */
+/** Diagnóstico WSFEX: PV exportación, listado FEEWS y último comprobante E. */
 router.get('/exportacion/diagnostico', authMiddleware, async (_req: Request, res: Response) => {
   if (!isAfipConfigured()) {
     return res.status(400).json({ error: 'AFIP no está configurado.' });
@@ -93,6 +75,30 @@ router.get('/exportacion/diagnostico', authMiddleware, async (_req: Request, res
     return res.json(data);
   } catch (err: any) {
     const message = err?.message || String(err) || 'Error en diagnóstico WSFEX.';
+    if (!res.headersSent) return res.status(400).json({ error: message });
+  }
+});
+
+/** Catálogos WSFEX para Factura E: paises | monedas | incoterms | puntos_venta | … */
+router.get('/exportacion/:tipo', authMiddleware, async (req: Request, res: Response) => {
+  const tipo = (req.params.tipo || '').toLowerCase() as
+    | 'paises'
+    | 'monedas'
+    | 'incoterms'
+    | 'umed'
+    | 'tipo_expo'
+    | 'puntos_venta';
+  if (!['paises', 'monedas', 'incoterms', 'umed', 'tipo_expo', 'puntos_venta'].includes(tipo)) {
+    return res.status(400).json({ error: 'tipo debe ser paises, monedas, incoterms, umed, tipo_expo o puntos_venta' });
+  }
+  if (!isAfipConfigured()) {
+    return res.status(400).json({ error: 'AFIP no está configurado.' });
+  }
+  try {
+    const data = await getWsfexParametros(tipo);
+    return res.json({ tipo, data, puntoVentaExport: getAfipExportPuntoVenta() });
+  } catch (err: any) {
+    const message = err?.message || String(err) || 'Error consultando parámetros WSFEX.';
     if (!res.headersSent) return res.status(400).json({ error: message });
   }
 });

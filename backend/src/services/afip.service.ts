@@ -1356,16 +1356,17 @@ function arsToMonedaExport(arsAmount: number, monedaId: string, monedaCtz: numbe
   return Math.round((ars / ctz) * 100) / 100;
 }
 
-/** Catálogos WSFEX: paises | monedas | incoterms | umed | tipo_expo */
+/** Catálogos WSFEX: paises | monedas | incoterms | umed | tipo_expo | puntos_venta */
 export async function getWsfexParametros(
-  tipo: 'paises' | 'monedas' | 'incoterms' | 'umed' | 'tipo_expo'
+  tipo: 'paises' | 'monedas' | 'incoterms' | 'umed' | 'tipo_expo' | 'puntos_venta'
 ): Promise<unknown> {
   const methodMap: Record<string, string> = {
     paises: 'FEXGetPARAM_DST_pais',
     monedas: 'FEXGetPARAM_MON',
     incoterms: 'FEXGetPARAM_Incoterms',
     umed: 'FEXGetPARAM_UMed',
-    tipo_expo: 'FEXGetPARAM_Tipo_Expo'
+    tipo_expo: 'FEXGetPARAM_Tipo_Expo',
+    puntos_venta: 'FEXGetPARAM_PtoVenta'
   };
   const method = methodMap[tipo];
   if (!method) throw new Error(`Parámetro WSFEX desconocido: ${tipo}`);
@@ -1390,20 +1391,102 @@ export async function getLastExportVoucherNumber(puntoVta: number, cbteTipo = TI
   return Number.isFinite(nro) ? nro : 0;
 }
 
+export type WsfexPuntoVenta = { number: number; blocked: boolean; bajaFecha?: string };
+
+/** Puntos de venta habilitados para Factura E (FEEWS) según AFIP. */
+export function parseWsfexPuntosVenta(raw: unknown): WsfexPuntoVenta[] {
+  const parsed: WsfexPuntoVenta[] = [];
+  const seen = new Set<number>();
+
+  walkWsfexNodes(raw, (key, _value, parent) => {
+    if (key !== 'Pve_Nro' && key !== 'pve_nro') return;
+    const n = Number(parent.Pve_Nro ?? parent.pve_nro);
+    if (!Number.isFinite(n) || n <= 0 || seen.has(n)) return;
+    seen.add(n);
+    const blocked = String(parent.Pve_Bloqueado ?? parent.pve_bloqueado ?? '')
+      .trim()
+      .toUpperCase() === 'S';
+    const baja = String(parent.Pve_FchBaja ?? parent.pve_fchbaja ?? '').trim();
+    parsed.push({
+      number: n,
+      blocked,
+      bajaFecha: baja || undefined
+    });
+  });
+
+  return parsed.sort((a, b) => a.number - b.number);
+}
+
+export async function getWsfexPuntosVentaExportacion(): Promise<WsfexPuntoVenta[]> {
+  const raw = await getWsfexParametros('puntos_venta');
+  return parseWsfexPuntosVenta(raw);
+}
+
+function wsfexPuntosVentaActivos(puntos: WsfexPuntoVenta[]): WsfexPuntoVenta[] {
+  return puntos.filter((p) => !p.blocked && !p.bajaFecha);
+}
+
+async function assertExportPuntoVentaValido(puntoVta: number): Promise<void> {
+  const puntos = await getWsfexPuntosVentaExportacion();
+  const activos = wsfexPuntosVentaActivos(puntos);
+  if (activos.some((p) => p.number === puntoVta)) return;
+
+  const lista = activos.map((p) => String(p.number)).join(', ');
+  throw new Error(
+    lista
+      ? `El punto de venta ${puntoVta} no está habilitado para Factura E (WSFEX). En Railway configurá AFIP_PTO_VTA_EXPORT con uno de estos PV de exportación: ${lista}. (El PV ${process.env.AFIP_PTO_VTA || '?'} es para Factura A/B, no sirve para exportación.)`
+      : `No hay puntos de venta de exportación (FEEWS) en AFIP. En ARCA → Administración de puntos de venta creá uno tipo «Comprobantes de Exportación - Web Services» y luego definí AFIP_PTO_VTA_EXPORT en Railway.`
+  );
+}
+
+function friendlyWsfexErrorMessage(obs: string | null): string | null {
+  if (!obs) return null;
+  if (obs.includes('[1510]') || obs.toLowerCase().includes('punto_vta')) {
+    const pv = getAfipExportPuntoVenta();
+    return (
+      `AFIP rechazó la Factura E: el punto de venta ${pv} no es válido para exportación (error 1510). ` +
+      `Creá en ARCA un PV tipo «Comprobantes de Exportación - Web Services» (FEEWS) — no uses el PV de Factura A/B — ` +
+      `y configurá AFIP_PTO_VTA_EXPORT en Railway con ese número.`
+    );
+  }
+  return obs.startsWith('AFIP rechazó') ? obs : `AFIP rechazó la Factura E: ${obs}`;
+}
+
 /** Diagnóstico WSFEX: último comprobante tipo 19 en PV exportación. */
 export async function getWsfexExportDiagnostico(): Promise<{
   wsfexService: string;
   puntoVentaExport: number;
-  ultimoCbteTipo19: number;
-  proximoCbteTipo19: number;
+  puntoVentaConfiguradoValido: boolean;
+  puntosVentaExportacion: WsfexPuntoVenta[];
+  puntosVentaExportacionActivos: number[];
+  ultimoCbteTipo19: number | null;
+  proximoCbteTipo19: number | null;
+  ultimoCbteError: string | null;
 }> {
   const puntoVentaExport = getAfipExportPuntoVenta();
-  const ultimoCbteTipo19 = await getLastExportVoucherNumber(puntoVentaExport, TIPO_CBTE_E);
+  const puntosVentaExportacion = await getWsfexPuntosVentaExportacion();
+  const activos = wsfexPuntosVentaActivos(puntosVentaExportacion);
+  const puntoVentaConfiguradoValido = activos.some((p) => p.number === puntoVentaExport);
+
+  let ultimoCbteTipo19: number | null = null;
+  let ultimoCbteError: string | null = null;
+  if (puntoVentaConfiguradoValido) {
+    try {
+      ultimoCbteTipo19 = await getLastExportVoucherNumber(puntoVentaExport, TIPO_CBTE_E);
+    } catch (err: unknown) {
+      ultimoCbteError = (err as Error)?.message || String(err);
+    }
+  }
+
   return {
     wsfexService: getWsfexServiceId(),
     puntoVentaExport,
+    puntoVentaConfiguradoValido,
+    puntosVentaExportacion,
+    puntosVentaExportacionActivos: activos.map((p) => p.number),
     ultimoCbteTipo19,
-    proximoCbteTipo19: ultimoCbteTipo19 + 1
+    proximoCbteTipo19: ultimoCbteTipo19 != null ? ultimoCbteTipo19 + 1 : null,
+    ultimoCbteError
   };
 }
 
@@ -1419,6 +1502,7 @@ export async function emitirFacturaExportacion(
 ): Promise<ExportInvoiceResult> {
   const config = getConfig();
   const puntoVta = getAfipExportPuntoVenta();
+  await assertExportPuntoVentaValido(puntoVta);
   const dstCmp = Number(params.dstCmp);
   if (!Number.isFinite(dstCmp) || dstCmp <= 0) {
     throw new Error('País destino (dstCmp) inválido. Consultá /api/afip/exportacion/paises.');
@@ -1539,10 +1623,10 @@ export async function emitirFacturaExportacion(
     const obs = formatWsfexObservaciones(res);
     const detail = summarizeWsfexResponse(res);
     console.error('[AFIP WSFEX] FEXAuthorize sin CAE:', detail);
+    const friendly = friendlyWsfexErrorMessage(obs);
     throw new Error(
-      obs
-        ? `AFIP rechazó la Factura E: ${obs}`
-        : `AFIP no devolvió CAE (PV export ${puntoVta}, ws ${getWsfexServiceId()}). Verificá wsfex autorizado y PV de exportación en ARCA. Detalle: ${detail}`
+      friendly ||
+        `AFIP no devolvió CAE (PV export ${puntoVta}, ws ${getWsfexServiceId()}). Detalle: ${detail}`
     );
   }
 
