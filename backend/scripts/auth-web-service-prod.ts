@@ -46,24 +46,41 @@ async function main() {
   const Afip = (await import('@afipsdk/afip.js')).default;
   const afip = new Afip({ access_token: accessToken });
 
-  const data = {
+  const data: Record<string, string> = {
     cuit: cuit.replace(/\D/g, ''),
     username: (username || cuit).replace(/\D/g, ''),
     password,
     alias: (alias || 'afipsdk').replace(/\W/g, '') || 'afipsdk',
+    /** Afip SDK / ARCA: id del web service (wsfe, wsfex, …) */
+    wsid: service,
     service
   };
 
   console.log('Ejecutando automatización auth-web-service-prod...');
-  console.log('CUIT:', data.cuit, '| Alias:', data.alias, '| Servicio:', data.service);
+  console.log('CUIT:', data.cuit, '| Alias:', data.alias, '| wsid:', data.wsid);
+  console.log(
+    'Tip: el alias debe coincidir con el certificado en app.afipsdk.com (ej. lupohub). Definí AFIP_CERT_ALIAS si no es afipsdk.'
+  );
 
   try {
     const response = await afip.CreateAutomation('auth-web-service-prod', data, true);
     console.log('\n--- Respuesta ---');
     console.log(JSON.stringify(response, null, 2));
     console.log('\nSi status es "complete", el web service quedó autorizado para este certificado.');
-  } catch (error: any) {
-    console.error('Error:', error?.message || error);
+  } catch (error: unknown) {
+    const e = error as { message?: string; status?: number; data?: unknown };
+    console.error('\n--- Error ---');
+    console.error('HTTP:', e.status ?? '?', '|', e.message ?? String(error));
+    if (e.data != null) {
+      console.error('Detalle Afip SDK:');
+      console.error(typeof e.data === 'string' ? e.data : JSON.stringify(e.data, null, 2));
+    }
+    console.error('\nCausas frecuentes del 400:');
+    console.error('  1. AFIP_CERT_ALIAS incorrecto (debe ser el alias del cert en app.afipsdk.com)');
+    console.error('  2. AFIP_ARCA_PASSWORD incorrecta o ARCA bloqueó el acceso');
+    console.error('  3. El certificado no existe: corré create-cert-prod antes');
+    console.error('  4. wsid inválido (exportación = wsfex)');
+    console.error('  5. El servicio ya estaba autorizado (revisá en ARCA → Administrador de certificados)');
     process.exit(1);
   }
 }
