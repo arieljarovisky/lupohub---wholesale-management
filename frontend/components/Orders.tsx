@@ -29,6 +29,12 @@ import {
 import { getWholesaleStockImpactMeta } from '../utils/orderStockImpact';
 import { calcTotalesDesdeNetoGravado } from '../utils/afipComprobante';
 import {
+  AFIP_DST_TIERRA_DEL_FUEGO,
+  AFIP_EXPORT_DST_FALLBACK,
+  mergeAfipExportDestinos,
+  parseAfipDstPaisResponse,
+} from '../utils/afipExportDestinos';
+import {
   getStoredOrdersListFilters,
   setStoredOrdersListFilters,
   type OrdersInvoiceListFilter,
@@ -416,15 +422,9 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [emitirFacturaMonedaId, setEmitirFacturaMonedaId] = useState('PES');
   const [emitirFacturaMonedaCtz, setEmitirFacturaMonedaCtz] = useState('1');
   const [emitirFacturaIncoterms, setEmitirFacturaIncoterms] = useState('FOB');
-  const [exportPaisesOptions, setExportPaisesOptions] = useState<{ code: number; name: string }[]>([
-    { code: 212, name: 'Estados Unidos' },
-    { code: 203, name: 'Brasil' },
-    { code: 225, name: 'Uruguay' },
-    { code: 208, name: 'Chile' },
-    { code: 224, name: 'Paraguay' },
-    { code: 218, name: 'México' },
-    { code: 204, name: 'Colombia' },
-  ]);
+  const [exportPaisesOptions, setExportPaisesOptions] = useState<{ code: number; name: string }[]>(
+    AFIP_EXPORT_DST_FALLBACK
+  );
   const [ncOrder, setNcOrder] = useState<Order | null>(null);
   const [orderCreditNotes, setOrderCreditNotes] = useState<CreditNote[]>([]);
   const [ncTipo, setNcTipo] = useState<'total' | 'item' | 'items'>('total');
@@ -518,29 +518,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     if (!showEmitirFacturaModal || !afipConfigured) return;
     api.getAfipExportacionParametros('paises').then((res) => {
       const raw = (res as { data?: unknown })?.data ?? res;
-      const parsed: { code: number; name: string }[] = [];
-      const pushPais = (code: unknown, name: unknown) => {
-        const c = Number(code);
-        const n = String(name ?? '').trim();
-        if (Number.isFinite(c) && c > 0 && n) parsed.push({ code: c, name: n });
-      };
-      const walk = (node: unknown) => {
-        if (!node || typeof node !== 'object') return;
-        const o = node as Record<string, unknown>;
-        if (o.Dst_codigo != null || o.dst_codigo != null) {
-          pushPais(o.Dst_codigo ?? o.dst_codigo, o.Dst_Ds ?? o.dst_ds ?? o.Descripcion);
-        }
-        if (o.CliCodigo != null) pushPais(o.CliCodigo, o.CliDescripcion);
-        for (const v of Object.values(o)) {
-          if (Array.isArray(v)) v.forEach(walk);
-          else if (v && typeof v === 'object') walk(v);
-        }
-      };
-      walk(raw);
-      if (parsed.length) {
-        parsed.sort((a, b) => a.name.localeCompare(b.name, 'es'));
-        setExportPaisesOptions(parsed);
-      }
+      const parsed = parseAfipDstPaisResponse(raw);
+      setExportPaisesOptions(mergeAfipExportDestinos(parsed));
     }).catch(() => { /* mantener lista fallback */ });
   }, [showEmitirFacturaModal, afipConfigured]);
 
@@ -2275,7 +2254,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                           const custForEmit = customers.find((c) => c.id === order.customerId);
                           setEmitirFacturaTipo(custForEmit?.isExportClient ? 'E' : 'auto');
                           setEmitirFacturaDstCmp(
-                            custForEmit?.exportDstCmp != null ? String(custForEmit.exportDstCmp) : ''
+                            custForEmit?.exportDstCmp != null
+                              ? String(custForEmit.exportDstCmp)
+                              : custForEmit?.isExportClient
+                                ? String(AFIP_DST_TIERRA_DEL_FUEGO)
+                                : ''
                           );
                           setEmitirFacturaMonedaId('PES');
                           setEmitirFacturaMonedaCtz('1');
@@ -2773,17 +2756,19 @@ const Orders: React.FC<OrdersProps> = React.memo(({
               <label className="flex items-center gap-3 p-3 rounded-xl border border-indigo-700/60 hover:bg-indigo-950/30 cursor-pointer">
                 <input type="radio" name="tipoFactura" checked={emitirFacturaTipo === 'E'} onChange={() => setEmitirFacturaTipo('E')} className="rounded border-slate-500 text-indigo-400" />
                 <span className="text-white font-medium">Factura E</span>
-                <span className="text-slate-500 text-xs">(Exportación — WSFEX, cliente del exterior)</span>
+                <span className="text-slate-500 text-xs">(Exportación / zona franca — WSFEX)</span>
               </label>
             </div>
             {emitirFacturaTipo === 'E' && (
               <div className="mb-6 space-y-3 rounded-xl border border-indigo-800/50 bg-indigo-950/20 p-4">
                 <p className="text-xs text-indigo-200/90 leading-snug">
-                  Requiere web service <strong className="text-white">wsfex</strong> autorizado en ARCA y punto de venta de exportación.
-                  El cliente debe tener domicilio y identificación tributaria extranjera cargada en Clientes.
+                  Requiere web service <strong className="text-white">wsfex</strong> autorizado en ARCA y punto de venta de exportación (10).
+                  Para <strong className="text-white">Tierra del Fuego</strong> elegí{' '}
+                  <strong className="text-white">AAE Tierra del Fuego (250)</strong> — no es Factura A/B aunque sea Argentina.
+                  El cliente debe tener domicilio e identificación tributaria cargados en Clientes.
                 </p>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">País destino</label>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Destino AFIP (país / zona)</label>
                   <select
                     value={emitirFacturaDstCmp}
                     onChange={(e) => setEmitirFacturaDstCmp(e.target.value)}

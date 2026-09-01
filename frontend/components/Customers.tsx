@@ -1379,7 +1379,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                       className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-indigo-500"
                       value={newExportDstCmp}
                       onChange={(e) => setNewExportDstCmp(e.target.value)}
-                      placeholder="Ej. 212 USA"
+                      placeholder="Ej. 212 USA, 250 Tierra del Fuego"
                     />
                   </div>
                   <div>
@@ -3775,7 +3775,7 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">País destino (código AFIP)</label>
-                      <input type="number" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-indigo-500" value={newExportDstCmp} onChange={(e) => setNewExportDstCmp(e.target.value)} placeholder="Ej. 212" />
+                      <input type="number" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-indigo-500" value={newExportDstCmp} onChange={(e) => setNewExportDstCmp(e.target.value)} placeholder="Ej. 250 Tierra del Fuego" />
                     </div>
                     <div>
                       <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Nombre país</label>
