@@ -1393,13 +1393,13 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">ID tributaria extranjera</label>
+                    <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">ID tributaria (o CUIT argentino)</label>
                     <input
                       type="text"
                       className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-indigo-500"
                       value={newForeignTaxId}
                       onChange={(e) => setNewForeignTaxId(e.target.value)}
-                      placeholder="Tax ID / VAT"
+                      placeholder="Tierra del Fuego: usá el CUIT del cliente"
                     />
                   </div>
                   <div>
@@ -3782,8 +3782,8 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                       <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-indigo-500" value={newExportCountryName} onChange={(e) => setNewExportCountryName(e.target.value)} />
                     </div>
                     <div>
-                      <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">ID tributaria extranjera</label>
-                      <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-indigo-500" value={newForeignTaxId} onChange={(e) => setNewForeignTaxId(e.target.value)} />
+                      <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">ID tributaria (o CUIT argentino)</label>
+                      <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-indigo-500" value={newForeignTaxId} onChange={(e) => setNewForeignTaxId(e.target.value)} placeholder="Tierra del Fuego: CUIT del cliente" />
                     </div>
                     <div>
                       <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">CUIT país cliente (opcional)</label>

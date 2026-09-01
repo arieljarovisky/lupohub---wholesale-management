@@ -1135,9 +1135,17 @@ export interface CustomerExportForAfip {
   businessName: string;
   address?: string | null;
   city?: string | null;
+  cuit?: string | null;
   foreignTaxId?: string | null;
   exportDstCmp?: number | null;
   exportCuitPaisCliente?: number | null;
+}
+
+function resolveExportTaxId(customer: CustomerExportForAfip): string {
+  const foreign = (customer.foreignTaxId || '').trim();
+  if (foreign) return foreign;
+  const cuit = String(customer.cuit || '').replace(/\D/g, '');
+  return cuit.length >= 10 ? cuit : '';
 }
 
 export interface ExportOrderItemForAfip {
@@ -1353,11 +1361,11 @@ export async function emitirFacturaExportacion(
   impTotal = Math.round(impTotal * 100) / 100;
   if (impTotal <= 0) throw new Error('El importe total de exportación debe ser mayor a 0.');
 
-  const foreignTaxId = (customer.foreignTaxId || '').trim();
+  const foreignTaxId = resolveExportTaxId(customer);
   const cuitPaisCliente = customer.exportCuitPaisCliente != null ? Number(customer.exportCuitPaisCliente) : 0;
   if (!foreignTaxId && !(cuitPaisCliente > 0)) {
     throw new Error(
-      'El cliente de exportación debe tener identificación tributaria extranjera (foreignTaxId) o CUIT país cliente (exportCuitPaisCliente).'
+      'El cliente de exportación debe tener identificación tributaria (ID extranjera, CUIT del cliente o CUIT país cliente).'
     );
   }
 

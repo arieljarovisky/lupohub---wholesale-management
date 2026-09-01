@@ -2412,6 +2412,7 @@ export const emitirFactura = async (req: any, res: any) => {
               businessName: customerRow.business_name ?? '',
               address: customerRow.address,
               city: customerRow.city,
+              cuit: customerRow.cuit,
               foreignTaxId: customerRow.foreign_tax_id,
               exportDstCmp: dstCmp,
               exportCuitPaisCliente: customerRow.export_cuit_pais_cliente

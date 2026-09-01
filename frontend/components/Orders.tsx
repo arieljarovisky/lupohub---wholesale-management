@@ -42,6 +42,13 @@ import {
 import { downloadOneOrderExcel, downloadOrdersExcel } from '../utils/orderExportExcel';
 import EmitDebitNoteModal from './EmitDebitNoteModal';
 
+function customerHasExportTaxIdForFacturaE(c?: Customer | null): boolean {
+  if (!c) return false;
+  if ((c.foreignTaxId || '').trim()) return true;
+  if (Number(c.exportCuitPaisCliente) > 0) return true;
+  return String(c.cuit || '').replace(/\D/g, '').length >= 10;
+}
+
 /** Acción en tarjeta de pedido: ícono + texto corto (siempre visible). */
 function OrderCardActionButton(props: {
   onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
@@ -644,8 +651,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         return { error: 'Informá la cotización de la moneda para Factura E.' };
       }
       const custE = customers.find((c) => c.id === order.customerId);
-      if (!custE?.foreignTaxId && !(Number(custE?.exportCuitPaisCliente) > 0)) {
-        return { error: 'El cliente debe tener ID tributaria extranjera o CUIT país cliente en Clientes.' };
+      if (!customerHasExportTaxIdForFacturaE(custE)) {
+        return { error: 'El cliente debe tener ID tributaria, CUIT argentino o CUIT país cliente en Clientes.' };
       }
       return {
         body: {

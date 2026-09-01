@@ -291,6 +291,21 @@ function mapCustomerFromApi(r: any): Customer {
     shouldRetainIibb: Boolean(r.shouldRetainIibb ?? r.should_retain_iibb),
     agipPadronPeriod: r.agipPadronPeriod ?? r.agip_padron_period ?? undefined,
     iibbAlicuota: r.iibbAlicuota != null ? Number(r.iibbAlicuota) : (r.iibb_alicuota != null ? Number(r.iibb_alicuota) : undefined),
+    isExportClient: Number(r.isExportClient ?? r.is_export_client ?? 0) === 1,
+    exportDstCmp:
+      r.exportDstCmp != null
+        ? Number(r.exportDstCmp)
+        : r.export_dst_cmp != null
+          ? Number(r.export_dst_cmp)
+          : undefined,
+    exportCountryName: r.exportCountryName ?? r.export_country_name ?? undefined,
+    foreignTaxId: r.foreignTaxId ?? r.foreign_tax_id ?? undefined,
+    exportCuitPaisCliente:
+      r.exportCuitPaisCliente != null
+        ? Number(r.exportCuitPaisCliente)
+        : r.export_cuit_pais_cliente != null
+          ? Number(r.export_cuit_pais_cliente)
+          : undefined,
   };
 }
 
