@@ -1393,26 +1393,60 @@ export async function getLastExportVoucherNumber(puntoVta: number, cbteTipo = TI
 
 export type WsfexPuntoVenta = { number: number; blocked: boolean; bajaFecha?: string };
 
+function isWsfexPuntoVentaBaja(fecha?: string): boolean {
+  const f = (fecha || '').trim();
+  if (!f) return false;
+  const normalized = f.toUpperCase();
+  if (normalized === '00000000' || normalized === 'NULL' || normalized === '-' || normalized === '0') {
+    return false;
+  }
+  return true;
+}
+
+function isWsfexPuntoVentaBlocked(flag: unknown): boolean {
+  const s = String(flag ?? '').trim().toUpperCase();
+  return s === 'S' || s === 'SI' || s === 'Y' || s === '1';
+}
+
+function mapWsfexPuntoVentaRow(row: Record<string, unknown>): WsfexPuntoVenta | null {
+  const n = Number(row.Pve_Nro ?? row.pve_nro ?? row.PveNro ?? row.Nro ?? row.nro);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const baja = String(row.Pve_FchBaja ?? row.pve_fchbaja ?? row.PveFchBaja ?? '').trim();
+  return {
+    number: n,
+    blocked: isWsfexPuntoVentaBlocked(row.Pve_Bloqueado ?? row.pve_bloqueado ?? row.PveBloqueado),
+    bajaFecha: baja || undefined
+  };
+}
+
 /** Puntos de venta habilitados para Factura E (FEEWS) según AFIP. */
 export function parseWsfexPuntosVenta(raw: unknown): WsfexPuntoVenta[] {
   const parsed: WsfexPuntoVenta[] = [];
   const seen = new Set<number>();
 
-  walkWsfexNodes(raw, (key, _value, parent) => {
-    if (key !== 'Pve_Nro' && key !== 'pve_nro') return;
-    const n = Number(parent.Pve_Nro ?? parent.pve_nro);
-    if (!Number.isFinite(n) || n <= 0 || seen.has(n)) return;
-    seen.add(n);
-    const blocked = String(parent.Pve_Bloqueado ?? parent.pve_bloqueado ?? '')
-      .trim()
-      .toUpperCase() === 'S';
-    const baja = String(parent.Pve_FchBaja ?? parent.pve_fchbaja ?? '').trim();
-    parsed.push({
-      number: n,
-      blocked,
-      bajaFecha: baja || undefined
+  const push = (row: WsfexPuntoVenta | null) => {
+    if (!row || seen.has(row.number)) return;
+    seen.add(row.number);
+    parsed.push(row);
+  };
+
+  const root = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const result = (root.FEXGetPARAM_PtoVentaResult ?? root) as Record<string, unknown>;
+  const get = (result.FEXResultGet ?? result) as Record<string, unknown>;
+  let rows = get.ClsFEXResponse_PtoVenta ?? get.clsFEXResponse_PtoVenta;
+  if (rows) {
+    const list = Array.isArray(rows) ? rows : [rows];
+    for (const row of list) {
+      if (row && typeof row === 'object') push(mapWsfexPuntoVentaRow(row as Record<string, unknown>));
+    }
+  }
+
+  if (!parsed.length) {
+    walkWsfexNodes(raw, (key, _value, parent) => {
+      if (key !== 'Pve_Nro' && key !== 'pve_nro' && key !== 'PveNro') return;
+      push(mapWsfexPuntoVentaRow(parent));
     });
-  });
+  }
 
   return parsed.sort((a, b) => a.number - b.number);
 }
@@ -1423,8 +1457,13 @@ export async function getWsfexPuntosVentaExportacion(): Promise<WsfexPuntoVenta[
 }
 
 function wsfexPuntosVentaActivos(puntos: WsfexPuntoVenta[]): WsfexPuntoVenta[] {
-  return puntos.filter((p) => !p.blocked && !p.bajaFecha);
+  return puntos.filter((p) => !p.blocked && !isWsfexPuntoVentaBaja(p.bajaFecha));
 }
+
+const ARCA_PV_EXPORT_INSTRUCTIONS =
+  'En ARCA (con clave fiscal) → Administración de puntos de venta y domicilios → Agregar punto de venta → ' +
+  'elegí «RECE para aplicativo y web services» o «Comprobantes de Exportación - Web Services» (FEEWS). ' +
+  'Luego en Railway definí AFIP_PTO_VTA_EXPORT con el número que te asigne ARCA.';
 
 async function assertExportPuntoVentaValido(puntoVta: number): Promise<void> {
   const puntos = await getWsfexPuntosVentaExportacion();
@@ -1435,7 +1474,7 @@ async function assertExportPuntoVentaValido(puntoVta: number): Promise<void> {
   throw new Error(
     lista
       ? `El punto de venta ${puntoVta} no está habilitado para Factura E (WSFEX). En Railway configurá AFIP_PTO_VTA_EXPORT con uno de estos PV de exportación: ${lista}. (El PV ${process.env.AFIP_PTO_VTA || '?'} es para Factura A/B, no sirve para exportación.)`
-      : `No hay puntos de venta de exportación (FEEWS) en AFIP. En ARCA → Administración de puntos de venta creá uno tipo «Comprobantes de Exportación - Web Services» y luego definí AFIP_PTO_VTA_EXPORT en Railway.`
+      : `AFIP no tiene ningún punto de venta de exportación (FEEWS) para tu CUIT. ${ARCA_PV_EXPORT_INSTRUCTIONS}`
   );
 }
 
