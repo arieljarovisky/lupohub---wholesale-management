@@ -129,6 +129,16 @@ export interface Customer {
   saleCondition?: string;
   /** Condición de IVA (ej. Responsable Inscripto, Monotributo, Consumidor Final) */
   condicionIva?: string;
+  /** Cliente del exterior — emite Factura E (WSFEX). */
+  isExportClient?: boolean;
+  /** Código AFIP país destino (Dst_cmp) para exportación. */
+  exportDstCmp?: number;
+  /** Nombre del país (referencia interna). */
+  exportCountryName?: string;
+  /** Identificación tributaria en el exterior (Id_impositivo). */
+  foreignTaxId?: string;
+  /** CUIT país cliente AFIP (alternativa a foreignTaxId). */
+  exportCuitPaisCliente?: number;
   /** Transportes (express) asignados para despachar pedidos a este cliente */
   transportes?: Transporte[];
   /** Solo actualización PATCH: ids de transportes a vincular al cliente. */
@@ -191,6 +201,12 @@ export interface OrderInvoice {
   /** Retención/percepción AGIP guardada al emitir (si aplica). */
   agipAlicuota?: number;
   agipRetPer?: number;
+  /** Factura E: moneda y datos de exportación */
+  monedaId?: string;
+  monedaCtz?: number;
+  exportDstCmp?: number;
+  exportIncoterms?: string;
+  exportTipoExpo?: number;
 }
 
 export interface Order {

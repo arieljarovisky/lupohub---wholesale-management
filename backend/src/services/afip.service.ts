@@ -13,6 +13,10 @@ import * as path from 'path';
 import { todayYmdArgentina } from '../utils/argentinaDate';
 
 const PTO_VTA_DEFAULT = 1;
+/** Punto de venta WSFEX (Factura E). Override con AFIP_PTO_VTA_EXPORT. */
+const PTO_VTA_EXPORT_DEFAULT = 10;
+/** Moneda por defecto Factura E en LupoHub. */
+const MONEDA_EXPORT_DEFAULT = 'PES';
 /** Factura A (CUIT) = 1, Factura B (consumidor final) = 6 */
 const TIPO_CBTE_A = 1;
 const TIPO_CBTE_B = 6;
@@ -22,6 +26,14 @@ const TIPO_NC_B = 8;
 /** Nota de Débito A = 2, Nota de Débito B = 7 */
 const TIPO_ND_A = 2;
 const TIPO_ND_B = 7;
+/** Factura E (exportación) = 19 — web service WSFEX, no WSFE */
+export const TIPO_CBTE_E = 19;
+/** Exportación definitiva de bienes (prendas) */
+const TIPO_EXPO_BIENES = 1;
+/** Unidad de medida AFIP: unidades */
+const PRO_UMED_UNIDADES = 7;
+/** Idioma comprobante: español */
+const IDIOMA_CBTE_ES = 1;
 /** DocTipo: 80 = CUIT, 99 = Consumidor final */
 const DOC_TIPO_CUIT = 80;
 const DOC_TIPO_CF = 99;
@@ -1114,4 +1126,305 @@ export async function consultarComprobanteAfip(
     }
     throw err;
   }
+}
+
+// ─── Factura E (WSFEX) ───────────────────────────────────────────────────────
+
+export interface CustomerExportForAfip {
+  id: string;
+  businessName: string;
+  address?: string | null;
+  city?: string | null;
+  foreignTaxId?: string | null;
+  exportDstCmp?: number | null;
+  exportCuitPaisCliente?: number | null;
+}
+
+export interface ExportOrderItemForAfip {
+  description: string;
+  quantity: number;
+  unitPriceArs: number;
+}
+
+export interface ExportInvoiceParams {
+  /** Código AFIP país destino (Dst_cmp). Obligatorio. */
+  dstCmp: number;
+  /** Moneda AFIP (ej. PES, DOL, EUR). Default PES. */
+  monedaId?: string;
+  /** Cotización de la moneda. Obligatoria si moneda ≠ PES. */
+  monedaCtz?: number;
+  /** Incoterms (ej. FOB, CIF). Default FOB. */
+  incoterms?: string;
+  /** Descripción incoterms. Default igual a incoterms. */
+  incotermsDs?: string;
+  /** 1=bienes, 2=servicios, 4=otros. Default 1. */
+  tipoExpo?: number;
+  /** Forma de pago impresa. Default Contado. */
+  formaPago?: string;
+  /** Observaciones libres. */
+  obs?: string;
+}
+
+export interface ExportInvoiceResult extends InvoiceResult {
+  monedaId: string;
+  monedaCtz: number;
+  exportDstCmp: number;
+  exportIncoterms: string;
+  exportTipoExpo: number;
+  impTotal: number;
+}
+
+type AfipClient = {
+  CUIT: number;
+  WebService: (id: string) => {
+    getTokenAuthorization: () => Promise<{ token: string; sign: string }>;
+    executeRequest: (method: string, data: Record<string, unknown>) => Promise<unknown>;
+  };
+};
+
+async function createAfipClient(): Promise<AfipClient> {
+  const config = getConfig();
+  let Afip: any;
+  try {
+    Afip = (await import('@afipsdk/afip.js')).default;
+  } catch {
+    throw new Error('Paquete AFIP no instalado. Ejecutá: npm install @afipsdk/afip.js');
+  }
+  const afipOptions: Record<string, unknown> = {
+    CUIT: config.cuit,
+    production: config.production
+  };
+  if (config.accessToken) afipOptions.access_token = config.accessToken;
+  if (config.cert && config.key) {
+    afipOptions.cert = config.cert;
+    afipOptions.key = config.key;
+  }
+  return new Afip(afipOptions) as AfipClient;
+}
+
+/** Punto de venta para exportación (WSFEX). Default 10; override con AFIP_PTO_VTA_EXPORT. */
+export function getAfipExportPuntoVenta(): number {
+  const pv = parseInt(process.env.AFIP_PTO_VTA_EXPORT || String(PTO_VTA_EXPORT_DEFAULT), 10);
+  return Number.isFinite(pv) && pv > 0 ? pv : PTO_VTA_EXPORT_DEFAULT;
+}
+
+async function wsfexAuthBlock(afip: AfipClient, ws: ReturnType<AfipClient['WebService']>) {
+  const config = getConfig();
+  const ta = await ws.getTokenAuthorization();
+  return {
+    Token: ta.token,
+    Sign: ta.sign,
+    Cuit: config.cuit
+  };
+}
+
+function formatWsfexObservaciones(res: unknown): string | null {
+  if (!res || typeof res !== 'object') return null;
+  const r = res as Record<string, unknown>;
+  const root = (r.FEXAuthorizeResult ?? r.FEXGetLast_CMPResult ?? r) as Record<string, unknown>;
+  const events = root.FEXEvents ?? root.FEXErr;
+  const fromEvents = pickAfipText(events);
+  if (fromEvents) return fromEvents;
+  const auth = root.FEXResultAuth as Record<string, unknown> | undefined;
+  const motivos = auth?.Motivos_Obs ?? auth?.motivos_Obs;
+  return pickAfipText(motivos);
+}
+
+function extractCaeFromWsfexResponse(res: unknown): { cae: string; caeFchVto: string; resultado: string } {
+  const r = res as Record<string, unknown>;
+  const root = (r?.FEXAuthorizeResult ?? r) as Record<string, unknown>;
+  const auth = (root?.FEXResultAuth ?? root) as Record<string, unknown>;
+  const cae = auth?.Cae ?? auth?.cae ?? r?.Cae ?? r?.cae;
+  const vto = auth?.Fch_venc_Cae ?? auth?.fch_venc_Cae ?? r?.Fch_venc_Cae ?? '';
+  const resultado = String(auth?.Resultado ?? auth?.resultado ?? '');
+  return {
+    cae: cae ? String(cae) : '',
+    caeFchVto: String(vto || ''),
+    resultado
+  };
+}
+
+function arsToMonedaExport(arsAmount: number, monedaId: string, monedaCtz: number): number {
+  const ars = Math.round((Number(arsAmount) || 0) * 100) / 100;
+  if (monedaId === 'PES') return ars;
+  const ctz = Number(monedaCtz);
+  if (!Number.isFinite(ctz) || ctz <= 0) {
+    throw new Error('Para factura en moneda extranjera informá la cotización (monedaCtz > 0).');
+  }
+  return Math.round((ars / ctz) * 100) / 100;
+}
+
+/** Catálogos WSFEX: paises | monedas | incoterms | umed | tipo_expo */
+export async function getWsfexParametros(
+  tipo: 'paises' | 'monedas' | 'incoterms' | 'umed' | 'tipo_expo'
+): Promise<unknown> {
+  const methodMap: Record<string, string> = {
+    paises: 'FEXGetPARAM_DST_pais',
+    monedas: 'FEXGetPARAM_MON',
+    incoterms: 'FEXGetPARAM_Incoterms',
+    umed: 'FEXGetPARAM_UMed',
+    tipo_expo: 'FEXGetPARAM_Tipo_Expo'
+  };
+  const method = methodMap[tipo];
+  if (!method) throw new Error(`Parámetro WSFEX desconocido: ${tipo}`);
+
+  const afip = await createAfipClient();
+  const ws = afip.WebService('wsfex');
+  const Auth = await wsfexAuthBlock(afip, ws);
+  return withAfipRetry(`wsfex ${method}`, () => ws.executeRequest(method, { Auth }) as Promise<unknown>);
+}
+
+/** Último comprobante de exportación autorizado (WSFEX). */
+export async function getLastExportVoucherNumber(puntoVta: number, cbteTipo = TIPO_CBTE_E): Promise<number> {
+  const afip = await createAfipClient();
+  const ws = afip.WebService('wsfex');
+  const Auth = await wsfexAuthBlock(afip, ws);
+  const res = (await withAfipRetry('FEXGetLast_CMP', () =>
+    ws.executeRequest('FEXGetLast_CMP', { Auth, Pto_venta: puntoVta, Cbte_Tipo: cbteTipo })
+  )) as Record<string, unknown>;
+  const root = (res?.FEXGetLast_CMPResult ?? res) as Record<string, unknown>;
+  const last = (root?.FEXResult_LastCMP ?? root) as Record<string, unknown>;
+  const nro = Number(last?.Cbte_nro ?? last?.cbte_nro ?? 0);
+  return Number.isFinite(nro) ? nro : 0;
+}
+
+/**
+ * Emite Factura E (exportación) vía WSFEX / FEXAuthorize.
+ * Requiere autorizar el web service `wsfex` en ARCA (además de wsfe).
+ */
+export async function emitirFacturaExportacion(
+  order: OrderForAfip,
+  customer: CustomerExportForAfip,
+  items: ExportOrderItemForAfip[],
+  params: ExportInvoiceParams
+): Promise<ExportInvoiceResult> {
+  const config = getConfig();
+  const puntoVta = getAfipExportPuntoVenta();
+  const dstCmp = Number(params.dstCmp);
+  if (!Number.isFinite(dstCmp) || dstCmp <= 0) {
+    throw new Error('País destino (dstCmp) inválido. Consultá /api/afip/exportacion/paises.');
+  }
+  if (!customer.businessName?.trim()) {
+    throw new Error('El cliente debe tener razón social / nombre para Factura E.');
+  }
+  const domicilio = [customer.address, customer.city].filter(Boolean).join(', ').trim();
+  if (!domicilio) {
+    throw new Error('El cliente de exportación debe tener domicilio y ciudad cargados.');
+  }
+
+  const monedaId = (params.monedaId || process.env.AFIP_EXPORT_MONEDA_ID || MONEDA_EXPORT_DEFAULT)
+    .trim()
+    .toUpperCase();
+  const monedaCtz =
+    monedaId === 'PES'
+      ? 1
+      : Number(params.monedaCtz ?? process.env.AFIP_EXPORT_MONEDA_CTZ ?? 0);
+  if (monedaId !== 'PES' && !(monedaCtz > 0)) {
+    throw new Error('Informá la cotización de la moneda (monedaCtz) para Factura E en moneda extranjera.');
+  }
+
+  const tipoExpo = params.tipoExpo === 2 || params.tipoExpo === 4 ? params.tipoExpo : TIPO_EXPO_BIENES;
+  const incoterms = (params.incoterms || process.env.AFIP_EXPORT_INCOTERMS || 'FOB').trim().toUpperCase();
+  const incotermsDs = (params.incotermsDs || incoterms).trim();
+  const formaPago = (params.formaPago || 'Contado').trim();
+
+  const lineItems = (items || []).filter((it) => (Number(it.quantity) || 0) > 0);
+  if (lineItems.length === 0) {
+    throw new Error('El pedido no tiene ítems con cantidad para facturar.');
+  }
+
+  let impTotal = 0;
+  const afipItems: Record<string, unknown>[] = [];
+  for (const it of lineItems) {
+    const qty = Math.round((Number(it.quantity) || 0) * 10000) / 10000;
+    const unitArs = Math.round((Number(it.unitPriceArs) || 0) * 100) / 100;
+    const unit = arsToMonedaExport(unitArs, monedaId, monedaCtz);
+    const totalItem = Math.round(qty * unit * 100) / 100;
+    impTotal += totalItem;
+    afipItems.push({
+      Pro_ds: (it.description || 'Mercadería').slice(0, 250),
+      Pro_qty: qty,
+      Pro_umed: PRO_UMED_UNIDADES,
+      Pro_precio_uni: unit,
+      Pro_bonificacion: 0,
+      Pro_total_item: totalItem
+    });
+  }
+  impTotal = Math.round(impTotal * 100) / 100;
+  if (impTotal <= 0) throw new Error('El importe total de exportación debe ser mayor a 0.');
+
+  const foreignTaxId = (customer.foreignTaxId || '').trim();
+  const cuitPaisCliente = customer.exportCuitPaisCliente != null ? Number(customer.exportCuitPaisCliente) : 0;
+  if (!foreignTaxId && !(cuitPaisCliente > 0)) {
+    throw new Error(
+      'El cliente de exportación debe tener identificación tributaria extranjera (foreignTaxId) o CUIT país cliente (exportCuitPaisCliente).'
+    );
+  }
+
+  const dateStr = todayYmdArgentina();
+  const fechaCbte = dateStr.replace(/-/g, '');
+  if (fechaCbte.length !== 8) throw new Error('Fecha inválida para AFIP exportación.');
+
+  const afip = await createAfipClient();
+  const ws = afip.WebService('wsfex');
+  const Auth = await wsfexAuthBlock(afip, ws);
+  const ambiente = config.production ? 'producción' : 'homologación';
+  console.log(`[AFIP WSFEX] Emitiendo Factura E en ${ambiente}. Pto.Vta ${puntoVta}, Dst ${dstCmp}, ${monedaId}`);
+
+  const lastNro = await getLastExportVoucherNumber(puntoVta, TIPO_CBTE_E);
+  const cbteNro = lastNro + 1;
+  const requestId = Date.now() % 999_999_999;
+
+  const Cmp: Record<string, unknown> = {
+    Id: requestId,
+    Fecha_cbte: fechaCbte,
+    Cbte_Tipo: TIPO_CBTE_E,
+    Punto_vta: puntoVta,
+    Cbte_nro: cbteNro,
+    Tipo_expo: tipoExpo,
+    Permiso_existente: tipoExpo === TIPO_EXPO_BIENES ? 'N' : '',
+    Dst_cmp: dstCmp,
+    Cliente: customer.businessName.trim().slice(0, 200),
+    Domicilio_cliente: domicilio.slice(0, 200),
+    Moneda_Id: monedaId,
+    Moneda_ctz: monedaCtz,
+    Imp_total: impTotal,
+    Forma_pago: formaPago.slice(0, 50),
+    Incoterms: incoterms.slice(0, 3),
+    Incoterms_Ds: incotermsDs.slice(0, 20),
+    Idioma_cbte: IDIOMA_CBTE_ES,
+    Items: { Item: afipItems }
+  };
+  if (foreignTaxId) Cmp.Id_impositivo = foreignTaxId.slice(0, 50);
+  if (cuitPaisCliente > 0) Cmp.Cuit_pais_cliente = cuitPaisCliente;
+  if (params.obs?.trim()) Cmp.Obs = params.obs.trim().slice(0, 1000);
+
+  const res = (await withAfipRetry('FEXAuthorize Factura E', () =>
+    ws.executeRequest('FEXAuthorize', { Auth, Cmp })
+  )) as Record<string, unknown>;
+
+  const { cae, caeFchVto, resultado } = extractCaeFromWsfexResponse(res);
+  if (!cae || (resultado && resultado !== 'A')) {
+    const obs = formatWsfexObservaciones(res);
+    throw new Error(
+      obs
+        ? `AFIP rechazó la Factura E: ${obs}`
+        : 'AFIP no devolvió CAE para Factura E. Revisá datos de exportación y autorización wsfex.'
+    );
+  }
+
+  return {
+    cae: String(cae),
+    caeFchVto: String(caeFchVto),
+    puntoVta,
+    cbteTipo: TIPO_CBTE_E,
+    cbteDesde: cbteNro,
+    cbteHasta: cbteNro,
+    monedaId,
+    monedaCtz,
+    exportDstCmp: dstCmp,
+    exportIncoterms: incoterms,
+    exportTipoExpo: tipoExpo,
+    impTotal
+  };
 }

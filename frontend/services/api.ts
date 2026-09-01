@@ -1717,8 +1717,41 @@ export const api = {
   },
 
   /** Emite factura electrónica AFIP para un pedido (requiere picking y estado control/despacho). */
-  emitirFactura: async (orderId: string, body?: { cbteTipo?: 1 | 6 }): Promise<{ id: string; orderId: string; cae: string; caeFchVto?: string; cbteDesde: number; cbteHasta: number; cbteTipo: number; puntoVta?: number; agipAlicuota?: number; agipRetPer?: number }> => {
+  emitirFactura: async (
+    orderId: string,
+    body?: {
+      cbteTipo?: 1 | 6 | 19;
+      dstCmp?: number;
+      monedaId?: string;
+      monedaCtz?: number;
+      incoterms?: string;
+      formaPago?: string;
+    }
+  ): Promise<{
+    id: string;
+    orderId: string;
+    cae: string;
+    caeFchVto?: string;
+    cbteDesde: number;
+    cbteHasta: number;
+    cbteTipo: number;
+    puntoVta?: number;
+    agipAlicuota?: number;
+    agipRetPer?: number;
+    monedaId?: string;
+    monedaCtz?: number;
+    exportDstCmp?: number;
+    exportIncoterms?: string;
+    exportTipoExpo?: number;
+  }> => {
     return await request<any>(`/orders/${orderId}/emitir-factura`, 'POST', body ?? {}, undefined, AFIP_EMIT_TIMEOUT_MS);
+  },
+
+  /** Catálogos WSFEX para Factura E (paises, monedas, incoterms). */
+  getAfipExportacionParametros: async (
+    tipo: 'paises' | 'monedas' | 'incoterms'
+  ): Promise<{ tipo: string; data: unknown; puntoVentaExport?: number }> => {
+    return await request(`/afip/exportacion/${tipo}`, 'GET');
   },
 
   /** Marca pedido como showroom listo para AFIP (picked=qty, Controlado, pagado, stock). */

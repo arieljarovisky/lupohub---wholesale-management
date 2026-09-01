@@ -287,6 +287,54 @@ async function getOrderNetFromLineItems(orderId: string): Promise<number> {
   return Math.round(sum * 100) / 100;
 }
 
+/** Líneas del pedido para Factura E (descripción + neto unitario en ARS). */
+async function getOrderItemsForExport(orderId: string): Promise<
+  { description: string; quantity: number; unitPriceArs: number }[]
+> {
+  const meta = await get(
+    `SELECT COALESCE(o.no_stock_impact, 0) AS no_stock_impact, o.status
+     FROM orders o WHERE o.id = ? LIMIT 1`,
+    [orderId]
+  ) as { no_stock_impact?: number; status?: string } | undefined;
+  const usePicked =
+    !Number(meta?.no_stock_impact) && PICKING_DONE_STATUSES_AFIP.has(String(meta?.status || ''));
+  const rows = await query(
+    `SELECT oi.quantity, oi.picked, oi.price_at_moment,
+            COALESCE(p.name, 'Mercadería') AS product_name,
+            COALESCE(pv.sku, '') AS sku,
+            COALESCE(c.name, '') AS color_name,
+            COALESCE(s.code, '') AS size_code
+     FROM order_items oi
+     LEFT JOIN product_variants pv ON pv.id = oi.variant_id
+     LEFT JOIN products p ON p.id = pv.product_id
+     LEFT JOIN colors c ON c.id = pv.color_id
+     LEFT JOIN sizes s ON s.id = pv.size_id
+     WHERE oi.order_id = ?
+     ORDER BY oi.id`,
+    [orderId]
+  ) as {
+    quantity: number;
+    picked: number | null;
+    price_at_moment: string | number;
+    product_name: string;
+    sku: string;
+    color_name: string;
+    size_code: string;
+  }[];
+  const out: { description: string; quantity: number; unitPriceArs: number }[] = [];
+  for (const r of rows) {
+    const q = Number(r.quantity) || 0;
+    const p = Number(r.picked) || 0;
+    const lineQty = usePicked ? Math.min(q, Math.max(0, p)) : q;
+    if (lineQty <= 0) continue;
+    const price = Math.round((Number(r.price_at_moment) || 0) * 100) / 100;
+    const parts = [r.product_name, r.color_name, r.size_code, r.sku].filter(Boolean);
+    const description = parts.join(' ').trim() || 'Mercadería';
+    out.push({ description, quantity: lineQty, unitPriceArs: price });
+  }
+  return out;
+}
+
 /** Neto para NC total: pickeado, o —si quedó en 0— lo facturado (IIBB / cantidades / total del pedido). */
 async function getOrderNetForCreditNoteTotal(orderId: string): Promise<number> {
   const fromPicked = await getOrderNetFromLineItems(orderId);
@@ -2187,7 +2235,7 @@ export const getOrderInvoice = async (req: any, res: any) => {
   try {
     const inv = await get(
       `SELECT i.id, i.order_id, i.cae, i.cae_fch_vto, i.punto_venta, i.cbte_tipo, i.cbte_desde, i.cbte_hasta, i.created_at,
-              i.agip_alicuota, i.agip_ret_per,
+              i.agip_alicuota, i.agip_ret_per, i.moneda_id, i.moneda_ctz, i.export_dst_cmp, i.export_incoterms, i.export_tipo_expo,
               o.total AS order_total, o.date AS order_date, c.cuit AS customer_cuit
        FROM invoices i
        JOIN orders o ON o.id = i.order_id
@@ -2219,7 +2267,12 @@ export const getOrderInvoice = async (req: any, res: any) => {
       cbteHasta: inv.cbte_hasta,
       createdAt: inv.created_at,
       agipAlicuota: agip.alicuota,
-      agipRetPer: agip.amount
+      agipRetPer: agip.amount,
+      monedaId: inv.moneda_id ?? undefined,
+      monedaCtz: inv.moneda_ctz != null ? Number(inv.moneda_ctz) : undefined,
+      exportDstCmp: inv.export_dst_cmp != null ? Number(inv.export_dst_cmp) : undefined,
+      exportIncoterms: inv.export_incoterms ?? undefined,
+      exportTipoExpo: inv.export_tipo_expo != null ? Number(inv.export_tipo_expo) : undefined
     });
   } catch (error) {
     console.error(error);
@@ -2252,13 +2305,21 @@ export const emitirFactura = async (req: any, res: any) => {
     if (existingInv) return res.status(409).json({ message: 'Este pedido ya tiene una factura emitida', invoiceId: existingInv.id });
 
     const customerRow = await get(
-      'SELECT id, business_name, cuit, condicion_iva FROM customers WHERE id = ?',
+      `SELECT id, business_name, cuit, condicion_iva, address, city,
+              COALESCE(is_export_client, 0) AS is_export_client,
+              export_dst_cmp, foreign_tax_id, export_cuit_pais_cliente
+       FROM customers WHERE id = ?`,
       [orderRow.customer_id]
     );
     if (!customerRow) return res.status(400).json({ message: 'Cliente del pedido no encontrado' });
 
     const cbteTipoFromBody = req.body?.cbteTipo;
-    const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? (cbteTipoFromBody as 1 | 6) : undefined;
+    const isFacturaE = cbteTipoFromBody === 19 || cbteTipoFromBody === '19';
+    const forceCbteTipo =
+      cbteTipoFromBody === 1 || cbteTipoFromBody === 6 ? (cbteTipoFromBody as 1 | 6) : undefined;
+    if (isFacturaE && forceCbteTipo) {
+      return res.status(400).json({ message: 'cbteTipo inválido: use 19 para Factura E, o 1/6 para A/B.' });
+    }
 
     const netFromItems = await getOrderNetFromLineItems(id);
     if (!PICKING_DONE_STATUSES_AFIP.has(String(orderRow.status || ''))) {
@@ -2277,11 +2338,30 @@ export const emitirFactura = async (req: any, res: any) => {
     const grossFromItems = netFromItems > 0 ? netFromItems : Number(orderRow.total);
     const totalForAfip = orderGrossToAfipNeto(grossFromItems);
 
-    const agip = await getAgipRetentionForOrder({
-      orderDate: orderRow.date,
-      customerCuit: customerRow.cuit,
-      netAmount: totalForAfip
-    });
+    const exportDstCmpBody = req.body?.dstCmp ?? req.body?.exportDstCmp;
+    const exportMonedaId = (req.body?.monedaId ?? req.body?.moneda_id ?? '').toString().trim().toUpperCase();
+    const exportMonedaCtz = req.body?.monedaCtz ?? req.body?.moneda_ctz;
+    const exportIncoterms = (req.body?.incoterms ?? '').toString().trim();
+    const exportFormaPago = (req.body?.formaPago ?? req.body?.forma_pago ?? '').toString().trim();
+
+    if (isFacturaE) {
+      const dstCmp = Number(exportDstCmpBody ?? customerRow.export_dst_cmp);
+      if (!Number.isFinite(dstCmp) || dstCmp <= 0) {
+        return res.status(400).json({
+          message:
+            'Factura E: informá el país destino (dstCmp). Podés cargarlo en el cliente o en el body de emisión.'
+        });
+      }
+    }
+
+    const agip =
+      isFacturaE
+        ? null
+        : await getAgipRetentionForOrder({
+            orderDate: orderRow.date,
+            customerCuit: customerRow.cuit,
+            netAmount: totalForAfip
+          });
     const iibbPercepcion =
       agip && agip.amount > 0.005
         ? { baseImp: totalForAfip, alicuota: agip.alicuota, importe: agip.amount }
@@ -2297,31 +2377,80 @@ export const emitirFactura = async (req: any, res: any) => {
     let work = emitFacturaInFlight.get(id);
     if (!work) {
       work = (async () => {
-        const { emitirFactura: emitirAfip } = await import('../services/afip.service');
-        const result = await emitirAfip(
-          {
-            id: orderRow.id,
-            date: orderRow.date,
-            total: totalForAfip,
-            customerId: orderRow.customer_id,
-            iibbPercepcion: iibbPercepcion ?? null
-          },
-          {
-            id: customerRow.id,
-            businessName: customerRow.business_name ?? '',
-            cuit: customerRow.cuit,
-            condicionIva: customerRow.condicion_iva ?? null
-          },
-          forceCbteTipo
-        );
+        let result: {
+          cae: string;
+          caeFchVto: string;
+          puntoVta: number;
+          cbteTipo: number;
+          cbteDesde: number;
+          cbteHasta: number;
+          monedaId?: string;
+          monedaCtz?: number;
+          exportDstCmp?: number;
+          exportIncoterms?: string;
+          exportTipoExpo?: number;
+        };
+
+        if (isFacturaE) {
+          const { emitirFacturaExportacion: emitirExport } = await import('../services/afip.service');
+          const exportItems = await getOrderItemsForExport(id);
+          const dstCmp = Number(exportDstCmpBody ?? customerRow.export_dst_cmp);
+          const exportResult = await emitirExport(
+            {
+              id: orderRow.id,
+              date: orderRow.date,
+              total: totalForAfip,
+              customerId: orderRow.customer_id,
+              iibbPercepcion: null
+            },
+            {
+              id: customerRow.id,
+              businessName: customerRow.business_name ?? '',
+              address: customerRow.address,
+              city: customerRow.city,
+              foreignTaxId: customerRow.foreign_tax_id,
+              exportDstCmp: dstCmp,
+              exportCuitPaisCliente: customerRow.export_cuit_pais_cliente
+            },
+            exportItems,
+            {
+              dstCmp,
+              monedaId: exportMonedaId || undefined,
+              monedaCtz: exportMonedaCtz != null ? Number(exportMonedaCtz) : undefined,
+              incoterms: exportIncoterms || undefined,
+              formaPago: exportFormaPago || undefined
+            }
+          );
+          result = exportResult;
+        } else {
+          const { emitirFactura: emitirAfip } = await import('../services/afip.service');
+          result = await emitirAfip(
+            {
+              id: orderRow.id,
+              date: orderRow.date,
+              total: totalForAfip,
+              customerId: orderRow.customer_id,
+              iibbPercepcion: iibbPercepcion ?? null
+            },
+            {
+              id: customerRow.id,
+              businessName: customerRow.business_name ?? '',
+              cuit: customerRow.cuit,
+              condicionIva: customerRow.condicion_iva ?? null
+            },
+            forceCbteTipo
+          );
+        }
+
         const invCheck = await get('SELECT id FROM invoices WHERE order_id = ?', [id]);
         if (invCheck) {
           throw Object.assign(new Error('Este pedido ya tiene una factura emitida'), { status: 409 });
         }
         const invoiceId = uuidv4();
         await execute(
-          `INSERT INTO invoices (id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, agip_alicuota, agip_ret_per)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO invoices (id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta,
+                                 agip_alicuota, agip_ret_per, moneda_id, moneda_ctz, export_dst_cmp, export_incoterms, export_tipo_expo)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             invoiceId,
             id,
@@ -2331,8 +2460,13 @@ export const emitirFactura = async (req: any, res: any) => {
             result.cbteTipo,
             result.cbteDesde,
             result.cbteHasta,
-            agip?.alicuota ?? 0,
-            agip?.amount ?? 0
+            isFacturaE ? 0 : agip?.alicuota ?? 0,
+            isFacturaE ? 0 : agip?.amount ?? 0,
+            result.monedaId ?? null,
+            result.monedaCtz ?? null,
+            result.exportDstCmp ?? null,
+            result.exportIncoterms ?? null,
+            result.exportTipoExpo ?? null
           ]
         );
         await execute('UPDATE orders SET total = ? WHERE id = ?', [
@@ -2350,8 +2484,13 @@ export const emitirFactura = async (req: any, res: any) => {
           cbteTipo: result.cbteTipo,
           cbteDesde: result.cbteDesde,
           cbteHasta: result.cbteHasta,
-          agipAlicuota: agip?.alicuota ?? 0,
-          agipRetPer: agip?.amount ?? 0
+          agipAlicuota: isFacturaE ? 0 : agip?.alicuota ?? 0,
+          agipRetPer: isFacturaE ? 0 : agip?.amount ?? 0,
+          monedaId: result.monedaId,
+          monedaCtz: result.monedaCtz,
+          exportDstCmp: result.exportDstCmp,
+          exportIncoterms: result.exportIncoterms,
+          exportTipoExpo: result.exportTipoExpo
         };
       })();
       emitFacturaInFlight.set(id, work);

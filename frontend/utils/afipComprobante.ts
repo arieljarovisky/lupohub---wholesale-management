@@ -1,6 +1,7 @@
-/** Tipos AFIP WSFE usados en LupoHub (factura / NC). */
+/** Tipos AFIP WSFE / WSFEX usados en LupoHub (factura / NC). */
 export const CBTE_FACTURA_A = 1;
 export const CBTE_FACTURA_B = 6;
+export const CBTE_FACTURA_E = 19;
 export const CBTE_NC_A = 3;
 export const CBTE_NC_B = 8;
 
@@ -12,11 +13,16 @@ export function isComprobanteClaseB(cbteTipo: number): boolean {
   return t === CBTE_FACTURA_B || t === CBTE_NC_B;
 }
 
-export function letraDesdeCbteTipo(cbteTipo: number): 'A' | 'B' | 'C' {
+export function letraDesdeCbteTipo(cbteTipo: number): 'A' | 'B' | 'C' | 'E' {
   const t = Number(cbteTipo);
+  if (t === CBTE_FACTURA_E) return 'E';
   if (t === CBTE_FACTURA_A || t === CBTE_NC_A) return 'A';
   if (t === 11 || t === 13) return 'C';
   return 'B';
+}
+
+export function isComprobanteExportacion(cbteTipo: number): boolean {
+  return Number(cbteTipo) === CBTE_FACTURA_E;
 }
 
 /**

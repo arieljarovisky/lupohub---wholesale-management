@@ -3,7 +3,7 @@
  * Totales: neto gravado + IVA 21% + percepción IIBB (Factura A); en Factura B el importe impreso lleva IVA incluido sin discriminar.
  */
 import type { CreditNote, Customer, DebitNote, Order, OrderItem, Product } from '../types';
-import { calcTotalesDesdeNetoGravado, isComprobanteClaseB } from './afipComprobante';
+import { calcTotalesDesdeNetoGravado, isComprobanteClaseB, isComprobanteExportacion } from './afipComprobante';
 import { ORDER_PRICES_INCLUDE_IVA, IVA_RATE, IVA_MULTIPLIER, orderGrossToAfipNeto } from './orderPricing';
 import { formatMoneyAr } from './moneyFormat';
 import { codigoTalleParaSku, nombreTalleDesdeCodigo } from './tallesTango';
@@ -800,8 +800,9 @@ export function buildWholesaleFacturaHtml(params: {
   };
 
   const cbteTipoNum = Number((inv as { cbteTipo?: number }).cbteTipo ?? (inv as { cbte_tipo?: number }).cbte_tipo);
-  const tipoFactura = cbteTipoNum === 1 ? 'A' : cbteTipoNum === 11 ? 'C' : 'B';
-  const codigoComprobante = cbteTipoNum === 1 ? '001' : cbteTipoNum === 11 ? '011' : '006';
+  const esExport = isComprobanteExportacion(cbteTipoNum);
+  const tipoFactura = esExport ? 'E' : cbteTipoNum === 1 ? 'A' : cbteTipoNum === 11 ? 'C' : 'B';
+  const codigoComprobante = esExport ? '019' : cbteTipoNum === 1 ? '001' : cbteTipoNum === 11 ? '011' : '006';
   const nroComprobante = inv.puntoVta != null ? `${String(inv.puntoVta).padStart(5, '0')}-${String(inv.cbteDesde).padStart(8, '0')}` : String(inv.cbteDesde);
   const fechaComprobante = inv.createdAt ? formatDateShort(inv.createdAt) : formatDateShort(order.date);
   const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
@@ -818,9 +819,37 @@ export function buildWholesaleFacturaHtml(params: {
     sumLines > 0 ? Math.round(sumLines * 100) / 100 : Math.round((Number(order.total) > 0 ? Number(order.total) : 0) * 100) / 100;
   const agipAlicuota = Number((inv as any).agipAlicuota ?? (inv as any).agip_alicuota ?? 0);
   const agipRetPer = Number((inv as any).agipRetPer ?? (inv as any).agip_ret_per ?? 0);
-  const totales = calcTotalesDesdeNetoGravado(netoGravado, cbteTipoNum, agipRetPer);
-  const { neto: netoImpreso, iva: iva21, total, discriminaIva, factorPrecioImpreso } = totales;
-  const subtotalBruto = discriminaIva ? netoGravado : Math.round((netoGravado + totales.iva) * 100) / 100;
+  const monedaExportId = String((inv as any).monedaId ?? (inv as any).moneda_id ?? 'PES').toUpperCase();
+  const monedaExportCtz = Number((inv as any).monedaCtz ?? (inv as any).moneda_ctz ?? 1);
+  const exportIncoterms = String((inv as any).exportIncoterms ?? (inv as any).export_incoterms ?? 'FOB');
+  let netoImpreso: number;
+  let iva21: number;
+  let total: number;
+  let discriminaIva: boolean;
+  let factorPrecioImpreso: number;
+  let subtotalBruto: number;
+  if (esExport) {
+    const totalArs = netoGravado;
+    const totalMoneda =
+      monedaExportId === 'PES'
+        ? totalArs
+        : Math.round((totalArs / (monedaExportCtz > 0 ? monedaExportCtz : 1)) * 100) / 100;
+    netoImpreso = totalMoneda;
+    iva21 = 0;
+    total = totalMoneda;
+    discriminaIva = false;
+    factorPrecioImpreso =
+      monedaExportId === 'PES' ? 1 : 1 / (monedaExportCtz > 0 ? monedaExportCtz : 1);
+    subtotalBruto = totalMoneda;
+  } else {
+    const totales = calcTotalesDesdeNetoGravado(netoGravado, cbteTipoNum, agipRetPer);
+    netoImpreso = totales.neto;
+    iva21 = totales.iva;
+    total = totales.total;
+    discriminaIva = totales.discriminaIva;
+    factorPrecioImpreso = totales.factorPrecioImpreso;
+    subtotalBruto = discriminaIva ? netoGravado : Math.round((netoGravado + totales.iva) * 100) / 100;
+  }
 
   const rows = items
     .map((i) => {
@@ -908,8 +937,8 @@ export function buildWholesaleFacturaHtml(params: {
     tipoCmp: Number((inv as { cbteTipo?: number }).cbteTipo ?? (inv as { cbte_tipo?: number }).cbte_tipo ?? 0),
     nroCmp: Number(inv.cbteDesde ?? 0),
     importe: Number(total.toFixed(2)),
-    moneda: 'PES',
-    ctz: 1,
+    moneda: esExport ? monedaExportId : 'PES',
+    ctz: esExport ? (monedaExportCtz > 0 ? monedaExportCtz : 1) : 1,
     tipoDocRec,
     nroDocRec,
     tipoCodAut: 'E',

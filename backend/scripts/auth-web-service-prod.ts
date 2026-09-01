@@ -13,7 +13,7 @@
  *   AFIP_CERT_ALIAS=lupohub \
  *   npm run auth-web-service-prod
  *
- *   Para otro servicio: AFIP_WS_SERVICE=wsaa npm run auth-web-service-prod
+ *   Para otro servicio: AFIP_WS_SERVICE=wsfex npm run auth-web-service-prod
  */
 
 import * as dotenv from 'dotenv';

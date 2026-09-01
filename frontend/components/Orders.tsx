@@ -410,8 +410,21 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [restoringMayoristaStockId, setRestoringMayoristaStockId] = useState<string | null>(null);
   const [showEmitirFacturaModal, setShowEmitirFacturaModal] = useState(false);
   const [orderToEmitFactura, setOrderToEmitFactura] = useState<Order | null>(null);
-  const [emitirFacturaTipo, setEmitirFacturaTipo] = useState<'auto' | 'A' | 'B'>('auto');
+  const [emitirFacturaTipo, setEmitirFacturaTipo] = useState<'auto' | 'A' | 'B' | 'E'>('auto');
   const [emitirFacturaSaleCondition, setEmitirFacturaSaleCondition] = useState<CondicionVentaFactura>('Contado');
+  const [emitirFacturaDstCmp, setEmitirFacturaDstCmp] = useState('');
+  const [emitirFacturaMonedaId, setEmitirFacturaMonedaId] = useState('PES');
+  const [emitirFacturaMonedaCtz, setEmitirFacturaMonedaCtz] = useState('1');
+  const [emitirFacturaIncoterms, setEmitirFacturaIncoterms] = useState('FOB');
+  const [exportPaisesOptions, setExportPaisesOptions] = useState<{ code: number; name: string }[]>([
+    { code: 212, name: 'Estados Unidos' },
+    { code: 203, name: 'Brasil' },
+    { code: 225, name: 'Uruguay' },
+    { code: 208, name: 'Chile' },
+    { code: 224, name: 'Paraguay' },
+    { code: 218, name: 'México' },
+    { code: 204, name: 'Colombia' },
+  ]);
   const [ncOrder, setNcOrder] = useState<Order | null>(null);
   const [orderCreditNotes, setOrderCreditNotes] = useState<CreditNote[]>([]);
   const [ncTipo, setNcTipo] = useState<'total' | 'item' | 'items'>('total');
@@ -500,6 +513,36 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     }).catch(() => { setAfipConfigured(false); setAfipProduction(true); });
     api.getAfipIssuer().then(setIssuerFromApi).catch(() => setIssuerFromApi(null));
   }, [canEmitirFactura]);
+
+  useEffect(() => {
+    if (!showEmitirFacturaModal || !afipConfigured) return;
+    api.getAfipExportacionParametros('paises').then((res) => {
+      const raw = (res as { data?: unknown })?.data ?? res;
+      const parsed: { code: number; name: string }[] = [];
+      const pushPais = (code: unknown, name: unknown) => {
+        const c = Number(code);
+        const n = String(name ?? '').trim();
+        if (Number.isFinite(c) && c > 0 && n) parsed.push({ code: c, name: n });
+      };
+      const walk = (node: unknown) => {
+        if (!node || typeof node !== 'object') return;
+        const o = node as Record<string, unknown>;
+        if (o.Dst_codigo != null || o.dst_codigo != null) {
+          pushPais(o.Dst_codigo ?? o.dst_codigo, o.Dst_Ds ?? o.dst_ds ?? o.Descripcion);
+        }
+        if (o.CliCodigo != null) pushPais(o.CliCodigo, o.CliDescripcion);
+        for (const v of Object.values(o)) {
+          if (Array.isArray(v)) v.forEach(walk);
+          else if (v && typeof v === 'object') walk(v);
+        }
+      };
+      walk(raw);
+      if (parsed.length) {
+        parsed.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+        setExportPaisesOptions(parsed);
+      }
+    }).catch(() => { /* mantener lista fallback */ });
+  }, [showEmitirFacturaModal, afipConfigured]);
 
   // El remitente (CAI y vencimiento incluidos) se carga siempre que el componente esté visible:
   // cualquier rol que genere un remito debe poder ver el CAI configurado en Settings.
@@ -2229,7 +2272,14 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         onClick={(e) => {
                           e.stopPropagation();
                           setOrderToEmitFactura(order);
-                          setEmitirFacturaTipo('auto');
+                          const custForEmit = customers.find((c) => c.id === order.customerId);
+                          setEmitirFacturaTipo(custForEmit?.isExportClient ? 'E' : 'auto');
+                          setEmitirFacturaDstCmp(
+                            custForEmit?.exportDstCmp != null ? String(custForEmit.exportDstCmp) : ''
+                          );
+                          setEmitirFacturaMonedaId('PES');
+                          setEmitirFacturaMonedaCtz('1');
+                          setEmitirFacturaIncoterms('FOB');
                           const prevSale = manualFacturaDataByOrder[order.id]?.saleCondition
                             || customers.find((c) => c.id === order.customerId)?.saleCondition
                             || '';
@@ -2720,7 +2770,76 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                 <span className="text-white font-medium">Factura B</span>
                 <span className="text-slate-500 text-xs">(Consumidor final / Monotributo)</span>
               </label>
+              <label className="flex items-center gap-3 p-3 rounded-xl border border-indigo-700/60 hover:bg-indigo-950/30 cursor-pointer">
+                <input type="radio" name="tipoFactura" checked={emitirFacturaTipo === 'E'} onChange={() => setEmitirFacturaTipo('E')} className="rounded border-slate-500 text-indigo-400" />
+                <span className="text-white font-medium">Factura E</span>
+                <span className="text-slate-500 text-xs">(Exportación — WSFEX, cliente del exterior)</span>
+              </label>
             </div>
+            {emitirFacturaTipo === 'E' && (
+              <div className="mb-6 space-y-3 rounded-xl border border-indigo-800/50 bg-indigo-950/20 p-4">
+                <p className="text-xs text-indigo-200/90 leading-snug">
+                  Requiere web service <strong className="text-white">wsfex</strong> autorizado en ARCA y punto de venta de exportación.
+                  El cliente debe tener domicilio y identificación tributaria extranjera cargada en Clientes.
+                </p>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">País destino</label>
+                  <select
+                    value={emitirFacturaDstCmp}
+                    onChange={(e) => setEmitirFacturaDstCmp(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                  >
+                    <option value="">— Seleccionar país —</option>
+                    {exportPaisesOptions.map((p) => (
+                      <option key={p.code} value={String(p.code)}>{p.name} ({p.code})</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Moneda</label>
+                    <select
+                      value={emitirFacturaMonedaId}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setEmitirFacturaMonedaId(v);
+                        if (v === 'PES') setEmitirFacturaMonedaCtz('1');
+                      }}
+                      className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                    >
+                      <option value="PES">Pesos argentinos (PES)</option>
+                      <option value="DOL">USD (DOL)</option>
+                      <option value="EUR">EUR</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Cotización</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={emitirFacturaMonedaCtz}
+                      onChange={(e) => setEmitirFacturaMonedaCtz(e.target.value)}
+                      disabled={emitirFacturaMonedaId === 'PES'}
+                      placeholder={emitirFacturaMonedaId === 'PES' ? '1 (pesos)' : 'Ej. 1050'}
+                      className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none disabled:opacity-60"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Incoterms</label>
+                    <select
+                      value={emitirFacturaIncoterms}
+                      onChange={(e) => setEmitirFacturaIncoterms(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                    >
+                      {['FOB', 'CIF', 'CFR', 'EXW', 'FCA', 'DAP', 'DDP'].map((i) => (
+                        <option key={i} value={i}>{i}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
             <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">Condición de venta</label>
             <div className="mb-4">
               <select
@@ -2783,7 +2902,29 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     showToast('error', 'Completá el picking y pasá el pedido a control antes de emitir la factura.');
                     return;
                   }
-                  const cbteTipo = emitirFacturaTipo === 'A' ? 1 as const : emitirFacturaTipo === 'B' ? 6 as const : undefined;
+                  const cbteTipo =
+                    emitirFacturaTipo === 'E'
+                      ? (19 as const)
+                      : emitirFacturaTipo === 'A'
+                        ? (1 as const)
+                        : emitirFacturaTipo === 'B'
+                          ? (6 as const)
+                          : undefined;
+                  if (emitirFacturaTipo === 'E') {
+                    if (!emitirFacturaDstCmp) {
+                      showToast('error', 'Seleccioná el país destino para Factura E.');
+                      return;
+                    }
+                    if (emitirFacturaMonedaId !== 'PES' && !(Number(emitirFacturaMonedaCtz) > 0)) {
+                      showToast('error', 'Informá la cotización de la moneda para Factura E.');
+                      return;
+                    }
+                    const custE = customers.find((c) => c.id === orderToEmitFactura.customerId);
+                    if (!custE?.foreignTaxId && !(Number(custE?.exportCuitPaisCliente) > 0)) {
+                      showToast('error', 'El cliente debe tener ID tributaria extranjera o CUIT país cliente en Clientes.');
+                      return;
+                    }
+                  }
                   setEmitiendoFacturaId(orderToEmitFactura.id);
                   const custEmit = customers.find((c) => c.id === orderToEmitFactura.customerId);
                   const optsEmit = transporteOptionsForCustomer(custEmit, transportes);
@@ -2807,7 +2948,24 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     ...prev,
                     [orderToEmitFactura.id]: manual
                   }));
-                  api.emitirFactura(orderToEmitFactura.id, cbteTipo != null ? { cbteTipo } : undefined)
+                  api.emitirFactura(
+                    orderToEmitFactura.id,
+                    cbteTipo === 19
+                      ? {
+                          cbteTipo: 19,
+                          dstCmp: Number(emitirFacturaDstCmp),
+                          monedaId: emitirFacturaMonedaId,
+                          monedaCtz:
+                            emitirFacturaMonedaId === 'PES'
+                              ? 1
+                              : Number(emitirFacturaMonedaCtz),
+                          incoterms: emitirFacturaIncoterms,
+                          formaPago: emitirFacturaSaleCondition,
+                        }
+                      : cbteTipo != null
+                        ? { cbteTipo: cbteTipo as 1 | 6 }
+                        : undefined
+                  )
                     .then((res) => {
                       onFacturaEmitida?.(orderToEmitFactura.id, {
                         cae: res.cae,
