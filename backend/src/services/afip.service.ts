@@ -1148,6 +1148,24 @@ function resolveExportTaxId(customer: CustomerExportForAfip): string {
   return cuit.length >= 10 ? cuit : '';
 }
 
+/** Destinos AFIP en Argentina (zona franca / AAE): Cuit_pais_cliente = CUIT del cliente. */
+const AFIP_DST_ARGENTINA_SPECIAL = new Set([250, 256, 257, 259]);
+
+function parseCuitDigits(value: unknown): number {
+  const n = Number(String(value ?? '').replace(/\D/g, ''));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/** Cuit_pais_cliente WSFEX: para TDF/ZF argentinas es el CUIT del cliente; exterior = tabla AFIP. */
+function resolveExportCuitPaisCliente(customer: CustomerExportForAfip, dstCmp: number): number {
+  const fromField = parseCuitDigits(customer.exportCuitPaisCliente);
+  if (fromField > 0) return fromField;
+  if (AFIP_DST_ARGENTINA_SPECIAL.has(dstCmp)) {
+    return parseCuitDigits(resolveExportTaxId(customer));
+  }
+  return 0;
+}
+
 export interface ExportOrderItemForAfip {
   description: string;
   quantity: number;
@@ -1227,15 +1245,52 @@ async function wsfexAuthBlock(afip: AfipClient, ws: ReturnType<AfipClient['WebSe
 }
 
 function formatWsfexObservaciones(res: unknown): string | null {
-  if (!res || typeof res !== 'object') return null;
-  const r = res as Record<string, unknown>;
-  const root = (r.FEXAuthorizeResult ?? r.FEXGetLast_CMPResult ?? r) as Record<string, unknown>;
-  const events = root.FEXEvents ?? root.FEXErr;
-  const fromEvents = pickAfipText(events);
-  if (fromEvents) return fromEvents;
-  const auth = root.FEXResultAuth as Record<string, unknown> | undefined;
-  const motivos = auth?.Motivos_Obs ?? auth?.motivos_Obs;
-  return pickAfipText(motivos);
+  const parts: string[] = [];
+  const seen = new Set<string>();
+
+  const push = (text: string | null | undefined) => {
+    const t = (text || '').trim();
+    if (!t || seen.has(t)) return;
+    seen.add(t);
+    parts.push(t);
+  };
+
+  const walk = (node: unknown, depth = 0) => {
+    if (node == null || depth > 10) return;
+    if (Array.isArray(node)) {
+      node.forEach((x) => walk(x, depth + 1));
+      return;
+    }
+    if (typeof node !== 'object') return;
+    const o = node as Record<string, unknown>;
+
+    const code = o.Code ?? o.code ?? o.Codigo ?? o.codigo;
+    const msg =
+      o.Msg ??
+      o.msg ??
+      o.Message ??
+      o.message ??
+      o.Motivo ??
+      o.motivo ??
+      o.Motivos_Obs ??
+      o.motivos_Obs;
+    const codeText = pickAfipText(code);
+    const msgText = pickAfipText(msg);
+    if (msgText) push(codeText ? `[${codeText}] ${msgText}` : msgText);
+
+    const resultado = String(o.Resultado ?? o.resultado ?? '').trim();
+    if (resultado && resultado !== 'A') {
+      push(`Resultado AFIP: ${resultado}`);
+    }
+
+    for (const v of Object.values(o)) walk(v, depth + 1);
+  };
+
+  walk(res);
+  if (parts.length) return parts.join('; ');
+
+  const fallback = pickAfipText(res);
+  return fallback;
 }
 
 function extractCaeFromWsfexResponse(res: unknown): { cae: string; caeFchVto: string; resultado: string } {
@@ -1362,10 +1417,12 @@ export async function emitirFacturaExportacion(
   if (impTotal <= 0) throw new Error('El importe total de exportación debe ser mayor a 0.');
 
   const foreignTaxId = resolveExportTaxId(customer);
-  const cuitPaisCliente = customer.exportCuitPaisCliente != null ? Number(customer.exportCuitPaisCliente) : 0;
+  const cuitPaisCliente = resolveExportCuitPaisCliente(customer, dstCmp);
   if (!foreignTaxId && !(cuitPaisCliente > 0)) {
     throw new Error(
-      'El cliente de exportación debe tener identificación tributaria (ID extranjera, CUIT del cliente o CUIT país cliente).'
+      AFIP_DST_ARGENTINA_SPECIAL.has(dstCmp)
+        ? 'Para Tierra del Fuego / zona franca argentina el cliente debe tener CUIT cargado (o ID tributaria / CUIT país cliente).'
+        : 'El cliente de exportación debe tener identificación tributaria (ID extranjera, CUIT del cliente o CUIT país cliente).'
     );
   }
 
@@ -1396,6 +1453,7 @@ export async function emitirFacturaExportacion(
     Domicilio_cliente: domicilio.slice(0, 200),
     Moneda_Id: monedaId,
     Moneda_ctz: monedaCtz,
+    CanMisMonExt: monedaId === 'PES' ? 'N' : 'S',
     Imp_total: impTotal,
     Forma_pago: formaPago.slice(0, 50),
     Incoterms: incoterms.slice(0, 3),
@@ -1414,10 +1472,18 @@ export async function emitirFacturaExportacion(
   const { cae, caeFchVto, resultado } = extractCaeFromWsfexResponse(res);
   if (!cae || (resultado && resultado !== 'A')) {
     const obs = formatWsfexObservaciones(res);
+    try {
+      console.error(
+        '[AFIP WSFEX] FEXAuthorize sin CAE:',
+        JSON.stringify(res).slice(0, 2500)
+      );
+    } catch {
+      /* ignore */
+    }
     throw new Error(
       obs
         ? `AFIP rechazó la Factura E: ${obs}`
-        : 'AFIP no devolvió CAE para Factura E. Revisá datos de exportación y autorización wsfex.'
+        : `AFIP no devolvió CAE para Factura E (resultado: ${resultado || '—'}). Revisá PV exportación ${puntoVta}, wsfex autorizado y datos del cliente.`
     );
   }
 
