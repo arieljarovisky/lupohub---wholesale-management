@@ -602,13 +602,66 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const canDuplicateOrder =
     role === Role.ADMIN || role === Role.SELLER || role === Role.WAREHOUSE || role === Role.CUSTOMER;
 
-  /** Tipo de factura que se emitirá según condición IVA del cliente (misma regla que el backend). */
-  const getTipoFacturaParaCliente = (order: Order): 'A' | 'B' => {
+  /** Tipo de factura que se emitirá según cliente (exportación → E; si no, A/B por condición IVA). */
+  const getTipoFacturaParaCliente = (order: Order): 'A' | 'B' | 'E' => {
     const customer = customers.find(c => c.id === order.customerId);
+    if (customer?.isExportClient) return 'E';
     const condicion = (customer?.condicionIva ?? '').toLowerCase();
     const esRI = condicion.includes('responsable inscripto') && !condicion.includes('no inscripto');
     const tieneCuit = customer?.cuit && String(customer.cuit).replace(/\D/g, '').length >= 10;
     return tieneCuit && esRI ? 'A' : 'B';
+  };
+
+  const resolveExportDstCmpForOrder = (order: Order): number | null => {
+    if (emitirFacturaDstCmp.trim()) {
+      const n = Number(emitirFacturaDstCmp);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    }
+    const cust = customers.find((c) => c.id === order.customerId);
+    if (cust?.exportDstCmp != null && Number(cust.exportDstCmp) > 0) return Number(cust.exportDstCmp);
+    if (cust?.isExportClient) return AFIP_DST_TIERRA_DEL_FUEGO;
+    return null;
+  };
+
+  const getCbteTipoFromEmitSelection = (order: Order): 1 | 6 | 19 => {
+    if (emitirFacturaTipo === 'E') return 19;
+    if (emitirFacturaTipo === 'A') return 1;
+    if (emitirFacturaTipo === 'B') return 6;
+    if (customers.find((c) => c.id === order.customerId)?.isExportClient) return 19;
+    return getTipoFacturaParaCliente(order) === 'A' ? 1 : 6;
+  };
+
+  const buildEmitFacturaRequest = (
+    order: Order
+  ): { body?: Parameters<typeof api.emitirFactura>[1]; error?: string } => {
+    const cbteTipo = getCbteTipoFromEmitSelection(order);
+    if (cbteTipo === 19) {
+      const dstCmp = resolveExportDstCmpForOrder(order);
+      if (!dstCmp) {
+        return { error: 'Seleccioná el país destino para Factura E.' };
+      }
+      if (emitirFacturaMonedaId !== 'PES' && !(Number(emitirFacturaMonedaCtz) > 0)) {
+        return { error: 'Informá la cotización de la moneda para Factura E.' };
+      }
+      const custE = customers.find((c) => c.id === order.customerId);
+      if (!custE?.foreignTaxId && !(Number(custE?.exportCuitPaisCliente) > 0)) {
+        return { error: 'El cliente debe tener ID tributaria extranjera o CUIT país cliente en Clientes.' };
+      }
+      return {
+        body: {
+          cbteTipo: 19,
+          dstCmp,
+          monedaId: emitirFacturaMonedaId,
+          monedaCtz: emitirFacturaMonedaId === 'PES' ? 1 : Number(emitirFacturaMonedaCtz),
+          incoterms: emitirFacturaIncoterms,
+          formaPago: emitirFacturaSaleCondition,
+        },
+      };
+    }
+    if (emitirFacturaTipo === 'A' || emitirFacturaTipo === 'B') {
+      return { body: { cbteTipo: cbteTipo as 1 | 6 } };
+    }
+    return { body: undefined };
   };
 
   const getCustomerName = (orderOrCustomerId: Order | string) => {
@@ -1285,12 +1338,6 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       w.document.write(html);
       w.document.close();
     }
-  };
-
-  const getCbteTipoFromEmitSelection = (order: Order): 1 | 6 => {
-    if (emitirFacturaTipo === 'A') return 1;
-    if (emitirFacturaTipo === 'B') return 6;
-    return getTipoFacturaParaCliente(order) === 'A' ? 1 : 6;
   };
 
   /** Proforma de la factura nueva que se emitiría tras NC total + reemisión (IIBB según cliente / padrón en UI). */
@@ -2741,7 +2788,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
               <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-600 hover:bg-slate-700/50 cursor-pointer">
                 <input type="radio" name="tipoFactura" checked={emitirFacturaTipo === 'auto'} onChange={() => setEmitirFacturaTipo('auto')} className="rounded border-slate-500 text-emerald-500" />
                 <span className="text-white">Automático</span>
-                <span className="text-slate-500 text-xs">(según condición IVA del cliente)</span>
+                <span className="text-slate-500 text-xs">(según condición IVA del cliente; exportación → Factura E)</span>
               </label>
               <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-600 hover:bg-slate-700/50 cursor-pointer">
                 <input type="radio" name="tipoFactura" checked={emitirFacturaTipo === 'A'} onChange={() => setEmitirFacturaTipo('A')} className="rounded border-slate-500 text-emerald-500" />
@@ -2887,28 +2934,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     showToast('error', 'Completá el picking y pasá el pedido a control antes de emitir la factura.');
                     return;
                   }
-                  const cbteTipo =
-                    emitirFacturaTipo === 'E'
-                      ? (19 as const)
-                      : emitirFacturaTipo === 'A'
-                        ? (1 as const)
-                        : emitirFacturaTipo === 'B'
-                          ? (6 as const)
-                          : undefined;
-                  if (emitirFacturaTipo === 'E') {
-                    if (!emitirFacturaDstCmp) {
-                      showToast('error', 'Seleccioná el país destino para Factura E.');
-                      return;
-                    }
-                    if (emitirFacturaMonedaId !== 'PES' && !(Number(emitirFacturaMonedaCtz) > 0)) {
-                      showToast('error', 'Informá la cotización de la moneda para Factura E.');
-                      return;
-                    }
-                    const custE = customers.find((c) => c.id === orderToEmitFactura.customerId);
-                    if (!custE?.foreignTaxId && !(Number(custE?.exportCuitPaisCliente) > 0)) {
-                      showToast('error', 'El cliente debe tener ID tributaria extranjera o CUIT país cliente en Clientes.');
-                      return;
-                    }
+                  const { body: emitBody, error: emitError } = buildEmitFacturaRequest(orderToEmitFactura);
+                  if (emitError) {
+                    showToast('error', emitError);
+                    return;
                   }
                   setEmitiendoFacturaId(orderToEmitFactura.id);
                   const custEmit = customers.find((c) => c.id === orderToEmitFactura.customerId);
@@ -2933,24 +2962,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     ...prev,
                     [orderToEmitFactura.id]: manual
                   }));
-                  api.emitirFactura(
-                    orderToEmitFactura.id,
-                    cbteTipo === 19
-                      ? {
-                          cbteTipo: 19,
-                          dstCmp: Number(emitirFacturaDstCmp),
-                          monedaId: emitirFacturaMonedaId,
-                          monedaCtz:
-                            emitirFacturaMonedaId === 'PES'
-                              ? 1
-                              : Number(emitirFacturaMonedaCtz),
-                          incoterms: emitirFacturaIncoterms,
-                          formaPago: emitirFacturaSaleCondition,
-                        }
-                      : cbteTipo != null
-                        ? { cbteTipo: cbteTipo as 1 | 6 }
-                        : undefined
-                  )
+                  api.emitirFactura(orderToEmitFactura.id, emitBody)
                     .then((res) => {
                       onFacturaEmitida?.(orderToEmitFactura.id, {
                         cae: res.cae,

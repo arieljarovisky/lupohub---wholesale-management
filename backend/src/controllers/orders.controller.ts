@@ -2314,7 +2314,11 @@ export const emitirFactura = async (req: any, res: any) => {
     if (!customerRow) return res.status(400).json({ message: 'Cliente del pedido no encontrado' });
 
     const cbteTipoFromBody = req.body?.cbteTipo;
-    const isFacturaE = cbteTipoFromBody === 19 || cbteTipoFromBody === '19';
+    const isExportClient = Number(customerRow.is_export_client) === 1;
+    const isFacturaE =
+      cbteTipoFromBody === 19 ||
+      cbteTipoFromBody === '19' ||
+      (isExportClient && cbteTipoFromBody !== 1 && cbteTipoFromBody !== 6 && cbteTipoFromBody !== '1' && cbteTipoFromBody !== '6');
     const forceCbteTipo =
       cbteTipoFromBody === 1 || cbteTipoFromBody === 6 ? (cbteTipoFromBody as 1 | 6) : undefined;
     if (isFacturaE && forceCbteTipo) {
