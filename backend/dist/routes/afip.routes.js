@@ -94,4 +94,19 @@ router.get('/exportacion/:tipo', auth_1.authMiddleware, (req, res) => __awaiter(
             return res.status(400).json({ error: message });
     }
 }));
+/** Diagnóstico WSFEX: PV exportación y último comprobante E autorizado. */
+router.get('/exportacion/diagnostico', auth_1.authMiddleware, (_req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    if (!(0, afip_service_1.isAfipConfigured)()) {
+        return res.status(400).json({ error: 'AFIP no está configurado.' });
+    }
+    try {
+        const data = yield (0, afip_service_1.getWsfexExportDiagnostico)();
+        return res.json(data);
+    }
+    catch (err) {
+        const message = (err === null || err === void 0 ? void 0 : err.message) || String(err) || 'Error en diagnóstico WSFEX.';
+        if (!res.headersSent)
+            return res.status(400).json({ error: message });
+    }
+}));
 exports.default = router;

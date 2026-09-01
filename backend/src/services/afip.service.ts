@@ -1240,14 +1240,62 @@ async function wsfexAuthBlock(afip: AfipClient, ws: ReturnType<AfipClient['WebSe
   return {
     Token: ta.token,
     Sign: ta.sign,
-    Cuit: config.cuit
+    Cuit: Number(config.cuit)
   };
+}
+
+function getWsfexServiceId(): string {
+  return (process.env.AFIP_WSFEX_SERVICE || 'wsfex').trim() || 'wsfex';
+}
+
+function unwrapWsfexPayload(res: unknown): unknown {
+  if (res == null || typeof res !== 'object') return res;
+  const r = res as Record<string, unknown>;
+  const candidates = [
+    r.FEXAuthorizeResult,
+    r.FEXAuthorizeResponse,
+    r.data,
+    r.result,
+    r.response,
+    (r.FEXAuthorizeResponse as Record<string, unknown> | undefined)?.FEXAuthorizeResult
+  ];
+  for (const c of candidates) {
+    if (c && typeof c === 'object') return c;
+  }
+  return res;
+}
+
+function walkWsfexNodes(
+  node: unknown,
+  visit: (key: string, value: unknown, parent: Record<string, unknown>) => void,
+  depth = 0
+): void {
+  if (node == null || depth > 14) return;
+  if (Array.isArray(node)) {
+    node.forEach((x) => walkWsfexNodes(x, visit, depth + 1));
+    return;
+  }
+  if (typeof node !== 'object') return;
+  const o = node as Record<string, unknown>;
+  for (const [k, v] of Object.entries(o)) {
+    visit(k, v, o);
+    walkWsfexNodes(v, visit, depth + 1);
+  }
+}
+
+function summarizeWsfexResponse(res: unknown): string {
+  try {
+    const s = JSON.stringify(res);
+    if (!s || s === '{}' || s === 'null') return 'respuesta vacía de AFIP/WSFEX';
+    return s.length > 600 ? `${s.slice(0, 600)}…` : s;
+  } catch {
+    return String(res);
+  }
 }
 
 function formatWsfexObservaciones(res: unknown): string | null {
   const parts: string[] = [];
   const seen = new Set<string>();
-
   const push = (text: string | null | undefined) => {
     const t = (text || '').trim();
     if (!t || seen.has(t)) return;
@@ -1255,56 +1303,47 @@ function formatWsfexObservaciones(res: unknown): string | null {
     parts.push(t);
   };
 
-  const walk = (node: unknown, depth = 0) => {
-    if (node == null || depth > 10) return;
-    if (Array.isArray(node)) {
-      node.forEach((x) => walk(x, depth + 1));
+  const root = unwrapWsfexPayload(res);
+  walkWsfexNodes(root, (key, value, parent) => {
+    const kl = key.toLowerCase();
+    if (kl === 'errmsg' || kl === 'eventmsg') {
+      const msg = pickAfipText(value);
+      if (!msg) return;
+      const code = pickAfipText(
+        parent.ErrCode ?? parent.errCode ?? parent.errcode ?? parent.EventCode ?? parent.eventCode
+      );
+      push(code ? `[${code}] ${msg}` : msg);
       return;
     }
-    if (typeof node !== 'object') return;
-    const o = node as Record<string, unknown>;
-
-    const code = o.Code ?? o.code ?? o.Codigo ?? o.codigo;
-    const msg =
-      o.Msg ??
-      o.msg ??
-      o.Message ??
-      o.message ??
-      o.Motivo ??
-      o.motivo ??
-      o.Motivos_Obs ??
-      o.motivos_Obs;
-    const codeText = pickAfipText(code);
-    const msgText = pickAfipText(msg);
-    if (msgText) push(codeText ? `[${codeText}] ${msgText}` : msgText);
-
-    const resultado = String(o.Resultado ?? o.resultado ?? '').trim();
-    if (resultado && resultado !== 'A') {
-      push(`Resultado AFIP: ${resultado}`);
+    if (kl === 'motivos_obs' || kl === 'obs') {
+      const msg = pickAfipText(value);
+      if (msg) push(msg);
     }
+    if (kl === 'resultado' && value && String(value).trim() && String(value).trim() !== 'A') {
+      push(`Resultado AFIP: ${String(value).trim()}`);
+    }
+  });
 
-    for (const v of Object.values(o)) walk(v, depth + 1);
-  };
-
-  walk(res);
   if (parts.length) return parts.join('; ');
-
-  const fallback = pickAfipText(res);
-  return fallback;
+  return pickAfipText(root) ?? pickAfipText(res);
 }
 
 function extractCaeFromWsfexResponse(res: unknown): { cae: string; caeFchVto: string; resultado: string } {
-  const r = res as Record<string, unknown>;
-  const root = (r?.FEXAuthorizeResult ?? r) as Record<string, unknown>;
-  const auth = (root?.FEXResultAuth ?? root) as Record<string, unknown>;
-  const cae = auth?.Cae ?? auth?.cae ?? r?.Cae ?? r?.cae;
-  const vto = auth?.Fch_venc_Cae ?? auth?.fch_venc_Cae ?? r?.Fch_venc_Cae ?? '';
-  const resultado = String(auth?.Resultado ?? auth?.resultado ?? '');
-  return {
-    cae: cae ? String(cae) : '',
-    caeFchVto: String(vto || ''),
-    resultado
-  };
+  let cae = '';
+  let caeFchVto = '';
+  let resultado = '';
+
+  const root = unwrapWsfexPayload(res);
+  walkWsfexNodes(root, (key, value) => {
+    const kl = key.toLowerCase();
+    if (kl === 'cae' && value != null && String(value).trim()) cae = String(value).trim();
+    if ((kl === 'fch_venc_cae' || kl === 'caefchvto') && value != null && String(value).trim()) {
+      caeFchVto = String(value).trim();
+    }
+    if (kl === 'resultado' && value != null && String(value).trim()) resultado = String(value).trim();
+  });
+
+  return { cae, caeFchVto, resultado };
 }
 
 function arsToMonedaExport(arsAmount: number, monedaId: string, monedaCtz: number): number {
@@ -1332,7 +1371,7 @@ export async function getWsfexParametros(
   if (!method) throw new Error(`Parámetro WSFEX desconocido: ${tipo}`);
 
   const afip = await createAfipClient();
-  const ws = afip.WebService('wsfex');
+  const ws = afip.WebService(getWsfexServiceId());
   const Auth = await wsfexAuthBlock(afip, ws);
   return withAfipRetry(`wsfex ${method}`, () => ws.executeRequest(method, { Auth }) as Promise<unknown>);
 }
@@ -1340,7 +1379,7 @@ export async function getWsfexParametros(
 /** Último comprobante de exportación autorizado (WSFEX). */
 export async function getLastExportVoucherNumber(puntoVta: number, cbteTipo = TIPO_CBTE_E): Promise<number> {
   const afip = await createAfipClient();
-  const ws = afip.WebService('wsfex');
+  const ws = afip.WebService(getWsfexServiceId());
   const Auth = await wsfexAuthBlock(afip, ws);
   const res = (await withAfipRetry('FEXGetLast_CMP', () =>
     ws.executeRequest('FEXGetLast_CMP', { Auth, Pto_venta: puntoVta, Cbte_Tipo: cbteTipo })
@@ -1349,6 +1388,23 @@ export async function getLastExportVoucherNumber(puntoVta: number, cbteTipo = TI
   const last = (root?.FEXResult_LastCMP ?? root) as Record<string, unknown>;
   const nro = Number(last?.Cbte_nro ?? last?.cbte_nro ?? 0);
   return Number.isFinite(nro) ? nro : 0;
+}
+
+/** Diagnóstico WSFEX: último comprobante tipo 19 en PV exportación. */
+export async function getWsfexExportDiagnostico(): Promise<{
+  wsfexService: string;
+  puntoVentaExport: number;
+  ultimoCbteTipo19: number;
+  proximoCbteTipo19: number;
+}> {
+  const puntoVentaExport = getAfipExportPuntoVenta();
+  const ultimoCbteTipo19 = await getLastExportVoucherNumber(puntoVentaExport, TIPO_CBTE_E);
+  return {
+    wsfexService: getWsfexServiceId(),
+    puntoVentaExport,
+    ultimoCbteTipo19,
+    proximoCbteTipo19: ultimoCbteTipo19 + 1
+  };
 }
 
 /**
@@ -1415,6 +1471,11 @@ export async function emitirFacturaExportacion(
   }
   impTotal = Math.round(impTotal * 100) / 100;
   if (impTotal <= 0) throw new Error('El importe total de exportación debe ser mayor a 0.');
+  // AFIP exige que Imp_total = suma de ítems (evitar rechazo silencioso).
+  const itemsSum = Math.round(
+    afipItems.reduce((s, it) => s + (Number(it.Pro_total_item) || 0), 0) * 100
+  ) / 100;
+  impTotal = itemsSum;
 
   const foreignTaxId = resolveExportTaxId(customer);
   const cuitPaisCliente = resolveExportCuitPaisCliente(customer, dstCmp);
@@ -1431,18 +1492,22 @@ export async function emitirFacturaExportacion(
   if (fechaCbte.length !== 8) throw new Error('Fecha inválida para AFIP exportación.');
 
   const afip = await createAfipClient();
-  const ws = afip.WebService('wsfex');
+  const ws = afip.WebService(getWsfexServiceId());
   const Auth = await wsfexAuthBlock(afip, ws);
   const ambiente = config.production ? 'producción' : 'homologación';
-  console.log(`[AFIP WSFEX] Emitiendo Factura E en ${ambiente}. Pto.Vta ${puntoVta}, Dst ${dstCmp}, ${monedaId}`);
+  console.log(
+    `[AFIP WSFEX] Emitiendo Factura E en ${ambiente}. ws=${getWsfexServiceId()} Pto.Vta ${puntoVta}, Dst ${dstCmp}, ${monedaId}, total ${impTotal}`
+  );
 
   const lastNro = await getLastExportVoucherNumber(puntoVta, TIPO_CBTE_E);
   const cbteNro = lastNro + 1;
   const requestId = Date.now() % 999_999_999;
 
+  const itemPayload = afipItems.length === 1 ? afipItems[0] : afipItems;
   const Cmp: Record<string, unknown> = {
     Id: requestId,
     Fecha_cbte: fechaCbte,
+    Tipo_cbte: TIPO_CBTE_E,
     Cbte_Tipo: TIPO_CBTE_E,
     Punto_vta: puntoVta,
     Cbte_nro: cbteNro,
@@ -1459,7 +1524,7 @@ export async function emitirFacturaExportacion(
     Incoterms: incoterms.slice(0, 3),
     Incoterms_Ds: incotermsDs.slice(0, 20),
     Idioma_cbte: IDIOMA_CBTE_ES,
-    Items: { Item: afipItems }
+    Items: { Item: itemPayload }
   };
   if (foreignTaxId) Cmp.Id_impositivo = foreignTaxId.slice(0, 50);
   if (cuitPaisCliente > 0) Cmp.Cuit_pais_cliente = cuitPaisCliente;
@@ -1472,18 +1537,12 @@ export async function emitirFacturaExportacion(
   const { cae, caeFchVto, resultado } = extractCaeFromWsfexResponse(res);
   if (!cae || (resultado && resultado !== 'A')) {
     const obs = formatWsfexObservaciones(res);
-    try {
-      console.error(
-        '[AFIP WSFEX] FEXAuthorize sin CAE:',
-        JSON.stringify(res).slice(0, 2500)
-      );
-    } catch {
-      /* ignore */
-    }
+    const detail = summarizeWsfexResponse(res);
+    console.error('[AFIP WSFEX] FEXAuthorize sin CAE:', detail);
     throw new Error(
       obs
         ? `AFIP rechazó la Factura E: ${obs}`
-        : `AFIP no devolvió CAE para Factura E (resultado: ${resultado || '—'}). Revisá PV exportación ${puntoVta}, wsfex autorizado y datos del cliente.`
+        : `AFIP no devolvió CAE (PV export ${puntoVta}, ws ${getWsfexServiceId()}). Verificá wsfex autorizado y PV de exportación en ARCA. Detalle: ${detail}`
     );
   }
 

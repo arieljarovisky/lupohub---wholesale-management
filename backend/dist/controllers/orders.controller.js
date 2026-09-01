@@ -311,11 +311,12 @@ function getOrderItemsForExport(orderId) {
             COALESCE(p.name, 'Mercadería') AS product_name,
             COALESCE(pv.sku, '') AS sku,
             COALESCE(c.name, '') AS color_name,
-            COALESCE(s.code, '') AS size_code
+            COALESCE(s.size_code, s.name, '') AS size_code
      FROM order_items oi
      LEFT JOIN product_variants pv ON pv.id = oi.variant_id
-     LEFT JOIN products p ON p.id = pv.product_id
-     LEFT JOIN colors c ON c.id = pv.color_id
+     LEFT JOIN product_colors pc ON pc.id = pv.product_color_id
+     LEFT JOIN products p ON p.id = pc.product_id
+     LEFT JOIN colors c ON c.id = pc.color_id
      LEFT JOIN sizes s ON s.id = pv.size_id
      WHERE oi.order_id = ?
      ORDER BY oi.id`, [orderId]);
@@ -2112,7 +2113,10 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         if (!customerRow)
             return res.status(400).json({ message: 'Cliente del pedido no encontrado' });
         const cbteTipoFromBody = (_c = req.body) === null || _c === void 0 ? void 0 : _c.cbteTipo;
-        const isFacturaE = cbteTipoFromBody === 19 || cbteTipoFromBody === '19';
+        const isExportClient = Number(customerRow.is_export_client) === 1;
+        const isFacturaE = cbteTipoFromBody === 19 ||
+            cbteTipoFromBody === '19' ||
+            (isExportClient && cbteTipoFromBody !== 1 && cbteTipoFromBody !== 6 && cbteTipoFromBody !== '1' && cbteTipoFromBody !== '6');
         const forceCbteTipo = cbteTipoFromBody === 1 || cbteTipoFromBody === 6 ? cbteTipoFromBody : undefined;
         if (isFacturaE && forceCbteTipo) {
             return res.status(400).json({ message: 'cbteTipo inválido: use 19 para Factura E, o 1/6 para A/B.' });
@@ -2176,6 +2180,7 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                         businessName: (_a = customerRow.business_name) !== null && _a !== void 0 ? _a : '',
                         address: customerRow.address,
                         city: customerRow.city,
+                        cuit: customerRow.cuit,
                         foreignTaxId: customerRow.foreign_tax_id,
                         exportDstCmp: dstCmp,
                         exportCuitPaisCliente: customerRow.export_cuit_pais_cliente
