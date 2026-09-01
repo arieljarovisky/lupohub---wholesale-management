@@ -2684,8 +2684,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 
       {/* Modal: elegir tipo de factura (A o B) antes de emitir */}
       {showEmitirFacturaModal && orderToEmitFactura && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { if (!emitiendoFacturaId) { setShowEmitirFacturaModal(false); setOrderToEmitFactura(null); } }}>
-          <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-2xl p-6" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto" onClick={() => { if (!emitiendoFacturaId) { setShowEmitirFacturaModal(false); setOrderToEmitFactura(null); } }}>
+          <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto my-auto" onClick={e => e.stopPropagation()}>
             <h3 className="text-lg font-bold text-white mb-1">Emitir factura electrónica AFIP</h3>
             <p className="text-xs text-sky-200/95 mb-3 rounded-lg border border-sky-800/50 bg-sky-950/35 px-3 py-2 leading-snug">
               Pedidos de depósito: emití después del picking (
