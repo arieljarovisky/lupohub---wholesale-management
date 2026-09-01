@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node dist/index.js",
     "dev": "cross-env PORT=3010 nodemon src/index.ts",
-    "build": "tsc && npm prune --omit=dev",
+    "build": "tsc && tsc -p tsconfig.scripts.json && npm prune --omit=dev",
     "init-db": "ts-node src/database/init.ts",
     "merge-trifil": "ts-node scripts/merge-trifil-products.ts",
     "merge-trifil:prod": "cross-env NODE_ENV=production ts-node scripts/merge-trifil-products.ts",
@@ -14,7 +14,8 @@
     "merge-duplicate-products:prod": "cross-env NODE_ENV=production ts-node scripts/merge-duplicate-products-by-sku.ts",
     "parse-tango": "node scripts/parse-tango-articulos.js",
     "create-cert-prod": "ts-node scripts/create-cert-prod.ts",
-    "auth-web-service-prod": "ts-node scripts/auth-web-service-prod.ts",
+    "auth-web-service-prod": "node dist/scripts/auth-web-service-prod.js",
+    "auth-web-service-prod:dev": "ts-node scripts/auth-web-service-prod.ts",
     "delete-billing-by-cae": "ts-node scripts/delete-billing-by-cae.ts",
     "delete-billing-by-cae:prod": "cross-env NODE_ENV=production ts-node scripts/delete-billing-by-cae.ts",
     "import-multimedia-saldos": "ts-node scripts/import-multimedia-composicion-saldos.ts",

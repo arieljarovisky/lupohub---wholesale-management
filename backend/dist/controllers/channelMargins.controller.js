@@ -204,8 +204,7 @@ function computeChannelMargins() {
             const totalVariants = ((_b = allVariantIdsByProduct.get(pr.product_id)) === null || _b === void 0 ? void 0 : _b.length) ||
                 Number(pr.variant_count) ||
                 variantIds.length;
-            const fobRaw = fobInfo.byProductId.get(pr.product_id);
-            const fob = fobRaw != null && Number.isFinite(fobRaw) ? Number(fobRaw) : null;
+            const fob = (0, channelMarginUtils_1.lookupFobPrice)(fobInfo, pr.product_id, pr.base_sku);
             const repMl = vars.find((v) => resolveVariantLinks(v, pubLinks).hasMl);
             const hasTnLink = vars.some((v) => resolveVariantLinks(v, pubLinks).hasTn);
             let priceTN = 0;

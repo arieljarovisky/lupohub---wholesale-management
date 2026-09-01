@@ -68,13 +68,14 @@ const add_payment_orders_table_1 = require("./database/add_payment_orders_table"
 const add_no_stock_impact_orders_1 = require("./database/add_no_stock_impact_orders");
 const add_include_in_saldo_orders_1 = require("./database/add_include_in_saldo_orders");
 const add_customer_invoice_fields_1 = require("./database/add_customer_invoice_fields");
+const add_customer_export_fields_1 = require("./database/add_customer_export_fields");
+const add_invoices_export_fields_1 = require("./database/add_invoices_export_fields");
 const add_external_invoices_table_1 = require("./database/add_external_invoices_table");
 const add_external_credit_notes_table_1 = require("./database/add_external_credit_notes_table");
+const add_afip_synced_vouchers_table_1 = require("./database/add_afip_synced_vouchers_table");
 const add_customer_multimedia_ledger_1 = require("./database/add_customer_multimedia_ledger");
 const add_customer_manual_comprobantes_1 = require("./database/add_customer_manual_comprobantes");
 const add_customer_manual_comprobantes_pdf_1 = require("./database/add_customer_manual_comprobantes_pdf");
-const add_lupo_stock_webhook_config_table_1 = require("./database/add_lupo_stock_webhook_config_table");
-const add_variant_luposhop_stock_table_1 = require("./database/add_variant_luposhop_stock_table");
 const add_order_created_by_1 = require("./database/add_order_created_by");
 const add_order_matrix_import_label_1 = require("./database/add_order_matrix_import_label");
 const add_order_notes_1 = require("./database/add_order_notes");
@@ -93,6 +94,7 @@ const add_customer_seller_commission_1 = require("./database/add_customer_seller
 const add_customer_opening_balance_1 = require("./database/add_customer_opening_balance");
 const add_publication_stock_bundles_1 = require("./database/add_publication_stock_bundles");
 const add_orders_performance_indexes_1 = require("./database/add_orders_performance_indexes");
+const add_seller_price_lists_1 = require("./database/add_seller_price_lists");
 const init_schema_1 = require("./database/init_schema");
 const ensure_admin_user_1 = require("./database/ensure_admin_user");
 const db_1 = require("./database/db");
@@ -265,13 +267,14 @@ function initDatabase() {
                 yield (0, add_no_stock_impact_orders_1.addNoStockImpactToOrders)();
                 yield (0, add_include_in_saldo_orders_1.addIncludeInSaldoToOrders)();
                 yield (0, add_customer_invoice_fields_1.addCustomerInvoiceFields)();
+                yield (0, add_customer_export_fields_1.addCustomerExportFields)();
+                yield (0, add_invoices_export_fields_1.addInvoicesExportFields)();
                 yield (0, add_external_invoices_table_1.addExternalInvoicesTable)();
                 yield (0, add_external_credit_notes_table_1.addExternalCreditNotesTable)();
+                yield (0, add_afip_synced_vouchers_table_1.addAfipSyncedVouchersTable)();
                 yield (0, add_customer_multimedia_ledger_1.addCustomerMultimediaLedger)();
                 yield (0, add_customer_manual_comprobantes_1.addCustomerManualComprobantesTable)();
                 yield (0, add_customer_manual_comprobantes_pdf_1.addCustomerManualComprobantesPdfColumns)();
-                yield (0, add_lupo_stock_webhook_config_table_1.addLupoStockWebhookConfigTable)();
-                yield (0, add_variant_luposhop_stock_table_1.addVariantLuposhopStockTable)();
                 yield (0, add_order_created_by_1.addOrderCreatedBy)();
                 yield (0, add_order_matrix_import_label_1.addOrderMatrixImportLabel)();
                 yield (0, add_order_notes_1.addOrderNotes)();
@@ -287,6 +290,7 @@ function initDatabase() {
                 yield (0, add_customer_opening_balance_1.addCustomerOpeningBalance)();
                 yield (0, add_publication_stock_bundles_1.addPublicationStockBundles)();
                 yield (0, add_orders_performance_indexes_1.addOrdersPerformanceIndexes)();
+                yield (0, add_seller_price_lists_1.addSellerPriceLists)();
                 console.log('[DB] Tablas inicializadas correctamente');
                 return;
             }

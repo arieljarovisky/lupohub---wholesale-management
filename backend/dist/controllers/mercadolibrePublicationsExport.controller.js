@@ -17,6 +17,7 @@ const axios_1 = __importDefault(require("axios"));
 const exceljs_1 = __importDefault(require("exceljs"));
 const db_1 = require("../database/db");
 const integrations_controller_1 = require("./integrations.controller");
+const channelMarginUtils_1 = require("../utils/channelMarginUtils");
 const ML_SYNC_MAX_ITEMS = Math.max(100, parseInt(process.env.ML_SYNC_MAX_ITEMS || '5000', 10));
 const ADS_LOOKBACK_DAYS = 30;
 /** Misma lista que integrations (Product Ads). */
@@ -475,31 +476,9 @@ const exportMercadolibrePublicationsXlsx = (req, res) => __awaiter(void 0, void 
             const key = `${ep}|${extVar}`;
             pubMap.set(key, Object.assign(Object.assign({}, base), { pub_pack: pr.pack_size != null ? Math.max(1, Number(pr.pack_size) || 1) : null }));
         }
-        /** Precio FOB por producto: lista de precios cuyo nombre contiene "fob" (ej. "precios FOB") o env LUPOHUB_FOB_PRICE_LIST_ID. */
-        let fobListName = '';
+        const fobInfo = yield (0, channelMarginUtils_1.resolveFobPriceList)();
+        const fobListName = fobInfo.name;
         const fobListIdEnv = (process.env.LUPOHUB_FOB_PRICE_LIST_ID || '').trim();
-        let fobListId = null;
-        if (fobListIdEnv) {
-            const exists = yield (0, db_1.get)('SELECT id, name FROM price_lists WHERE id = ?', [fobListIdEnv]);
-            if (exists === null || exists === void 0 ? void 0 : exists.id) {
-                fobListId = String(exists.id);
-                fobListName = exists.name || '';
-            }
-        }
-        if (!fobListId) {
-            const pl = yield (0, db_1.get)(`SELECT id, name FROM price_lists WHERE LOWER(TRIM(name)) LIKE '%fob%' ORDER BY CASE WHEN LOWER(TRIM(name)) = 'precios fob' THEN 0 ELSE 1 END, name LIMIT 1`);
-            if (pl === null || pl === void 0 ? void 0 : pl.id) {
-                fobListId = String(pl.id);
-                fobListName = String(pl.name || '');
-            }
-        }
-        const fobPriceRows = fobListId
-            ? (yield (0, db_1.query)(`SELECT product_id, price FROM price_list_items WHERE price_list_id = ?`, [fobListId]))
-            : [];
-        const fobByProductId = new Map();
-        for (const fr of fobPriceRows) {
-            fobByProductId.set(String(fr.product_id), Number(fr.price) || 0);
-        }
         const productMeta = new Map();
         for (const r of hubRows) {
             if (productMeta.has(r.product_id))
@@ -669,10 +648,10 @@ const exportMercadolibrePublicationsXlsx = (req, res) => __awaiter(void 0, void 
             let fobCost = null;
             if (key.startsWith('p:')) {
                 const pid = key.slice(2);
-                fobCost = fobByProductId.has(pid) ? fobByProductId.get(pid) : null;
+                fobCost = (0, channelMarginUtils_1.lookupFobPrice)(fobInfo, pid, agg.codigo);
             }
             else {
-                fobCost = null;
+                fobCost = (0, channelMarginUtils_1.lookupFobPrice)(fobInfo, null, agg.codigo);
             }
             let inversion = 0;
             for (const iid of agg.ml_item_ids) {

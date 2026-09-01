@@ -7,18 +7,25 @@ const mlToTiendaNubeExport_controller_1 = require("../controllers/mlToTiendaNube
 const channelPrices_controller_1 = require("../controllers/channelPrices.controller");
 const channelMargins_controller_1 = require("../controllers/channelMargins.controller");
 const tiendanubeSalesReport_controller_1 = require("../controllers/tiendanubeSalesReport.controller");
+const tiendanubeProductsCsvExport_controller_1 = require("../controllers/tiendanubeProductsCsvExport.controller");
+const mercadolibreSalesReport_controller_1 = require("../controllers/mercadolibreSalesReport.controller");
+const marketingTopProductsExport_controller_1 = require("../controllers/marketingTopProductsExport.controller");
+const mercadolibreReviews_controller_1 = require("../controllers/mercadolibreReviews.controller");
 const tiendanubeCategoryImages_controller_1 = require("../controllers/tiendanubeCategoryImages.controller");
+const tiendanubeProductImages_controller_1 = require("../controllers/tiendanubeProductImages.controller");
 const tiendanubeCatalog_controller_1 = require("../controllers/tiendanubeCatalog.controller");
 const tiendanubeCatalogConfig_controller_1 = require("../controllers/tiendanubeCatalogConfig.controller");
-const auth_1 = require("../middleware/auth");
+const tiendanubeExpressTrackingPage_controller_1 = require("../controllers/tiendanubeExpressTrackingPage.controller");
 const lupoWebhookSettings_controller_1 = require("../controllers/lupoWebhookSettings.controller");
+const auth_1 = require("../middleware/auth");
 const adsIntegrations_controller_1 = require("../controllers/adsIntegrations.controller");
 const router = (0, express_1.Router)();
 router.get('/status', integrations_controller_1.getIntegrationStatus);
+// LupoShop (stubs: integración removida; evita 404 en Settings)
 router.get('/luposhop/webhook-config', auth_1.authMiddleware, lupoWebhookSettings_controller_1.getLupoWebhookConfigEndpoint);
 router.post('/luposhop/webhook-config', auth_1.authMiddleware, lupoWebhookSettings_controller_1.saveLupoWebhookConfigEndpoint);
 router.post('/luposhop/webhook-test', auth_1.authMiddleware, lupoWebhookSettings_controller_1.testLupoWebhookEndpoint);
-router.post('/luposhop/sync-ml-stock-to-shop', auth_1.authMiddleware, lupoWebhookSettings_controller_1.syncLupoShopMlStockBulkEndpoint);
+router.post('/luposhop/sync-ml-stock-to-shop', auth_1.authMiddleware, lupoWebhookSettings_controller_1.syncLupoShopMlStockToShopEndpoint);
 // Mercado Libre
 router.get('/mercadolibre/auth', integrations_controller_1.getMercadoLibreAuthUrl);
 router.get('/mercadolibre/callback', integrations_controller_1.handleMercadoLibreCallback);
@@ -26,6 +33,8 @@ router.get('/mercadolibre/test', integrations_controller_1.testMercadoLibreConne
 router.get('/mercadolibre/debug', integrations_controller_1.debugMercadoLibreItem);
 router.get('/mercadolibre/orders', integrations_controller_1.getMercadoLibreOrders);
 router.get('/mercadolibre/questions', integrations_controller_1.getMercadoLibreQuestions);
+router.get('/mercadolibre/reviews', auth_1.authMiddleware, mercadolibreReviews_controller_1.getMercadoLibreReviews);
+router.get('/mercadolibre/reviews-export', auth_1.authMiddleware, mercadolibreReviews_controller_1.exportMercadoLibreReviewsXlsx);
 router.get('/mercadolibre/stock', integrations_controller_1.getMercadoLibreStock);
 router.get('/mercadolibre/stock/totals', integrations_controller_1.getMercadoLibreStockTotals);
 /** Métricas Mercado Ads (Product Ads): anunciantes, campañas y anuncios por publicación. */
@@ -38,6 +47,7 @@ router.get('/mercadolibre/display-ads/advertisers', integrations_controller_1.ge
 router.get('/mercadolibre/display-ads/campaigns', integrations_controller_1.getMercadoLibreDisplayAdsCampaigns);
 /** Excel: publicaciones ML + precio mayorista + último FOB por variante (requiere login). */
 router.get('/mercadolibre/publications-export', auth_1.authMiddleware, mercadolibrePublicationsExport_controller_1.exportMercadolibrePublicationsXlsx);
+router.get('/mercadolibre/sales-report-export', auth_1.authMiddleware, mercadolibreSalesReport_controller_1.exportMercadoLibreSalesReportXlsx);
 router.get('/mercadolibre/items/:itemId/variations', integrations_controller_1.getMercadoLibreItemVariations);
 router.post('/variant-external-stocks', integrations_controller_1.getVariantExternalStocks);
 router.post('/variant-channel-prices', auth_1.authMiddleware, channelPrices_controller_1.getVariantChannelPrices);
@@ -55,6 +65,8 @@ router.post('/mercadolibre/questions-ai/reject', auth_1.authMiddleware, integrat
 router.get('/mercadolibre/questions-ai/metrics', auth_1.authMiddleware, integrations_controller_1.getMLQuestionsAiMetrics);
 router.post('/mercadolibre/sync', integrations_controller_1.syncProductsFromMercadoLibre);
 router.post('/mercadolibre/sync-stock', integrations_controller_1.syncAllStockToMercadoLibre);
+router.get('/mercadolibre/sync-stock/status', integrations_controller_1.getMercadoLibreStockSyncStatus);
+router.get('/stock-sync/failures-export', integrations_controller_1.exportStockSyncFailuresXlsx);
 router.post('/mercadolibre/sync-stock-selected', integrations_controller_1.syncSelectedStockToMercadoLibre);
 router.post('/mercadolibre/sync-from-ml', integrations_controller_1.syncAllStockFromMercadoLibre);
 router.post('/mercadolibre/import-stock', integrations_controller_1.importStockFromMercadoLibre);
@@ -79,16 +91,25 @@ router.patch('/tiendanube/orders/:orderId/express-tracking/status', auth_1.authM
 router.get('/tiendanube/stock', integrations_controller_1.getTiendaNubeStock);
 router.get('/tiendanube/stock/totals', integrations_controller_1.getTiendaNubeStockTotals);
 router.get('/tiendanube/sales-report-export', auth_1.authMiddleware, tiendanubeSalesReport_controller_1.exportTiendaNubeSalesReportXlsx);
+router.get('/tiendanube/products-csv-export', auth_1.authMiddleware, tiendanubeProductsCsvExport_controller_1.exportTiendaNubeProductsCsv);
+/** Marketing: más vendidos con unidades por plataforma (TN / ML / Mayorista). */
+router.get('/marketing/top-products-export', auth_1.authMiddleware, marketingTopProductsExport_controller_1.exportMarketingTopProductsXlsx);
 router.get('/tiendanube/category-images/preview', auth_1.authMiddleware, tiendanubeCategoryImages_controller_1.listTiendaNubeCategoryMatches);
 router.get('/tiendanube/category-images/download', auth_1.authMiddleware, tiendanubeCategoryImages_controller_1.downloadTiendaNubeCategoryImagesZip);
 router.get('/tiendanube/catalog', auth_1.authMiddleware, tiendanubeCatalog_controller_1.getTiendaNubeCatalog);
 router.get('/tiendanube/catalog/config', auth_1.authMiddleware, tiendanubeCatalogConfig_controller_1.getTiendaNubeCatalogConfig);
 router.put('/tiendanube/catalog/config', auth_1.authMiddleware, tiendanubeCatalogConfig_controller_1.saveTiendaNubeCatalogConfig);
+router.get('/tiendanube/express-tracking-page/config', auth_1.authMiddleware, tiendanubeExpressTrackingPage_controller_1.getTiendaNubeExpressTrackingPageConfig);
+router.put('/tiendanube/express-tracking-page/config', auth_1.authMiddleware, tiendanubeExpressTrackingPage_controller_1.saveTiendaNubeExpressTrackingPageConfig);
 router.get('/tiendanube/products/:productId/variants', integrations_controller_1.getTiendaNubeProductVariants);
+router.post('/tiendanube/products/images/match-preview', auth_1.authMiddleware, tiendanubeProductImages_controller_1.previewTiendaNubeImageMatchesEndpoint);
+router.get('/tiendanube/products/:productId/images', auth_1.authMiddleware, tiendanubeProductImages_controller_1.getTiendaNubeProductImagesEndpoint);
+router.post('/tiendanube/products/:productId/images', auth_1.authMiddleware, tiendanubeProductImages_controller_1.uploadTnProductImagesMiddleware, tiendanubeProductImages_controller_1.saveTiendaNubeProductImagesEndpoint);
 router.post('/tiendanube/products', integrations_controller_1.createTiendaNubeProduct);
 router.post('/tiendanube/products/:productId/duplicate', integrations_controller_1.duplicateTiendaNubeProduct);
 router.post('/tiendanube/sync', integrations_controller_1.syncProductsFromTiendaNube);
 router.post('/tiendanube/sync-stock', integrations_controller_1.syncAllStockToTiendaNube);
+router.get('/tiendanube/sync-stock/status', integrations_controller_1.getTiendaNubeStockSyncStatus);
 router.post('/tiendanube/sync-stock-selected', integrations_controller_1.syncSelectedStockToTiendaNube);
 router.post('/tiendanube/import-product', integrations_controller_1.importProductFromTiendaNube);
 router.post('/tiendanube/normalize-sizes', integrations_controller_1.normalizeSizesInTiendaNube);

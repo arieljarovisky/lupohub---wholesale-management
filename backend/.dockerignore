@@ -4,7 +4,6 @@ dist
 .env
 .env.*
 *.md
-scripts
 src/tests
 uploads
 tmp

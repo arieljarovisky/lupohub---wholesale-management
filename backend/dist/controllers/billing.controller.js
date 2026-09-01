@@ -188,14 +188,29 @@ function dateFromYmd(value) {
         if (m)
             return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
     }
-    if (value instanceof Date && !Number.isNaN(value.getTime()))
-        return value;
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+        // MySQL DATE suele llegar como medianoche UTC o AR (T03:00Z). Usar componentes UTC
+        // del día civil, no devolver el Date crudo (evita desfase al formatear).
+        return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
+    }
     const ymd = normalizeDate(value);
     const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (m)
         return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
     return null;
 }
+/**
+ * Fecha del comprobante para Arciba RetPer:
+ * - reemisión NC+FA → fecha de emisión de la FA nueva
+ * - factura restaurada (created_at >> fecha pedido) → o.date (created_at es la restauración)
+ * - caso normal → DATE(created_at) = emisión AFIP (no la fecha del pedido)
+ */
+const SQL_RETPER_FAC_FECHA = `CASE
+  WHEN cn_reemit.id IS NOT NULL THEN COALESCE(DATE(i.created_at), DATE(cn_reemit.created_at), o.date)
+  WHEN i.created_at IS NOT NULL AND o.date IS NOT NULL
+    AND DATE(i.created_at) > DATE_ADD(o.date, INTERVAL 3 DAY) THEN o.date
+  ELSE COALESCE(DATE(i.created_at), o.date)
+END`;
 /** "20/05/2026" */
 function formatDateEsShort(value) {
     const d = dateFromYmd(value);
@@ -1322,48 +1337,194 @@ const printBilling = (req, res) => __awaiter(void 0, void 0, void 0, function* (
     }
 });
 exports.printBilling = printBilling;
-/** Detecta provincia a partir del campo `city` (y opcionalmente `address`) del cliente. */
-function detectProvincia(city, address = '') {
-    const haystack = `${city || ''} ${address || ''}`
+/** Detecta provincia a partir de la ciudad/localidad del cliente (no usar calle: "MENDOZA 123" no es Mendoza). */
+function detectProvincia(city) {
+    const haystack = String(city || '')
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '')
-        .toLowerCase();
-    if (!haystack.trim())
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!haystack)
         return { code: '', name: '' };
-    /** Códigos conocidos según Excel modelo del estudio contable (Tango). El resto va vacío y se completa manual. */
+    /**
+     * Códigos conocidos según Excel modelo del estudio contable (Tango).
+     * El resto deja COD vacío; NOM se completa igual para facilitar la carga manual.
+     * Incluye localidades frecuentes de clientes (GBA, interior) además del nombre de provincia.
+     */
     const PROVINCIAS = [
-        { code: '01', name: 'CAPITAL', patterns: [/capital\s*federal/, /\bcaba\b/, /ciudad\s*autonoma/, /^capital$/] },
-        { code: '02', name: 'BUENOS AIRES', patterns: [/buenos\s*aires/, /\bbs\s*\.?\s*as\b/, /provincia\s*de\s*buenos\s*aires/] },
+        {
+            code: '01',
+            name: 'CAPITAL',
+            patterns: [
+                /capital\s*federal/,
+                /\bcaba\b/,
+                /ciudad\s*autonoma/,
+                /^capital$/,
+                /\bcap\.?\s*fed\b/,
+            ],
+        },
+        {
+            code: '02',
+            name: 'BUENOS AIRES',
+            patterns: [
+                /buenos\s*aires/,
+                /\bbs\s*\.?\s*as\b/,
+                /provincia\s*de\s*buenos\s*aires/,
+                /mar\s*del\s*plata/,
+                /\bla\s*plata\b/,
+                /\bquilmes\b/,
+                /san\s*isidro/,
+                /vicente\s*lopez/,
+                /\blanus\b/,
+                /\bmoron\b/,
+                /\bmoreno\b/,
+                /\badrogue\b/,
+                /florencio\s*varela/,
+                /san\s*francisco\s*solano/,
+                /\bbernal\b/,
+                /\bberisso\b/,
+                /\bavellaneda\b/,
+                /\bwilde\b/,
+                /\bcastelar\b/,
+                /\bmartinez\b/,
+                /guillermo\s*e\.?\s*hudson/,
+                /\bhudson\b/,
+                /bahia\s*blanca/,
+                /tres\s*arroyos/,
+                /punta\s*alta/,
+                /coronel\s*suarez/,
+                /general\s*san\s*martin/,
+                /\blomas\s*de\s*zamora\b/,
+                /\btemperley\b/,
+                /\bbanfield\b/,
+                /\bramos\s*mejia\b/,
+                /\bhaedo\b/,
+                /\bituzaingo\b/,
+                /\bmerlo\b/,
+                /\btigre\b/,
+                /\bsan\s*fernando\b/,
+                /\bpilar\b/,
+                /\bescobar\b/,
+                /\bzarate\b/,
+                /\bcampana\b/,
+                /\bolavarria\b/,
+                /\bnecochea\b/,
+                /\btandil\b/,
+                /\bsan\s*miguel\b(?!\s*de\s*tucuman)/,
+                /\bsan\s*martin\b(?!\s*de\s*los\s*andes)/,
+            ],
+        },
         { code: '', name: 'CATAMARCA', patterns: [/catamarca/] },
         { code: '', name: 'CHACO', patterns: [/\bchaco\b/, /resistencia/] },
-        { code: '', name: 'CHUBUT', patterns: [/chubut/, /comodoro\s*rivadavia/, /trelew/, /puerto\s*madryn/, /rawson/] },
+        {
+            code: '',
+            name: 'CHUBUT',
+            patterns: [/chubut/, /comodoro\s*rivadavia/, /trelew/, /puerto\s*madryn/, /rawson/],
+        },
         { code: '', name: 'CORDOBA', patterns: [/cordoba/, /\bcba\b/] },
-        { code: '', name: 'CORRIENTES', patterns: [/corrientes/] },
-        { code: '09', name: 'ENTRE RIOS', patterns: [/entre\s*rios/, /\bparana\b/, /concordia/, /gualeguaychu/] },
+        { code: '', name: 'CORRIENTES', patterns: [/corrientes/, /\bgoya\b/] },
+        {
+            code: '09',
+            name: 'ENTRE RIOS',
+            patterns: [
+                /entre\s*rios/,
+                /\bparana\b/,
+                /concordia/,
+                /gualeguaychu/,
+                /\bchajari\b/,
+                /\bnogoya\b/,
+                /\bcolon\b/,
+                /\bvictoria\b/,
+            ],
+        },
         { code: '', name: 'FORMOSA', patterns: [/formosa/] },
         { code: '', name: 'JUJUY', patterns: [/jujuy/, /san\s*salvador\s*de\s*jujuy/] },
         { code: '', name: 'LA PAMPA', patterns: [/la\s*pampa/, /santa\s*rosa/] },
         { code: '', name: 'LA RIOJA', patterns: [/la\s*rioja/] },
-        { code: '05', name: 'MENDOZA', patterns: [/mendoza/, /godoy\s*cruz/, /malargue/, /san\s*rafael/] },
+        {
+            code: '05',
+            name: 'MENDOZA',
+            patterns: [
+                /mendoza/,
+                /godoy\s*cruz/,
+                /malargue/,
+                /san\s*rafael/,
+                /\btunuyan\b/,
+                /\blujan\s*de\s*cuyo\b/,
+                /\bmaipu\b/,
+            ],
+        },
         { code: '', name: 'MISIONES', patterns: [/misiones/, /posadas/, /obera/, /eldorado/] },
         { code: '', name: 'NEUQUEN', patterns: [/neuquen/] },
-        { code: '', name: 'RIO NEGRO', patterns: [/rio\s*negro/, /bariloche/, /viedma/, /general\s*roca/] },
+        {
+            code: '',
+            name: 'RIO NEGRO',
+            patterns: [/rio\s*negro/, /bariloche/, /viedma/, /general\s*roca/],
+        },
         { code: '', name: 'SALTA', patterns: [/\bsalta\b/] },
         { code: '', name: 'SAN JUAN', patterns: [/san\s*juan/] },
         { code: '', name: 'SAN LUIS', patterns: [/san\s*luis/] },
-        { code: '', name: 'SANTA CRUZ', patterns: [/santa\s*cruz/, /rio\s*gallegos/, /\bcaleta\s*olivia\b/] },
-        { code: '10', name: 'SANTA FE', patterns: [/santa\s*fe/, /\brosario\b/, /rafaela/, /reconquista/, /venado\s*tuerto/] },
+        {
+            code: '',
+            name: 'SANTA CRUZ',
+            patterns: [/santa\s*cruz/, /rio\s*gallegos/, /\bcaleta\s*olivia\b/],
+        },
+        {
+            code: '10',
+            name: 'SANTA FE',
+            patterns: [
+                /santa\s*fe/,
+                /\brosario\b/,
+                /rafaela/,
+                /reconquista/,
+                /venado\s*tuerto/,
+                /san\s*jose\s*del\s*rincon/,
+                /\bsanto\s*tome\b/,
+            ],
+        },
         { code: '', name: 'SANTIAGO DEL ESTERO', patterns: [/santiago\s*del\s*estero/] },
-        { code: '24', name: 'Tierra del Fuego', patterns: [/tierra\s*del\s*fuego/, /ushuaia/, /rio\s*grande/] },
-        { code: '', name: 'TUCUMAN', patterns: [/tucuman/, /san\s*miguel\s*de\s*tucuman/] }
+        {
+            code: '24',
+            name: 'Tierra del Fuego',
+            patterns: [/tierra\s*del\s*fuego/, /ushuaia/, /rio\s*grande/],
+        },
+        { code: '', name: 'TUCUMAN', patterns: [/tucuman/, /san\s*miguel\s*de\s*tucuman/] },
     ];
-    // Buscar CAPITAL antes que BUENOS AIRES para resolver ambigüedad (CAPITAL FEDERAL contiene "buenos aires" en algunos formatos).
+    // CAPITAL antes que BUENOS AIRES (ambigüedad "buenos aires" / CABA).
+    // TUCUMAN (san miguel de tucuman) se evalúa después de BA; el lookbehind negativo en SAN MIGUEL evita choque.
     for (const p of PROVINCIAS) {
         if (p.patterns.some((rx) => rx.test(haystack))) {
             return { code: p.code, name: p.name };
         }
     }
     return { code: '', name: '' };
+}
+/** Ciudad del cliente, o la primera ciudad no vacía en sucursales (`delivery_addresses`). */
+function resolveCustomerCityForProvincia(city, deliveryAddressesJson) {
+    const main = String(city || '').trim();
+    if (main)
+        return main;
+    let list = [];
+    if (Array.isArray(deliveryAddressesJson)) {
+        list = deliveryAddressesJson;
+    }
+    else if (typeof deliveryAddressesJson === 'string' && deliveryAddressesJson.trim()) {
+        try {
+            const parsed = JSON.parse(deliveryAddressesJson);
+            if (Array.isArray(parsed))
+                list = parsed;
+        }
+        catch (_a) {
+            /* ignore */
+        }
+    }
+    for (const it of list) {
+        const c = String((it === null || it === void 0 ? void 0 : it.city) || '').trim();
+        if (c)
+            return c;
+    }
+    return '';
 }
 /** Convierte 'YYYY-MM-DD' (o Date) al serial de Excel (días desde 1899-12-30, con bug del año bisiesto 1900). */
 function toExcelSerialDate(value) {
@@ -1392,6 +1553,7 @@ function letraFromCbteTipo(t) {
 }
 /**
  * Exporta el Excel "Ventas por Jurisdicción" con el formato esperado por el estudio contable.
+ * Solo facturas/NC mayoristas (sin Tienda Nube ni Mercado Libre).
  * Columnas: COD_PROVI, NOM_PROVI, FECHA_EMI (serial), T_COMP (FAC/CDE), N_COMP (A0002000012131),
  *           RAZON_SOC, SIN_IVA, IMP_IVA, IMPUEST, IMPORTE, COD_TRANSP, NOM_TRANSP.
  * NC va con montos en negativo y sin transporte.
@@ -1403,8 +1565,13 @@ const exportVentasJurisdiccionXlsx = (req, res) => __awaiter(void 0, void 0, voi
             return res.status(400).json({ message: 'Faltan parámetros desde / hasta (YYYY-MM-DD)' });
         }
         const authUser = req.user;
-        const sellerJoinSql = (authUser === null || authUser === void 0 ? void 0 : authUser.role) === 'SELLER' ? ' AND c.seller_id = ?' : '';
-        const sellerParam = (authUser === null || authUser === void 0 ? void 0 : authUser.role) === 'SELLER' ? [authUser.id] : [];
+        const isSeller = (authUser === null || authUser === void 0 ? void 0 : authUser.role) === 'SELLER';
+        const sellerJoinSql = isSeller ? ' AND c.seller_id = ?' : '';
+        const sellerParam = isSeller ? [authUser.id] : [];
+        const queryParams = [
+            desde, hasta, ...sellerParam,
+            desde, hasta, ...sellerParam,
+        ];
         const rows = yield (0, db_1.query)(`
       SELECT *
       FROM (
@@ -1420,7 +1587,8 @@ const exportVentasJurisdiccionXlsx = (req, res) => __awaiter(void 0, void 0, voi
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, '') AS razon_social,
           COALESCE(c.city, '') AS city,
-          COALESCE(c.address, '') AS address
+          COALESCE(c.address, '') AS address,
+          c.delivery_addresses AS delivery_addresses
         FROM invoices i
         JOIN orders o ON o.id = i.order_id
         JOIN customers c ON c.id = o.customer_id
@@ -1442,16 +1610,17 @@ const exportVentasJurisdiccionXlsx = (req, res) => __awaiter(void 0, void 0, voi
           c.id AS customer_id,
           COALESCE(c.business_name, c.name, '') AS razon_social,
           COALESCE(c.city, '') AS city,
-          COALESCE(c.address, '') AS address
+          COALESCE(c.address, '') AS address,
+          c.delivery_addresses AS delivery_addresses
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
         JOIN customers c ON c.id = o.customer_id
         WHERE o.date >= ? AND o.date <= ?${sellerJoinSql}
         GROUP BY cn.cae, cn.punto_venta, cn.cbte_tipo, cn.cbte_desde, cn.cbte_hasta,
-                 c.id, c.business_name, c.name, c.city, c.address
+                 c.id, c.business_name, c.name, c.city, c.address, c.delivery_addresses
       ) AS x
       ORDER BY x.fecha ASC, x.punto_venta ASC, x.cbte_desde ASC
-      `, [desde, hasta, ...sellerParam, desde, hasta, ...sellerParam]);
+      `, queryParams);
         // Primer transporte por cliente (fallback a customers.transport_number).
         const customerIds = Array.from(new Set(rows.map((r) => String(r.customer_id || '')))).filter(Boolean);
         const transportesByCustomer = new Map();
@@ -1502,7 +1671,8 @@ const exportVentasJurisdiccionXlsx = (req, res) => __awaiter(void 0, void 0, voi
             const pv = String(Number(r.punto_venta) || 0).padStart(4, '0');
             const nro = String(Number(r.cbte_desde) || 0).padStart(8, '0');
             const nComp = `${letra}${pv}${nro}`;
-            const prov = detectProvincia(String(r.city || ''), String(r.address || ''));
+            const cityForProv = resolveCustomerCityForProvincia(r.city, r.delivery_addresses);
+            const prov = detectProvincia(cityForProv);
             const fechaSerial = toExcelSerialDate(r.fecha);
             // Para NC: sin transporte, igual que el modelo del estudio.
             const transp = tipo === 'CDE'
@@ -1561,28 +1731,18 @@ const exportRetPerTxt = (req, res) => __awaiter(void 0, void 0, void 0, function
         }
         const whereFac = [];
         const paramsFac = [];
+        // Filtrar por la misma fecha que va al TXT (emisión AFIP / pedido si fue restauración).
         if (fromDate && toDate) {
-            // Pedido del mes, emisión FA/NC del mes, o reemisión (NC+FA) emitida en el mes.
-            whereFac.push(`(
-        (o.date >= ? AND o.date <= ?)
-        OR (COALESCE(DATE(i.created_at), o.date) >= ? AND COALESCE(DATE(i.created_at), o.date) <= ?)
-        OR EXISTS (
-          SELECT 1 FROM credit_notes cn_m
-          WHERE cn_m.order_id = o.id
-            AND COALESCE(cn_m.superseded_by_reinvoice, 0) = 1
-            AND COALESCE(DATE(cn_m.created_at), DATE(i.created_at), o.date) >= ?
-            AND COALESCE(DATE(cn_m.created_at), DATE(i.created_at), o.date) <= ?
-        )
-      )`);
-            paramsFac.push(fromDate, toDate, fromDate, toDate, fromDate, toDate);
+            whereFac.push(`(${SQL_RETPER_FAC_FECHA}) >= ? AND (${SQL_RETPER_FAC_FECHA}) <= ?`);
+            paramsFac.push(fromDate, toDate);
         }
         else {
             if (fromDate) {
-                whereFac.push('COALESCE(DATE(i.created_at), o.date) >= ?');
+                whereFac.push(`(${SQL_RETPER_FAC_FECHA}) >= ?`);
                 paramsFac.push(fromDate);
             }
             if (toDate) {
-                whereFac.push('COALESCE(DATE(i.created_at), o.date) <= ?');
+                whereFac.push(`(${SQL_RETPER_FAC_FECHA}) <= ?`);
                 paramsFac.push(toDate);
             }
         }
@@ -1631,10 +1791,7 @@ const exportRetPerTxt = (req, res) => __awaiter(void 0, void 0, void 0, function
         const ncWhereSql = ncWhere.length ? `WHERE ${ncWhere.join(' AND ')}` : '';
         const rowsRaw = yield (0, db_1.query)(`
       SELECT
-        CASE
-          WHEN cn_reemit.id IS NOT NULL THEN COALESCE(DATE(i.created_at), DATE(cn_reemit.created_at), o.date)
-          ELSE o.date
-        END AS fecha,
+        ${SQL_RETPER_FAC_FECHA} AS fecha,
         i.cbte_tipo,
         i.punto_venta,
         i.cbte_desde,

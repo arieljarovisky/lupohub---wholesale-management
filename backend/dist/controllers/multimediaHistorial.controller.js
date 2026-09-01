@@ -52,6 +52,7 @@ const orderPricing_1 = require("../config/orderPricing");
 const customerOpeningBalance_1 = require("../sql/customerOpeningBalance");
 const orderPaymentBalance_service_1 = require("../services/orderPaymentBalance.service");
 const ledgerDocType_1 = require("../utils/ledgerDocType");
+const reinvoicePaymentSaldo_1 = require("../utils/reinvoicePaymentSaldo");
 const ledgerRunningSaldo_1 = require("../utils/ledgerRunningSaldo");
 const SQL_ORDER_ACTIVE_COND = `o.status NOT IN ('Cancelado', 'Borrador') AND (o.archived = 0 OR o.archived IS NULL)`;
 function normalizeNameForMatch(v) {
@@ -443,6 +444,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
        LEFT JOIN payment_invoice_refs pir ON pir.payment_id = p.id
        LEFT JOIN payment_orders po ON po.payment_id = p.id
        WHERE p.customer_id = ?
+         AND ${carteraImportedSql_1.SQL_WHERE_PAYMENT_SOLO_LUPOHUB}
        GROUP BY p.id, p.date, p.created_at, p.receipt_number, p.amount, p.notes, p.invoice_id, p.order_id
        ORDER BY p.created_at ASC, p.date ASC`, [id]));
         const orderSaldoRows = (yield (0, db_1.query)(`SELECT
@@ -677,6 +679,9 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 detalle: reemision
                     ? `Pedido ${cn.order_id || ''} · NC AFIP LupoHub (reemisión IIBB)`
                     : `Pedido ${cn.order_id || ''} · NC AFIP LupoHub`,
+                /** Par informativo con la FAC anulada: la factura nueva ya está en cartera. */
+                excluirDeSaldo: reemision,
+                supersededByReinvoice: reemision,
                 paginaPdf: null,
                 orderId: cn.order_id ? String(cn.order_id) : null,
                 ncLinks,
@@ -738,6 +743,12 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 source: 'system'
             };
         });
+        const supersededReinvoiceCreditNotes = creditNoteRows
+            .filter((cn) => Number(cn.superseded_by_reinvoice) === 1)
+            .map((cn) => ({
+            order_id: String(cn.order_id || ''),
+            amount_credited: Number(cn.amount_credited || 0),
+        }));
         const paymentAsEntries = paymentEntries
             .filter((p) => ledgerMovementVisibleAfterOpening(openingBalanceDate, p.date))
             .map((p, idx) => {
@@ -752,13 +763,17 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 ...String(p.payment_order_ids || '').split(',').map((x) => x.trim()).filter(Boolean),
                 ...(p.order_id ? [String(p.order_id).trim()] : []),
             ])).filter((oid) => oid && !oid.startsWith('mm-'));
+            const unallocated = orderRefs.length === 0 &&
+                comprobantes.length === 0 &&
+                !String(p.invoice_id || '').trim();
+            const excludeFromSaldo = (0, reinvoicePaymentSaldo_1.paymentCoversSupersededReinvoiceCargo)(Number(p.amount || 0), orderRefs, supersededReinvoiceCreditNotes, unallocated);
             const parts = [];
             if (comprobantes.length)
                 parts.push(`Factura(s) AFIP: ${comprobantes.join(' | ')}`);
             if (orderRefs.length)
                 parts.push(`Pedido(s): ${orderRefs.join(' | ')}`);
             const refsText = parts.length ? parts.join(' · ') : 'Sin imputar';
-            const detail = `${refsText}${p.notes ? ` | ${String(p.notes).trim()}` : ''}`;
+            const detail = `${refsText}${excludeFromSaldo ? ' · Cobro del cargo anterior a reemisión IIBB (no modifica saldo)' : ''}${p.notes ? ` | ${String(p.notes).trim()}` : ''}`;
             return {
                 lineOrder: maxLineOrder + 100000 + idx,
                 lineDate: p.date,
@@ -770,6 +785,8 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 saldo: null,
                 detalle: detail,
                 paginaPdf: null,
+                excluirDeSaldo: excludeFromSaldo,
+                supersededReinvoicePayment: excludeFromSaldo,
                 source: 'system'
             };
         });
