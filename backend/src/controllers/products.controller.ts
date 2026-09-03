@@ -2055,9 +2055,9 @@ export const exportInventory = async (req: Request, res: Response) => {
         COALESCE(st.stock, 0) AS stock
       FROM products p
       JOIN product_colors pc ON pc.product_id = p.id
-      JOIN colors c ON c.id = pc.color_id
       JOIN product_variants pv ON pv.product_color_id = pc.id
-      JOIN sizes s ON s.id = pv.size_id
+      LEFT JOIN colors c ON c.id = pc.color_id
+      LEFT JOIN sizes s ON s.id = pv.size_id
       LEFT JOIN stocks st ON st.variant_id = pv.id
       ORDER BY p.sku, s.size_code, c.code
     `);
