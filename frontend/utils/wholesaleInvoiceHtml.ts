@@ -1079,7 +1079,9 @@ export function buildWholesaleFacturaHtml(params: {
               <div class="r"><span>Bonificación</span><span>$${formatMoneyAr(0)}</span></div>
               <div class="r"><span>Subtotal Neto</span><span>$${formatMoneyAr(netoImpreso)}</span></div>
               <div class="r"><span>IVA 21%</span><span>$${formatMoneyAr(iva21)}</span></div>`
-                  : `<div class="r"><span>Subtotal</span><span>$${formatMoneyAr(subtotalBruto)}</span></div>
+                  : esExport
+                    ? `<div class="r"><span>Subtotal</span><span>$${formatMoneyAr(subtotalBruto)}</span></div>`
+                    : `<div class="r"><span>Subtotal</span><span>$${formatMoneyAr(subtotalBruto)}</span></div>
               <div class="r" style="font-size:9px;border-bottom:none;padding-top:2px;"><span class="muted">IVA incluido en el precio</span><span></span></div>`
               }
               ${(agipRetPer > 0 || agipAlicuota > 0) ? `<div class="r"><span>Percepciones IIBB (${agipAlicuota.toFixed(2)}%)</span><span>$${formatMoneyAr(agipRetPer)}</span></div>` : ''}
