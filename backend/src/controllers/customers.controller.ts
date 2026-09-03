@@ -8,6 +8,7 @@ import { canonicalizeCityInput } from '../utils/cityNormalize';
 import {
   backfillPaymentOrdersFromLegacy,
   SQL_CN_TOTAL_SUBQUERY,
+  SQL_INVOICE_AGIP_RET_PER,
   SQL_ORDER_BASE_MINUS_NC,
   SQL_ORDER_IN_SALDO_SCOPE,
   SQL_ORDER_NETO_AFIP,
@@ -1572,6 +1573,16 @@ const SQL_ORDER_CARGO_CON_IVA = sqlAmountWithIvaFromOrderLines(SQL_ORDER_NETO_GR
 const SQL_ORDER_CARGO_PENDIENTE_SUM = `SUM(ROUND((${SQL_ORDER_BASE_MINUS_NC})${
   ORDER_PRICES_INCLUDE_IVA ? '' : ` * ${IVA_MULTIPLIER}`
 }, 2))`;
+
+/** Suma de cargos pendientes incluyendo IIBB de facturas emitidas. */
+const SQL_ORDER_CARGO_PENDIENTE_SUM_CON_IIBB = `SUM(ROUND(
+  (${SQL_ORDER_BASE_MINUS_NC})${ORDER_PRICES_INCLUDE_IVA ? '' : ` * ${IVA_MULTIPLIER}`}
+  + (${SQL_INVOICE_AGIP_RET_PER}),
+2))`;
+
+/** Total de IIBB (percepciones ingresos brutos) de facturas emitidas por cliente. */
+const SQL_IIBB_TOTAL_SUM = `COALESCE(SUM(${SQL_INVOICE_AGIP_RET_PER}), 0)`;
+
 const SQL_ORDER_NC_CREDIT_EXPR = sqlNetoAfipToAmountWithIva(
   `LEAST(COALESCE(cn.cn_total, 0), (${SQL_ORDER_NETO_AFIP}))`
 );
@@ -1674,7 +1685,7 @@ function carteraTotalRecibosSql(): string {
   return `ROUND(COALESCE(pay.total_pagos, 0) + ${SQL_CARTERA_IMPORT_REC_EXPR}, 2)`;
 }
 
-/** Saldos: pedidos con cobro pendiente (IVA 21% sobre neto, neto de NC) menos pagos/recibos en `payments`. */
+/** Saldos: pedidos con cobro pendiente (IVA 21% sobre neto, neto de NC, + IIBB de facturas) menos pagos/recibos en `payments`. */
 export const getSaldosPendientes = async (req: Request, res: Response) => {
   const user = (req as any).user;
   if (!user || !roleCanViewSaldos(user.role)) {
@@ -1716,7 +1727,8 @@ export const getSaldosPendientes = async (req: Request, res: Response) => {
       saldoPendiente: parseSaldoNumero(r.saldoPendiente),
       totalCargosPendiente: Number(r.totalCargosPendiente) || 0,
       totalPagos: Number(r.totalPagos) || 0,
-      pedidosPendientes: Number(r.pedidosPendientes) || 0
+      pedidosPendientes: Number(r.pedidosPendientes) || 0,
+      totalIibb: Number(r.totalIibb) || 0
     }));
 
   const sqlWithNc = `
@@ -1730,7 +1742,8 @@ export const getSaldosPendientes = async (req: Request, res: Response) => {
       ROUND(t.cargosPendientes - COALESCE(pay.total_pagos, 0), 2) AS saldoPendiente,
       ROUND(t.cargosPendientes, 2) AS totalCargosPendiente,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
-      t.pedidosPendientes
+      t.pedidosPendientes,
+      ROUND(t.totalIibb, 2) AS totalIibb
     FROM (
       SELECT
         c.id AS customerId,
@@ -1739,8 +1752,9 @@ export const getSaldosPendientes = async (req: Request, res: Response) => {
         c.cuit,
         c.city,
         c.email,
-        ${SQL_ORDER_CARGO_PENDIENTE_SUM} AS cargosPendientes,
-        COUNT(DISTINCT o.id) AS pedidosPendientes
+        ${SQL_ORDER_CARGO_PENDIENTE_SUM_CON_IIBB} AS cargosPendientes,
+        COUNT(DISTINCT o.id) AS pedidosPendientes,
+        ${SQL_IIBB_TOTAL_SUM} AS totalIibb
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
       LEFT JOIN (
@@ -1771,7 +1785,8 @@ export const getSaldosPendientes = async (req: Request, res: Response) => {
       ROUND(t.cargosPendientes - COALESCE(pay.total_pagos, 0), 2) AS saldoPendiente,
       ROUND(t.cargosPendientes, 2) AS totalCargosPendiente,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
-      t.pedidosPendientes
+      t.pedidosPendientes,
+      ROUND(t.totalIibb, 2) AS totalIibb
     FROM (
       SELECT
         c.id AS customerId,
@@ -1780,8 +1795,9 @@ export const getSaldosPendientes = async (req: Request, res: Response) => {
         c.cuit,
         c.city,
         c.email,
-        SUM(${SQL_ORDER_CARGO_CON_IVA}) AS cargosPendientes,
-        COUNT(DISTINCT o.id) AS pedidosPendientes
+        SUM(${SQL_ORDER_CARGO_CON_IVA}) + ${SQL_IIBB_TOTAL_SUM} AS cargosPendientes,
+        COUNT(DISTINCT o.id) AS pedidosPendientes,
+        ${SQL_IIBB_TOTAL_SUM} AS totalIibb
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
       WHERE ${SQL_ORDER_ACTIVE_COND}
@@ -2304,7 +2320,8 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
       ROUND(t.cargosPendientes - COALESCE(pay.total_pagos, 0), 2) AS saldoPendiente,
       ROUND(t.cargosPendientes, 2) AS totalCargosPendiente,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
-      t.pedidosPendientes
+      t.pedidosPendientes,
+      ROUND(t.totalIibb, 2) AS totalIibb
     FROM (
       SELECT
         c.id AS customerId,
@@ -2313,8 +2330,9 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
         c.cuit,
         c.city,
         c.email,
-        ${SQL_ORDER_CARGO_PENDIENTE_SUM} AS cargosPendientes,
-        COUNT(DISTINCT o.id) AS pedidosPendientes
+        ${SQL_ORDER_CARGO_PENDIENTE_SUM_CON_IIBB} AS cargosPendientes,
+        COUNT(DISTINCT o.id) AS pedidosPendientes,
+        ${SQL_IIBB_TOTAL_SUM} AS totalIibb
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
       LEFT JOIN (
@@ -2345,7 +2363,8 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
       ROUND(t.cargosPendientes - COALESCE(pay.total_pagos, 0), 2) AS saldoPendiente,
       ROUND(t.cargosPendientes, 2) AS totalCargosPendiente,
       ROUND(COALESCE(pay.total_pagos, 0), 2) AS totalPagos,
-      t.pedidosPendientes
+      t.pedidosPendientes,
+      ROUND(t.totalIibb, 2) AS totalIibb
     FROM (
       SELECT
         c.id AS customerId,
@@ -2354,8 +2373,9 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
         c.cuit,
         c.city,
         c.email,
-        SUM(${SQL_ORDER_CARGO_CON_IVA}) AS cargosPendientes,
-        COUNT(DISTINCT o.id) AS pedidosPendientes
+        SUM(${SQL_ORDER_CARGO_CON_IVA}) + ${SQL_IIBB_TOTAL_SUM} AS cargosPendientes,
+        COUNT(DISTINCT o.id) AS pedidosPendientes,
+        ${SQL_IIBB_TOTAL_SUM} AS totalIibb
       FROM customers c
       INNER JOIN orders o ON o.customer_id = c.id
       WHERE ${SQL_ORDER_ACTIVE_COND}
@@ -2385,6 +2405,7 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
     'email',
     'pedidos_impagos',
     'total_cargos_iva',
+    'ingresos_brutos',
     'pagos_registrados',
     'saldo_pendiente'
   ];
@@ -2401,6 +2422,7 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
         esc(r.email ?? ''),
         Number(r.pedidosPendientes) || 0,
         (Number(r.totalCargosPendiente) || 0).toFixed(2).replace('.', ','),
+        (Number(r.totalIibb) || 0).toFixed(2).replace('.', ','),
         (Number(r.totalPagos) || 0).toFixed(2).replace('.', ','),
         (Number(r.saldoPendiente) || 0).toFixed(2).replace('.', ',')
       ].join(';')
