@@ -202,7 +202,7 @@ function fetchMercadoPagoMovements(from, to) {
             connected: true,
             note: truncated
                 ? `Se listaron los primeros ${MAX_PAGES * PAGE_SIZE} pagos del período. Acotá el rango de fechas si falta información.`
-                : 'Cobros y reembolsos desde la API de Mercado Pago (pagos del período).',
+                : 'Solo cobros recibidos y reembolsos. No incluye retiros a banco, transferencias ni pagos realizados.',
             summary: {
                 count: movements.length,
                 grossIn: round2(grossIn),

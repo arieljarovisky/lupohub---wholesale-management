@@ -291,6 +291,21 @@ function mapCustomerFromApi(r: any): Customer {
     shouldRetainIibb: Boolean(r.shouldRetainIibb ?? r.should_retain_iibb),
     agipPadronPeriod: r.agipPadronPeriod ?? r.agip_padron_period ?? undefined,
     iibbAlicuota: r.iibbAlicuota != null ? Number(r.iibbAlicuota) : (r.iibb_alicuota != null ? Number(r.iibb_alicuota) : undefined),
+    isExportClient: Number(r.isExportClient ?? r.is_export_client ?? 0) === 1,
+    exportDstCmp:
+      r.exportDstCmp != null
+        ? Number(r.exportDstCmp)
+        : r.export_dst_cmp != null
+          ? Number(r.export_dst_cmp)
+          : undefined,
+    exportCountryName: r.exportCountryName ?? r.export_country_name ?? undefined,
+    foreignTaxId: r.foreignTaxId ?? r.foreign_tax_id ?? undefined,
+    exportCuitPaisCliente:
+      r.exportCuitPaisCliente != null
+        ? Number(r.exportCuitPaisCliente)
+        : r.export_cuit_pais_cliente != null
+          ? Number(r.export_cuit_pais_cliente)
+          : undefined,
   };
 }
 
@@ -598,6 +613,23 @@ export const api = {
       invoiceLabel: string;
       amountWithIva: number;
       orderStatus: string;
+    }>;
+    wholesaleOrdersInvoicedCount: number;
+    wholesaleOrdersInvoicedNet: number;
+    wholesaleOrdersUninvoicedCount: number;
+    wholesaleOrdersUninvoicedNet: number;
+    wholesaleOrdersTotalCount: number;
+    wholesaleOrdersTotalNet: number;
+    periodWholesaleOrders?: Array<{
+      orderId: string;
+      orderDate: string;
+      customerName: string;
+      orderStatus: string;
+      paymentStatus: string;
+      net: number;
+      netWithIva: number;
+      invoiced: boolean;
+      invoiceLabel: string | null;
     }>;
     byCategory: Array<{ entryType: string; category: string; categoryLabel: string; total: number; count: number }>;
     byMonth: Array<{ month: string; entryType: string; total: number }>;
@@ -1700,8 +1732,41 @@ export const api = {
   },
 
   /** Emite factura electrónica AFIP para un pedido (requiere picking y estado control/despacho). */
-  emitirFactura: async (orderId: string, body?: { cbteTipo?: 1 | 6 }): Promise<{ id: string; orderId: string; cae: string; caeFchVto?: string; cbteDesde: number; cbteHasta: number; cbteTipo: number; puntoVta?: number; agipAlicuota?: number; agipRetPer?: number }> => {
+  emitirFactura: async (
+    orderId: string,
+    body?: {
+      cbteTipo?: 1 | 6 | 19;
+      dstCmp?: number;
+      monedaId?: string;
+      monedaCtz?: number;
+      incoterms?: string;
+      formaPago?: string;
+    }
+  ): Promise<{
+    id: string;
+    orderId: string;
+    cae: string;
+    caeFchVto?: string;
+    cbteDesde: number;
+    cbteHasta: number;
+    cbteTipo: number;
+    puntoVta?: number;
+    agipAlicuota?: number;
+    agipRetPer?: number;
+    monedaId?: string;
+    monedaCtz?: number;
+    exportDstCmp?: number;
+    exportIncoterms?: string;
+    exportTipoExpo?: number;
+  }> => {
     return await request<any>(`/orders/${orderId}/emitir-factura`, 'POST', body ?? {}, undefined, AFIP_EMIT_TIMEOUT_MS);
+  },
+
+  /** Catálogos WSFEX para Factura E (paises, monedas, incoterms). */
+  getAfipExportacionParametros: async (
+    tipo: 'paises' | 'monedas' | 'incoterms'
+  ): Promise<{ tipo: string; data: unknown; puntoVentaExport?: number }> => {
+    return await request(`/afip/exportacion/${tipo}`, 'GET');
   },
 
   /** Marca pedido como showroom listo para AFIP (picked=qty, Controlado, pagado, stock). */

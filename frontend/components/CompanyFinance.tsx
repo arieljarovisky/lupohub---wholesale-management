@@ -22,6 +22,9 @@ import {
   Download,
   Warehouse,
   Search,
+  ChevronDown,
+  ChevronUp,
+  ListOrdered,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
@@ -139,6 +142,9 @@ const CompanyFinance: React.FC = () => {
   const [fixedExpenses, setFixedExpenses] = useState<FixedExpense[]>([]);
   const [exporting, setExporting] = useState(false);
   const [stockSearch, setStockSearch] = useState('');
+  const [showPeriodOrders, setShowPeriodOrders] = useState(false);
+  const [periodOrdersFilter, setPeriodOrdersFilter] = useState<'all' | 'invoiced' | 'uninvoiced'>('all');
+  const [loadingPeriodOrders, setLoadingPeriodOrders] = useState(false);
   const [form, setForm] = useState({
     entryType: 'expense' as 'expense' | 'income',
     category: 'sueldo',
@@ -172,6 +178,13 @@ const CompanyFinance: React.FC = () => {
     );
   }, [summary, stockSearch]);
 
+  const filteredPeriodOrders = useMemo(() => {
+    const list = summary?.periodWholesaleOrders || [];
+    if (periodOrdersFilter === 'invoiced') return list.filter((o) => o.invoiced);
+    if (periodOrdersFilter === 'uninvoiced') return list.filter((o) => !o.invoiced);
+    return list;
+  }, [summary?.periodWholesaleOrders, periodOrdersFilter]);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -198,8 +211,47 @@ const CompanyFinance: React.FC = () => {
     }
   }, [range.from, range.to, filterType, showToast]);
 
+  const loadPeriodOrders = useCallback(async () => {
+    setLoadingPeriodOrders(true);
+    try {
+      const sum = await api.getCompanyFinanceSummary({
+        from: range.from,
+        to: range.to,
+        includeOrders: true,
+      });
+      setSummary((prev) =>
+        prev
+          ? {
+              ...prev,
+              wholesaleOrdersInvoicedCount: sum.wholesaleOrdersInvoicedCount,
+              wholesaleOrdersInvoicedNet: sum.wholesaleOrdersInvoicedNet,
+              wholesaleOrdersUninvoicedCount: sum.wholesaleOrdersUninvoicedCount,
+              wholesaleOrdersUninvoicedNet: sum.wholesaleOrdersUninvoicedNet,
+              wholesaleOrdersTotalCount: sum.wholesaleOrdersTotalCount,
+              wholesaleOrdersTotalNet: sum.wholesaleOrdersTotalNet,
+              periodWholesaleOrders: sum.periodWholesaleOrders,
+            }
+          : sum
+      );
+    } catch (e: unknown) {
+      showToast('error', e instanceof Error ? e.message : 'No se pudieron cargar los pedidos');
+    } finally {
+      setLoadingPeriodOrders(false);
+    }
+  }, [range.from, range.to, showToast]);
+
+  const togglePeriodOrders = useCallback(() => {
+    if (showPeriodOrders) {
+      setShowPeriodOrders(false);
+      return;
+    }
+    setShowPeriodOrders(true);
+    void loadPeriodOrders();
+  }, [showPeriodOrders, loadPeriodOrders]);
+
   useEffect(() => {
     load();
+    setShowPeriodOrders(false);
   }, [load]);
 
   useEffect(() => {
@@ -589,7 +641,7 @@ const CompanyFinance: React.FC = () => {
                 indent={1}
                 label="Mayorista"
                 value={summary.channels?.wholesale.revenue ?? summary.ordersRevenue ?? 0}
-                hint={`${summary.channels?.wholesale.orderCount ?? 0} pedidos · sin IVA · IVA incl. ${fmt(summary.wholesaleRevenueWithIva ?? 0)}`}
+                hint={`${summary.wholesaleOrdersTotalCount ?? summary.channels?.wholesale.orderCount ?? 0} pedidos · ${summary.wholesaleOrdersInvoicedCount ?? 0} fact. · ${summary.wholesaleOrdersUninvoicedCount ?? 0} sin fact. · sin IVA · IVA incl. ${fmt(summary.wholesaleRevenueWithIva ?? 0)}`}
               />
               <PnlLine
                 indent={1}
@@ -1006,6 +1058,128 @@ const CompanyFinance: React.FC = () => {
               </table>
             </div>
           </div>
+
+          {(summary.wholesaleOrdersTotalCount ?? 0) > 0 && (
+            <div className="rounded-xl border border-violet-800/40 overflow-hidden">
+              <div className="px-3 sm:px-4 py-2 sm:py-3 bg-violet-950/30 border-b border-violet-900/40 text-xs sm:text-sm font-bold text-violet-200 flex flex-wrap items-center justify-between gap-2">
+                <span className="flex items-center gap-2">
+                  <ListOrdered size={16} className="shrink-0" />
+                  Pedidos mayoristas del período
+                </span>
+                <button
+                  type="button"
+                  onClick={togglePeriodOrders}
+                  className="inline-flex items-center gap-1 text-[10px] sm:text-xs font-semibold text-violet-300 hover:text-violet-100 transition-colors"
+                >
+                  {showPeriodOrders ? (
+                    <>
+                      Ocultar listado <ChevronUp size={14} />
+                    </>
+                  ) : (
+                    <>
+                      Ver listado <ChevronDown size={14} />
+                    </>
+                  )}
+                </button>
+              </div>
+              <ul className="divide-y divide-slate-800/80 text-xs sm:text-sm">
+                <li className="flex justify-between items-center p-2 sm:p-3">
+                  <span className="text-slate-300">
+                    Facturados ({summary.wholesaleOrdersInvoicedCount ?? 0})
+                  </span>
+                  <span className="font-mono text-emerald-300">{fmt(summary.wholesaleOrdersInvoicedNet ?? 0)}</span>
+                </li>
+                <li className="flex justify-between items-center p-2 sm:p-3">
+                  <span className="text-slate-300">
+                    Sin facturar ({summary.wholesaleOrdersUninvoicedCount ?? 0})
+                  </span>
+                  <span className="font-mono text-amber-300">{fmt(summary.wholesaleOrdersUninvoicedNet ?? 0)}</span>
+                </li>
+                <li className="flex justify-between items-center p-2 sm:p-3 bg-slate-800/30">
+                  <span className="text-slate-200 font-bold">Total ({summary.wholesaleOrdersTotalCount ?? 0})</span>
+                  <span className="font-mono font-bold text-violet-200">{fmt(summary.wholesaleOrdersTotalNet ?? 0)}</span>
+                </li>
+              </ul>
+              <p className="px-3 sm:px-4 pb-2 sm:pb-3 text-[9px] sm:text-[10px] text-slate-600">
+                Por fecha del pedido, neto de notas de crédito y sin IVA. Distinto del bloque «Facturado AFIP», que usa fecha de emisión.
+              </p>
+              {showPeriodOrders && (
+                <div className="border-t border-violet-900/40">
+                  <div className="px-3 sm:px-4 py-2 flex flex-wrap gap-2 items-center border-b border-slate-800/80">
+                    {(
+                      [
+                        { key: 'all' as const, label: 'Todos' },
+                        { key: 'invoiced' as const, label: 'Facturados' },
+                        { key: 'uninvoiced' as const, label: 'Sin facturar' },
+                      ] as const
+                    ).map(({ key, label }) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setPeriodOrdersFilter(key)}
+                        className={`px-2.5 py-1 rounded-lg text-[10px] sm:text-xs font-semibold transition-colors ${
+                          periodOrdersFilter === key
+                            ? 'bg-violet-600/30 text-violet-200 border border-violet-500/50'
+                            : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                    {loadingPeriodOrders ? (
+                      <span className="inline-flex items-center gap-1 text-[10px] text-slate-500 ml-auto">
+                        <Loader2 size={12} className="animate-spin" /> Cargando…
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="overflow-x-auto max-h-80 overflow-y-auto">
+                    <table className="w-full text-sm min-w-[640px]">
+                      <thead className="sticky top-0 bg-slate-900/95">
+                        <tr className="text-left text-slate-500 text-[10px] uppercase border-b border-slate-800">
+                          <th className="p-3">Fecha</th>
+                          <th className="p-3">Cliente</th>
+                          <th className="p-3">Estado</th>
+                          <th className="p-3">Factura</th>
+                          <th className="p-3">Cobro</th>
+                          <th className="p-3 text-right">Neto</th>
+                          <th className="p-3 text-right">c/IVA</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredPeriodOrders.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="p-4 text-center text-slate-500 text-xs">
+                              {loadingPeriodOrders
+                                ? 'Cargando pedidos…'
+                                : 'No hay pedidos para este filtro.'}
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredPeriodOrders.map((order) => (
+                            <tr key={order.orderId} className="border-b border-slate-800/60 hover:bg-slate-800/30">
+                              <td className="p-3 text-slate-400">{order.orderDate}</td>
+                              <td className="p-3 text-slate-200">{order.customerName}</td>
+                              <td className="p-3 text-slate-500">{order.orderStatus}</td>
+                              <td className="p-3 font-mono text-xs">
+                                {order.invoiced ? (
+                                  <span className="text-emerald-300">{order.invoiceLabel}</span>
+                                ) : (
+                                  <span className="text-amber-400/90">Sin factura</span>
+                                )}
+                              </td>
+                              <td className="p-3 text-slate-500 capitalize">{order.paymentStatus}</td>
+                              <td className="p-3 text-right font-mono text-slate-200">{fmt(order.net)}</td>
+                              <td className="p-3 text-right font-mono text-slate-400">{fmt(order.netWithIva)}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {(summary.pendingInvoices?.length ?? 0) > 0 && (
             <div className="rounded-xl border border-amber-800/40 overflow-hidden">

@@ -51,6 +51,8 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.TIPO_CBTE_E = void 0;
+exports.formatAfipObservaciones = formatAfipObservaciones;
 exports.formatAfipError = formatAfipError;
 exports.afipEmitHttpStatusFromMessage = afipEmitHttpStatusFromMessage;
 exports.isAfipConfigured = isAfipConfigured;
@@ -60,11 +62,22 @@ exports.emitirFactura = emitirFactura;
 exports.emitirNotaCredito = emitirNotaCredito;
 exports.emitirNotaDebito = emitirNotaDebito;
 exports.getCondicionIvaByCuit = getCondicionIvaByCuit;
+exports.getAfipPuntoVenta = getAfipPuntoVenta;
+exports.getLastAfipVoucherNumber = getLastAfipVoucherNumber;
 exports.consultarComprobanteAfip = consultarComprobanteAfip;
+exports.getAfipExportPuntoVenta = getAfipExportPuntoVenta;
+exports.getWsfexParametros = getWsfexParametros;
+exports.getLastExportVoucherNumber = getLastExportVoucherNumber;
+exports.getWsfexExportDiagnostico = getWsfexExportDiagnostico;
+exports.emitirFacturaExportacion = emitirFacturaExportacion;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const argentinaDate_1 = require("../utils/argentinaDate");
 const PTO_VTA_DEFAULT = 1;
+/** Punto de venta WSFEX (Factura E). Override con AFIP_PTO_VTA_EXPORT. */
+const PTO_VTA_EXPORT_DEFAULT = 10;
+/** Moneda por defecto Factura E en LupoHub. */
+const MONEDA_EXPORT_DEFAULT = 'PES';
 /** Factura A (CUIT) = 1, Factura B (consumidor final) = 6 */
 const TIPO_CBTE_A = 1;
 const TIPO_CBTE_B = 6;
@@ -74,6 +87,14 @@ const TIPO_NC_B = 8;
 /** Nota de Débito A = 2, Nota de Débito B = 7 */
 const TIPO_ND_A = 2;
 const TIPO_ND_B = 7;
+/** Factura E (exportación) = 19 — web service WSFEX, no WSFE */
+exports.TIPO_CBTE_E = 19;
+/** Exportación definitiva de bienes (prendas) */
+const TIPO_EXPO_BIENES = 1;
+/** Unidad de medida AFIP: unidades */
+const PRO_UMED_UNIDADES = 7;
+/** Idioma comprobante: español */
+const IDIOMA_CBTE_ES = 1;
 /** DocTipo: 80 = CUIT, 99 = Consumidor final */
 const DOC_TIPO_CUIT = 80;
 const DOC_TIPO_CF = 99;
@@ -113,20 +134,121 @@ function isAfipTransientError(err) {
         msg.includes('econnreset') ||
         msg.includes('etimedout'));
 }
+function pickAfipText(value) {
+    var _a, _b, _c, _d, _e, _f;
+    if (typeof value === 'string' && value.trim())
+        return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value))
+        return String(value);
+    if (Array.isArray(value)) {
+        const parts = value.map(pickAfipText).filter((x) => !!x);
+        return parts.length ? parts.join(' | ') : null;
+    }
+    if (value && typeof value === 'object') {
+        const o = value;
+        const code = (_c = (_b = (_a = o.Code) !== null && _a !== void 0 ? _a : o.code) !== null && _b !== void 0 ? _b : o.Codigo) !== null && _c !== void 0 ? _c : o.codigo;
+        const msg = (_f = (_e = (_d = o.Msg) !== null && _d !== void 0 ? _d : o.msg) !== null && _e !== void 0 ? _e : o.Message) !== null && _f !== void 0 ? _f : o.message;
+        if (msg != null || code != null) {
+            const msgText = pickAfipText(msg);
+            const codeText = pickAfipText(code);
+            if (msgText && codeText)
+                return `[${codeText}] ${msgText}`;
+            if (msgText)
+                return msgText;
+            if (codeText)
+                return `código ${codeText}`;
+        }
+        for (const key of ['message', 'msg', 'Msg', 'error', 'Error', 'description', 'Description']) {
+            const t = pickAfipText(o[key]);
+            if (t)
+                return t;
+        }
+    }
+    return null;
+}
+/** Extrae Observaciones / Errors de una respuesta FECAE completa. */
+function formatAfipObservaciones(res) {
+    var _a, _b, _c, _d, _e, _f;
+    if (!res || typeof res !== 'object')
+        return null;
+    const r = res;
+    const det = (_c = (_b = (_a = r.FeDetResp) === null || _a === void 0 ? void 0 : _a.FECAEDetResponse) !== null && _b !== void 0 ? _b : r.FECAEDetResponse) !== null && _c !== void 0 ? _c : r;
+    const detObj = Array.isArray(det) ? det[0] : det;
+    const obsRoot = detObj && typeof detObj === 'object'
+        ? detObj.Observaciones
+        : undefined;
+    const obsList = obsRoot && typeof obsRoot === 'object'
+        ? (_d = obsRoot.Obs) !== null && _d !== void 0 ? _d : obsRoot
+        : undefined;
+    const obsText = pickAfipText(obsList);
+    if (obsText)
+        return obsText;
+    const errRoot = (_e = r.Errors) !== null && _e !== void 0 ? _e : r.errors;
+    const errList = errRoot && typeof errRoot === 'object'
+        ? (_f = errRoot.Err) !== null && _f !== void 0 ? _f : errRoot
+        : undefined;
+    return pickAfipText(errList);
+}
+function extractCaeFromAfipResponse(res, afip) {
+    var _a, _b, _c, _d, _e, _f, _g, _h;
+    const simplifiedCae = (_a = res === null || res === void 0 ? void 0 : res.CAE) !== null && _a !== void 0 ? _a : res === null || res === void 0 ? void 0 : res.cae;
+    if (simplifiedCae) {
+        return {
+            cae: String(simplifiedCae),
+            caeFchVto: String((_c = (_b = res === null || res === void 0 ? void 0 : res.CAEFchVto) !== null && _b !== void 0 ? _b : res === null || res === void 0 ? void 0 : res.CAE_FchVto) !== null && _c !== void 0 ? _c : '')
+        };
+    }
+    const detRaw = (_d = res === null || res === void 0 ? void 0 : res.FeDetResp) === null || _d === void 0 ? void 0 : _d.FECAEDetResponse;
+    const det = (Array.isArray(detRaw) ? detRaw[0] : detRaw);
+    const cae = (_e = det === null || det === void 0 ? void 0 : det.CAE) !== null && _e !== void 0 ? _e : det === null || det === void 0 ? void 0 : det.cae;
+    const rawVto = (_g = (_f = det === null || det === void 0 ? void 0 : det.CAEFchVto) !== null && _f !== void 0 ? _f : det === null || det === void 0 ? void 0 : det.CAE_FchVto) !== null && _g !== void 0 ? _g : '';
+    let caeFchVto = String(rawVto || '');
+    if (caeFchVto && /^\d{8}$/.test(caeFchVto) && typeof ((_h = afip === null || afip === void 0 ? void 0 : afip.ElectronicBilling) === null || _h === void 0 ? void 0 : _h.formatDate) === 'function') {
+        try {
+            caeFchVto = afip.ElectronicBilling.formatDate(caeFchVto);
+        }
+        catch (_j) {
+            /* keep raw */
+        }
+    }
+    return { cae: cae ? String(cae) : '', caeFchVto };
+}
 /** Mensaje legible para el usuario (ARCA congestionado, etc.). */
 function formatAfipError(err) {
-    var _a, _b;
+    var _a, _b, _c, _d, _e, _f;
     const e = err;
-    const arcMsg = (_a = e === null || e === void 0 ? void 0 : e.data) === null || _a === void 0 ? void 0 : _a.message;
-    if (typeof arcMsg === 'string' && arcMsg.trim())
-        return arcMsg.trim();
-    const msg = String((_b = e === null || e === void 0 ? void 0 : e.message) !== null && _b !== void 0 ? _b : '').trim();
-    if (!msg)
-        return 'Error comunicándose con AFIP';
-    if (msg.includes('503') || msg.toLowerCase().includes('congestion') || msg.toLowerCase().includes('arca')) {
-        return 'Los servidores de ARCA están congestionados. Espere unos minutos e intente nuevamente.';
+    const data = (_a = e === null || e === void 0 ? void 0 : e.data) !== null && _a !== void 0 ? _a : (_b = e === null || e === void 0 ? void 0 : e.response) === null || _b === void 0 ? void 0 : _b.data;
+    const fromData = pickAfipText(data);
+    if (fromData) {
+        if (fromData.includes('503') ||
+            fromData.toLowerCase().includes('congestion') ||
+            fromData.toLowerCase().includes('arca')) {
+            return 'Los servidores de ARCA están congestionados. Espere unos minutos e intente nuevamente.';
+        }
+        return fromData;
     }
-    return msg;
+    const msg = pickAfipText(e === null || e === void 0 ? void 0 : e.message) || '';
+    if (msg && msg !== 'undefined' && msg !== '[object Object]') {
+        if (msg.includes('503') || msg.toLowerCase().includes('congestion') || msg.toLowerCase().includes('arca')) {
+            return 'Los servidores de ARCA están congestionados. Espere unos minutos e intente nuevamente.';
+        }
+        return msg;
+    }
+    const status = (_c = e === null || e === void 0 ? void 0 : e.status) !== null && _c !== void 0 ? _c : (_d = e === null || e === void 0 ? void 0 : e.response) === null || _d === void 0 ? void 0 : _d.status;
+    const statusText = (_e = e === null || e === void 0 ? void 0 : e.statusText) !== null && _e !== void 0 ? _e : (_f = e === null || e === void 0 ? void 0 : e.response) === null || _f === void 0 ? void 0 : _f.statusText;
+    if (status) {
+        return `Error comunicándose con AFIP (HTTP ${status}${statusText ? ` ${statusText}` : ''}). Reintentá en unos minutos; si persiste, revisá token/certificado AFIP en Railway.`;
+    }
+    try {
+        const raw = JSON.stringify(err);
+        if (raw && raw !== '{}' && raw !== 'null') {
+            return `Error comunicándose con AFIP: ${raw.slice(0, 280)}`;
+        }
+    }
+    catch (_g) {
+        /* ignore */
+    }
+    return 'Error comunicándose con AFIP';
 }
 function afipEmitHttpStatusFromMessage(msg) {
     const m = (msg || '').toLowerCase();
@@ -274,7 +396,7 @@ function getAfipIssuerData() {
  */
 function emitirFactura(order, customer, forceCbteTipo) {
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c, _d;
+        var _a;
         const config = getConfig();
         const { cuit, puntoVta } = config;
         const cuitCliente = customer.cuit ? String(customer.cuit).replace(/\D/g, '') : '';
@@ -349,7 +471,7 @@ function emitirFactura(order, customer, forceCbteTipo) {
         try {
             Afip = (yield Promise.resolve().then(() => __importStar(require('@afipsdk/afip.js')))).default;
         }
-        catch (_e) {
+        catch (_b) {
             throw new Error('Paquete AFIP no instalado. Ejecutá: npm install @afipsdk/afip.js');
         }
         const afipOptions = {
@@ -406,11 +528,13 @@ function emitirFactura(order, customer, forceCbteTipo) {
             ];
             console.log(`[AFIP] Factura con percepción IIBB: ImpNeto=${impNeto} ImpIVA=${impIva} ImpTrib=${impTributo} ImpTotal=${total} BaseIIBB=${baseIibb} Alic=${alicuotaIibb}%`);
         }
-        const res = (yield withAfipRetry('createVoucher factura', () => afip.ElectronicBilling.createVoucher(data)));
-        const cae = (_b = res === null || res === void 0 ? void 0 : res.CAE) !== null && _b !== void 0 ? _b : res === null || res === void 0 ? void 0 : res.cae;
-        const caeFchVto = (_d = (_c = res === null || res === void 0 ? void 0 : res.CAEFchVto) !== null && _c !== void 0 ? _c : res === null || res === void 0 ? void 0 : res.CAE_FchVto) !== null && _d !== void 0 ? _d : '';
+        const res = (yield withAfipRetry('createVoucher factura', () => afip.ElectronicBilling.createVoucher(data, true)));
+        const { cae, caeFchVto } = extractCaeFromAfipResponse(res, afip);
         if (!cae) {
-            throw new Error('AFIP no devolvió CAE. Revisá los datos del comprobante y el estado del servicio.');
+            const obs = formatAfipObservaciones(res);
+            throw new Error(obs
+                ? `AFIP rechazó el comprobante: ${obs}`
+                : 'AFIP no devolvió CAE. Revisá los datos del comprobante y el estado del servicio.');
         }
         return {
             cae: String(cae),
@@ -431,7 +555,7 @@ function emitirFactura(order, customer, forceCbteTipo) {
  */
 function emitirNotaCredito(facturaOriginal, customer, amountToCredit, iibbPercepcion) {
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c, _d;
+        var _a;
         const config = getConfig();
         const { cuit, puntoVta } = config;
         const cuitCliente = customer.cuit ? String(customer.cuit).replace(/\D/g, '') : '';
@@ -510,7 +634,7 @@ function emitirNotaCredito(facturaOriginal, customer, amountToCredit, iibbPercep
         try {
             Afip = (yield Promise.resolve().then(() => __importStar(require('@afipsdk/afip.js')))).default;
         }
-        catch (_e) {
+        catch (_b) {
             throw new Error('Paquete AFIP no instalado. Ejecutá: npm install @afipsdk/afip.js');
         }
         const afipOptions = {
@@ -574,11 +698,13 @@ function emitirNotaCredito(facturaOriginal, customer, amountToCredit, iibbPercep
             ];
             console.log(`[AFIP] Nota de crédito con percepción IIBB: ImpNeto=${impNeto} ImpIVA=${impIva} ImpTrib=${impTributo} ImpTotal=${total} BaseIIBB=${baseIibb} Alic=${alicuotaIibb}%`);
         }
-        const res = (yield withAfipRetry('createVoucher NC', () => afip.ElectronicBilling.createVoucher(data)));
-        const cae = (_b = res === null || res === void 0 ? void 0 : res.CAE) !== null && _b !== void 0 ? _b : res === null || res === void 0 ? void 0 : res.cae;
-        const caeFchVto = (_d = (_c = res === null || res === void 0 ? void 0 : res.CAEFchVto) !== null && _c !== void 0 ? _c : res === null || res === void 0 ? void 0 : res.CAE_FchVto) !== null && _d !== void 0 ? _d : '';
+        const res = (yield withAfipRetry('createVoucher NC', () => afip.ElectronicBilling.createVoucher(data, true)));
+        const { cae, caeFchVto } = extractCaeFromAfipResponse(res, afip);
         if (!cae) {
-            throw new Error('AFIP no devolvió CAE para la Nota de Crédito.');
+            const obs = formatAfipObservaciones(res);
+            throw new Error(obs
+                ? `AFIP rechazó la Nota de Crédito: ${obs}`
+                : 'AFIP no devolvió CAE para la Nota de Crédito.');
         }
         return {
             cae: String(cae),
@@ -619,7 +745,7 @@ function resolveCondicionIvaForNotaAsociada(tipoCbte, tieneCuit, condicionIvaDes
  */
 function emitirNotaDebito(facturaOriginal, customer, amountToDebit, iibbPercepcion) {
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c, _d;
+        var _a;
         const config = getConfig();
         const { cuit, puntoVta } = config;
         const cuitCliente = customer.cuit ? String(customer.cuit).replace(/\D/g, '') : '';
@@ -669,7 +795,7 @@ function emitirNotaDebito(facturaOriginal, customer, amountToDebit, iibbPercepci
         try {
             Afip = (yield Promise.resolve().then(() => __importStar(require('@afipsdk/afip.js')))).default;
         }
-        catch (_e) {
+        catch (_b) {
             throw new Error('Paquete AFIP no instalado. Ejecutá: npm install @afipsdk/afip.js');
         }
         const afipOptions = {
@@ -732,11 +858,13 @@ function emitirNotaDebito(facturaOriginal, customer, amountToDebit, iibbPercepci
             ];
             console.log(`[AFIP] Nota de débito con percepción IIBB: ImpNeto=${impNeto} ImpIVA=${impIva} ImpTrib=${impTributo} ImpTotal=${total} BaseIIBB=${baseIibb} Alic=${alicuotaIibb}%`);
         }
-        const res = (yield withAfipRetry('createVoucher ND', () => afip.ElectronicBilling.createVoucher(data)));
-        const cae = (_b = res === null || res === void 0 ? void 0 : res.CAE) !== null && _b !== void 0 ? _b : res === null || res === void 0 ? void 0 : res.cae;
-        const caeFchVto = (_d = (_c = res === null || res === void 0 ? void 0 : res.CAEFchVto) !== null && _c !== void 0 ? _c : res === null || res === void 0 ? void 0 : res.CAE_FchVto) !== null && _d !== void 0 ? _d : '';
+        const res = (yield withAfipRetry('createVoucher ND', () => afip.ElectronicBilling.createVoucher(data, true)));
+        const { cae, caeFchVto } = extractCaeFromAfipResponse(res, afip);
         if (!cae) {
-            throw new Error('AFIP no devolvió CAE para la Nota de Débito.');
+            const obs = formatAfipObservaciones(res);
+            throw new Error(obs
+                ? `AFIP rechazó la Nota de Débito: ${obs}`
+                : 'AFIP no devolvió CAE para la Nota de Débito.');
         }
         return {
             cae: String(cae),
@@ -835,6 +963,34 @@ function getCondicionIvaByCuit(cuit) {
  * Si AFIP responde con datos del comprobante → la factura está registrada.
  * @returns Objeto con existe, datos del comprobante (si existe) y posible error de AFIP.
  */
+function getAfipPuntoVenta() {
+    return getConfig().puntoVta;
+}
+/** Último comprobante autorizado en AFIP para punto de venta y tipo. */
+function getLastAfipVoucherNumber(puntoVta, cbteTipo) {
+    return __awaiter(this, void 0, void 0, function* () {
+        let Afip;
+        try {
+            Afip = (yield Promise.resolve().then(() => __importStar(require('@afipsdk/afip.js')))).default;
+        }
+        catch (_a) {
+            throw new Error('Paquete AFIP no instalado. Ejecutá: npm install @afipsdk/afip.js');
+        }
+        const config = getConfig();
+        const afipOptions = {
+            CUIT: config.cuit,
+            production: config.production
+        };
+        if (config.accessToken)
+            afipOptions.access_token = config.accessToken;
+        if (config.cert && config.key) {
+            afipOptions.cert = config.cert;
+            afipOptions.key = config.key;
+        }
+        const afip = new Afip(afipOptions);
+        return withAfipRetry(`getLastVoucher ${puntoVta}/${cbteTipo}`, () => afip.ElectronicBilling.getLastVoucher(puntoVta, cbteTipo));
+    });
+}
 function consultarComprobanteAfip(puntoVta, cbteTipo, cbteNro) {
     return __awaiter(this, void 0, void 0, function* () {
         var _a, _b;
@@ -872,5 +1028,358 @@ function consultarComprobanteAfip(puntoVta, cbteTipo, cbteNro) {
             }
             throw err;
         }
+    });
+}
+function resolveExportTaxId(customer) {
+    const foreign = (customer.foreignTaxId || '').trim();
+    if (foreign)
+        return foreign;
+    const cuit = String(customer.cuit || '').replace(/\D/g, '');
+    return cuit.length >= 10 ? cuit : '';
+}
+/** Destinos AFIP en Argentina (zona franca / AAE): Cuit_pais_cliente = CUIT del cliente. */
+const AFIP_DST_ARGENTINA_SPECIAL = new Set([250, 256, 257, 259]);
+function parseCuitDigits(value) {
+    const n = Number(String(value !== null && value !== void 0 ? value : '').replace(/\D/g, ''));
+    return Number.isFinite(n) && n > 0 ? n : 0;
+}
+/** Cuit_pais_cliente WSFEX: para TDF/ZF argentinas es el CUIT del cliente; exterior = tabla AFIP. */
+function resolveExportCuitPaisCliente(customer, dstCmp) {
+    const fromField = parseCuitDigits(customer.exportCuitPaisCliente);
+    if (fromField > 0)
+        return fromField;
+    if (AFIP_DST_ARGENTINA_SPECIAL.has(dstCmp)) {
+        return parseCuitDigits(resolveExportTaxId(customer));
+    }
+    return 0;
+}
+function createAfipClient() {
+    return __awaiter(this, void 0, void 0, function* () {
+        const config = getConfig();
+        let Afip;
+        try {
+            Afip = (yield Promise.resolve().then(() => __importStar(require('@afipsdk/afip.js')))).default;
+        }
+        catch (_a) {
+            throw new Error('Paquete AFIP no instalado. Ejecutá: npm install @afipsdk/afip.js');
+        }
+        const afipOptions = {
+            CUIT: config.cuit,
+            production: config.production
+        };
+        if (config.accessToken)
+            afipOptions.access_token = config.accessToken;
+        if (config.cert && config.key) {
+            afipOptions.cert = config.cert;
+            afipOptions.key = config.key;
+        }
+        return new Afip(afipOptions);
+    });
+}
+/** Punto de venta para exportación (WSFEX). Default 10; override con AFIP_PTO_VTA_EXPORT. */
+function getAfipExportPuntoVenta() {
+    const pv = parseInt(process.env.AFIP_PTO_VTA_EXPORT || String(PTO_VTA_EXPORT_DEFAULT), 10);
+    return Number.isFinite(pv) && pv > 0 ? pv : PTO_VTA_EXPORT_DEFAULT;
+}
+function wsfexAuthBlock(afip, ws) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const config = getConfig();
+        const ta = yield ws.getTokenAuthorization();
+        return {
+            Token: ta.token,
+            Sign: ta.sign,
+            Cuit: Number(config.cuit)
+        };
+    });
+}
+function getWsfexServiceId() {
+    return (process.env.AFIP_WSFEX_SERVICE || 'wsfex').trim() || 'wsfex';
+}
+function unwrapWsfexPayload(res) {
+    var _a;
+    if (res == null || typeof res !== 'object')
+        return res;
+    const r = res;
+    const candidates = [
+        r.FEXAuthorizeResult,
+        r.FEXAuthorizeResponse,
+        r.data,
+        r.result,
+        r.response,
+        (_a = r.FEXAuthorizeResponse) === null || _a === void 0 ? void 0 : _a.FEXAuthorizeResult
+    ];
+    for (const c of candidates) {
+        if (c && typeof c === 'object')
+            return c;
+    }
+    return res;
+}
+function walkWsfexNodes(node, visit, depth = 0) {
+    if (node == null || depth > 14)
+        return;
+    if (Array.isArray(node)) {
+        node.forEach((x) => walkWsfexNodes(x, visit, depth + 1));
+        return;
+    }
+    if (typeof node !== 'object')
+        return;
+    const o = node;
+    for (const [k, v] of Object.entries(o)) {
+        visit(k, v, o);
+        walkWsfexNodes(v, visit, depth + 1);
+    }
+}
+function summarizeWsfexResponse(res) {
+    try {
+        const s = JSON.stringify(res);
+        if (!s || s === '{}' || s === 'null')
+            return 'respuesta vacía de AFIP/WSFEX';
+        return s.length > 600 ? `${s.slice(0, 600)}…` : s;
+    }
+    catch (_a) {
+        return String(res);
+    }
+}
+function formatWsfexObservaciones(res) {
+    var _a;
+    const parts = [];
+    const seen = new Set();
+    const push = (text) => {
+        const t = (text || '').trim();
+        if (!t || seen.has(t))
+            return;
+        seen.add(t);
+        parts.push(t);
+    };
+    const root = unwrapWsfexPayload(res);
+    walkWsfexNodes(root, (key, value, parent) => {
+        var _a, _b, _c, _d;
+        const kl = key.toLowerCase();
+        if (kl === 'errmsg' || kl === 'eventmsg') {
+            const msg = pickAfipText(value);
+            if (!msg)
+                return;
+            const code = pickAfipText((_d = (_c = (_b = (_a = parent.ErrCode) !== null && _a !== void 0 ? _a : parent.errCode) !== null && _b !== void 0 ? _b : parent.errcode) !== null && _c !== void 0 ? _c : parent.EventCode) !== null && _d !== void 0 ? _d : parent.eventCode);
+            push(code ? `[${code}] ${msg}` : msg);
+            return;
+        }
+        if (kl === 'motivos_obs' || kl === 'obs') {
+            const msg = pickAfipText(value);
+            if (msg)
+                push(msg);
+        }
+        if (kl === 'resultado' && value && String(value).trim() && String(value).trim() !== 'A') {
+            push(`Resultado AFIP: ${String(value).trim()}`);
+        }
+    });
+    if (parts.length)
+        return parts.join('; ');
+    return (_a = pickAfipText(root)) !== null && _a !== void 0 ? _a : pickAfipText(res);
+}
+function extractCaeFromWsfexResponse(res) {
+    let cae = '';
+    let caeFchVto = '';
+    let resultado = '';
+    const root = unwrapWsfexPayload(res);
+    walkWsfexNodes(root, (key, value) => {
+        const kl = key.toLowerCase();
+        if (kl === 'cae' && value != null && String(value).trim())
+            cae = String(value).trim();
+        if ((kl === 'fch_venc_cae' || kl === 'caefchvto') && value != null && String(value).trim()) {
+            caeFchVto = String(value).trim();
+        }
+        if (kl === 'resultado' && value != null && String(value).trim())
+            resultado = String(value).trim();
+    });
+    return { cae, caeFchVto, resultado };
+}
+function arsToMonedaExport(arsAmount, monedaId, monedaCtz) {
+    const ars = Math.round((Number(arsAmount) || 0) * 100) / 100;
+    if (monedaId === 'PES')
+        return ars;
+    const ctz = Number(monedaCtz);
+    if (!Number.isFinite(ctz) || ctz <= 0) {
+        throw new Error('Para factura en moneda extranjera informá la cotización (monedaCtz > 0).');
+    }
+    return Math.round((ars / ctz) * 100) / 100;
+}
+/** Catálogos WSFEX: paises | monedas | incoterms | umed | tipo_expo */
+function getWsfexParametros(tipo) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const methodMap = {
+            paises: 'FEXGetPARAM_DST_pais',
+            monedas: 'FEXGetPARAM_MON',
+            incoterms: 'FEXGetPARAM_Incoterms',
+            umed: 'FEXGetPARAM_UMed',
+            tipo_expo: 'FEXGetPARAM_Tipo_Expo'
+        };
+        const method = methodMap[tipo];
+        if (!method)
+            throw new Error(`Parámetro WSFEX desconocido: ${tipo}`);
+        const afip = yield createAfipClient();
+        const ws = afip.WebService(getWsfexServiceId());
+        const Auth = yield wsfexAuthBlock(afip, ws);
+        return withAfipRetry(`wsfex ${method}`, () => ws.executeRequest(method, { Auth }));
+    });
+}
+/** Último comprobante de exportación autorizado (WSFEX). */
+function getLastExportVoucherNumber(puntoVta_1) {
+    return __awaiter(this, arguments, void 0, function* (puntoVta, cbteTipo = exports.TIPO_CBTE_E) {
+        var _a, _b, _c, _d;
+        const afip = yield createAfipClient();
+        const ws = afip.WebService(getWsfexServiceId());
+        const Auth = yield wsfexAuthBlock(afip, ws);
+        const res = (yield withAfipRetry('FEXGetLast_CMP', () => ws.executeRequest('FEXGetLast_CMP', { Auth, Pto_venta: puntoVta, Cbte_Tipo: cbteTipo })));
+        const root = ((_a = res === null || res === void 0 ? void 0 : res.FEXGetLast_CMPResult) !== null && _a !== void 0 ? _a : res);
+        const last = ((_b = root === null || root === void 0 ? void 0 : root.FEXResult_LastCMP) !== null && _b !== void 0 ? _b : root);
+        const nro = Number((_d = (_c = last === null || last === void 0 ? void 0 : last.Cbte_nro) !== null && _c !== void 0 ? _c : last === null || last === void 0 ? void 0 : last.cbte_nro) !== null && _d !== void 0 ? _d : 0);
+        return Number.isFinite(nro) ? nro : 0;
+    });
+}
+/** Diagnóstico WSFEX: último comprobante tipo 19 en PV exportación. */
+function getWsfexExportDiagnostico() {
+    return __awaiter(this, void 0, void 0, function* () {
+        const puntoVentaExport = getAfipExportPuntoVenta();
+        const ultimoCbteTipo19 = yield getLastExportVoucherNumber(puntoVentaExport, exports.TIPO_CBTE_E);
+        return {
+            wsfexService: getWsfexServiceId(),
+            puntoVentaExport,
+            ultimoCbteTipo19,
+            proximoCbteTipo19: ultimoCbteTipo19 + 1
+        };
+    });
+}
+/**
+ * Emite Factura E (exportación) vía WSFEX / FEXAuthorize.
+ * Requiere autorizar el web service `wsfex` en ARCA (además de wsfe).
+ */
+function emitirFacturaExportacion(order, customer, items, params) {
+    return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b, _c, _d;
+        const config = getConfig();
+        const puntoVta = getAfipExportPuntoVenta();
+        const dstCmp = Number(params.dstCmp);
+        if (!Number.isFinite(dstCmp) || dstCmp <= 0) {
+            throw new Error('País destino (dstCmp) inválido. Consultá /api/afip/exportacion/paises.');
+        }
+        if (!((_a = customer.businessName) === null || _a === void 0 ? void 0 : _a.trim())) {
+            throw new Error('El cliente debe tener razón social / nombre para Factura E.');
+        }
+        const domicilio = [customer.address, customer.city].filter(Boolean).join(', ').trim();
+        if (!domicilio) {
+            throw new Error('El cliente de exportación debe tener domicilio y ciudad cargados.');
+        }
+        const monedaId = (params.monedaId || process.env.AFIP_EXPORT_MONEDA_ID || MONEDA_EXPORT_DEFAULT)
+            .trim()
+            .toUpperCase();
+        const monedaCtz = monedaId === 'PES'
+            ? 1
+            : Number((_c = (_b = params.monedaCtz) !== null && _b !== void 0 ? _b : process.env.AFIP_EXPORT_MONEDA_CTZ) !== null && _c !== void 0 ? _c : 0);
+        if (monedaId !== 'PES' && !(monedaCtz > 0)) {
+            throw new Error('Informá la cotización de la moneda (monedaCtz) para Factura E en moneda extranjera.');
+        }
+        const tipoExpo = params.tipoExpo === 2 || params.tipoExpo === 4 ? params.tipoExpo : TIPO_EXPO_BIENES;
+        const incoterms = (params.incoterms || process.env.AFIP_EXPORT_INCOTERMS || 'FOB').trim().toUpperCase();
+        const incotermsDs = (params.incotermsDs || incoterms).trim();
+        const formaPago = (params.formaPago || 'Contado').trim();
+        const lineItems = (items || []).filter((it) => (Number(it.quantity) || 0) > 0);
+        if (lineItems.length === 0) {
+            throw new Error('El pedido no tiene ítems con cantidad para facturar.');
+        }
+        let impTotal = 0;
+        const afipItems = [];
+        for (const it of lineItems) {
+            const qty = Math.round((Number(it.quantity) || 0) * 10000) / 10000;
+            const unitArs = Math.round((Number(it.unitPriceArs) || 0) * 100) / 100;
+            const unit = arsToMonedaExport(unitArs, monedaId, monedaCtz);
+            const totalItem = Math.round(qty * unit * 100) / 100;
+            impTotal += totalItem;
+            afipItems.push({
+                Pro_ds: (it.description || 'Mercadería').slice(0, 250),
+                Pro_qty: qty,
+                Pro_umed: PRO_UMED_UNIDADES,
+                Pro_precio_uni: unit,
+                Pro_bonificacion: 0,
+                Pro_total_item: totalItem
+            });
+        }
+        impTotal = Math.round(impTotal * 100) / 100;
+        if (impTotal <= 0)
+            throw new Error('El importe total de exportación debe ser mayor a 0.');
+        // AFIP exige que Imp_total = suma de ítems (evitar rechazo silencioso).
+        const itemsSum = Math.round(afipItems.reduce((s, it) => s + (Number(it.Pro_total_item) || 0), 0) * 100) / 100;
+        impTotal = itemsSum;
+        const foreignTaxId = resolveExportTaxId(customer);
+        const cuitPaisCliente = resolveExportCuitPaisCliente(customer, dstCmp);
+        if (!foreignTaxId && !(cuitPaisCliente > 0)) {
+            throw new Error(AFIP_DST_ARGENTINA_SPECIAL.has(dstCmp)
+                ? 'Para Tierra del Fuego / zona franca argentina el cliente debe tener CUIT cargado (o ID tributaria / CUIT país cliente).'
+                : 'El cliente de exportación debe tener identificación tributaria (ID extranjera, CUIT del cliente o CUIT país cliente).');
+        }
+        const dateStr = (0, argentinaDate_1.todayYmdArgentina)();
+        const fechaCbte = dateStr.replace(/-/g, '');
+        if (fechaCbte.length !== 8)
+            throw new Error('Fecha inválida para AFIP exportación.');
+        const afip = yield createAfipClient();
+        const ws = afip.WebService(getWsfexServiceId());
+        const Auth = yield wsfexAuthBlock(afip, ws);
+        const ambiente = config.production ? 'producción' : 'homologación';
+        console.log(`[AFIP WSFEX] Emitiendo Factura E en ${ambiente}. ws=${getWsfexServiceId()} Pto.Vta ${puntoVta}, Dst ${dstCmp}, ${monedaId}, total ${impTotal}`);
+        const lastNro = yield getLastExportVoucherNumber(puntoVta, exports.TIPO_CBTE_E);
+        const cbteNro = lastNro + 1;
+        const requestId = Date.now() % 999999999;
+        const itemPayload = afipItems.length === 1 ? afipItems[0] : afipItems;
+        const Cmp = {
+            Id: requestId,
+            Fecha_cbte: fechaCbte,
+            Tipo_cbte: exports.TIPO_CBTE_E,
+            Cbte_Tipo: exports.TIPO_CBTE_E,
+            Punto_vta: puntoVta,
+            Cbte_nro: cbteNro,
+            Tipo_expo: tipoExpo,
+            Permiso_existente: tipoExpo === TIPO_EXPO_BIENES ? 'N' : '',
+            Dst_cmp: dstCmp,
+            Cliente: customer.businessName.trim().slice(0, 200),
+            Domicilio_cliente: domicilio.slice(0, 200),
+            Moneda_Id: monedaId,
+            Moneda_ctz: monedaCtz,
+            CanMisMonExt: monedaId === 'PES' ? 'N' : 'S',
+            Imp_total: impTotal,
+            Forma_pago: formaPago.slice(0, 50),
+            Incoterms: incoterms.slice(0, 3),
+            Incoterms_Ds: incotermsDs.slice(0, 20),
+            Idioma_cbte: IDIOMA_CBTE_ES,
+            Items: { Item: itemPayload }
+        };
+        if (foreignTaxId)
+            Cmp.Id_impositivo = foreignTaxId.slice(0, 50);
+        if (cuitPaisCliente > 0)
+            Cmp.Cuit_pais_cliente = cuitPaisCliente;
+        if ((_d = params.obs) === null || _d === void 0 ? void 0 : _d.trim())
+            Cmp.Obs = params.obs.trim().slice(0, 1000);
+        const res = (yield withAfipRetry('FEXAuthorize Factura E', () => ws.executeRequest('FEXAuthorize', { Auth, Cmp })));
+        const { cae, caeFchVto, resultado } = extractCaeFromWsfexResponse(res);
+        if (!cae || (resultado && resultado !== 'A')) {
+            const obs = formatWsfexObservaciones(res);
+            const detail = summarizeWsfexResponse(res);
+            console.error('[AFIP WSFEX] FEXAuthorize sin CAE:', detail);
+            throw new Error(obs
+                ? `AFIP rechazó la Factura E: ${obs}`
+                : `AFIP no devolvió CAE (PV export ${puntoVta}, ws ${getWsfexServiceId()}). Verificá wsfex autorizado y PV de exportación en ARCA. Detalle: ${detail}`);
+        }
+        return {
+            cae: String(cae),
+            caeFchVto: String(caeFchVto),
+            puntoVta,
+            cbteTipo: exports.TIPO_CBTE_E,
+            cbteDesde: cbteNro,
+            cbteHasta: cbteNro,
+            monedaId,
+            monedaCtz,
+            exportDstCmp: dstCmp,
+            exportIncoterms: incoterms,
+            exportTipoExpo: tipoExpo,
+            impTotal
+        };
     });
 }

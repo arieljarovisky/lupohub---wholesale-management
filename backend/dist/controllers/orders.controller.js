@@ -45,7 +45,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.assignDespachosToOrderItems = exports.getOrderItemsMissingDespacho = exports.assignRemitoNumber = exports.exportTopWholesaleProductsMetricsXlsx = exports.emitirNotaDebito = exports.getOrderDebitNotes = exports.emitirNotaCredito = exports.getOrderCreditNotes = exports.emitirFactura = exports.getOrderInvoice = exports.reemitirFacturaConAgip = exports.recalculateStoredInvoiceAgip = exports.deleteOrder = exports.archiveOrder = exports.restoreMayoristaStockDeduction = exports.applyMayoristaStockDeduction = exports.patchOrderPaymentStatus = exports.patchOrderIncludeInSaldo = exports.updateOrder = exports.updateOrderStatus = exports.importOrdersFromMatrix = exports.createOrder = exports.getOrders = exports.getLinkableOrdersForPayment = void 0;
+exports.assignDespachosToOrderItems = exports.getOrderItemsMissingDespacho = exports.assignRemitoNumber = exports.exportTopWholesaleProductsMetricsXlsx = exports.emitirNotaDebito = exports.getOrderDebitNotes = exports.emitirNotaCredito = exports.getOrderCreditNotes = exports.emitirFactura = exports.getOrderInvoice = exports.reemitirFacturaConAgip = exports.recalculateStoredInvoiceAgip = exports.deleteOrder = exports.archiveOrder = exports.restoreMayoristaStockDeduction = exports.applyMayoristaStockDeduction = exports.patchOrderPaymentStatus = exports.patchOrderIncludeInSaldo = exports.updateOrder = exports.updateOrderStatus = exports.importOrdersFromMatrix = exports.markShowroomReady = exports.createOrder = exports.getOrders = exports.getLinkableOrdersForPayment = void 0;
 const db_1 = require("../database/db");
 const types_1 = require("../types");
 const exceljs_1 = __importDefault(require("exceljs"));
@@ -53,6 +53,7 @@ const stock_controller_1 = require("./stock.controller");
 const uuid_1 = require("uuid");
 const matrixImportSku_1 = require("../utils/matrixImportSku");
 const orderPaymentBalance_service_1 = require("../services/orderPaymentBalance.service");
+const channelMarginUtils_1 = require("../utils/channelMarginUtils");
 /** Evita dos POST simultáneos al mismo pedido; el segundo espera el mismo resultado AFIP. */
 const emitFacturaInFlight = new Map();
 function getProductIdForVariant(variantId) {
@@ -298,6 +299,40 @@ function getOrderNetFromLineItems(orderId) {
             sum += Math.round(lineQty * price * 100) / 100;
         }
         return Math.round(sum * 100) / 100;
+    });
+}
+/** Líneas del pedido para Factura E (descripción + neto unitario en ARS). */
+function getOrderItemsForExport(orderId) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const meta = yield (0, db_1.get)(`SELECT COALESCE(o.no_stock_impact, 0) AS no_stock_impact, o.status
+     FROM orders o WHERE o.id = ? LIMIT 1`, [orderId]);
+        const usePicked = !Number(meta === null || meta === void 0 ? void 0 : meta.no_stock_impact) && PICKING_DONE_STATUSES_AFIP.has(String((meta === null || meta === void 0 ? void 0 : meta.status) || ''));
+        const rows = yield (0, db_1.query)(`SELECT oi.quantity, oi.picked, oi.price_at_moment,
+            COALESCE(p.name, 'Mercadería') AS product_name,
+            COALESCE(pv.sku, '') AS sku,
+            COALESCE(c.name, '') AS color_name,
+            COALESCE(s.size_code, s.name, '') AS size_code
+     FROM order_items oi
+     LEFT JOIN product_variants pv ON pv.id = oi.variant_id
+     LEFT JOIN product_colors pc ON pc.id = pv.product_color_id
+     LEFT JOIN products p ON p.id = pc.product_id
+     LEFT JOIN colors c ON c.id = pc.color_id
+     LEFT JOIN sizes s ON s.id = pv.size_id
+     WHERE oi.order_id = ?
+     ORDER BY oi.id`, [orderId]);
+        const out = [];
+        for (const r of rows) {
+            const q = Number(r.quantity) || 0;
+            const p = Number(r.picked) || 0;
+            const lineQty = usePicked ? Math.min(q, Math.max(0, p)) : q;
+            if (lineQty <= 0)
+                continue;
+            const price = Math.round((Number(r.price_at_moment) || 0) * 100) / 100;
+            const parts = [r.product_name, r.color_name, r.size_code, r.sku].filter(Boolean);
+            const description = parts.join(' ').trim() || 'Mercadería';
+            out.push({ description, quantity: lineQty, unitPriceArs: price });
+        }
+        return out;
     });
 }
 /** Neto para NC total: pickeado, o —si quedó en 0— lo facturado (IIBB / cantidades / total del pedido). */
@@ -841,12 +876,27 @@ function persistNewWholesaleOrder(newOrder, user, explicitOrderId) {
             }
         };
         const sqlDate = toSqlDate(newOrder.date);
-        const paymentStatus = newOrder.paymentStatus === 'pagado' || newOrder.paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
+        let paymentStatus = newOrder.paymentStatus === 'pagado' || newOrder.paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
         const noStockImpact = newOrder.noStockImpact === true || newOrder.no_stock_impact === 1 ? 1 : 0;
         const createdBy = (_c = user === null || user === void 0 ? void 0 : user.id) !== null && _c !== void 0 ? _c : null;
         const requestedStatus = String(newOrder.status || 'Borrador');
-        const shouldStayPendingAdmin = requestedStatus === 'Confirmado' && ((user === null || user === void 0 ? void 0 : user.role) === 'SELLER' || (user === null || user === void 0 ? void 0 : user.role) === 'CUSTOMER');
-        const statusToSave = shouldStayPendingAdmin ? 'Pendiente confirmación admin' : requestedStatus;
+        /** Venta showroom / mostrador: entrega inmediata, sin picking de depósito; queda lista para AFIP. */
+        const isShowroomSale = newOrder.showroomSale === true ||
+            newOrder.showroom_sale === true;
+        const canCreateShowroom = (user === null || user === void 0 ? void 0 : user.role) === 'ADMIN' || (user === null || user === void 0 ? void 0 : user.role) === 'WAREHOUSE' || (user === null || user === void 0 ? void 0 : user.role) === 'DEPOSITO' || (user === null || user === void 0 ? void 0 : user.role) === 'SELLER';
+        if (isShowroomSale && !canCreateShowroom) {
+            const err = new Error('No tenés permiso para crear ventas showroom');
+            err.statusCode = 403;
+            throw err;
+        }
+        const shouldStayPendingAdmin = !isShowroomSale &&
+            requestedStatus === 'Confirmado' &&
+            ((user === null || user === void 0 ? void 0 : user.role) === 'SELLER' || (user === null || user === void 0 ? void 0 : user.role) === 'CUSTOMER');
+        let statusToSave = shouldStayPendingAdmin ? 'Pendiente confirmación admin' : requestedStatus;
+        if (isShowroomSale) {
+            statusToSave = 'Controlado';
+            paymentStatus = 'pagado';
+        }
         const matrixImportLabelRaw = (_d = newOrder.matrixImportLabel) !== null && _d !== void 0 ? _d : newOrder.matrix_import_label;
         const matrixImportLabelForSql = matrixImportLabelRaw != null && String(matrixImportLabelRaw).trim()
             ? String(matrixImportLabelRaw).trim().slice(0, 120)
@@ -913,7 +963,8 @@ function persistNewWholesaleOrder(newOrder, user, explicitOrderId) {
                 for (const alloc of pr.allocations) {
                     if (!alloc.quantity || alloc.quantity <= 0)
                         continue;
-                    yield conn.execute(`INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [(0, uuid_1.v4)(), orderId, pr.variantId, alloc.quantity, 0, (_f = pr.item.priceAtMoment) !== null && _f !== void 0 ? _f : 0, pr.sellAsPack, alloc.despachoId]);
+                    const pickedQty = isShowroomSale ? alloc.quantity : 0;
+                    yield conn.execute(`INSERT INTO order_items (id, order_id, variant_id, quantity, picked, price_at_moment, sell_as_pack, despacho_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [(0, uuid_1.v4)(), orderId, pr.variantId, alloc.quantity, pickedQty, (_f = pr.item.priceAtMoment) !== null && _f !== void 0 ? _f : 0, pr.sellAsPack, alloc.despachoId]);
                     insertedItems += 1;
                 }
             }
@@ -937,7 +988,20 @@ function persistNewWholesaleOrder(newOrder, user, explicitOrderId) {
         finally {
             conn.release();
         }
-        // No descontar al confirmar: ahora se descuenta cuando finaliza picking.
+        // Showroom: descontar stock ya (equivalente a haber terminado picking).
+        // Pedidos normales: se descuenta al pasar a Falta controlar / Controlado / Despachado.
+        if (isShowroomSale && !noStockImpact) {
+            try {
+                const { deductStockForOrder } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
+                const result = yield deductStockForOrder(orderId);
+                if (!result.success) {
+                    console.error('Showroom: errores descontando stock:', result.errors);
+                }
+            }
+            catch (stockErr) {
+                console.error('Showroom: falló descuento de stock:', stockErr);
+            }
+        }
         return buildPersistedOrderResponse(orderId, newOrder, despachoWarnings);
     });
 }
@@ -959,6 +1023,47 @@ const createOrder = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
     }
 });
 exports.createOrder = createOrder;
+/**
+ * Marca un pedido existente como venta showroom lista para AFIP:
+ * picked = quantity en todas las líneas, status Controlado, payment pagado, descuenta stock.
+ */
+const markShowroomReady = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const { id } = req.params;
+    const user = req.user;
+    if (!user || (user.role !== 'ADMIN' && user.role !== 'WAREHOUSE' && user.role !== 'DEPOSITO')) {
+        return res.status(403).json({ message: 'Solo ADMIN o Depósito pueden marcar showroom' });
+    }
+    if (!id)
+        return res.status(400).json({ message: 'ID de pedido inválido' });
+    try {
+        const orderRow = yield (0, db_1.get)('SELECT id, status, no_stock_impact, payment_status FROM orders WHERE id = ?', [id]);
+        if (!orderRow)
+            return res.status(404).json({ message: 'Pedido no encontrado' });
+        if (String(orderRow.status || '') === 'Cancelado') {
+            return res.status(400).json({ message: 'No se puede marcar un pedido cancelado' });
+        }
+        const existingInv = yield (0, db_1.get)('SELECT id FROM invoices WHERE order_id = ?', [id]);
+        if (existingInv) {
+            return res.status(409).json({ message: 'Este pedido ya tiene factura emitida' });
+        }
+        yield (0, db_1.execute)(`UPDATE order_items SET picked = quantity WHERE order_id = ?`, [id]);
+        yield (0, db_1.execute)(`UPDATE orders SET status = ?, payment_status = 'pagado', picked_by = COALESCE(picked_by, ?) WHERE id = ?`, ['Controlado', user.id, id]);
+        if (!Number(orderRow.no_stock_impact) && !(yield (0, stock_controller_1.isMayoristaStockDeductedForWholesale)(id))) {
+            const { deductStockForOrder } = yield Promise.resolve().then(() => __importStar(require('./stock.controller')));
+            const result = yield deductStockForOrder(id);
+            if (!result.success) {
+                console.error('markShowroomReady stock:', result.errors);
+            }
+        }
+        const orderResponse = yield buildPersistedOrderResponse(id, { id, customerId: '', items: [], total: 0, status: 'Controlado', date: '' }, []);
+        res.json(Object.assign(Object.assign({}, orderResponse), { message: 'Pedido listo para facturar (showroom)' }));
+    }
+    catch (error) {
+        console.error('markShowroomReady:', error);
+        res.status(500).json({ message: (error === null || error === void 0 ? void 0 : error.message) || 'Error marcando showroom' });
+    }
+});
+exports.markShowroomReady = markShowroomReady;
 function normalizeMatrixCustomerRefKey(ref) {
     return String(ref !== null && ref !== void 0 ? ref : '')
         .trim()
@@ -1927,13 +2032,13 @@ const reemitirFacturaConAgip = (req, res) => __awaiter(void 0, void 0, void 0, f
 exports.reemitirFacturaConAgip = reemitirFacturaConAgip;
 /** Obtiene la factura AFIP asociada a un pedido (si existe). */
 const getOrderInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _a, _b, _c, _d, _e;
     const { id } = req.params;
     if (!id)
         return res.status(400).json({ message: 'ID de pedido inválido' });
     try {
         const inv = yield (0, db_1.get)(`SELECT i.id, i.order_id, i.cae, i.cae_fch_vto, i.punto_venta, i.cbte_tipo, i.cbte_desde, i.cbte_hasta, i.created_at,
-              i.agip_alicuota, i.agip_ret_per,
+              i.agip_alicuota, i.agip_ret_per, i.moneda_id, i.moneda_ctz, i.export_dst_cmp, i.export_incoterms, i.export_tipo_expo,
               o.total AS order_total, o.date AS order_date, c.cuit AS customer_cuit
        FROM invoices i
        JOIN orders o ON o.id = i.order_id
@@ -1964,7 +2069,12 @@ const getOrderInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function
             cbteHasta: inv.cbte_hasta,
             createdAt: inv.created_at,
             agipAlicuota: agip.alicuota,
-            agipRetPer: agip.amount
+            agipRetPer: agip.amount,
+            monedaId: (_d = inv.moneda_id) !== null && _d !== void 0 ? _d : undefined,
+            monedaCtz: inv.moneda_ctz != null ? Number(inv.moneda_ctz) : undefined,
+            exportDstCmp: inv.export_dst_cmp != null ? Number(inv.export_dst_cmp) : undefined,
+            exportIncoterms: (_e = inv.export_incoterms) !== null && _e !== void 0 ? _e : undefined,
+            exportTipoExpo: inv.export_tipo_expo != null ? Number(inv.export_tipo_expo) : undefined
         });
     }
     catch (error) {
@@ -1975,7 +2085,7 @@ const getOrderInvoice = (req, res) => __awaiter(void 0, void 0, void 0, function
 exports.getOrderInvoice = getOrderInvoice;
 /** Emite factura electrónica AFIP para un pedido. Solo ADMIN o WAREHOUSE. */
 const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u;
     const { id } = req.params;
     const user = req.user;
     if (!user || (user.role !== 'ADMIN' && user.role !== 'WAREHOUSE' && user.role !== 'DEPOSITO')) {
@@ -1996,11 +2106,21 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const existingInv = yield (0, db_1.get)('SELECT id FROM invoices WHERE order_id = ?', [id]);
         if (existingInv)
             return res.status(409).json({ message: 'Este pedido ya tiene una factura emitida', invoiceId: existingInv.id });
-        const customerRow = yield (0, db_1.get)('SELECT id, business_name, cuit, condicion_iva FROM customers WHERE id = ?', [orderRow.customer_id]);
+        const customerRow = yield (0, db_1.get)(`SELECT id, business_name, cuit, condicion_iva, address, city,
+              COALESCE(is_export_client, 0) AS is_export_client,
+              export_dst_cmp, foreign_tax_id, export_cuit_pais_cliente
+       FROM customers WHERE id = ?`, [orderRow.customer_id]);
         if (!customerRow)
             return res.status(400).json({ message: 'Cliente del pedido no encontrado' });
         const cbteTipoFromBody = (_c = req.body) === null || _c === void 0 ? void 0 : _c.cbteTipo;
-        const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? cbteTipoFromBody : undefined;
+        const isExportClient = Number(customerRow.is_export_client) === 1;
+        const isFacturaE = cbteTipoFromBody === 19 ||
+            cbteTipoFromBody === '19' ||
+            (isExportClient && cbteTipoFromBody !== 1 && cbteTipoFromBody !== 6 && cbteTipoFromBody !== '1' && cbteTipoFromBody !== '6');
+        const forceCbteTipo = cbteTipoFromBody === 1 || cbteTipoFromBody === 6 ? cbteTipoFromBody : undefined;
+        if (isFacturaE && forceCbteTipo) {
+            return res.status(400).json({ message: 'cbteTipo inválido: use 19 para Factura E, o 1/6 para A/B.' });
+        }
         const netFromItems = yield getOrderNetFromLineItems(id);
         if (!PICKING_DONE_STATUSES_AFIP.has(String(orderRow.status || ''))) {
             return res.status(400).json({
@@ -2015,11 +2135,26 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const { orderGrossToAfipNeto, ORDER_PRICES_INCLUDE_IVA } = yield Promise.resolve().then(() => __importStar(require('../config/orderPricing')));
         const grossFromItems = netFromItems > 0 ? netFromItems : Number(orderRow.total);
         const totalForAfip = orderGrossToAfipNeto(grossFromItems);
-        const agip = yield getAgipRetentionForOrder({
-            orderDate: orderRow.date,
-            customerCuit: customerRow.cuit,
-            netAmount: totalForAfip
-        });
+        const exportDstCmpBody = (_e = (_d = req.body) === null || _d === void 0 ? void 0 : _d.dstCmp) !== null && _e !== void 0 ? _e : (_f = req.body) === null || _f === void 0 ? void 0 : _f.exportDstCmp;
+        const exportMonedaId = ((_k = (_h = (_g = req.body) === null || _g === void 0 ? void 0 : _g.monedaId) !== null && _h !== void 0 ? _h : (_j = req.body) === null || _j === void 0 ? void 0 : _j.moneda_id) !== null && _k !== void 0 ? _k : '').toString().trim().toUpperCase();
+        const exportMonedaCtz = (_m = (_l = req.body) === null || _l === void 0 ? void 0 : _l.monedaCtz) !== null && _m !== void 0 ? _m : (_o = req.body) === null || _o === void 0 ? void 0 : _o.moneda_ctz;
+        const exportIncoterms = ((_q = (_p = req.body) === null || _p === void 0 ? void 0 : _p.incoterms) !== null && _q !== void 0 ? _q : '').toString().trim();
+        const exportFormaPago = ((_u = (_s = (_r = req.body) === null || _r === void 0 ? void 0 : _r.formaPago) !== null && _s !== void 0 ? _s : (_t = req.body) === null || _t === void 0 ? void 0 : _t.forma_pago) !== null && _u !== void 0 ? _u : '').toString().trim();
+        if (isFacturaE) {
+            const dstCmp = Number(exportDstCmpBody !== null && exportDstCmpBody !== void 0 ? exportDstCmpBody : customerRow.export_dst_cmp);
+            if (!Number.isFinite(dstCmp) || dstCmp <= 0) {
+                return res.status(400).json({
+                    message: 'Factura E: informá el país destino (dstCmp). Podés cargarlo en el cliente o en el body de emisión.'
+                });
+            }
+        }
+        const agip = isFacturaE
+            ? null
+            : yield getAgipRetentionForOrder({
+                orderDate: orderRow.date,
+                customerCuit: customerRow.cuit,
+                netAmount: totalForAfip
+            });
         const iibbPercepcion = agip && agip.amount > 0.005
             ? { baseImp: totalForAfip, alicuota: agip.alicuota, importe: agip.amount }
             : undefined;
@@ -2028,27 +2163,59 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         let work = emitFacturaInFlight.get(id);
         if (!work) {
             work = (() => __awaiter(void 0, void 0, void 0, function* () {
-                var _a, _b, _c, _d, _e, _f;
-                const { emitirFactura: emitirAfip } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
-                const result = yield emitirAfip({
-                    id: orderRow.id,
-                    date: orderRow.date,
-                    total: totalForAfip,
-                    customerId: orderRow.customer_id,
-                    iibbPercepcion: iibbPercepcion !== null && iibbPercepcion !== void 0 ? iibbPercepcion : null
-                }, {
-                    id: customerRow.id,
-                    businessName: (_a = customerRow.business_name) !== null && _a !== void 0 ? _a : '',
-                    cuit: customerRow.cuit,
-                    condicionIva: (_b = customerRow.condicion_iva) !== null && _b !== void 0 ? _b : null
-                }, forceCbteTipo);
+                var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m;
+                let result;
+                if (isFacturaE) {
+                    const { emitirFacturaExportacion: emitirExport } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
+                    const exportItems = yield getOrderItemsForExport(id);
+                    const dstCmp = Number(exportDstCmpBody !== null && exportDstCmpBody !== void 0 ? exportDstCmpBody : customerRow.export_dst_cmp);
+                    const exportResult = yield emitirExport({
+                        id: orderRow.id,
+                        date: orderRow.date,
+                        total: totalForAfip,
+                        customerId: orderRow.customer_id,
+                        iibbPercepcion: null
+                    }, {
+                        id: customerRow.id,
+                        businessName: (_a = customerRow.business_name) !== null && _a !== void 0 ? _a : '',
+                        address: customerRow.address,
+                        city: customerRow.city,
+                        cuit: customerRow.cuit,
+                        foreignTaxId: customerRow.foreign_tax_id,
+                        exportDstCmp: dstCmp,
+                        exportCuitPaisCliente: customerRow.export_cuit_pais_cliente
+                    }, exportItems, {
+                        dstCmp,
+                        monedaId: exportMonedaId || undefined,
+                        monedaCtz: exportMonedaCtz != null ? Number(exportMonedaCtz) : undefined,
+                        incoterms: exportIncoterms || undefined,
+                        formaPago: exportFormaPago || undefined
+                    });
+                    result = exportResult;
+                }
+                else {
+                    const { emitirFactura: emitirAfip } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
+                    result = yield emitirAfip({
+                        id: orderRow.id,
+                        date: orderRow.date,
+                        total: totalForAfip,
+                        customerId: orderRow.customer_id,
+                        iibbPercepcion: iibbPercepcion !== null && iibbPercepcion !== void 0 ? iibbPercepcion : null
+                    }, {
+                        id: customerRow.id,
+                        businessName: (_b = customerRow.business_name) !== null && _b !== void 0 ? _b : '',
+                        cuit: customerRow.cuit,
+                        condicionIva: (_c = customerRow.condicion_iva) !== null && _c !== void 0 ? _c : null
+                    }, forceCbteTipo);
+                }
                 const invCheck = yield (0, db_1.get)('SELECT id FROM invoices WHERE order_id = ?', [id]);
                 if (invCheck) {
                     throw Object.assign(new Error('Este pedido ya tiene una factura emitida'), { status: 409 });
                 }
                 const invoiceId = (0, uuid_1.v4)();
-                yield (0, db_1.execute)(`INSERT INTO invoices (id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, agip_alicuota, agip_ret_per)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+                yield (0, db_1.execute)(`INSERT INTO invoices (id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta,
+                                 agip_alicuota, agip_ret_per, moneda_id, moneda_ctz, export_dst_cmp, export_incoterms, export_tipo_expo)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
                     invoiceId,
                     id,
                     result.cae,
@@ -2057,8 +2224,13 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                     result.cbteTipo,
                     result.cbteDesde,
                     result.cbteHasta,
-                    (_c = agip === null || agip === void 0 ? void 0 : agip.alicuota) !== null && _c !== void 0 ? _c : 0,
-                    (_d = agip === null || agip === void 0 ? void 0 : agip.amount) !== null && _d !== void 0 ? _d : 0
+                    isFacturaE ? 0 : (_d = agip === null || agip === void 0 ? void 0 : agip.alicuota) !== null && _d !== void 0 ? _d : 0,
+                    isFacturaE ? 0 : (_e = agip === null || agip === void 0 ? void 0 : agip.amount) !== null && _e !== void 0 ? _e : 0,
+                    (_f = result.monedaId) !== null && _f !== void 0 ? _f : null,
+                    (_g = result.monedaCtz) !== null && _g !== void 0 ? _g : null,
+                    (_h = result.exportDstCmp) !== null && _h !== void 0 ? _h : null,
+                    (_j = result.exportIncoterms) !== null && _j !== void 0 ? _j : null,
+                    (_k = result.exportTipoExpo) !== null && _k !== void 0 ? _k : null
                 ]);
                 yield (0, db_1.execute)('UPDATE orders SET total = ? WHERE id = ?', [
                     ORDER_PRICES_INCLUDE_IVA ? grossFromItems : totalForAfip,
@@ -2075,8 +2247,13 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                     cbteTipo: result.cbteTipo,
                     cbteDesde: result.cbteDesde,
                     cbteHasta: result.cbteHasta,
-                    agipAlicuota: (_e = agip === null || agip === void 0 ? void 0 : agip.alicuota) !== null && _e !== void 0 ? _e : 0,
-                    agipRetPer: (_f = agip === null || agip === void 0 ? void 0 : agip.amount) !== null && _f !== void 0 ? _f : 0
+                    agipAlicuota: isFacturaE ? 0 : (_l = agip === null || agip === void 0 ? void 0 : agip.alicuota) !== null && _l !== void 0 ? _l : 0,
+                    agipRetPer: isFacturaE ? 0 : (_m = agip === null || agip === void 0 ? void 0 : agip.amount) !== null && _m !== void 0 ? _m : 0,
+                    monedaId: result.monedaId,
+                    monedaCtz: result.monedaCtz,
+                    exportDstCmp: result.exportDstCmp,
+                    exportIncoterms: result.exportIncoterms,
+                    exportTipoExpo: result.exportTipoExpo
                 };
             }))();
             emitFacturaInFlight.set(id, work);
@@ -2091,6 +2268,12 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
     }
     catch (error) {
         console.error('emitirFactura:', error);
+        try {
+            console.error('emitirFactura raw:', JSON.stringify(error, Object.getOwnPropertyNames(error || {})));
+        }
+        catch (_v) {
+            /* ignore */
+        }
         const msg = (error === null || error === void 0 ? void 0 : error.message) || 'Error emitiendo factura AFIP';
         const { afipEmitHttpStatusFromMessage } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
         const status = (error === null || error === void 0 ? void 0 : error.status) === 409
@@ -2784,10 +2967,43 @@ const exportTopWholesaleProductsMetricsXlsx = (req, res) => __awaiter(void 0, vo
       GROUP BY p.id, p.sku, p.name
       ORDER BY units_ordered DESC, orders_count DESC, subtotal DESC
       `, params);
+        const fobInfo = yield (0, channelMarginUtils_1.resolveFobPriceList)();
+        const withYield = rows.map((r) => {
+            const units = Number(r.units_ordered || 0);
+            const revenue = Number(r.subtotal || 0);
+            const fob = (0, channelMarginUtils_1.lookupFobPrice)(fobInfo, r.product_id, r.product_code);
+            return Object.assign(Object.assign(Object.assign({}, r), { units,
+                revenue }), (0, channelMarginUtils_1.calcFobYield)(revenue, units, fob));
+        });
+        const withFob = withYield.filter((r) => r.costFob != null);
+        const totalCostFob = withFob.reduce((a, r) => a + (r.costFob || 0), 0);
+        const totalProfit = withFob.reduce((a, r) => a + (r.profit || 0), 0);
+        const totalRevWithFob = withFob.reduce((a, r) => a + r.revenue, 0);
+        const totalYieldOnCost = totalCostFob > 0 ? Math.round((totalProfit / totalCostFob) * 10000) / 100 : null;
         const wb = new exceljs_1.default.Workbook();
         wb.creator = 'LupoHub';
         wb.created = new Date();
+        const wsResumen = wb.addWorksheet('Resumen');
+        wsResumen.columns = [{ width: 42 }, { width: 28 }];
+        wsResumen.addRow(['Top pedidos mayorista — rendimiento FOB', '']);
+        wsResumen.mergeCells(1, 1, 1, 2);
+        wsResumen.addRow(['Lista FOB', fobInfo.name || 'Sin lista FOB']);
+        wsResumen.addRow(['Artículos', withYield.length]);
+        wsResumen.addRow(['Artículos con FOB', withFob.length]);
+        wsResumen.addRow(['Artículos sin FOB', withYield.length - withFob.length]);
+        wsResumen.addRow(['Facturación (con FOB)', totalRevWithFob]);
+        wsResumen.addRow(['Costo FOB', totalCostFob]);
+        wsResumen.addRow(['Ganancia (facturación − FOB × uds)', totalProfit]);
+        wsResumen.addRow(['Rendimiento sobre costo FOB %', totalYieldOnCost]);
+        wsResumen.getCell('A1').font = { bold: true, size: 13 };
+        for (let r = 2; r <= 9; r++)
+            wsResumen.getCell(`A${r}`).font = { bold: true };
+        wsResumen.getCell('B6').numFmt = '#,##0.00';
+        wsResumen.getCell('B7').numFmt = '#,##0.00';
+        wsResumen.getCell('B8').numFmt = '#,##0.00';
+        wsResumen.getCell('B9').numFmt = '0.00"%"';
         const ws = wb.addWorksheet('Top pedidos mayorista');
+        const fobHeader = fobInfo.name ? `FOB (${fobInfo.name})` : 'FOB';
         ws.columns = [
             { header: 'Ranking', key: 'rank', width: 10 },
             { header: 'Código', key: 'code', width: 18 },
@@ -2795,26 +3011,44 @@ const exportTopWholesaleProductsMetricsXlsx = (req, res) => __awaiter(void 0, vo
             { header: 'Unidades pedidas', key: 'units', width: 18 },
             { header: 'Pedidos', key: 'orders', width: 12 },
             { header: 'Clientes', key: 'customers', width: 12 },
-            { header: 'Subtotal', key: 'subtotal', width: 16 }
+            { header: 'Subtotal', key: 'subtotal', width: 16 },
+            { header: fobHeader, key: 'fob', width: 16 },
+            { header: 'Precio prom.', key: 'avgPrice', width: 14 },
+            { header: 'Costo FOB', key: 'costFob', width: 14 },
+            { header: 'Ganancia', key: 'profit', width: 14 },
+            { header: 'Rendimiento % (sobre costo)', key: 'yieldOnCost', width: 22 },
+            { header: 'Margen % (sobre venta)', key: 'yieldOnSale', width: 20 }
         ];
         ws.getRow(1).font = { bold: true };
         ws.views = [{ state: 'frozen', ySplit: 1 }];
-        rows.forEach((r, idx) => {
+        withYield.forEach((r, idx) => {
             var _a, _b;
             ws.addRow({
                 rank: idx + 1,
                 code: (_a = r.product_code) !== null && _a !== void 0 ? _a : '',
                 name: (_b = r.product_name) !== null && _b !== void 0 ? _b : '',
-                units: Number(r.units_ordered || 0),
+                units: r.units,
                 orders: Number(r.orders_count || 0),
                 customers: Number(r.customers_count || 0),
-                subtotal: Number(r.subtotal || 0)
+                subtotal: r.revenue,
+                fob: r.fob,
+                avgPrice: r.avgPrice,
+                costFob: r.costFob,
+                profit: r.profit,
+                yieldOnCost: r.yieldOnCost,
+                yieldOnSale: r.yieldOnSale
             });
         });
         ws.getColumn('D').numFmt = '#,##0';
         ws.getColumn('E').numFmt = '#,##0';
         ws.getColumn('F').numFmt = '#,##0';
         ws.getColumn('G').numFmt = '#,##0.00';
+        ws.getColumn('H').numFmt = '#,##0.00';
+        ws.getColumn('I').numFmt = '#,##0.00';
+        ws.getColumn('J').numFmt = '#,##0.00';
+        ws.getColumn('K').numFmt = '#,##0.00';
+        ws.getColumn('L').numFmt = '0.00"%"';
+        ws.getColumn('M').numFmt = '0.00"%"';
         const out = yield wb.xlsx.writeBuffer();
         const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out));
         const filename = `metricas_mayorista_top_articulos_${new Date().toISOString().slice(0, 10)}.xlsx`;

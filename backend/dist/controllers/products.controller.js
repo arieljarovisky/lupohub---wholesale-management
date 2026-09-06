@@ -47,11 +47,28 @@ exports.deleteProductById = deleteProductById;
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
 const talles_tango_1 = require("../talles-tango");
+function resolveSizeId(sizeCode) {
+    return __awaiter(this, void 0, void 0, function* () {
+        for (const candidate of (0, talles_tango_1.sizeCodeLookupCandidates)(sizeCode)) {
+            const row = yield (0, db_1.get)(`SELECT id FROM sizes WHERE size_code = ?`, [candidate]);
+            if (row === null || row === void 0 ? void 0 : row.id)
+                return row.id;
+        }
+        const letter = (0, talles_tango_1.nombreTalleDesdeCodigo)(sizeCode);
+        if (letter) {
+            const row = yield (0, db_1.get)(`SELECT id FROM sizes WHERE UPPER(name) = ?`, [letter.toUpperCase()]);
+            if (row === null || row === void 0 ? void 0 : row.id)
+                return row.id;
+        }
+        return null;
+    });
+}
 const colorCodeCanonical_1 = require("../utils/colorCodeCanonical");
 const stock_controller_1 = require("./stock.controller");
 const skuString_1 = require("../utils/skuString");
 const mergeDuplicateProductsBySku_1 = require("../services/mergeDuplicateProductsBySku");
 const touchProductUpdatedAt_1 = require("../utils/touchProductUpdatedAt");
+const despachoFob_1 = require("../utils/despachoFob");
 const getProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { page = '1', per_page = '20', q = '', sort = 'sku', dir = 'asc', sync_ml, sync_tn, sync_none, skip_total, price_list_id } = req.query;
@@ -163,7 +180,7 @@ const getProducts = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
 });
 exports.getProducts = getProducts;
 const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z;
     const body = req.body || {};
     const sku = body.sku != null ? String(body.sku).trim() : '';
     const name = body.name != null ? String(body.name).trim() : '';
@@ -231,22 +248,24 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
                     }
                 }
             }
-            let sizeId = (_d = (yield (0, db_1.get)(`SELECT id FROM sizes WHERE size_code = ?`, [sizeCode]))) === null || _d === void 0 ? void 0 : _d.id;
+            let sizeId = yield resolveSizeId(String(sizeCode));
             if (!sizeId) {
+                console.log('[createProduct] Talle no encontrado:', sizeCode, 'candidatos=', (0, talles_tango_1.sizeCodeLookupCandidates)(sizeCode).join(', '));
                 return res.status(400).json({
                     message: `No existe el talle con código "${sizeCode}". Creálo en Configuración > Talles.`,
                 });
             }
-            let colorId = (_e = (yield (0, db_1.get)(`SELECT id FROM colors WHERE code = ?`, [colorCode]))) === null || _e === void 0 ? void 0 : _e.id;
+            let colorId = (_d = (yield (0, db_1.get)(`SELECT id FROM colors WHERE code = ?`, [colorCode]))) === null || _d === void 0 ? void 0 : _d.id;
             if (!colorId) {
-                colorId = (_f = (yield (0, db_1.get)(`SELECT id FROM colors WHERE name = ?`, [colorCode]))) === null || _f === void 0 ? void 0 : _f.id;
+                colorId = (_e = (yield (0, db_1.get)(`SELECT id FROM colors WHERE name = ?`, [colorCode]))) === null || _e === void 0 ? void 0 : _e.id;
             }
             if (!colorId) {
+                console.log('[createProduct] Color no encontrado:', colorCode);
                 return res.status(400).json({
                     message: `No existe el color con código "${colorCode}". Creálo en Configuración > Colores.`,
                 });
             }
-            let productColorId = (_g = (yield (0, db_1.get)(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]))) === null || _g === void 0 ? void 0 : _g.id;
+            let productColorId = (_f = (yield (0, db_1.get)(`SELECT id FROM product_colors WHERE product_id = ? AND color_id = ?`, [productId, colorId]))) === null || _f === void 0 ? void 0 : _f.id;
             if (!productColorId) {
                 productColorId = (0, uuid_1.v4)();
                 yield (0, db_1.execute)(`INSERT INTO product_colors (id, product_id, color_id) VALUES (?, ?, ?)`, [productColorId, productId, colorId]);
@@ -255,17 +274,18 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             if (existingVariant) {
                 const productRow = yield (0, db_1.get)(`SELECT name, category, base_price, tienda_nube_id, mercado_libre_id FROM products WHERE id = ?`, [productId]);
                 const stockRow = yield (0, db_1.get)(`SELECT stock FROM stocks WHERE variant_id = ?`, [existingVariant.id]);
+                console.log('[createProduct] Variante ya existía:', sku, 'variantId=', existingVariant.id);
                 return res.status(200).json({
                     id: existingVariant.id,
-                    sku: (_h = existingVariant.sku) !== null && _h !== void 0 ? _h : sku,
-                    name: (_j = productRow === null || productRow === void 0 ? void 0 : productRow.name) !== null && _j !== void 0 ? _j : name,
-                    category: (_l = (_k = productRow === null || productRow === void 0 ? void 0 : productRow.category) !== null && _k !== void 0 ? _k : category) !== null && _l !== void 0 ? _l : 'General',
-                    base_price: Number((_m = productRow === null || productRow === void 0 ? void 0 : productRow.base_price) !== null && _m !== void 0 ? _m : basePrice),
-                    description: (_p = (_o = productRow === null || productRow === void 0 ? void 0 : productRow.description) !== null && _o !== void 0 ? _o : description) !== null && _p !== void 0 ? _p : undefined,
-                    stock_total: Number((_q = stockRow === null || stockRow === void 0 ? void 0 : stockRow.stock) !== null && _q !== void 0 ? _q : 0),
+                    sku: (_g = existingVariant.sku) !== null && _g !== void 0 ? _g : sku,
+                    name: (_h = productRow === null || productRow === void 0 ? void 0 : productRow.name) !== null && _h !== void 0 ? _h : name,
+                    category: (_k = (_j = productRow === null || productRow === void 0 ? void 0 : productRow.category) !== null && _j !== void 0 ? _j : category) !== null && _k !== void 0 ? _k : 'General',
+                    base_price: Number((_l = productRow === null || productRow === void 0 ? void 0 : productRow.base_price) !== null && _l !== void 0 ? _l : basePrice),
+                    description: (_o = (_m = productRow === null || productRow === void 0 ? void 0 : productRow.description) !== null && _m !== void 0 ? _m : description) !== null && _o !== void 0 ? _o : undefined,
+                    stock_total: Number((_p = stockRow === null || stockRow === void 0 ? void 0 : stockRow.stock) !== null && _p !== void 0 ? _p : 0),
                     externalIds: {
-                        tiendaNube: (_r = productRow === null || productRow === void 0 ? void 0 : productRow.tienda_nube_id) !== null && _r !== void 0 ? _r : undefined,
-                        mercadoLibre: (_s = productRow === null || productRow === void 0 ? void 0 : productRow.mercado_libre_id) !== null && _s !== void 0 ? _s : undefined,
+                        tiendaNube: (_q = productRow === null || productRow === void 0 ? void 0 : productRow.tienda_nube_id) !== null && _q !== void 0 ? _q : undefined,
+                        mercadoLibre: (_r = productRow === null || productRow === void 0 ? void 0 : productRow.mercado_libre_id) !== null && _r !== void 0 ? _r : undefined,
                     },
                     existing: true,
                 });
@@ -278,13 +298,13 @@ const createProduct = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             return res.status(201).json({
                 id: variantId,
                 sku,
-                name: (_t = productRow === null || productRow === void 0 ? void 0 : productRow.name) !== null && _t !== void 0 ? _t : name,
-                category: (_v = (_u = productRow === null || productRow === void 0 ? void 0 : productRow.category) !== null && _u !== void 0 ? _u : category) !== null && _v !== void 0 ? _v : 'General',
-                base_price: Number((_w = productRow === null || productRow === void 0 ? void 0 : productRow.base_price) !== null && _w !== void 0 ? _w : basePrice),
-                description: (_y = (_x = productRow === null || productRow === void 0 ? void 0 : productRow.description) !== null && _x !== void 0 ? _x : description) !== null && _y !== void 0 ? _y : undefined,
+                name: (_s = productRow === null || productRow === void 0 ? void 0 : productRow.name) !== null && _s !== void 0 ? _s : name,
+                category: (_u = (_t = productRow === null || productRow === void 0 ? void 0 : productRow.category) !== null && _t !== void 0 ? _t : category) !== null && _u !== void 0 ? _u : 'General',
+                base_price: Number((_v = productRow === null || productRow === void 0 ? void 0 : productRow.base_price) !== null && _v !== void 0 ? _v : basePrice),
+                description: (_x = (_w = productRow === null || productRow === void 0 ? void 0 : productRow.description) !== null && _w !== void 0 ? _w : description) !== null && _x !== void 0 ? _x : undefined,
                 externalIds: {
-                    tiendaNube: (_z = productRow === null || productRow === void 0 ? void 0 : productRow.tienda_nube_id) !== null && _z !== void 0 ? _z : undefined,
-                    mercadoLibre: (_0 = productRow === null || productRow === void 0 ? void 0 : productRow.mercado_libre_id) !== null && _0 !== void 0 ? _0 : undefined,
+                    tiendaNube: (_y = productRow === null || productRow === void 0 ? void 0 : productRow.tienda_nube_id) !== null && _y !== void 0 ? _y : undefined,
+                    mercadoLibre: (_z = productRow === null || productRow === void 0 ? void 0 : productRow.mercado_libre_id) !== null && _z !== void 0 ? _z : undefined,
                 },
             });
         }
@@ -356,7 +376,7 @@ const getProductById = (req, res) => __awaiter(void 0, void 0, void 0, function*
 });
 exports.getProductById = getProductById;
 const getProductBySku = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
+    var _a, _b, _c, _d;
     const { sku } = req.params;
     const includeRelatedRaw = (_a = req.query) === null || _a === void 0 ? void 0 : _a.includeRelated;
     const includeRelated = includeRelatedRaw !== '0' &&
@@ -396,6 +416,86 @@ const getProductBySku = (req, res) => __awaiter(void 0, void 0, void 0, function
                 mercadoLibreVariant: v.mercado_libre_variant_id,
                 mercadoLibreItemId: v.mercado_libre_item_id
             } })));
+        // Si el vínculo está solo en variant_publications (Más publ.) y no en columnas
+        // principales, el inventario mostraba "Sin vincular" aunque en Vincular se veía lleno.
+        try {
+            const variantIds = variants.map((v) => String(v.variant_id)).filter(Boolean);
+            if (variantIds.length > 0) {
+                const ph = variantIds.map(() => '?').join(',');
+                const pubRows = yield (0, db_1.query)(`SELECT variant_id, platform, external_product_id, external_variant_id, created_at
+           FROM variant_publications
+           WHERE variant_id IN (${ph})
+           ORDER BY created_at ASC`, variantIds);
+                const firstPubByVariantPlatform = new Map();
+                for (const pr of pubRows || []) {
+                    const vid = String(pr.variant_id || '');
+                    const platform = String(pr.platform || '');
+                    const key = `${vid}::${platform}`;
+                    if (!vid || !platform || firstPubByVariantPlatform.has(key))
+                        continue;
+                    const productId = String(pr.external_product_id || '').trim();
+                    const varId = pr.external_variant_id != null ? String(pr.external_variant_id).trim() : '';
+                    if (!productId && !varId)
+                        continue;
+                    firstPubByVariantPlatform.set(key, { productId, variantId: varId });
+                }
+                for (const v of variants) {
+                    const vid = String(v.variant_id || '');
+                    const mlEmpty = !(((_b = v.externalIds) === null || _b === void 0 ? void 0 : _b.mercadoLibreItemId) != null && String(v.externalIds.mercadoLibreItemId).trim() !== '') &&
+                        !(((_c = v.externalIds) === null || _c === void 0 ? void 0 : _c.mercadoLibreVariant) != null && String(v.externalIds.mercadoLibreVariant).trim() !== '');
+                    const tnEmpty = !(((_d = v.externalIds) === null || _d === void 0 ? void 0 : _d.tiendaNubeVariant) != null && String(v.externalIds.tiendaNubeVariant).trim() !== '');
+                    if (mlEmpty) {
+                        const pub = firstPubByVariantPlatform.get(`${vid}::mercadolibre`);
+                        if (pub && (pub.productId || pub.variantId)) {
+                            v.externalIds.mercadoLibreItemId = pub.productId || v.externalIds.mercadoLibreItemId;
+                            v.externalIds.mercadoLibreVariant = pub.variantId || v.externalIds.mercadoLibreVariant;
+                            v.mercado_libre_item_id = v.externalIds.mercadoLibreItemId;
+                            v.mercado_libre_variant_id = v.externalIds.mercadoLibreVariant;
+                            // Persistir para que inventario, sync y "Desvincular" usen la misma fuente.
+                            try {
+                                yield (0, db_1.execute)(`UPDATE product_variants
+                   SET mercado_libre_item_id = COALESCE(NULLIF(mercado_libre_item_id, ''), ?),
+                       mercado_libre_variant_id = COALESCE(NULLIF(mercado_libre_variant_id, ''), ?)
+                   WHERE id = ?
+                     AND (mercado_libre_item_id IS NULL OR mercado_libre_item_id = '')
+                     AND (mercado_libre_variant_id IS NULL OR mercado_libre_variant_id = '')`, [pub.productId || null, pub.variantId || null, vid]);
+                            }
+                            catch (_e) {
+                                /* ignore backfill errors */
+                            }
+                        }
+                    }
+                    if (tnEmpty) {
+                        const pub = firstPubByVariantPlatform.get(`${vid}::tiendanube`);
+                        if (pub === null || pub === void 0 ? void 0 : pub.variantId) {
+                            v.externalIds.tiendaNubeVariant = pub.variantId;
+                            v.tienda_nube_variant_id = pub.variantId;
+                            if (pub.productId && !product.tienda_nube_id) {
+                                try {
+                                    yield (0, db_1.execute)(`UPDATE products SET tienda_nube_id = COALESCE(NULLIF(tienda_nube_id, ''), ?) WHERE id = ?`, [pub.productId, product.id]);
+                                    product.tienda_nube_id = pub.productId;
+                                }
+                                catch (_f) {
+                                    /* ignore */
+                                }
+                            }
+                            try {
+                                yield (0, db_1.execute)(`UPDATE product_variants
+                   SET tienda_nube_variant_id = COALESCE(NULLIF(tienda_nube_variant_id, ''), ?)
+                   WHERE id = ?
+                     AND (tienda_nube_variant_id IS NULL OR tienda_nube_variant_id = '')`, [pub.variantId, vid]);
+                            }
+                            catch (_g) {
+                                /* ignore */
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (pubMergeErr) {
+            console.warn('[getProductBySku] merge variant_publications:', pubMergeErr === null || pubMergeErr === void 0 ? void 0 : pubMergeErr.message);
+        }
         const stock_total = variants.reduce((sum, v) => sum + Number(v.stock || 0), 0);
         res.json(Object.assign(Object.assign({}, product), { externalIds: {
                 tiendaNube: product.tienda_nube_id,
@@ -531,7 +631,7 @@ const updateVariantExternalIds = (req, res) => __awaiter(void 0, void 0, void 0,
         const mlItemOnVariant = hasMlItem && mercadoLibreItemId != null && String(mercadoLibreItemId).trim() !== ''
             ? String(mercadoLibreItemId).trim()
             : null;
-        const mlVarOnVariant = !mlItemOnVariant && hasMlVar && mercadoLibreVariantId != null && String(mercadoLibreVariantId).trim() !== ''
+        const mlVarOnVariant = hasMlVar && mercadoLibreVariantId != null && String(mercadoLibreVariantId).trim() !== ''
             ? String(mercadoLibreVariantId).trim()
             : null;
         const sets = [];
@@ -540,7 +640,11 @@ const updateVariantExternalIds = (req, res) => __awaiter(void 0, void 0, void 0,
             sets.push('tienda_nube_variant_id = ?');
             params.push(tiendaNubeVariantId != null && String(tiendaNubeVariantId).trim() !== '' ? String(tiendaNubeVariantId).trim() : null);
         }
-        if (mlItemOnVariant) {
+        if (mlItemOnVariant && mlVarOnVariant) {
+            sets.push('mercado_libre_item_id = ?', 'mercado_libre_variant_id = ?');
+            params.push(mlItemOnVariant, mlVarOnVariant);
+        }
+        else if (mlItemOnVariant) {
             sets.push('mercado_libre_item_id = ?', 'mercado_libre_variant_id = NULL');
             params.push(mlItemOnVariant);
         }
@@ -764,7 +868,7 @@ const bulkLinkVariants = (req, res) => __awaiter(void 0, void 0, void 0, functio
             if (!variantId)
                 continue;
             const mlItemId = (linkMlItemId != null && String(linkMlItemId).trim() !== '') ? String(linkMlItemId).trim() : null;
-            const mlVarId = !mlItemId && mercadoLibreVariantId != null && String(mercadoLibreVariantId).trim() !== ''
+            const mlVarId = mercadoLibreVariantId != null && String(mercadoLibreVariantId).trim() !== ''
                 ? String(mercadoLibreVariantId).trim()
                 : null;
             const tnVarId = tiendaNubeVariantId != null && String(tiendaNubeVariantId).trim() !== '' ? String(tiendaNubeVariantId).trim() : null;
@@ -777,7 +881,11 @@ const bulkLinkVariants = (req, res) => __awaiter(void 0, void 0, void 0, functio
                 sets.push('tienda_nube_variant_id = ?');
                 params.push(tnVarId);
             }
-            if (mlItemId != null) {
+            if (mlItemId && mlVarId) {
+                sets.push('mercado_libre_item_id = ?', 'mercado_libre_variant_id = ?');
+                params.push(mlItemId, mlVarId);
+            }
+            else if (mlItemId != null) {
                 sets.push('mercado_libre_item_id = ?', 'mercado_libre_variant_id = NULL');
                 params.push(mlItemId);
             }
@@ -1147,32 +1255,45 @@ function resolveTangoImportLayout(headers) {
 /**
  * Parsea un código Tango respetando los caracteres no numéricos del prefijo (ej.: "Q05875", "C01303").
  *
- * El layout real del código en Tango es de ancho fijo:
- *   - Posiciones 0..8 (9 caracteres): código del artículo, padded a la derecha con espacios.
- *     Ej.: "Q05875   ", "C01303   ", "0012501  ", "0587513  "
- *   - Posiciones 9..11 (3 caracteres): talle.
- *   - Posiciones 12..14 (3 caracteres): color.
+ * Dos formatos válidos:
+ * 1) Ancho fijo CON espacios (export Tango):
+ *    - Posiciones 0..8 (9 caracteres): artículo, padded a la derecha con espacios.
+ *      Ej.: "Q05875   ", "4090001  "
+ *    - Posiciones 9..11: talle (3)
+ *    - Posiciones 12..14: color (3)
+ * 2) Concatenado SIN espacios (barras / remitos): artículo + talle(3) + color(3).
+ *    Ej.: "4090001140997" → art 4090001, talle 140, color 997.
+ *    Con prefijo: "Q05875140111" → art Q05875, talle 140, color 111.
  *
- * Versiones anteriores hacían `raw.replace(/\D/g, '')` antes de cortar; eso **eliminaba** los prefijos
- * tipo "Q"/"C" del SKU y producía duplicados (ej. "Q05875" y "0587500" como dos productos distintos).
- * Este parser conserva el prefijo como parte del artículo.
+ * Importante: no aplicar el layout 9+3+3 a strings solo-dígitos sin espacios; eso come el talle
+ * dentro del artículo (4090001140997 → art 409000114, color "7") y agrupa mal los colores.
  *
- * `codigoCompleto` mantiene el código completo *sin espacios* (artículo + talle + color), útil para
- * usarlo como SKU de variante (legible en remitos/facturas).
+ * `codigoCompleto` mantiene el código completo *sin espacios* (artículo + talle + color).
  */
 function parseCodigoTango(codigo) {
     const raw = (codigo != null ? String(codigo) : '');
-    if (!raw)
+    if (!raw.trim())
         return { articulo: '', talle: '', color: '', codigo13: '', codigoCompleto: '' };
-    const padded = raw.padEnd(15, ' ');
-    let articulo = padded.slice(0, 9).trim();
-    let talle = padded.slice(9, 12).trim();
-    let color = padded.slice(12, 15).trim();
-    // Si el formato no respeta el ancho fijo (códigos más cortos o concatenados sin padding) intentamos un fallback.
-    if (!articulo) {
+    let articulo = '';
+    let talle = '';
+    let color = '';
+    if (/\s/.test(raw)) {
+        const padded = raw.padEnd(15, ' ');
+        articulo = padded.slice(0, 9).trim();
+        talle = padded.slice(9, 12).trim();
+        color = padded.slice(12, 15).trim();
+    }
+    else {
         const cleaned = raw.trim();
-        if (cleaned.length >= 13) {
-            // Asumimos formato concatenado: 7 artículo + 3 talle + 3 color (puede tener letra al inicio o no).
+        const m = cleaned.match(/^([A-Za-z]*)(\d+)$/);
+        if (m && m[2].length >= 6) {
+            const letters = m[1];
+            const digits = m[2];
+            color = digits.slice(-3);
+            talle = digits.slice(-6, -3);
+            articulo = letters + digits.slice(0, -6);
+        }
+        else if (cleaned.length >= 6) {
             articulo = cleaned.slice(0, cleaned.length - 6);
             talle = cleaned.slice(cleaned.length - 6, cleaned.length - 3);
             color = cleaned.slice(cleaned.length - 3);
@@ -1430,14 +1551,17 @@ const importTangoArticles = (req, res) => __awaiter(void 0, void 0, void 0, func
                 let variantId;
                 if (!existingVariant) {
                     variantId = (0, uuid_1.v4)();
-                    yield (0, db_1.execute)(`INSERT INTO product_variants (id, product_color_id, size_id, sku) VALUES (?, ?, ?, ?)`, [variantId, productColorId, sizeId, r.codigo13]);
+                    // SKU siempre desde artículo+talle+color resueltos (no confiar en codigo13 si vino mal parseado).
+                    const variantSku = `${r.articulo}${r.talle}${r.color}`;
+                    yield (0, db_1.execute)(`INSERT INTO product_variants (id, product_color_id, size_id, sku) VALUES (?, ?, ?, ?)`, [variantId, productColorId, sizeId, variantSku]);
                     const qty = (_g = r.initialStock) !== null && _g !== void 0 ? _g : 0;
                     yield (0, db_1.execute)(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?)`, [variantId, qty]);
                     variantsCreated++;
                 }
                 else {
                     variantId = existingVariant.id;
-                    yield (0, db_1.execute)(`UPDATE product_variants SET sku = ? WHERE id = ?`, [r.codigo13, variantId]);
+                    const variantSku = `${r.articulo}${r.talle}${r.color}`;
+                    yield (0, db_1.execute)(`UPDATE product_variants SET sku = ? WHERE id = ?`, [variantSku, variantId]);
                     variantsUpdated++;
                     if (r.initialStock !== undefined) {
                         if (keepStockOnExistingVariants) {
@@ -1459,7 +1583,7 @@ const importTangoArticles = (req, res) => __awaiter(void 0, void 0, void 0, func
                     }
                     const prodRow = yield (0, db_1.get)(`SELECT name FROM products WHERE id = ?`, [productId]);
                     const prodName = String((prodRow === null || prodRow === void 0 ? void 0 : prodRow.name) || r.articulo || '').trim();
-                    const descripcionItem = `${prodName} - ${r.codigo13}`.trim();
+                    const descripcionItem = `${prodName} - ${r.articulo}${r.talle}${r.color}`.trim();
                     if (qtyDespacho > 0) {
                         const di = yield (0, db_1.get)(`SELECT id FROM despacho_items WHERE despacho_id = ? AND variant_id = ? LIMIT 1`, [despachoLink.id, variantId]);
                         if (di === null || di === void 0 ? void 0 : di.id) {
@@ -1483,6 +1607,9 @@ const importTangoArticles = (req, res) => __awaiter(void 0, void 0, void 0, func
             catch (err) {
                 errors.push(`Fila ${r.codigo13}: ${(err === null || err === void 0 ? void 0 : err.message) || 'Error'}`);
             }
+        }
+        if (despachoLink === null || despachoLink === void 0 ? void 0 : despachoLink.id) {
+            yield (0, despachoFob_1.persistDespachoFobFromList)(despachoLink.id);
         }
         res.json({
             message: 'Importación Tango finalizada',
@@ -1781,8 +1908,12 @@ const addVariantPublication = (req, res) => __awaiter(void 0, void 0, void 0, fu
         if (!exists)
             return res.status(404).json({ message: 'Variante no encontrada' });
         const id = (0, uuid_1.v4)();
-        yield (0, db_1.execute)(`INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size) VALUES (?, ?, ?, ?, ?, ?)`, [id, variantId, platform, String(externalProductId).trim(), extVariantId, pack]);
-        const row = yield (0, db_1.get)('SELECT id, variant_id, platform, external_product_id, external_variant_id, pack_size, created_at FROM variant_publications WHERE id = ?', [id]);
+        yield (0, db_1.execute)(`INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE pack_size = VALUES(pack_size)`, [id, variantId, platform, String(externalProductId).trim(), extVariantId, pack]);
+        const row = yield (0, db_1.get)(`SELECT id, variant_id, platform, external_product_id, external_variant_id, pack_size, created_at
+       FROM variant_publications
+       WHERE variant_id = ? AND platform = ? AND external_product_id = ? AND external_variant_id = ?`, [variantId, platform, String(externalProductId).trim(), extVariantId]);
         try {
             const stockRow = yield (0, db_1.get)(`SELECT stock FROM stocks WHERE variant_id = ?`, [variantId]);
             const currentStock = Number((_a = stockRow === null || stockRow === void 0 ? void 0 : stockRow.stock) !== null && _a !== void 0 ? _a : 0);

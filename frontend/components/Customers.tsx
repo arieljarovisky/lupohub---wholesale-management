@@ -247,6 +247,11 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
   const [newRemitoNumber, setNewRemitoNumber] = useState('');
   const [newSaleCondition, setNewSaleCondition] = useState('');
   const [newCondicionIva, setNewCondicionIva] = useState('');
+  const [newIsExportClient, setNewIsExportClient] = useState(false);
+  const [newExportDstCmp, setNewExportDstCmp] = useState('');
+  const [newExportCountryName, setNewExportCountryName] = useState('');
+  const [newForeignTaxId, setNewForeignTaxId] = useState('');
+  const [newExportCuitPaisCliente, setNewExportCuitPaisCliente] = useState('');
   const [newLegacyCode, setNewLegacyCode] = useState('');
   const [newAccountZone, setNewAccountZone] = useState('');
   const [newAccountSellerLabel, setNewAccountSellerLabel] = useState('');
@@ -504,6 +509,11 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         remitoNumber: newRemitoNumber || undefined,
         saleCondition: newSaleCondition || undefined,
         condicionIva: newCondicionIva || undefined,
+        isExportClient: newIsExportClient,
+        exportDstCmp: newExportDstCmp.trim() ? Number(newExportDstCmp) : undefined,
+        exportCountryName: newExportCountryName.trim() || undefined,
+        foreignTaxId: newForeignTaxId.trim() || undefined,
+        exportCuitPaisCliente: newExportCuitPaisCliente.trim() ? Number(newExportCuitPaisCliente) : undefined,
         transporteIds: selectedTransporteIds,
         legacyCode: newLegacyCode.trim() || undefined,
         accountZone: newAccountZone.trim() || undefined,
@@ -535,6 +545,11 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
         setNewRemitoNumber('');
         setNewSaleCondition('');
         setNewCondicionIva('');
+        setNewIsExportClient(false);
+        setNewExportDstCmp('');
+        setNewExportCountryName('');
+        setNewForeignTaxId('');
+        setNewExportCuitPaisCliente('');
         setNewLegacyCode('');
         setNewAccountZone('');
         setNewAccountSellerLabel('');
@@ -561,6 +576,11 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
       remitoNumber: newRemitoNumber || undefined,
       saleCondition: newSaleCondition || undefined,
       condicionIva: newCondicionIva || undefined,
+      isExportClient: newIsExportClient,
+      exportDstCmp: newExportDstCmp.trim() ? Number(newExportDstCmp) : undefined,
+      exportCountryName: newExportCountryName.trim() || undefined,
+      foreignTaxId: newForeignTaxId.trim() || undefined,
+      exportCuitPaisCliente: newExportCuitPaisCliente.trim() ? Number(newExportCuitPaisCliente) : undefined,
       legacyCode: newLegacyCode.trim() || undefined,
       accountZone: newAccountZone.trim() || undefined,
       accountSellerLabel: newAccountSellerLabel.trim() || undefined,
@@ -1340,6 +1360,61 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                 )}
               </select>
             </div>
+            <div className="rounded-xl border border-indigo-900/40 bg-indigo-950/20 p-4 space-y-3">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={newIsExportClient}
+                  onChange={(e) => setNewIsExportClient(e.target.checked)}
+                  className="rounded border-slate-600 text-indigo-500 focus:ring-indigo-500"
+                />
+                <span className="text-sm font-semibold text-indigo-200">Cliente de exportación (Factura E)</span>
+              </label>
+              {newIsExportClient && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">País destino (código AFIP)</label>
+                    <input
+                      type="number"
+                      className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-indigo-500"
+                      value={newExportDstCmp}
+                      onChange={(e) => setNewExportDstCmp(e.target.value)}
+                      placeholder="Ej. 212 USA, 250 Tierra del Fuego"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Nombre país (referencia)</label>
+                    <input
+                      type="text"
+                      className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-indigo-500"
+                      value={newExportCountryName}
+                      onChange={(e) => setNewExportCountryName(e.target.value)}
+                      placeholder="Estados Unidos"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">ID tributaria (o CUIT argentino)</label>
+                    <input
+                      type="text"
+                      className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-indigo-500"
+                      value={newForeignTaxId}
+                      onChange={(e) => setNewForeignTaxId(e.target.value)}
+                      placeholder="Tierra del Fuego: usá el CUIT del cliente"
+                    />
+                  </div>
+                  <div>
+                      <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">CUIT país cliente (AFIP)</label>
+                      <input
+                        type="text"
+                        className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-indigo-500"
+                        value={newExportCuitPaisCliente}
+                        onChange={(e) => setNewExportCuitPaisCliente(e.target.value)}
+                        placeholder="Tierra del Fuego: se usa el CUIT del cliente si está vacío"
+                      />
+                  </div>
+                </div>
+              )}
+            </div>
             {transportes.length > 0 && (
               <div>
                 <label className="block text-xs font-black text-slate-500 uppercase mb-2 ml-1">Transportes (factura, remitos y despacho)</label>
@@ -1533,6 +1608,15 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                  setNewRemitoNumber(selectedCustomer.remitoNumber || '');
                  setNewSaleCondition(selectedCustomer.saleCondition || '');
                  setNewCondicionIva(selectedCustomer.condicionIva || '');
+                 setNewIsExportClient(!!selectedCustomer.isExportClient);
+                 setNewExportDstCmp(selectedCustomer.exportDstCmp != null ? String(selectedCustomer.exportDstCmp) : '');
+                 setNewExportCountryName(selectedCustomer.exportCountryName || '');
+                 setNewForeignTaxId(selectedCustomer.foreignTaxId || '');
+                 setNewExportCuitPaisCliente(
+                   selectedCustomer.exportCuitPaisCliente != null
+                     ? String(selectedCustomer.exportCuitPaisCliente)
+                     : ''
+                 );
                  setNewLegacyCode(selectedCustomer.legacyCode || '');
                  setNewAccountZone(selectedCustomer.accountZone || '');
                  setNewAccountSellerLabel(selectedCustomer.accountSellerLabel || '');
@@ -3676,6 +3760,37 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                     <option value={newCondicionIva}>{newCondicionIva}</option>
                   )}
                 </select>
+              </div>
+              <div className="rounded-xl border border-indigo-900/40 bg-indigo-950/20 p-4 space-y-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newIsExportClient}
+                    onChange={(e) => setNewIsExportClient(e.target.checked)}
+                    className="rounded border-slate-600 text-indigo-500 focus:ring-indigo-500"
+                  />
+                  <span className="text-sm font-semibold text-indigo-200">Cliente de exportación (Factura E)</span>
+                </label>
+                {newIsExportClient && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">País destino (código AFIP)</label>
+                      <input type="number" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-indigo-500" value={newExportDstCmp} onChange={(e) => setNewExportDstCmp(e.target.value)} placeholder="Ej. 250 Tierra del Fuego" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">Nombre país</label>
+                      <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-indigo-500" value={newExportCountryName} onChange={(e) => setNewExportCountryName(e.target.value)} />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">ID tributaria (o CUIT argentino)</label>
+                      <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-indigo-500" value={newForeignTaxId} onChange={(e) => setNewForeignTaxId(e.target.value)} placeholder="Tierra del Fuego: CUIT del cliente" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-black text-slate-500 uppercase mb-1 ml-1">CUIT país cliente (AFIP)</label>
+                      <input type="text" className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-white outline-none focus:border-indigo-500" value={newExportCuitPaisCliente} onChange={(e) => setNewExportCuitPaisCliente(e.target.value)} placeholder="Tierra del Fuego: se usa el CUIT del cliente" />
+                    </div>
+                  </div>
+                )}
               </div>
               {transportes.length > 0 && (
                 <div>

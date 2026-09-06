@@ -53,6 +53,8 @@ import { addPaymentOrdersTable } from './database/add_payment_orders_table';
 import { addNoStockImpactToOrders } from './database/add_no_stock_impact_orders';
 import { addIncludeInSaldoToOrders } from './database/add_include_in_saldo_orders';
 import { addCustomerInvoiceFields } from './database/add_customer_invoice_fields';
+import { addCustomerExportFields } from './database/add_customer_export_fields';
+import { addInvoicesExportFields } from './database/add_invoices_export_fields';
 import { addExternalInvoicesTable } from './database/add_external_invoices_table';
 import { addExternalCreditNotesTable } from './database/add_external_credit_notes_table';
 import { addAfipSyncedVouchersTable } from './database/add_afip_synced_vouchers_table';
@@ -253,6 +255,8 @@ async function initDatabase() {
       await addNoStockImpactToOrders();
       await addIncludeInSaldoToOrders();
       await addCustomerInvoiceFields();
+      await addCustomerExportFields();
+      await addInvoicesExportFields();
       await addExternalInvoicesTable();
       await addExternalCreditNotesTable();
       await addAfipSyncedVouchersTable();

@@ -9,6 +9,7 @@ router.get('/', orders_controller_1.getOrders);
 router.get('/linkable-for-payment', auth_1.authMiddleware, orders_controller_1.getLinkableOrdersForPayment);
 router.post('/import-matrix', auth_1.authMiddleware, orders_controller_1.importOrdersFromMatrix);
 router.post('/', orders_controller_1.createOrder);
+router.post('/:id/mark-showroom-ready', auth_1.authMiddleware, orders_controller_1.markShowroomReady);
 router.patch('/:id/payment-status', auth_1.authMiddleware, orders_controller_1.patchOrderPaymentStatus);
 router.patch('/:id/include-in-saldo', auth_1.authMiddleware, orders_controller_1.patchOrderIncludeInSaldo);
 router.post('/:id/apply-mayorista-stock', auth_1.authMiddleware, orders_controller_1.applyMayoristaStockDeduction);

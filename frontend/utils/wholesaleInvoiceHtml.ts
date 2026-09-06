@@ -3,10 +3,50 @@
  * Totales: neto gravado + IVA 21% + percepción IIBB (Factura A); en Factura B el importe impreso lleva IVA incluido sin discriminar.
  */
 import type { CreditNote, Customer, DebitNote, Order, OrderItem, Product } from '../types';
-import { calcTotalesDesdeNetoGravado, isComprobanteClaseB } from './afipComprobante';
+import { calcTotalesDesdeNetoGravado, isComprobanteClaseB, isComprobanteExportacion } from './afipComprobante';
 import { ORDER_PRICES_INCLUDE_IVA, IVA_RATE, IVA_MULTIPLIER, orderGrossToAfipNeto } from './orderPricing';
 import { formatMoneyAr } from './moneyFormat';
 import { codigoTalleParaSku, nombreTalleDesdeCodigo } from './tallesTango';
+
+/** Paginación al imprimir / guardar PDF (facturas con muchas líneas). */
+const WHOLESALE_PRINT_PAGINATION_CSS = `
+      thead { display: table-header-group; }
+      tbody tr { page-break-inside: avoid; break-inside: avoid; }
+      .topbar, .period-row, .boxrow { page-break-inside: avoid; break-inside: avoid; }
+      .bottom-block, .summary { page-break-inside: avoid; break-inside: avoid; }
+      @media print {
+        .sheet { min-height: auto; padding: 0; width: auto; }
+        .lupohub-preview-banner {
+          position: static !important;
+          page-break-after: avoid;
+          break-after: avoid;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+        .no-print { display: none !important; }
+      }`;
+
+/** Banner de vista previa (sin validez fiscal). Evita position:sticky, que tapa ítems al imprimir. */
+export function injectWholesalePreviewBanner(html: string): string {
+  if (!html) return html;
+  const bannerCss = `
+      .lupohub-preview-banner {
+        background: #7f1d1d;
+        color: #fff;
+        padding: 10px 14px;
+        font: 700 12px Arial, Helvetica, sans-serif;
+        letter-spacing: .03em;
+        text-transform: uppercase;
+        text-align: center;
+      }`;
+  const withCss = html.includes('.lupohub-preview-banner')
+    ? html
+    : html.replace('</style>', `${bannerCss}</style>`);
+  return withCss.replace(
+    /<body([^>]*)>/i,
+    `<body$1><div class="lupohub-preview-banner">Vista previa sin validez fiscal — aún no emitida en AFIP</div>`
+  );
+}
 
 export type FacturaRemitente = Record<string, unknown> & {
   businessName?: string;
@@ -760,8 +800,9 @@ export function buildWholesaleFacturaHtml(params: {
   };
 
   const cbteTipoNum = Number((inv as { cbteTipo?: number }).cbteTipo ?? (inv as { cbte_tipo?: number }).cbte_tipo);
-  const tipoFactura = cbteTipoNum === 1 ? 'A' : cbteTipoNum === 11 ? 'C' : 'B';
-  const codigoComprobante = cbteTipoNum === 1 ? '001' : cbteTipoNum === 11 ? '011' : '006';
+  const esExport = isComprobanteExportacion(cbteTipoNum);
+  const tipoFactura = esExport ? 'E' : cbteTipoNum === 1 ? 'A' : cbteTipoNum === 11 ? 'C' : 'B';
+  const codigoComprobante = esExport ? '019' : cbteTipoNum === 1 ? '001' : cbteTipoNum === 11 ? '011' : '006';
   const nroComprobante = inv.puntoVta != null ? `${String(inv.puntoVta).padStart(5, '0')}-${String(inv.cbteDesde).padStart(8, '0')}` : String(inv.cbteDesde);
   const fechaComprobante = inv.createdAt ? formatDateShort(inv.createdAt) : formatDateShort(order.date);
   const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
@@ -778,9 +819,37 @@ export function buildWholesaleFacturaHtml(params: {
     sumLines > 0 ? Math.round(sumLines * 100) / 100 : Math.round((Number(order.total) > 0 ? Number(order.total) : 0) * 100) / 100;
   const agipAlicuota = Number((inv as any).agipAlicuota ?? (inv as any).agip_alicuota ?? 0);
   const agipRetPer = Number((inv as any).agipRetPer ?? (inv as any).agip_ret_per ?? 0);
-  const totales = calcTotalesDesdeNetoGravado(netoGravado, cbteTipoNum, agipRetPer);
-  const { neto: netoImpreso, iva: iva21, total, discriminaIva, factorPrecioImpreso } = totales;
-  const subtotalBruto = discriminaIva ? netoGravado : Math.round((netoGravado + totales.iva) * 100) / 100;
+  const monedaExportId = String((inv as any).monedaId ?? (inv as any).moneda_id ?? 'PES').toUpperCase();
+  const monedaExportCtz = Number((inv as any).monedaCtz ?? (inv as any).moneda_ctz ?? 1);
+  const exportIncoterms = String((inv as any).exportIncoterms ?? (inv as any).export_incoterms ?? 'FOB');
+  let netoImpreso: number;
+  let iva21: number;
+  let total: number;
+  let discriminaIva: boolean;
+  let factorPrecioImpreso: number;
+  let subtotalBruto: number;
+  if (esExport) {
+    const totalArs = netoGravado;
+    const totalMoneda =
+      monedaExportId === 'PES'
+        ? totalArs
+        : Math.round((totalArs / (monedaExportCtz > 0 ? monedaExportCtz : 1)) * 100) / 100;
+    netoImpreso = totalMoneda;
+    iva21 = 0;
+    total = totalMoneda;
+    discriminaIva = false;
+    factorPrecioImpreso =
+      monedaExportId === 'PES' ? 1 : 1 / (monedaExportCtz > 0 ? monedaExportCtz : 1);
+    subtotalBruto = totalMoneda;
+  } else {
+    const totales = calcTotalesDesdeNetoGravado(netoGravado, cbteTipoNum, agipRetPer);
+    netoImpreso = totales.neto;
+    iva21 = totales.iva;
+    total = totales.total;
+    discriminaIva = totales.discriminaIva;
+    factorPrecioImpreso = totales.factorPrecioImpreso;
+    subtotalBruto = discriminaIva ? netoGravado : Math.round((netoGravado + totales.iva) * 100) / 100;
+  }
 
   const rows = items
     .map((i) => {
@@ -868,8 +937,8 @@ export function buildWholesaleFacturaHtml(params: {
     tipoCmp: Number((inv as { cbteTipo?: number }).cbteTipo ?? (inv as { cbte_tipo?: number }).cbte_tipo ?? 0),
     nroCmp: Number(inv.cbteDesde ?? 0),
     importe: Number(total.toFixed(2)),
-    moneda: 'PES',
-    ctz: 1,
+    moneda: esExport ? monedaExportId : 'PES',
+    ctz: esExport ? (monedaExportCtz > 0 ? monedaExportCtz : 1) : 1,
     tipoDocRec,
     nroDocRec,
     tipoCodAut: 'E',
@@ -928,7 +997,7 @@ export function buildWholesaleFacturaHtml(params: {
       .qr-wrap img { width: 84px; height: 84px; display: block; margin: 0 auto; }
       .qr-label { margin-top: 3px; font-size: 8px; line-height: 1.1; }
       .no-print { margin-top: 14px; display: flex; gap: 10px; }
-      @media print { .no-print { display: none !important; } }
+      ${WHOLESALE_PRINT_PAGINATION_CSS}
     </style></head><body>
       <div class="sheet">
         <div class="original">ORIGINAL</div>
@@ -1010,7 +1079,9 @@ export function buildWholesaleFacturaHtml(params: {
               <div class="r"><span>Bonificación</span><span>$${formatMoneyAr(0)}</span></div>
               <div class="r"><span>Subtotal Neto</span><span>$${formatMoneyAr(netoImpreso)}</span></div>
               <div class="r"><span>IVA 21%</span><span>$${formatMoneyAr(iva21)}</span></div>`
-                  : `<div class="r"><span>Subtotal</span><span>$${formatMoneyAr(subtotalBruto)}</span></div>
+                  : esExport
+                    ? `<div class="r"><span>Subtotal</span><span>$${formatMoneyAr(subtotalBruto)}</span></div>`
+                    : `<div class="r"><span>Subtotal</span><span>$${formatMoneyAr(subtotalBruto)}</span></div>
               <div class="r" style="font-size:9px;border-bottom:none;padding-top:2px;"><span class="muted">IVA incluido en el precio</span><span></span></div>`
               }
               ${(agipRetPer > 0 || agipAlicuota > 0) ? `<div class="r"><span>Percepciones IIBB (${agipAlicuota.toFixed(2)}%)</span><span>$${formatMoneyAr(agipRetPer)}</span></div>` : ''}
@@ -1209,7 +1280,7 @@ export function buildWholesaleCreditNoteHtml(params: {
       .footer { margin-top: 12px; font-size: 10px; }
       .bottom-block { margin-top: auto; }
       .no-print { margin-top: 14px; display: flex; gap: 10px; }
-      @media print { .no-print { display: none !important; } }
+      ${WHOLESALE_PRINT_PAGINATION_CSS}
     </style></head><body>
       <div class="sheet">
         <div class="original">ORIGINAL</div>
@@ -1471,7 +1542,7 @@ export function buildWholesaleDebitNoteHtml(params: {
       .footer { margin-top: 12px; font-size: 10px; }
       .bottom-block { margin-top: auto; }
       .no-print { margin-top: 14px; display: flex; gap: 10px; }
-      @media print { .no-print { display: none !important; } }
+      ${WHOLESALE_PRINT_PAGINATION_CSS}
     </style></head><body>
       <div class="sheet">
         <div class="original">ORIGINAL</div>
@@ -1756,7 +1827,7 @@ export function buildExternalChannelFacturaHtml(params: {
       .qr-label { margin-top: 3px; font-size: 8px; line-height: 1.1; }
       .channel-ref { margin-top: 8px; font-size: 10px; color: #444; }
       .no-print { margin-top: 14px; display: flex; gap: 10px; }
-      @media print { .no-print { display: none !important; } }
+      ${WHOLESALE_PRINT_PAGINATION_CSS}
     </style></head><body>
       <div class="sheet">
         <div class="original">ORIGINAL</div>

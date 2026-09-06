@@ -12,6 +12,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getDespachoStats = exports.getProductosSinDespacho = exports.asignarDespachoATodos = exports.asignarDespachoAProducto = exports.removeDespachoItem = exports.addDespachoItem = exports.deleteDespacho = exports.updateDespacho = exports.createDespacho = exports.getDespachoById = exports.getDespachos = void 0;
 const db_1 = require("../database/db");
 const uuid_1 = require("uuid");
+const despachoFob_1 = require("../utils/despachoFob");
 const getStockTotalByProductId = (productId) => __awaiter(void 0, void 0, void 0, function* () {
     const stockRow = yield (0, db_1.get)(`SELECT COALESCE(SUM(s.stock), 0) AS stock_total
      FROM product_colors pc
@@ -38,6 +39,7 @@ function incrementVariantDepotStock(variantId, cantidadNum) {
 // Obtener todos los despachos
 const getDespachos = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
+        const fobInfo = yield (0, despachoFob_1.persistDespachoFobFromList)();
         const { estado, desde, hasta, limit = '50', offset = '0' } = req.query;
         let whereClause = '1=1';
         const params = [];
@@ -68,7 +70,9 @@ const getDespachos = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         const countResult = yield (0, db_1.get)(`SELECT COUNT(*) as total FROM despachos d WHERE ${whereClause}`, params);
         res.json({
             despachos,
-            total: (countResult === null || countResult === void 0 ? void 0 : countResult.total) || 0
+            total: (countResult === null || countResult === void 0 ? void 0 : countResult.total) || 0,
+            fob_list_id: fobInfo.id,
+            fob_list_name: fobInfo.name || null
         });
     }
     catch (error) {
@@ -81,12 +85,13 @@ exports.getDespachos = getDespachos;
 const getDespachoById = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
         const { id } = req.params;
+        const fobInfo = yield (0, despachoFob_1.persistDespachoFobFromList)(id);
         const despacho = yield (0, db_1.get)(`SELECT * FROM despachos WHERE id = ?`, [id]);
         if (!despacho) {
             return res.status(404).json({ message: 'Despacho no encontrado' });
         }
         // Obtener items del despacho (color name viene de colors, no de product_colors)
-        const items = yield (0, db_1.query)(`
+        const itemsRaw = yield (0, db_1.query)(`
       SELECT 
         di.*,
         p.name as product_name,
@@ -101,7 +106,9 @@ const getDespachoById = (req, res) => __awaiter(void 0, void 0, void 0, function
       WHERE di.despacho_id = ?
       ORDER BY di.created_at
     `, [id]);
-        res.json(Object.assign(Object.assign({}, despacho), { items }));
+        const items = (0, despachoFob_1.applyFobToDespachoItems)(itemsRaw, fobInfo);
+        const valorFob = (0, despachoFob_1.sumItemsFob)(items);
+        res.json(Object.assign(Object.assign({}, despacho), { valor_fob: valorFob, fob_list_id: fobInfo.id, fob_list_name: fobInfo.name || null, items }));
     }
     catch (error) {
         console.error('Error fetching despacho:', error);
@@ -145,6 +152,7 @@ const createDespacho = (req, res) => __awaiter(void 0, void 0, void 0, function*
                 yield (0, db_1.execute)(`UPDATE products SET ultimo_despacho_id = ?, pais_origen = ? WHERE id = ?`, [despachoId, pais_origen, item.product_id]);
             }
         }
+        yield (0, despachoFob_1.persistDespachoFobFromList)(despachoId);
         res.status(201).json({
             message: 'Despacho creado exitosamente',
             id: despachoId,
@@ -252,6 +260,7 @@ const addDespachoItem = (req, res) => __awaiter(void 0, void 0, void 0, function
         if (resolvedProductId) {
             yield (0, db_1.execute)(`UPDATE products SET ultimo_despacho_id = ?, pais_origen = ? WHERE id = ?`, [id, despacho.pais_origen, resolvedProductId]);
         }
+        yield (0, despachoFob_1.persistDespachoFobFromList)(id);
         res.status(201).json({
             message: 'Item agregado al despacho',
             id: itemId,
@@ -269,6 +278,7 @@ const removeDespachoItem = (req, res) => __awaiter(void 0, void 0, void 0, funct
     try {
         const { id, itemId } = req.params;
         yield (0, db_1.execute)(`DELETE FROM despacho_items WHERE id = ? AND despacho_id = ?`, [itemId, id]);
+        yield (0, despachoFob_1.persistDespachoFobFromList)(id);
         res.json({ message: 'Item eliminado del despacho' });
     }
     catch (error) {
@@ -345,6 +355,7 @@ const asignarDespachoAProducto = (req, res) => __awaiter(void 0, void 0, void 0,
             pais,
             product.id
         ]);
+        yield (0, despachoFob_1.persistDespachoFobFromList)(despacho.id);
         res.status(201).json({
             message: `Se asignó el despacho ${despacho.numero_despacho} al producto "${product.name}" (${product.sku}).`,
             despachoId: despacho.id,
@@ -431,6 +442,7 @@ const asignarDespachoATodos = (req, res) => __awaiter(void 0, void 0, void 0, fu
                 p.id
             ]);
         }
+        yield (0, despachoFob_1.persistDespachoFobFromList)(despachoId);
         res.status(201).json({
             message: creadoNuevo
                 ? `Se creó el despacho "${numero_despacho}" y se asignó a ${productos.length} producto(s).`
@@ -494,6 +506,7 @@ exports.getProductosSinDespacho = getProductosSinDespacho;
 // Estadísticas de despachos
 const getDespachoStats = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
+        const fobInfo = yield (0, despachoFob_1.persistDespachoFobFromList)();
         const stats = yield (0, db_1.get)(`
       SELECT 
         COUNT(*) as total_despachos,
@@ -517,7 +530,7 @@ const getDespachoStats = (req, res) => __awaiter(void 0, void 0, void 0, functio
       GROUP BY pais_origen
       ORDER BY cantidad DESC
     `);
-        res.json(Object.assign(Object.assign(Object.assign({}, stats), itemsStats), { por_pais: porPais }));
+        res.json(Object.assign(Object.assign(Object.assign({}, stats), itemsStats), { por_pais: porPais, fob_list_id: fobInfo.id, fob_list_name: fobInfo.name || null }));
     }
     catch (error) {
         console.error('Error fetching despacho stats:', error);

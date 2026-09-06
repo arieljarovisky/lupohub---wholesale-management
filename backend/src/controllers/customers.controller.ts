@@ -209,6 +209,12 @@ function toCustomer(row: any, transportes?: { id: string; name: string; address?
     remitoNumber: row.remito_number ?? undefined,
     saleCondition: row.sale_condition ?? undefined,
     condicionIva: row.condicion_iva ?? undefined,
+    isExportClient: Number(row.is_export_client || 0) === 1,
+    exportDstCmp: row.export_dst_cmp != null ? Number(row.export_dst_cmp) : undefined,
+    exportCountryName: row.export_country_name ?? undefined,
+    foreignTaxId: row.foreign_tax_id ?? undefined,
+    exportCuitPaisCliente:
+      row.export_cuit_pais_cliente != null ? Number(row.export_cuit_pais_cliente) : undefined,
     priceListId: row.price_list_id ?? undefined,
     legacyCode: row.legacy_code ?? undefined,
     accountZone: row.account_zone ?? undefined,
@@ -262,7 +268,8 @@ export const getCustomers = async (req: Request, res: Response) => {
     const rows = await query(
       `SELECT c.id, c.seller_id, c.seller_commission_percentage, c.user_id, c.name, c.business_name, c.email, c.address, c.city, c.cuit, c.phone, c.transport_number, c.remito_number, c.sale_condition, c.condicion_iva, c.price_list_id,
               c.legacy_code, c.account_zone, c.account_seller_label, c.delivery_addresses,
-              c.opening_balance, c.opening_balance_date
+              c.opening_balance, c.opening_balance_date,
+              c.is_export_client, c.export_dst_cmp, c.export_country_name, c.foreign_tax_id, c.export_cuit_pais_cliente
               ${agipSelect}
        FROM customers c
        ${agipJoin}
@@ -762,6 +769,11 @@ export const updateCustomer = async (req: Request, res: Response) => {
       sellerCommissionPercentage?: number | null;
       openingBalance?: number | string | null;
       openingBalanceDate?: string | null;
+      isExportClient?: boolean;
+      exportDstCmp?: number | null;
+      exportCountryName?: string | null;
+      foreignTaxId?: string | null;
+      exportCuitPaisCliente?: number | null;
     };
     const existing = await get('SELECT id FROM customers WHERE id = ?', [id]);
     if (!existing) return res.status(404).json({ message: 'Cliente no encontrado' });
@@ -781,6 +793,28 @@ export const updateCustomer = async (req: Request, res: Response) => {
     if (body.remitoNumber !== undefined) { updates.push('remito_number = ?'); params.push(body.remitoNumber?.trim() || null); }
     if (body.saleCondition !== undefined) { updates.push('sale_condition = ?'); params.push(body.saleCondition?.trim() || null); }
     if (body.condicionIva !== undefined) { updates.push('condicion_iva = ?'); params.push(body.condicionIva?.trim() || null); }
+    if (body.isExportClient !== undefined) {
+      updates.push('is_export_client = ?');
+      params.push(body.isExportClient ? 1 : 0);
+    }
+    if (body.exportDstCmp !== undefined) {
+      const dst = body.exportDstCmp == null ? null : Number(body.exportDstCmp);
+      updates.push('export_dst_cmp = ?');
+      params.push(Number.isFinite(dst as number) ? dst : null);
+    }
+    if (body.exportCountryName !== undefined) {
+      updates.push('export_country_name = ?');
+      params.push(body.exportCountryName?.trim() || null);
+    }
+    if (body.foreignTaxId !== undefined) {
+      updates.push('foreign_tax_id = ?');
+      params.push(body.foreignTaxId?.trim() || null);
+    }
+    if (body.exportCuitPaisCliente !== undefined) {
+      const cp = body.exportCuitPaisCliente == null ? null : Number(body.exportCuitPaisCliente);
+      updates.push('export_cuit_pais_cliente = ?');
+      params.push(Number.isFinite(cp as number) ? cp : null);
+    }
     if (body.sellerId !== undefined) { updates.push('seller_id = ?'); params.push(body.sellerId?.trim() || null); }
     if (body.sellerCommissionPercentage !== undefined) {
       const pct = parseSellerCommissionPercentage(body.sellerCommissionPercentage);
@@ -832,7 +866,7 @@ export const updateCustomer = async (req: Request, res: Response) => {
       }
     }
     const updated = await get(
-      `SELECT id, seller_id, seller_commission_percentage, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label, delivery_addresses, opening_balance, opening_balance_date FROM customers WHERE id = ?`,
+      `SELECT id, seller_id, seller_commission_percentage, user_id, name, business_name, email, address, city, cuit, phone, transport_number, remito_number, sale_condition, condicion_iva, price_list_id, legacy_code, account_zone, account_seller_label, delivery_addresses, opening_balance, opening_balance_date, is_export_client, export_dst_cmp, export_country_name, foreign_tax_id, export_cuit_pais_cliente FROM customers WHERE id = ?`,
       [id]
     );
     const links = await query(

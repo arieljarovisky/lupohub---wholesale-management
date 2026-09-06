@@ -6,15 +6,18 @@ import {
   aggregateMercadoLibreInRange,
   aggregateTiendaNubeInRange,
   listPendingInvoices,
+  listWholesaleOrdersInPeriod,
   sumDespachosCostInRange,
   sumInvoicedInRange,
   sumReceiptsInRange,
+  sumWholesaleOrdersInvoiceBreakdown,
 } from '../services/companyFinanceAggregates.service';
 import {
   coveragePct,
   finishChannelEconomics,
   loadCompanyFobList,
   loadMlItemProductIndex,
+  loadTnVariantProductIndex,
   sumInventoryAtFob,
   sumSellerCommissionsInRange,
   sumWholesaleSalesAndCogs,
@@ -513,6 +516,7 @@ export const getCompanyFinanceSummary = async (req: Request, res: Response) => {
     const { from, to } = parseDateRange(req);
     const includeChannels =
       req.query.includeChannels !== '0' && req.query.includeChannels !== 'false';
+    const includeOrders = req.query.includeOrders === '1' || req.query.includeOrders === 'true';
 
     const totals = (await get(
       `SELECT
@@ -552,12 +556,13 @@ export const getCompanyFinanceSummary = async (req: Request, res: Response) => {
       [from, to]
     )) as Array<{ month: string; entryType: string; total: number }>;
 
-    const [fobInfo, mlIndex] = await Promise.all([
+    const [fobInfo, mlIndex, tnIndex] = await Promise.all([
       loadCompanyFobList(),
       includeChannels ? loadMlItemProductIndex() : Promise.resolve(undefined),
+      includeChannels ? loadTnVariantProductIndex() : Promise.resolve(undefined),
     ]);
 
-    const [receipts, despachos, pendingInvoices, fixedAgg, channelAgg, invoiced, wholesale, commissions, inventory] =
+    const [receipts, despachos, pendingInvoices, fixedAgg, channelAgg, invoiced, wholesale, commissions, inventory, wholesaleOrdersBreakdown] =
       await Promise.all([
         sumReceiptsInRange(from, to),
         sumDespachosCostInRange(from, to),
@@ -566,7 +571,7 @@ export const getCompanyFinanceSummary = async (req: Request, res: Response) => {
         includeChannels
           ? Promise.all([
               aggregateMercadoLibreInRange(from, to, fobInfo, mlIndex),
-              aggregateTiendaNubeInRange(from, to, fobInfo),
+              aggregateTiendaNubeInRange(from, to, fobInfo, tnIndex),
             ])
           : Promise.resolve([
               {
@@ -594,7 +599,12 @@ export const getCompanyFinanceSummary = async (req: Request, res: Response) => {
         sumWholesaleSalesAndCogs(from, to, fobInfo),
         sumSellerCommissionsInRange(from, to),
         sumInventoryAtFob(fobInfo),
+        sumWholesaleOrdersInvoiceBreakdown(from, to),
       ]);
+
+    const periodWholesaleOrders = includeOrders
+      ? await listWholesaleOrdersInPeriod(from, to, 500)
+      : undefined;
 
     const [mlAgg, tnAgg] = channelAgg;
     const manualIncome = round2(Number(totals?.manualIncome ?? 0));
@@ -770,6 +780,13 @@ export const getCompanyFinanceSummary = async (req: Request, res: Response) => {
       pendingInvoicesTotal: pendingInvoices.totalPending,
       pendingInvoicesCount: pendingInvoices.items.length,
       pendingInvoices: pendingInvoices.items,
+      wholesaleOrdersInvoicedCount: wholesaleOrdersBreakdown.invoicedCount,
+      wholesaleOrdersInvoicedNet: wholesaleOrdersBreakdown.invoicedNet,
+      wholesaleOrdersUninvoicedCount: wholesaleOrdersBreakdown.uninvoicedCount,
+      wholesaleOrdersUninvoicedNet: wholesaleOrdersBreakdown.uninvoicedNet,
+      wholesaleOrdersTotalCount: wholesaleOrdersBreakdown.totalCount,
+      wholesaleOrdersTotalNet: wholesaleOrdersBreakdown.totalNet,
+      ...(periodWholesaleOrders ? { periodWholesaleOrders } : {}),
       byCategory: (byCategory || []).map((r) => ({
         ...r,
         total: round2(Number(r.total)),

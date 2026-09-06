@@ -6,6 +6,9 @@ const price_lists_controller_1 = require("../controllers/price_lists.controller"
 const router = (0, express_1.Router)();
 router.use(auth_1.authMiddleware);
 router.get('/', price_lists_controller_1.listPriceLists);
+router.get('/sellers', price_lists_controller_1.getAllSellersWithPriceLists);
+router.get('/sellers/:sellerId', price_lists_controller_1.getSellerPriceLists);
+router.put('/sellers/:sellerId', price_lists_controller_1.setSellerPriceLists);
 router.post('/', price_lists_controller_1.createPriceList);
 router.post('/bulk', price_lists_controller_1.createPriceListsBulk);
 router.get('/:id', price_lists_controller_1.getPriceList);

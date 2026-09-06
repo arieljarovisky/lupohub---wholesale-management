@@ -13,6 +13,7 @@ import {
   buildWholesaleFacturaHtml,
   buildWholesaleCreditNoteHtml,
   buildWholesaleDebitNoteHtml,
+  injectWholesalePreviewBanner,
   normalizeSkuForPrint,
   mergeServerInvoiceIntoOrder,
   orderNetoFromItemsForAfip as orderNetoFromItems,
@@ -28,12 +29,25 @@ import {
 import { getWholesaleStockImpactMeta } from '../utils/orderStockImpact';
 import { calcTotalesDesdeNetoGravado } from '../utils/afipComprobante';
 import {
+  AFIP_DST_TIERRA_DEL_FUEGO,
+  AFIP_EXPORT_DST_FALLBACK,
+  mergeAfipExportDestinos,
+  parseAfipDstPaisResponse,
+} from '../utils/afipExportDestinos';
+import {
   getStoredOrdersListFilters,
   setStoredOrdersListFilters,
   type OrdersInvoiceListFilter,
 } from '../utils/ordersListFilters';
 import { downloadOneOrderExcel, downloadOrdersExcel } from '../utils/orderExportExcel';
 import EmitDebitNoteModal from './EmitDebitNoteModal';
+
+function customerHasExportTaxIdForFacturaE(c?: Customer | null): boolean {
+  if (!c) return false;
+  if ((c.foreignTaxId || '').trim()) return true;
+  if (Number(c.exportCuitPaisCliente) > 0) return true;
+  return String(c.cuit || '').replace(/\D/g, '').length >= 10;
+}
 
 /** Acción en tarjeta de pedido: ícono + texto corto (siempre visible). */
 function OrderCardActionButton(props: {
@@ -409,8 +423,15 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [restoringMayoristaStockId, setRestoringMayoristaStockId] = useState<string | null>(null);
   const [showEmitirFacturaModal, setShowEmitirFacturaModal] = useState(false);
   const [orderToEmitFactura, setOrderToEmitFactura] = useState<Order | null>(null);
-  const [emitirFacturaTipo, setEmitirFacturaTipo] = useState<'auto' | 'A' | 'B'>('auto');
+  const [emitirFacturaTipo, setEmitirFacturaTipo] = useState<'auto' | 'A' | 'B' | 'E'>('auto');
   const [emitirFacturaSaleCondition, setEmitirFacturaSaleCondition] = useState<CondicionVentaFactura>('Contado');
+  const [emitirFacturaDstCmp, setEmitirFacturaDstCmp] = useState('');
+  const [emitirFacturaMonedaId, setEmitirFacturaMonedaId] = useState('PES');
+  const [emitirFacturaMonedaCtz, setEmitirFacturaMonedaCtz] = useState('1');
+  const [emitirFacturaIncoterms, setEmitirFacturaIncoterms] = useState('FOB');
+  const [exportPaisesOptions, setExportPaisesOptions] = useState<{ code: number; name: string }[]>(
+    AFIP_EXPORT_DST_FALLBACK
+  );
   const [ncOrder, setNcOrder] = useState<Order | null>(null);
   const [orderCreditNotes, setOrderCreditNotes] = useState<CreditNote[]>([]);
   const [ncTipo, setNcTipo] = useState<'total' | 'item' | 'items'>('total');
@@ -500,6 +521,15 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     api.getAfipIssuer().then(setIssuerFromApi).catch(() => setIssuerFromApi(null));
   }, [canEmitirFactura]);
 
+  useEffect(() => {
+    if (!showEmitirFacturaModal || !afipConfigured) return;
+    api.getAfipExportacionParametros('paises').then((res) => {
+      const raw = (res as { data?: unknown })?.data ?? res;
+      const parsed = parseAfipDstPaisResponse(raw);
+      setExportPaisesOptions(mergeAfipExportDestinos(parsed));
+    }).catch(() => { /* mantener lista fallback */ });
+  }, [showEmitirFacturaModal, afipConfigured]);
+
   // El remitente (CAI y vencimiento incluidos) se carga siempre que el componente esté visible:
   // cualquier rol que genere un remito debe poder ver el CAI configurado en Settings.
   useEffect(() => {
@@ -579,13 +609,66 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const canDuplicateOrder =
     role === Role.ADMIN || role === Role.SELLER || role === Role.WAREHOUSE || role === Role.CUSTOMER;
 
-  /** Tipo de factura que se emitirá según condición IVA del cliente (misma regla que el backend). */
-  const getTipoFacturaParaCliente = (order: Order): 'A' | 'B' => {
+  /** Tipo de factura que se emitirá según cliente (exportación → E; si no, A/B por condición IVA). */
+  const getTipoFacturaParaCliente = (order: Order): 'A' | 'B' | 'E' => {
     const customer = customers.find(c => c.id === order.customerId);
+    if (customer?.isExportClient) return 'E';
     const condicion = (customer?.condicionIva ?? '').toLowerCase();
     const esRI = condicion.includes('responsable inscripto') && !condicion.includes('no inscripto');
     const tieneCuit = customer?.cuit && String(customer.cuit).replace(/\D/g, '').length >= 10;
     return tieneCuit && esRI ? 'A' : 'B';
+  };
+
+  const resolveExportDstCmpForOrder = (order: Order): number | null => {
+    if (emitirFacturaDstCmp.trim()) {
+      const n = Number(emitirFacturaDstCmp);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    }
+    const cust = customers.find((c) => c.id === order.customerId);
+    if (cust?.exportDstCmp != null && Number(cust.exportDstCmp) > 0) return Number(cust.exportDstCmp);
+    if (cust?.isExportClient) return AFIP_DST_TIERRA_DEL_FUEGO;
+    return null;
+  };
+
+  const getCbteTipoFromEmitSelection = (order: Order): 1 | 6 | 19 => {
+    if (emitirFacturaTipo === 'E') return 19;
+    if (emitirFacturaTipo === 'A') return 1;
+    if (emitirFacturaTipo === 'B') return 6;
+    if (customers.find((c) => c.id === order.customerId)?.isExportClient) return 19;
+    return getTipoFacturaParaCliente(order) === 'A' ? 1 : 6;
+  };
+
+  const buildEmitFacturaRequest = (
+    order: Order
+  ): { body?: Parameters<typeof api.emitirFactura>[1]; error?: string } => {
+    const cbteTipo = getCbteTipoFromEmitSelection(order);
+    if (cbteTipo === 19) {
+      const dstCmp = resolveExportDstCmpForOrder(order);
+      if (!dstCmp) {
+        return { error: 'Seleccioná el país destino para Factura E.' };
+      }
+      if (emitirFacturaMonedaId !== 'PES' && !(Number(emitirFacturaMonedaCtz) > 0)) {
+        return { error: 'Informá la cotización de la moneda para Factura E.' };
+      }
+      const custE = customers.find((c) => c.id === order.customerId);
+      if (!customerHasExportTaxIdForFacturaE(custE)) {
+        return { error: 'El cliente debe tener ID tributaria, CUIT argentino o CUIT país cliente en Clientes.' };
+      }
+      return {
+        body: {
+          cbteTipo: 19,
+          dstCmp,
+          monedaId: emitirFacturaMonedaId,
+          monedaCtz: emitirFacturaMonedaId === 'PES' ? 1 : Number(emitirFacturaMonedaCtz),
+          incoterms: emitirFacturaIncoterms,
+          formaPago: emitirFacturaSaleCondition,
+        },
+      };
+    }
+    if (emitirFacturaTipo === 'A' || emitirFacturaTipo === 'B') {
+      return { body: { cbteTipo: cbteTipo as 1 | 6 } };
+    }
+    return { body: undefined };
   };
 
   const getCustomerName = (orderOrCustomerId: Order | string) => {
@@ -1250,13 +1333,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     });
   };
 
-  const injectPreviewBanner = (html: string) => {
-    if (!html) return html;
-    return html.replace(
-      '<body>',
-      '<body><div style="position:sticky;top:0;z-index:9999;background:#7f1d1d;color:#fff;padding:10px 14px;font:700 12px Arial,Helvetica,sans-serif;letter-spacing:.03em;text-transform:uppercase;text-align:center;">Vista previa sin validez fiscal - aun no emitida en AFIP</div>'
-    );
-  };
+  const injectPreviewBanner = injectWholesalePreviewBanner;
 
   const openHtmlPreviewWindow = (html: string) => {
     if (!html) {
@@ -1268,12 +1345,6 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       w.document.write(html);
       w.document.close();
     }
-  };
-
-  const getCbteTipoFromEmitSelection = (order: Order): 1 | 6 => {
-    if (emitirFacturaTipo === 'A') return 1;
-    if (emitirFacturaTipo === 'B') return 6;
-    return getTipoFacturaParaCliente(order) === 'A' ? 1 : 6;
   };
 
   /** Proforma de la factura nueva que se emitiría tras NC total + reemisión (IIBB según cliente / padrón en UI). */
@@ -2234,7 +2305,18 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         onClick={(e) => {
                           e.stopPropagation();
                           setOrderToEmitFactura(order);
-                          setEmitirFacturaTipo('auto');
+                          const custForEmit = customers.find((c) => c.id === order.customerId);
+                          setEmitirFacturaTipo(custForEmit?.isExportClient ? 'E' : 'auto');
+                          setEmitirFacturaDstCmp(
+                            custForEmit?.exportDstCmp != null
+                              ? String(custForEmit.exportDstCmp)
+                              : custForEmit?.isExportClient
+                                ? String(AFIP_DST_TIERRA_DEL_FUEGO)
+                                : ''
+                          );
+                          setEmitirFacturaMonedaId('PES');
+                          setEmitirFacturaMonedaCtz('1');
+                          setEmitirFacturaIncoterms('FOB');
                           const prevSale = manualFacturaDataByOrder[order.id]?.saleCondition
                             || customers.find((c) => c.id === order.customerId)?.saleCondition
                             || '';
@@ -2656,8 +2738,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
 
       {/* Modal: elegir tipo de factura (A o B) antes de emitir */}
       {showEmitirFacturaModal && orderToEmitFactura && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => { if (!emitiendoFacturaId) { setShowEmitirFacturaModal(false); setOrderToEmitFactura(null); } }}>
-          <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-2xl p-6" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto" onClick={() => { if (!emitiendoFacturaId) { setShowEmitirFacturaModal(false); setOrderToEmitFactura(null); } }}>
+          <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-2xl p-6 max-h-[90vh] overflow-y-auto my-auto" onClick={e => e.stopPropagation()}>
             <h3 className="text-lg font-bold text-white mb-1">Emitir factura electrónica AFIP</h3>
             <p className="text-xs text-sky-200/95 mb-3 rounded-lg border border-sky-800/50 bg-sky-950/35 px-3 py-2 leading-snug">
               Pedidos de depósito: emití después del picking (
@@ -2713,7 +2795,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
               <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-600 hover:bg-slate-700/50 cursor-pointer">
                 <input type="radio" name="tipoFactura" checked={emitirFacturaTipo === 'auto'} onChange={() => setEmitirFacturaTipo('auto')} className="rounded border-slate-500 text-emerald-500" />
                 <span className="text-white">Automático</span>
-                <span className="text-slate-500 text-xs">(según condición IVA del cliente)</span>
+                <span className="text-slate-500 text-xs">(según condición IVA del cliente; exportación → Factura E)</span>
               </label>
               <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-600 hover:bg-slate-700/50 cursor-pointer">
                 <input type="radio" name="tipoFactura" checked={emitirFacturaTipo === 'A'} onChange={() => setEmitirFacturaTipo('A')} className="rounded border-slate-500 text-emerald-500" />
@@ -2725,7 +2807,78 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                 <span className="text-white font-medium">Factura B</span>
                 <span className="text-slate-500 text-xs">(Consumidor final / Monotributo)</span>
               </label>
+              <label className="flex items-center gap-3 p-3 rounded-xl border border-indigo-700/60 hover:bg-indigo-950/30 cursor-pointer">
+                <input type="radio" name="tipoFactura" checked={emitirFacturaTipo === 'E'} onChange={() => setEmitirFacturaTipo('E')} className="rounded border-slate-500 text-indigo-400" />
+                <span className="text-white font-medium">Factura E</span>
+                <span className="text-slate-500 text-xs">(Exportación / zona franca — WSFEX)</span>
+              </label>
             </div>
+            {emitirFacturaTipo === 'E' && (
+              <div className="mb-6 space-y-3 rounded-xl border border-indigo-800/50 bg-indigo-950/20 p-4">
+                <p className="text-xs text-indigo-200/90 leading-snug">
+                  Requiere web service <strong className="text-white">wsfex</strong> autorizado en ARCA y punto de venta de exportación (10).
+                  Para <strong className="text-white">Tierra del Fuego</strong> elegí{' '}
+                  <strong className="text-white">AAE Tierra del Fuego (250)</strong> — no es Factura A/B aunque sea Argentina.
+                  El cliente debe tener domicilio e identificación tributaria cargados en Clientes.
+                </p>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Destino AFIP (país / zona)</label>
+                  <select
+                    value={emitirFacturaDstCmp}
+                    onChange={(e) => setEmitirFacturaDstCmp(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                  >
+                    <option value="">— Seleccionar país —</option>
+                    {exportPaisesOptions.map((p) => (
+                      <option key={p.code} value={String(p.code)}>{p.name} ({p.code})</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Moneda</label>
+                    <select
+                      value={emitirFacturaMonedaId}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setEmitirFacturaMonedaId(v);
+                        if (v === 'PES') setEmitirFacturaMonedaCtz('1');
+                      }}
+                      className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                    >
+                      <option value="PES">Pesos argentinos (PES)</option>
+                      <option value="DOL">USD (DOL)</option>
+                      <option value="EUR">EUR</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Cotización</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={emitirFacturaMonedaCtz}
+                      onChange={(e) => setEmitirFacturaMonedaCtz(e.target.value)}
+                      disabled={emitirFacturaMonedaId === 'PES'}
+                      placeholder={emitirFacturaMonedaId === 'PES' ? '1 (pesos)' : 'Ej. 1050'}
+                      className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none disabled:opacity-60"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 uppercase mb-1">Incoterms</label>
+                    <select
+                      value={emitirFacturaIncoterms}
+                      onChange={(e) => setEmitirFacturaIncoterms(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-indigo-500 outline-none"
+                    >
+                      {['FOB', 'CIF', 'CFR', 'EXW', 'FCA', 'DAP', 'DDP'].map((i) => (
+                        <option key={i} value={i}>{i}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
             <label className="block text-xs font-semibold text-slate-400 uppercase mb-2">Condición de venta</label>
             <div className="mb-4">
               <select
@@ -2788,7 +2941,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     showToast('error', 'Completá el picking y pasá el pedido a control antes de emitir la factura.');
                     return;
                   }
-                  const cbteTipo = emitirFacturaTipo === 'A' ? 1 as const : emitirFacturaTipo === 'B' ? 6 as const : undefined;
+                  const { body: emitBody, error: emitError } = buildEmitFacturaRequest(orderToEmitFactura);
+                  if (emitError) {
+                    showToast('error', emitError);
+                    return;
+                  }
                   setEmitiendoFacturaId(orderToEmitFactura.id);
                   const custEmit = customers.find((c) => c.id === orderToEmitFactura.customerId);
                   const optsEmit = transporteOptionsForCustomer(custEmit, transportes);
@@ -2812,7 +2969,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     ...prev,
                     [orderToEmitFactura.id]: manual
                   }));
-                  api.emitirFactura(orderToEmitFactura.id, cbteTipo != null ? { cbteTipo } : undefined)
+                  api.emitirFactura(orderToEmitFactura.id, emitBody)
                     .then((res) => {
                       onFacturaEmitida?.(orderToEmitFactura.id, {
                         cae: res.cae,

@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { isAfipConfigured, getAfipIssuerData, isAfipProduction, getCondicionIvaByCuit, consultarComprobanteAfip } from '../services/afip.service';
+import { isAfipConfigured, getAfipIssuerData, isAfipProduction, getCondicionIvaByCuit, consultarComprobanteAfip, getWsfexParametros, getAfipExportPuntoVenta, getWsfexExportDiagnostico } from '../services/afip.service';
 import { getRemitente, saveRemitente } from '../controllers/remitente.controller';
 import { optionalAuthMiddleware, authMiddleware } from '../middleware/auth';
 
@@ -63,6 +63,44 @@ router.get('/consultar-comprobante', authMiddleware, (req: Request, res: Respons
       const message = err?.message || String(err) || 'Error al consultar comprobante.';
       if (!res.headersSent) res.status(400).json({ error: message });
     });
+});
+
+/** Diagnóstico WSFEX: PV exportación, listado FEEWS y último comprobante E. */
+router.get('/exportacion/diagnostico', authMiddleware, async (_req: Request, res: Response) => {
+  if (!isAfipConfigured()) {
+    return res.status(400).json({ error: 'AFIP no está configurado.' });
+  }
+  try {
+    const data = await getWsfexExportDiagnostico();
+    return res.json(data);
+  } catch (err: any) {
+    const message = err?.message || String(err) || 'Error en diagnóstico WSFEX.';
+    if (!res.headersSent) return res.status(400).json({ error: message });
+  }
+});
+
+/** Catálogos WSFEX para Factura E: paises | monedas | incoterms | puntos_venta | … */
+router.get('/exportacion/:tipo', authMiddleware, async (req: Request, res: Response) => {
+  const tipo = (req.params.tipo || '').toLowerCase() as
+    | 'paises'
+    | 'monedas'
+    | 'incoterms'
+    | 'umed'
+    | 'tipo_expo'
+    | 'puntos_venta';
+  if (!['paises', 'monedas', 'incoterms', 'umed', 'tipo_expo', 'puntos_venta'].includes(tipo)) {
+    return res.status(400).json({ error: 'tipo debe ser paises, monedas, incoterms, umed, tipo_expo o puntos_venta' });
+  }
+  if (!isAfipConfigured()) {
+    return res.status(400).json({ error: 'AFIP no está configurado.' });
+  }
+  try {
+    const data = await getWsfexParametros(tipo);
+    return res.json({ tipo, data, puntoVentaExport: getAfipExportPuntoVenta() });
+  } catch (err: any) {
+    const message = err?.message || String(err) || 'Error consultando parámetros WSFEX.';
+    if (!res.headersSent) return res.status(400).json({ error: message });
+  }
 });
 
 export default router;

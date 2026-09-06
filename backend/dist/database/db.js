@@ -75,7 +75,10 @@ const execute = (sql_1, ...args_1) => __awaiter(void 0, [sql_1, ...args_1], void
         return rows;
     }
     catch (error) {
-        console.error(`Error executing command: ${sql}`, error);
+        const errno = error === null || error === void 0 ? void 0 : error.errno;
+        if (errno !== 1060) {
+            console.error(`Error executing command: ${sql}`, error);
+        }
         throw error;
     }
 });

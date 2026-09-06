@@ -807,13 +807,21 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     setExportingExcel(true);
     try {
       const rows = await api.exportInventory();
+      if (!rows.length) {
+        showToast('info', 'No hay variantes para exportar.');
+        return;
+      }
       const excelRows = rows.map((r: any) => ({
         'Código artículo': r.product_sku,
         'Nombre producto': r.product_name,
         'Categoría': r.category || '',
         'SKU variante': r.variant_sku || '',
-        'Talle': r.talle_display ? `${r.size_code} - ${r.talle_display}` : r.size_code,
-        'Color': r.color_code && r.color_name && r.color_code !== r.color_name ? `${r.color_code} - ${r.color_name}` : (r.color_name || r.color_code || ''),
+        'Talle': r.talle_display
+          ? `${r.size_code ?? ''} - ${r.talle_display}`.replace(/^ - /, '')
+          : (r.size_code || r.size_name || ''),
+        'Color': r.color_code && r.color_name && r.color_code !== r.color_name
+          ? `${r.color_code} - ${r.color_name}`
+          : (r.color_name || r.color_code || ''),
         'Stock': Number(r.stock ?? 0),
         'Precio': Number(r.base_price ?? 0),
       }));
@@ -822,6 +830,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Inventario');
       const filename = `inventario_${new Date().toISOString().slice(0, 10)}.xlsx`;
       XLSX.writeFile(workbook, filename);
+      showToast('success', `Exportadas ${rows.length.toLocaleString('es-AR')} variantes.`);
     } catch (e) {
       console.error(e);
       showToast('error', 'Error al exportar. Revisá que el backend esté conectado.');

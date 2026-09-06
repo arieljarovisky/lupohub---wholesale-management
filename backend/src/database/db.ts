@@ -61,7 +61,10 @@ export const execute = async (sql: string, params: any[] = []): Promise<any> => 
     const [rows] = await pool.execute(sql, params);
     return rows;
   } catch (error) {
-    console.error(`Error executing command: ${sql}`, error);
+    const errno = (error as { errno?: number })?.errno;
+    if (errno !== 1060) {
+      console.error(`Error executing command: ${sql}`, error);
+    }
     throw error;
   }
 };

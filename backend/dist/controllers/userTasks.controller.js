@@ -24,12 +24,14 @@ function isTasksOwner(req) {
 const getMyUserTasks = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a;
     try {
-        const email = normalizeEmail((_a = req === null || req === void 0 ? void 0 : req.user) === null || _a === void 0 ? void 0 : _a.email);
+        const rawEmail = (_a = req === null || req === void 0 ? void 0 : req.user) === null || _a === void 0 ? void 0 : _a.email;
+        const email = normalizeEmail(rawEmail);
         if (!email)
             return res.status(401).json({ message: 'Sesión inválida' });
+        // Usar UTC_TIMESTAMP para comparación consistente (expires_at se guarda en UTC)
         const rows = yield (0, db_1.query)(`SELECT id, message, assigned_to_email AS assignedToEmail, created_by_email AS createdByEmail, expires_at AS expiresAt, created_at AS createdAt
        FROM user_tasks
-       WHERE assigned_to_email = ? AND expires_at > NOW()
+       WHERE LOWER(assigned_to_email) = LOWER(?) AND expires_at > UTC_TIMESTAMP()
        ORDER BY expires_at ASC, created_at DESC`, [email]);
         res.json(rows);
     }
@@ -69,17 +71,22 @@ const createAssignedUserTask = (req, res) => __awaiter(void 0, void 0, void 0, f
         }
         if (!expiresAt)
             return res.status(400).json({ message: 'expiresAt es obligatorio' });
-        const expiresDate = new Date(expiresAt);
+        // El input datetime-local envía formato YYYY-MM-DDTHH:mm sin timezone
+        // El usuario está en Argentina (UTC-3), así que interpretamos la fecha en esa zona
+        const expiresDateStr = expiresAt.includes('T') ? expiresAt : `${expiresAt}T00:00`;
+        const expiresDate = new Date(expiresDateStr + ':00-03:00');
         if (isNaN(expiresDate.getTime()))
             return res.status(400).json({ message: 'expiresAt inválido' });
         if (expiresDate.getTime() <= Date.now())
             return res.status(400).json({ message: 'La fecha de fin debe ser futura' });
+        // Convertir a formato MySQL DATETIME en UTC para evitar problemas de timezone
+        const expiresDateUtc = expiresDate.toISOString().slice(0, 19).replace('T', ' ');
         const id = (0, uuid_1.v4)();
         const creator = (req === null || req === void 0 ? void 0 : req.user) || {};
         const createdByEmail = normalizeEmail(creator.email);
         const createdByUserId = creator.id || null;
         yield (0, db_1.execute)(`INSERT INTO user_tasks (id, message, assigned_to_email, created_by_user_id, created_by_email, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?)`, [id, message, assignedToEmail, createdByUserId, createdByEmail, expiresDate]);
+       VALUES (?, ?, ?, ?, ?, ?)`, [id, message, assignedToEmail, createdByUserId, createdByEmail, expiresDateUtc]);
         const created = yield (0, db_1.get)(`SELECT id, message, assigned_to_email AS assignedToEmail, created_by_email AS createdByEmail, expires_at AS expiresAt, created_at AS createdAt
        FROM user_tasks WHERE id = ?`, [id]);
         res.status(201).json(created);
