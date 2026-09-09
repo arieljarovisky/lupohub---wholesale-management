@@ -614,7 +614,11 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
         invoiceId: String(inv.id || ''),
         numero: formatAfipComprobanteNumero(Number(inv.punto_venta || 0), Number(inv.cbte_desde || 0)),
         agipRetPer: agipRet,
-        importeConIibb: invoiceLedgerImporte(Number(inv.total || 0), agipRet)
+        importeConIibb: invoiceLedgerImporte(
+          Number(inv.total || 0),
+          agipRet,
+          Number(inv.cbte_tipo)
+        )
       });
     }
     const orderSaldoAsEntries = orderSaldoRows.filter((ord) => movementOnOrAfterOpening(ord.order_date)).map((ord, idx) => {
@@ -650,7 +654,11 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
       )
       .map((inv, idx) => {
         const agipRet = Number(inv.agip_ret_per || 0);
-        const importe = invoiceLedgerImporte(Number(inv.total || 0), agipRet);
+        const importe = invoiceLedgerImporte(
+          Number(inv.total || 0),
+          agipRet,
+          Number(inv.cbte_tipo)
+        );
         const numero = formatAfipComprobanteNumero(Number(inv.punto_venta || 0), Number(inv.cbte_desde || 0));
         const lineDate = inv.invoice_created_at || inv.line_date || inv.order_date;
         const orderId = String(inv.order_id || '');

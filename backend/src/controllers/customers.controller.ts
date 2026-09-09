@@ -5026,7 +5026,7 @@ async function restoreFromAfipScan(
           if (!ord.dateYmd || !cbteFch) continue;
           const dayDiff = daysBetweenYmd(ord.dateYmd, cbteFch);
           if (dayDiff > 60) continue;
-          const expected = invoiceLedgerImporte(ord.orderNeto, agip);
+          const expected = invoiceLedgerImporte(ord.orderNeto, agip, cbteTipo);
           const amountDiff = Math.abs(expected - impTotal);
           if (amountDiff > 5) continue;
           const score = dayDiff * 100 + amountDiff;
