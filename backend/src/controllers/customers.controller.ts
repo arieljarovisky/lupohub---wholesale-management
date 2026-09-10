@@ -17,6 +17,7 @@ import {
 } from '../services/orderPaymentBalance.service';
 import {
   consultarComprobanteAfip,
+  getAfipExportPuntoVenta,
   getAfipPuntoVenta,
   getLastAfipVoucherNumber,
   isAfipConfigured
@@ -1579,7 +1580,20 @@ const SQL_ORDER_NC_CREDIT_SUM = `SUM(${SQL_ORDER_NC_CREDIT_EXPR})`;
 
 const SQL_ORDER_ACTIVE_COND = `o.status NOT IN ('Cancelado', 'Borrador') AND (o.archived = 0 OR o.archived IS NULL)`;
 
-/** Facturas AFIP emitidas (total con IVA + IIBB), desde saldo inicial. Solo punto de venta 21. */
+/** PV LupoHub en cartera: 21 (A/B), AFIP_PTO_VTA y AFIP_PTO_VTA_EXPORT (Factura E). */
+function lupohubPuntosDeVenta(): number[] {
+  return Array.from(
+    new Set(
+      [21, getAfipPuntoVenta(), getAfipExportPuntoVenta()].filter(
+        (n) => Number.isFinite(n) && n > 0
+      )
+    )
+  );
+}
+
+const SQL_CARTERA_PV_IN = lupohubPuntosDeVenta().join(', ');
+
+/** Facturas AFIP emitidas (total con IVA + IIBB; Factura E = neto), desde saldo inicial. */
 const SQL_CARTERA_AFIP_INVOICES_SUBQUERY = `
   SELECT
     o.customer_id,
@@ -1587,13 +1601,16 @@ const SQL_CARTERA_AFIP_INVOICES_SUBQUERY = `
   FROM invoices i
   INNER JOIN orders o ON o.id = i.order_id
   INNER JOIN customers co ON co.id = o.customer_id
-  WHERE i.punto_venta = 21
+  WHERE (
+      i.punto_venta IN (${SQL_CARTERA_PV_IN})
+      OR COALESCE(i.cbte_tipo, 0) = 19
+    )
     AND ${SQL_OPENING_AFIP_INVOICE_DATE_WHERE}
   GROUP BY o.customer_id
 `;
 
 /**
- * NC AFIP (× IVA) que restan del saldo. Solo punto de venta 21.
+ * NC AFIP (× IVA) que restan del saldo. Mismos puntos de venta que facturas LupoHub.
  * Excluye NC de reemisión IIBB (superseded_by_reinvoice): la factura anterior no figura en cartera
  * porque se actualiza en el mismo registro; solo cuenta la factura nueva.
  */
@@ -1604,7 +1621,7 @@ const SQL_CARTERA_AFIP_NC_SUBQUERY = `
   FROM credit_notes cn
   INNER JOIN orders o ON o.id = cn.order_id
   INNER JOIN customers co ON co.id = o.customer_id
-  WHERE cn.punto_venta = 21
+  WHERE cn.punto_venta IN (${SQL_CARTERA_PV_IN})
     AND COALESCE(cn.superseded_by_reinvoice, 0) = 0
     AND ${SQL_OPENING_AFIP_CN_DATE_WHERE}
   GROUP BY o.customer_id
@@ -4705,12 +4722,6 @@ function extractAgipFromAfipVoucher(r: Record<string, unknown>): number {
 
 function voucherDocNro(r: Record<string, unknown>): string {
   return normalizeCuitDigits(String(r.DocNro ?? r.docNro ?? ''));
-}
-
-/** Punto de venta 21 es el usado en cartera LupoHub; se suma el configurado en AFIP_PTO_VTA. */
-function lupohubPuntosDeVenta(): number[] {
-  const fromEnv = getAfipPuntoVenta();
-  return Array.from(new Set([21, fromEnv].filter((n) => Number.isFinite(n) && n > 0)));
 }
 
 function preferCbteTipoForCustomer(condicionIva: string | null | undefined): 1 | 6 {

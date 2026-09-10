@@ -13,6 +13,7 @@ import EmitDebitNoteModal from './EmitDebitNoteModal';
 import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2, Percent, RefreshCcw, FileMinus, ExternalLink, Printer, MoreHorizontal, ChevronDown, Download, Upload, Wallet, FilePlus, FileText, Pencil, Trash2 } from 'lucide-react';
 import { useNotification } from '../context/NotificationContext';
 import { formatMoneyAr } from '../utils/moneyFormat';
+import { formatOrderDate } from '../utils/formatDate';
 import { getStoredOrdersListFilters, setStoredOrdersListFilters } from '../utils/ordersListFilters';
 import { buildCityFilterOptions, cityMatchesFilter } from '../utils/cityNormalize';
 
@@ -475,10 +476,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
           : String(x.numeroDesde || x.numeroHasta || '').trim() || 'Comprobante s/n';
         return {
           invoiceId: x.id,
-          label: `${comprobante} — ${x.customerBusinessName || ''} — ${(() => {
-            const d = new Date(x.fecha);
-            return Number.isNaN(d.getTime()) ? String(x.fecha || '') : d.toLocaleDateString('es-AR');
-          })()} — $${formatMoneyAr(Number(x.importe || 0))}`.trim(),
+          label: `${comprobante} — ${x.customerBusinessName || ''} — ${formatOrderDate(x.fecha)} — $${formatMoneyAr(Number(x.importe || 0))}`.trim(),
           customerId: x.customerId
         };
       });
@@ -487,8 +485,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     rows: Awaited<ReturnType<typeof api.getLinkableOrdersForPayment>>
   ) =>
     rows.map((o) => {
-      const d = new Date(o.date);
-      const dateLabel = Number.isNaN(d.getTime()) ? String(o.date || '') : d.toLocaleDateString('es-AR');
+      const dateLabel = formatOrderDate(o.date);
       const ref = o.remitoNumber ? `Remito ${o.remitoNumber}` : `Pedido ${String(o.orderId).slice(0, 8)}`;
       return {
         orderId: o.orderId,
@@ -719,11 +716,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     [pedidoOptionsInModal]
   );
 
-  const formatDate = (d: any) => {
-    if (!d) return '';
-    const x = new Date(d);
-    return isNaN(x.getTime()) ? String(d) : x.toLocaleDateString('es-AR');
-  };
+  const formatDate = (d: any) => formatOrderDate(d == null ? d : String(d));
 
   const billingTipoBadgeClass = (t: string) => {
     if (t === 'NC') return 'bg-amber-900/40 text-amber-300 border border-amber-700/60';
