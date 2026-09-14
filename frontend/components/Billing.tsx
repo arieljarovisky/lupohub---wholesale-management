@@ -1965,8 +1965,24 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
         ) : (
           <div className="space-y-2">
             {pagedPayments.map((p) => {
-              const linkedOrders = Array.isArray(p.orderIds) ? p.orderIds : [];
-              const linkedInvoices = Array.isArray(p.invoiceIds) ? p.invoiceIds : [];
+              const invoiceLinks =
+                Array.isArray(p.invoiceLinks) && p.invoiceLinks.length > 0
+                  ? p.invoiceLinks
+                  : (Array.isArray(p.invoiceIds) ? p.invoiceIds : []).map((id) => ({
+                      invoiceId: id,
+                      label: facturaOptionById.get(id) || id,
+                      amountApplied: 0,
+                      invoiceOutstanding: NaN
+                    }));
+              const orderLinks =
+                Array.isArray(p.orderLinks) && p.orderLinks.length > 0
+                  ? p.orderLinks
+                  : (Array.isArray(p.orderIds) ? p.orderIds : []).map((id) => ({
+                      orderId: id,
+                      label: pedidoOptionById.get(id) || id,
+                      amountApplied: 0,
+                      orderOutstanding: NaN
+                    }));
               const shortLabel = (full: string, fallback: string) => {
                 const head = String(full || '').split(' — ')[0]?.trim();
                 return head || fallback;
@@ -1997,41 +2013,91 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                     </div>
                   </div>
 
-                  {(linkedOrders.length > 0 || linkedInvoices.length > 0) && (
+                  {(orderLinks.length > 0 || invoiceLinks.length > 0) && (
                     <div className="space-y-1.5">
-                      {linkedOrders.length > 0 && (
+                      {orderLinks.length > 0 && (
                         <div className="flex flex-wrap items-center gap-1.5">
                           <span className="text-[10px] uppercase tracking-wide font-bold text-slate-500 shrink-0">
                             Pedidos
                           </span>
-                          {linkedOrders.map((id) => {
-                            const full = pedidoOptionById.get(id) || id;
+                          {orderLinks.map((link) => {
+                            const full = pedidoOptionById.get(link.orderId) || link.label || link.orderId;
+                            const debe = Number(link.orderOutstanding);
+                            const imputa = Number(link.amountApplied) || 0;
+                            const titleParts = [
+                              full,
+                              imputa > 0 ? `Imputa $${formatMoneyAr(imputa)}` : '',
+                              Number.isFinite(debe)
+                                ? debe > 0.01
+                                  ? `Debe $${formatMoneyAr(debe)}`
+                                  : 'Saldado'
+                                : ''
+                            ].filter(Boolean);
                             return (
                               <span
-                                key={id}
-                                title={full}
-                                className="inline-flex max-w-full items-center rounded-md bg-slate-900/80 border border-slate-600/80 px-1.5 py-0.5 text-[11px] font-mono text-slate-300 truncate"
+                                key={link.orderId}
+                                title={titleParts.join(' · ')}
+                                className="inline-flex max-w-full flex-col sm:flex-row sm:items-baseline gap-0.5 sm:gap-1.5 rounded-md bg-slate-900/80 border border-slate-600/80 px-1.5 py-0.5 text-[11px] text-slate-300"
                               >
-                                {shortLabel(full, id)}
+                                <span className="font-mono truncate">{shortLabel(full, link.orderId)}</span>
+                                {imputa > 0.005 && (
+                                  <span className="text-slate-500 tabular-nums whitespace-nowrap">
+                                    imputa ${formatMoneyAr(imputa)}
+                                  </span>
+                                )}
+                                {Number.isFinite(debe) && (
+                                  debe > 0.01 ? (
+                                    <span className="text-amber-300 font-semibold tabular-nums whitespace-nowrap">
+                                      debe ${formatMoneyAr(debe)}
+                                    </span>
+                                  ) : (
+                                    <span className="text-emerald-400/90 font-semibold whitespace-nowrap">saldado</span>
+                                  )
+                                )}
                               </span>
                             );
                           })}
                         </div>
                       )}
-                      {linkedInvoices.length > 0 && (
+                      {invoiceLinks.length > 0 && (
                         <div className="flex flex-wrap items-center gap-1.5">
                           <span className="text-[10px] uppercase tracking-wide font-bold text-slate-500 shrink-0">
                             Facturas
                           </span>
-                          {linkedInvoices.map((id) => {
-                            const full = facturaOptionById.get(id) || id;
+                          {invoiceLinks.map((link) => {
+                            const full = facturaOptionById.get(link.invoiceId) || link.label || link.invoiceId;
+                            const debe = Number(link.invoiceOutstanding);
+                            const imputa = Number(link.amountApplied) || 0;
+                            const titleParts = [
+                              full,
+                              imputa > 0 ? `Imputa $${formatMoneyAr(imputa)}` : '',
+                              Number.isFinite(debe)
+                                ? debe > 0.01
+                                  ? `Debe $${formatMoneyAr(debe)}`
+                                  : 'Saldada'
+                                : ''
+                            ].filter(Boolean);
                             return (
                               <span
-                                key={id}
-                                title={full}
-                                className="inline-flex max-w-full items-center rounded-md bg-emerald-950/40 border border-emerald-800/50 px-1.5 py-0.5 text-[11px] font-mono text-emerald-200/90 truncate"
+                                key={link.invoiceId}
+                                title={titleParts.join(' · ')}
+                                className="inline-flex max-w-full flex-col sm:flex-row sm:items-baseline gap-0.5 sm:gap-1.5 rounded-md bg-emerald-950/40 border border-emerald-800/50 px-1.5 py-0.5 text-[11px] text-emerald-200/90"
                               >
-                                {shortLabel(full, id)}
+                                <span className="font-mono truncate">{shortLabel(full, link.invoiceId)}</span>
+                                {imputa > 0.005 && (
+                                  <span className="text-slate-400 tabular-nums whitespace-nowrap">
+                                    imputa ${formatMoneyAr(imputa)}
+                                  </span>
+                                )}
+                                {Number.isFinite(debe) && (
+                                  debe > 0.01 ? (
+                                    <span className="text-amber-300 font-semibold tabular-nums whitespace-nowrap">
+                                      debe ${formatMoneyAr(debe)}
+                                    </span>
+                                  ) : (
+                                    <span className="text-emerald-400 font-semibold whitespace-nowrap">saldada</span>
+                                  )
+                                )}
                               </span>
                             );
                           })}

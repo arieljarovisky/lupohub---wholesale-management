@@ -7,6 +7,7 @@ import { padLegacyCode, normalizeCuitDigits } from '../utils/multimediaHistorial
 import { canonicalizeCityInput } from '../utils/cityNormalize';
 import {
   backfillPaymentOrdersFromLegacy,
+  getPaymentAllocationLinksByPaymentIds,
   SQL_CN_TOTAL_SUBQUERY,
   SQL_ORDER_BASE_MINUS_NC,
   SQL_ORDER_IN_SALDO_SCOPE,
@@ -1518,6 +1519,103 @@ const SQL_PAYMENT_LINKED_ORDER_IDS = `COALESCE(
   p.order_id
 )`;
 
+/** Nº de recibo + facturas con saldo pendiente, p.ej. `R-001 → A 00021-00000123 (debe $10.000,00)`. */
+function formatReceiptComprobanteWithDebe(
+  receiptNumber: string,
+  links: Array<{ label: string; amountApplied: number; invoiceOutstanding: number }>
+): string {
+  const receipt = String(receiptNumber || '').trim();
+  if (!links.length) return receipt;
+  const money = (n: number) =>
+    n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const parts = links.map((l) => {
+    const debe = Number(l.invoiceOutstanding) || 0;
+    const suffix = debe > 0.01 ? ` (debe $${money(debe)})` : ' (saldada)';
+    return `${l.label}${suffix}`;
+  });
+  return [receipt, parts.join(', ')].filter(Boolean).join(' → ');
+}
+
+function formatReceiptDetalleWithDebe(
+  links: Array<{ label: string; amountApplied: number; invoiceOutstanding: number }>,
+  notes?: string | null
+): string {
+  const money = (n: number) =>
+    n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const parts = links.map((l) => {
+    const imputa = Number(l.amountApplied) || 0;
+    const debe = Number(l.invoiceOutstanding) || 0;
+    const bits = [l.label];
+    if (imputa > 0.005) bits.push(`imputa $${money(imputa)}`);
+    bits.push(debe > 0.01 ? `debe $${money(debe)}` : 'saldada');
+    return bits.join(' · ');
+  });
+  const base = parts.length ? `Factura(s): ${parts.join(' | ')}` : '';
+  const note = String(notes || '').trim();
+  if (base && note) return `${base} · ${note}`;
+  return base || note;
+}
+
+/** Enriquece comprobantes RECIBO del Excel con `(debe $X)` / `(saldada)` por factura vinculada. */
+async function enrichReciboMovementsWithDebe(
+  movements: Array<{ tipo?: string | null; comprobante?: string | null; customer_id?: string | null }>
+): Promise<void> {
+  const reciboIndexes: number[] = [];
+  for (let i = 0; i < movements.length; i += 1) {
+    const tipo = String(movements[i].tipo || '').toUpperCase();
+    if (tipo === 'RECIBO' || tipo === 'RECIBO_IMPORTADO') reciboIndexes.push(i);
+  }
+  if (reciboIndexes.length === 0) return;
+
+  const customerIds = Array.from(
+    new Set(
+      reciboIndexes
+        .map((i) => String(movements[i].customer_id || '').trim())
+        .filter(Boolean)
+    )
+  );
+  if (customerIds.length === 0) return;
+
+  const normalizeReceipt = (v: unknown) =>
+    String(v || '')
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '');
+
+  const paymentRows = (await query(
+    `SELECT id, customer_id, receipt_number
+     FROM payments
+     WHERE customer_id IN (${customerIds.map(() => '?').join(',')})`,
+    customerIds
+  )) as Array<{ id: string; customer_id: string; receipt_number: string | null }>;
+
+  const paymentIdByKey = new Map<string, string>();
+  for (const p of paymentRows) {
+    const key = `${p.customer_id}|${normalizeReceipt(p.receipt_number)}`;
+    if (!paymentIdByKey.has(key)) paymentIdByKey.set(key, p.id);
+  }
+
+  const movPaymentIds = new Map<number, string>();
+  for (const i of reciboIndexes) {
+    const m = movements[i];
+    const receiptRaw = String(m.comprobante || '').split(' → ')[0].trim();
+    const key = `${m.customer_id}|${normalizeReceipt(receiptRaw)}`;
+    const paymentId = paymentIdByKey.get(key);
+    if (paymentId) movPaymentIds.set(i, paymentId);
+  }
+  if (movPaymentIds.size === 0) return;
+
+  const linksByPayment = await getPaymentAllocationLinksByPaymentIds(
+    Array.from(new Set(movPaymentIds.values()))
+  );
+  for (const [i, paymentId] of movPaymentIds) {
+    const links = linksByPayment.get(paymentId);
+    if (!links?.invoiceLinks?.length) continue;
+    const receiptRaw = String(movements[i].comprobante || '').split(' → ')[0].trim();
+    movements[i].comprobante = formatReceiptComprobanteWithDebe(receiptRaw, links.invoiceLinks);
+  }
+}
+
 const CARTERA_MM_LAST_SALDO_SUBQUERY = `
   SELECT
     agg.customer_id,
@@ -2678,6 +2776,8 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
       haber: number;
     }>;
 
+    await enrichReciboMovementsWithDebe(movements);
+
     const customers = await query(
       `SELECT c.id, COALESCE(c.business_name, c.name, 'Cliente') AS customer_name, c.seller_id, u.name AS seller_name
        FROM customers c
@@ -2707,7 +2807,7 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
       { header: 'Vendedor', key: 'vendedor', width: 28 },
       { header: 'Fecha', key: 'fecha', width: 14 },
       { header: 'Tipo', key: 'tipo', width: 14 },
-      { header: 'Comprobante', key: 'comprobante', width: 48 },
+      { header: 'Comprobante', key: 'comprobante', width: 56 },
       { header: 'Pedido', key: 'pedido', width: 16 },
       { header: 'Debe', key: 'debe', width: 14 },
       { header: 'Haber', key: 'haber', width: 14 },
@@ -2908,6 +3008,8 @@ export const exportSaldosMovimientosSistemaXlsx = async (req: Request, res: Resp
       haber: number;
     }>;
 
+    await enrichReciboMovementsWithDebe(movements);
+
     const customers = await query(
       `SELECT c.id, COALESCE(c.business_name, c.name, 'Cliente') AS customer_name, c.seller_id, u.name AS seller_name
        FROM customers c
@@ -2937,7 +3039,7 @@ export const exportSaldosMovimientosSistemaXlsx = async (req: Request, res: Resp
       { header: 'Vendedor', key: 'vendedor', width: 28 },
       { header: 'Fecha', key: 'fecha', width: 14 },
       { header: 'Tipo', key: 'tipo', width: 22 },
-      { header: 'Comprobante', key: 'comprobante', width: 48 },
+      { header: 'Comprobante', key: 'comprobante', width: 56 },
       { header: 'Pedido', key: 'pedido', width: 16 },
       { header: 'Debe', key: 'debe', width: 14 },
       { header: 'Haber', key: 'haber', width: 14 },
@@ -3682,6 +3784,8 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
       haber: number;
     }>;
 
+    await enrichReciboMovementsWithDebe(movements);
+
     const customers = await query(
       `SELECT c.id, COALESCE(c.business_name, c.name, 'Cliente') AS customer_name, c.seller_id, u.name AS seller_name
        FROM customers c
@@ -3717,7 +3821,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
     wsDetalle.columns = [
       { header: 'Fecha', key: 'fecha', width: 14 },
       { header: 'Tipo', key: 'tipo', width: 22 },
-      { header: 'Comprobante', key: 'comprobante', width: 52 },
+      { header: 'Comprobante', key: 'comprobante', width: 56 },
       { header: 'Pedido', key: 'pedido', width: 16 },
       { header: 'Debe', key: 'debe', width: 14 },
       { header: 'Haber', key: 'haber', width: 14 },
@@ -5467,7 +5571,8 @@ async function buildCustomerFinancialSummary(
       m.debe,
       m.haber,
       m.detalle,
-      m.superseded_by_reinvoice
+      m.superseded_by_reinvoice,
+      m.payment_id AS paymentId
     FROM (
       SELECT
         COALESCE(i.created_at, o.date) AS fecha,
@@ -5486,7 +5591,8 @@ async function buildCustomerFinancialSummary(
         ${sqlInvoiceAmountFromOrderTotal()} AS debe,
         0 AS haber,
         CONCAT('Pedido ', COALESCE(o.id, '')) AS detalle,
-        0 AS superseded_by_reinvoice
+        0 AS superseded_by_reinvoice,
+        NULL AS payment_id
       FROM invoices i
       JOIN orders o ON o.id = i.order_id
       WHERE o.customer_id = ?
@@ -5510,7 +5616,8 @@ async function buildCustomerFinancialSummary(
         0 AS debe,
         ROUND(COALESCE(cn.amount_credited, 0) * 1.21, 2) AS haber,
         CONCAT('NC sobre pedido ', COALESCE(cn.order_id, '')) AS detalle,
-        COALESCE(cn.superseded_by_reinvoice, 0) AS superseded_by_reinvoice
+        COALESCE(cn.superseded_by_reinvoice, 0) AS superseded_by_reinvoice,
+        NULL AS payment_id
       FROM credit_notes cn
       JOIN orders o ON o.id = cn.order_id
       WHERE o.customer_id = ?
@@ -5534,7 +5641,8 @@ async function buildCustomerFinancialSummary(
         CASE WHEN m.tipo = 'FACTURA' THEN ROUND(m.importe_neto + COALESCE(m.agip_ret_per, 0), 2) ELSE 0 END AS debe,
         CASE WHEN m.tipo = 'NC' THEN ROUND(m.importe_neto, 2) ELSE 0 END AS haber,
         CONCAT('Comprobante manual', COALESCE(CONCAT(' · ', m.notes), '')) AS detalle,
-        0 AS superseded_by_reinvoice
+        0 AS superseded_by_reinvoice,
+        NULL AS payment_id
       FROM customer_manual_comprobantes m
       WHERE m.customer_id = ?
 
@@ -5548,7 +5656,8 @@ async function buildCustomerFinancialSummary(
         (${SQL_ORDER_SALDO_RESIDUAL}) AS debe,
         0 AS haber,
         'Saldo pendiente del pedido' AS detalle,
-        0 AS superseded_by_reinvoice
+        0 AS superseded_by_reinvoice,
+        NULL AS payment_id
       FROM orders o
       LEFT JOIN (
         SELECT order_id, SUM(amount_credited) AS cn_total
@@ -5571,21 +5680,9 @@ async function buildCustomerFinancialSummary(
         ${SQL_PAYMENT_LINKED_ORDER_IDS} AS order_id,
         0 AS debe,
         ${SQL_PAYMENT_SALDO_CONTRIBUTION_AMOUNT} AS haber,
-        TRIM(CONCAT(
-          CASE
-            WHEN (${SQL_PAYMENT_LINKED_INVOICE_LABELS}) <> ''
-            THEN CONCAT('Factura(s): ', (${SQL_PAYMENT_LINKED_INVOICE_LABELS}))
-            ELSE ''
-          END,
-          CASE
-            WHEN TRIM(COALESCE(p.notes, '')) <> '' THEN CONCAT(
-              CASE WHEN (${SQL_PAYMENT_LINKED_INVOICE_LABELS}) <> '' THEN ' · ' ELSE '' END,
-              p.notes
-            )
-            ELSE ''
-          END
-        )) AS detalle,
-        0 AS superseded_by_reinvoice
+        COALESCE(p.notes, '') AS detalle,
+        0 AS superseded_by_reinvoice,
+        p.id AS payment_id
       FROM payments p
       LEFT JOIN (
         SELECT
@@ -5624,6 +5721,26 @@ async function buildCustomerFinancialSummary(
     `,
     [customerId, customerId, customerId, customerId, customerId]
   )) as any[];
+
+  const receiptPaymentIds = Array.from(
+    new Set(
+      movements
+        .filter((m) => String(m.tipo || '').toUpperCase() === 'RECIBO' && m.paymentId)
+        .map((m) => String(m.paymentId))
+    )
+  );
+  const receiptLinksByPayment =
+    receiptPaymentIds.length > 0
+      ? await getPaymentAllocationLinksByPaymentIds(receiptPaymentIds)
+      : new Map();
+
+  for (const m of movements) {
+    if (String(m.tipo || '').toUpperCase() !== 'RECIBO' || !m.paymentId) continue;
+    const links = receiptLinksByPayment.get(String(m.paymentId));
+    if (!links?.invoiceLinks?.length) continue;
+    m.comprobante = formatReceiptComprobanteWithDebe(String(m.comprobante || ''), links.invoiceLinks);
+    m.detalle = formatReceiptDetalleWithDebe(links.invoiceLinks, m.detalle);
+  }
 
   const importedEntries = includeTangoImport
     ? ((await query(

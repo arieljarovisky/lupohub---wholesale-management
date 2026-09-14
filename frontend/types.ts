@@ -378,6 +378,20 @@ export interface Payment {
   orderIds?: string[];
   invoiceId?: string;
   invoiceIds?: string[];
+  /** Facturas imputadas: monto de este recibo + saldo que aún debe la factura. */
+  invoiceLinks?: Array<{
+    invoiceId: string;
+    label: string;
+    amountApplied: number;
+    invoiceOutstanding: number;
+  }>;
+  /** Pedidos sin factura imputados. */
+  orderLinks?: Array<{
+    orderId: string;
+    label: string;
+    amountApplied: number;
+    orderOutstanding: number;
+  }>;
   receiptNumber: string;
   date: string; // YYYY-MM-DD
   amount: number;
