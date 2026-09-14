@@ -569,10 +569,15 @@ export const exportCustomersBySheetsXlsx = async (req: Request, res: Response) =
         [r.id, r.id]
       ) as any[];
       const customerPayments = await query(
-        `SELECT date, receipt_number, amount, notes
-         FROM payments
-         WHERE customer_id = ?
-         ORDER BY date DESC, created_at DESC`,
+        `SELECT
+           p.date,
+           p.receipt_number,
+           p.amount,
+           p.notes,
+           ${SQL_PAYMENT_LINKED_INVOICE_LABELS} AS facturas_asociadas
+         FROM payments p
+         WHERE p.customer_id = ?
+         ORDER BY p.date DESC, p.created_at DESC`,
         [r.id]
       ) as any[];
 
@@ -623,14 +628,16 @@ export const exportCustomersBySheetsXlsx = async (req: Request, res: Response) =
       ws.getCell(`A${rowCursor}`).value = 'Fecha';
       ws.getCell(`B${rowCursor}`).value = 'Recibo';
       ws.getCell(`C${rowCursor}`).value = 'Importe';
-      ws.getCell(`D${rowCursor}`).value = 'Observaciones';
+      ws.getCell(`D${rowCursor}`).value = 'Factura asociada';
+      ws.getCell(`E${rowCursor}`).value = 'Observaciones';
       ws.getRow(rowCursor).font = { bold: true };
       rowCursor += 1;
       for (const p of customerPayments) {
         ws.getCell(`A${rowCursor}`).value = ymdToExcelDate(p.date);
         ws.getCell(`B${rowCursor}`).value = p.receipt_number ?? '';
         ws.getCell(`C${rowCursor}`).value = Number(p.amount || 0);
-        ws.getCell(`D${rowCursor}`).value = p.notes ?? '';
+        ws.getCell(`D${rowCursor}`).value = p.facturas_asociadas ?? '';
+        ws.getCell(`E${rowCursor}`).value = p.notes ?? '';
         rowCursor += 1;
       }
 
@@ -1435,6 +1442,81 @@ const SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT = `(
   OR (p.order_id IS NOT NULL AND TRIM(COALESCE(p.order_id, '')) <> '')
 )`;
 const SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT_PLAIN = SQL_PAYMENT_EXCLUDE_COMMISSION_IMPORT;
+
+/** Etiqueta AFIP `A 00021-00000123` para alias de tabla `invoices`. */
+function sqlInvoiceAfipLabel(alias: string): string {
+  return `CONCAT(
+    CASE
+      WHEN ${alias}.cbte_tipo = 1 THEN 'A '
+      WHEN ${alias}.cbte_tipo = 6 THEN 'B '
+      WHEN ${alias}.cbte_tipo = 11 THEN 'C '
+      ELSE ''
+    END,
+    LPAD(COALESCE(${alias}.punto_venta, 0), 5, '0'),
+    '-',
+    LPAD(COALESCE(${alias}.cbte_desde, 0), 8, '0')
+  )`;
+}
+
+/**
+ * Facturas asociadas al pago `p` (payment_invoices, legacy invoice_id, refs importadas).
+ * Para que en Excel de saldos el recibo muestre a qué factura está imputado.
+ */
+const SQL_PAYMENT_LINKED_INVOICE_LABELS = `COALESCE(TRIM(BOTH ', ' FROM CONCAT_WS(', ',
+  NULLIF((
+    SELECT GROUP_CONCAT(DISTINCT ${sqlInvoiceAfipLabel('inv_pi')} SEPARATOR ', ')
+    FROM payment_invoices pi
+    JOIN invoices inv_pi ON inv_pi.id = pi.invoice_id
+    WHERE pi.payment_id = p.id
+  ), ''),
+  NULLIF((
+    SELECT ${sqlInvoiceAfipLabel('inv_leg')}
+    FROM invoices inv_leg
+    WHERE inv_leg.id = p.invoice_id
+      AND p.invoice_id IS NOT NULL
+      AND TRIM(COALESCE(p.invoice_id, '')) <> ''
+      AND NOT EXISTS (
+        SELECT 1 FROM payment_invoices pi_dup
+        WHERE pi_dup.payment_id = p.id AND pi_dup.invoice_id = p.invoice_id
+      )
+    LIMIT 1
+  ), ''),
+  NULLIF((
+    SELECT GROUP_CONCAT(DISTINCT TRIM(pir.invoice_ref) SEPARATOR ', ')
+    FROM payment_invoice_refs pir
+    WHERE pir.payment_id = p.id
+      AND TRIM(COALESCE(pir.invoice_ref, '')) <> ''
+  ), '')
+)), '')`;
+
+/** Nº de recibo + facturas vinculadas, p.ej. `R-001 → A 00021-00000123`. */
+const SQL_PAYMENT_COMPROBANTE_CON_FACTURAS = `TRIM(CONCAT(
+  COALESCE(NULLIF(TRIM(p.receipt_number), ''), ''),
+  CASE
+    WHEN (${SQL_PAYMENT_LINKED_INVOICE_LABELS}) <> '' THEN CONCAT(
+      CASE WHEN TRIM(COALESCE(p.receipt_number, '')) <> '' THEN ' → ' ELSE '' END,
+      (${SQL_PAYMENT_LINKED_INVOICE_LABELS})
+    )
+    ELSE ''
+  END
+))`;
+
+/** Pedido(s) del recibo: payment_orders, pedido de factura imputada, o legacy order_id. */
+const SQL_PAYMENT_LINKED_ORDER_IDS = `COALESCE(
+  NULLIF((
+    SELECT GROUP_CONCAT(DISTINCT po.order_id SEPARATOR ', ')
+    FROM payment_orders po
+    WHERE po.payment_id = p.id
+  ), ''),
+  NULLIF((
+    SELECT GROUP_CONCAT(DISTINCT inv_o.order_id SEPARATOR ', ')
+    FROM payment_invoices pi_o
+    JOIN invoices inv_o ON inv_o.id = pi_o.invoice_id
+    WHERE pi_o.payment_id = p.id
+      AND TRIM(COALESCE(inv_o.order_id, '')) <> ''
+  ), ''),
+  p.order_id
+)`;
 
 const CARTERA_MM_LAST_SALDO_SUBQUERY = `
   SELECT
@@ -2554,8 +2636,8 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
           u.name AS seller_name,
           p.date AS fecha,
           'RECIBO' AS tipo,
-          p.receipt_number AS comprobante,
-          p.order_id AS order_id,
+          ${SQL_PAYMENT_COMPROBANTE_CON_FACTURAS} AS comprobante,
+          ${SQL_PAYMENT_LINKED_ORDER_IDS} AS order_id,
           0 AS debe,
           ROUND(COALESCE(p.amount, 0), 2) AS haber
         FROM payments p
@@ -2625,7 +2707,7 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
       { header: 'Vendedor', key: 'vendedor', width: 28 },
       { header: 'Fecha', key: 'fecha', width: 14 },
       { header: 'Tipo', key: 'tipo', width: 14 },
-      { header: 'Comprobante', key: 'comprobante', width: 24 },
+      { header: 'Comprobante', key: 'comprobante', width: 48 },
       { header: 'Pedido', key: 'pedido', width: 16 },
       { header: 'Debe', key: 'debe', width: 14 },
       { header: 'Haber', key: 'haber', width: 14 },
@@ -2801,8 +2883,8 @@ export const exportSaldosMovimientosSistemaXlsx = async (req: Request, res: Resp
           u.name AS seller_name,
           p.date AS fecha,
           'RECIBO' AS tipo,
-          p.receipt_number AS comprobante,
-          p.order_id AS order_id,
+          ${SQL_PAYMENT_COMPROBANTE_CON_FACTURAS} AS comprobante,
+          ${SQL_PAYMENT_LINKED_ORDER_IDS} AS order_id,
           0 AS debe,
           ROUND(COALESCE(p.amount, 0), 2) AS haber
         FROM payments p
@@ -2855,7 +2937,7 @@ export const exportSaldosMovimientosSistemaXlsx = async (req: Request, res: Resp
       { header: 'Vendedor', key: 'vendedor', width: 28 },
       { header: 'Fecha', key: 'fecha', width: 14 },
       { header: 'Tipo', key: 'tipo', width: 22 },
-      { header: 'Comprobante', key: 'comprobante', width: 24 },
+      { header: 'Comprobante', key: 'comprobante', width: 48 },
       { header: 'Pedido', key: 'pedido', width: 16 },
       { header: 'Debe', key: 'debe', width: 14 },
       { header: 'Haber', key: 'haber', width: 14 },
@@ -3236,8 +3318,8 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           u.name AS seller_name,
           p.date AS fecha,
           'RECIBO' AS tipo,
-          p.receipt_number AS comprobante,
-          p.order_id AS order_id,
+          ${SQL_PAYMENT_COMPROBANTE_CON_FACTURAS} AS comprobante,
+          ${SQL_PAYMENT_LINKED_ORDER_IDS} AS order_id,
           0 AS debe,
           ROUND(COALESCE(p.amount, 0), 2) AS haber
         FROM payments p
@@ -3253,8 +3335,8 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           u.name AS seller_name,
           p.date AS fecha,
           'RECIBO' AS tipo,
-          p.receipt_number AS comprobante,
-          p.order_id AS order_id,
+          ${SQL_PAYMENT_COMPROBANTE_CON_FACTURAS} AS comprobante,
+          ${SQL_PAYMENT_LINKED_ORDER_IDS} AS order_id,
           0 AS debe,
           ROUND(COALESCE(p.amount, 0), 2) AS haber
         FROM payments p
@@ -3635,7 +3717,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
     wsDetalle.columns = [
       { header: 'Fecha', key: 'fecha', width: 14 },
       { header: 'Tipo', key: 'tipo', width: 22 },
-      { header: 'Comprobante', key: 'comprobante', width: 36 },
+      { header: 'Comprobante', key: 'comprobante', width: 52 },
       { header: 'Pedido', key: 'pedido', width: 16 },
       { header: 'Debe', key: 'debe', width: 14 },
       { header: 'Haber', key: 'haber', width: 14 },
@@ -5485,11 +5567,24 @@ async function buildCustomerFinancialSummary(
       SELECT
         p.date AS fecha,
         'RECIBO' AS tipo,
-        COALESCE(p.receipt_number, '') AS comprobante,
-        p.order_id AS order_id,
+        COALESCE(NULLIF(TRIM(p.receipt_number), ''), '') AS comprobante,
+        ${SQL_PAYMENT_LINKED_ORDER_IDS} AS order_id,
         0 AS debe,
         ${SQL_PAYMENT_SALDO_CONTRIBUTION_AMOUNT} AS haber,
-        COALESCE(p.notes, '') AS detalle,
+        TRIM(CONCAT(
+          CASE
+            WHEN (${SQL_PAYMENT_LINKED_INVOICE_LABELS}) <> ''
+            THEN CONCAT('Factura(s): ', (${SQL_PAYMENT_LINKED_INVOICE_LABELS}))
+            ELSE ''
+          END,
+          CASE
+            WHEN TRIM(COALESCE(p.notes, '')) <> '' THEN CONCAT(
+              CASE WHEN (${SQL_PAYMENT_LINKED_INVOICE_LABELS}) <> '' THEN ' · ' ELSE '' END,
+              p.notes
+            )
+            ELSE ''
+          END
+        )) AS detalle,
         0 AS superseded_by_reinvoice
       FROM payments p
       LEFT JOIN (
@@ -5772,12 +5867,12 @@ export const exportCustomerFinancialSummaryXlsx = async (req: Request, res: Resp
       { header: 'Sección', key: 'section', width: 20 },
       { header: 'Fecha', key: 'fecha', width: 14 },
       { header: 'Tipo', key: 'tipo', width: 12 },
-      { header: 'Comprobante', key: 'comprobante', width: 24 },
+      { header: 'Comprobante', key: 'comprobante', width: 48 },
       { header: 'Pedido', key: 'orderId', width: 18 },
       { header: 'Debe', key: 'debe', width: 14 },
       { header: 'Haber', key: 'haber', width: 14 },
       { header: 'Saldo', key: 'saldo', width: 14 },
-      { header: 'Detalle', key: 'detalle', width: 42 }
+      { header: 'Detalle', key: 'detalle', width: 52 }
     ];
     ws.getRow(1).font = { bold: true };
     ws.views = [{ state: 'frozen', ySplit: 1 }];
@@ -5894,15 +5989,9 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
          p.notes,
          p.invoice_id,
          p.order_id,
-         GROUP_CONCAT(DISTINCT i.cae) AS invoice_caes,
-         GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids,
-         GROUP_CONCAT(DISTINCT pir.invoice_ref) AS invoice_refs
+         ${SQL_PAYMENT_LINKED_INVOICE_LABELS} AS invoice_labels
        FROM payments p
-       LEFT JOIN payment_invoices pi ON pi.payment_id = p.id
-       LEFT JOIN payment_invoice_refs pir ON pir.payment_id = p.id
-       LEFT JOIN invoices i ON i.id = COALESCE(pi.invoice_id, p.invoice_id)
        WHERE ${paymentsWhere.join(' AND ')}
-       GROUP BY p.id, p.date, p.created_at, p.receipt_number, p.amount, p.notes, p.invoice_id, p.order_id
        ORDER BY p.created_at DESC, p.date DESC`,
       paymentsParams
     ) as any[];
@@ -6114,10 +6203,18 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
     for (const p of paymentsRows) {
       const fecha = ymdToExcelDate(p.date);
       const ts = fecha && !Number.isNaN(fecha.getTime()) ? fecha.getTime() : Number.MAX_SAFE_INTEGER;
-      const caes = Array.from(
-        new Set(String(p.invoice_caes || '').split(',').map((x: string) => x.trim()).filter(Boolean))
+      const facturas = Array.from(
+        new Set(
+          String(p.invoice_labels || '')
+            .split(',')
+            .map((x: string) => x.trim())
+            .filter(Boolean)
+        )
       );
-      const caeFromNumero = String(p.receipt_number || '').trim();
+      const detalleParts = [
+        facturas.length ? `Factura(s): ${facturas.join(' | ')}` : 'Sin factura asociada',
+        p.notes ? String(p.notes) : ''
+      ].filter(Boolean);
       timelineRows.push({
         section: 'SISTEMA',
         fecha,
@@ -6125,7 +6222,7 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
         numero: p.receipt_number ?? '',
         importe: Number(p.amount || 0),
         saldo: null,
-        detalle: `Factura (CAE): ${caeFromNumero || (caes.length ? caes.join(' | ') : '-')}${p.notes ? ` | ${p.notes}` : ''}`,
+        detalle: detalleParts.join(' · '),
         sortTs: ts,
         sortSeq: 2000000,
         sortNumero: String(p.receipt_number || '')

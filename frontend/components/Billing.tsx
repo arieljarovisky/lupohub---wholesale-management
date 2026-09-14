@@ -1964,81 +1964,143 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
           <div className="py-4 text-slate-500 text-sm">No hay pagos cargados para el filtro actual.</div>
         ) : (
           <div className="space-y-2">
-            {pagedPayments.map((p) => (
-              <div key={p.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-800/70 border border-slate-700 rounded-2xl p-3">
-                <div className="min-w-0">
-                  <div className="text-sm text-white font-bold truncate">{p.customerBusinessName || p.customerId}</div>
-                  <div className="text-xs text-slate-400">
-                    Recibo <span className="font-mono">{p.receiptNumber}</span> — {formatDate(p.date)}{p.sellerName ? ` — ${p.sellerName}` : ''}
-                  </div>
-                  {Array.isArray(p.orderIds) && p.orderIds.length > 0 && (
-                    <div className="text-[11px] text-slate-500 truncate">
-                      Pedidos sin factura:{' '}
-                      {p.orderIds.map((id) => pedidoOptionById.get(id) || id).join(' | ')}
+            {pagedPayments.map((p) => {
+              const linkedOrders = Array.isArray(p.orderIds) ? p.orderIds : [];
+              const linkedInvoices = Array.isArray(p.invoiceIds) ? p.invoiceIds : [];
+              const shortLabel = (full: string, fallback: string) => {
+                const head = String(full || '').split(' — ')[0]?.trim();
+                return head || fallback;
+              };
+              return (
+              <div
+                key={p.id}
+                className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_auto_8.5rem] gap-x-3 gap-y-2 bg-slate-800/70 border border-slate-700 rounded-2xl p-3 items-start"
+              >
+                <div className="min-w-0 space-y-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm text-white font-bold truncate">{p.customerBusinessName || p.customerId}</div>
+                      <div className="text-xs text-slate-400 mt-0.5">
+                        Recibo <span className="font-mono text-slate-300">{p.receiptNumber}</span>
+                        <span className="text-slate-600"> · </span>
+                        {formatDate(p.date)}
+                        {p.sellerName ? (
+                          <>
+                            <span className="text-slate-600"> · </span>
+                            {p.sellerName}
+                          </>
+                        ) : null}
+                      </div>
                     </div>
-                  )}
-                  {Array.isArray(p.invoiceIds) && p.invoiceIds.length > 0 && (
-                    <div className="text-[11px] text-slate-500 truncate">
-                      Facturas: {p.invoiceIds.map((id) => facturaOptionById.get(id) || id).join(' | ')}
+                    <div className="lg:hidden shrink-0 text-sm font-black text-emerald-300 tabular-nums">
+                      ${formatMoneyAr(Number(p.amount || 0))}
+                    </div>
+                  </div>
+
+                  {(linkedOrders.length > 0 || linkedInvoices.length > 0) && (
+                    <div className="space-y-1.5">
+                      {linkedOrders.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-[10px] uppercase tracking-wide font-bold text-slate-500 shrink-0">
+                            Pedidos
+                          </span>
+                          {linkedOrders.map((id) => {
+                            const full = pedidoOptionById.get(id) || id;
+                            return (
+                              <span
+                                key={id}
+                                title={full}
+                                className="inline-flex max-w-full items-center rounded-md bg-slate-900/80 border border-slate-600/80 px-1.5 py-0.5 text-[11px] font-mono text-slate-300 truncate"
+                              >
+                                {shortLabel(full, id)}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {linkedInvoices.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-[10px] uppercase tracking-wide font-bold text-slate-500 shrink-0">
+                            Facturas
+                          </span>
+                          {linkedInvoices.map((id) => {
+                            const full = facturaOptionById.get(id) || id;
+                            return (
+                              <span
+                                key={id}
+                                title={full}
+                                className="inline-flex max-w-full items-center rounded-md bg-emerald-950/40 border border-emerald-800/50 px-1.5 py-0.5 text-[11px] font-mono text-emerald-200/90 truncate"
+                              >
+                                {shortLabel(full, id)}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
-                <div className="flex items-center gap-2 flex-wrap justify-end">
+
+                <div className="flex items-center gap-2 flex-wrap justify-end lg:justify-start">
                   <button
                     type="button"
-                    className="px-2 py-1 rounded-lg bg-emerald-900/40 border border-emerald-700/50 text-[11px] font-bold text-emerald-200 hover:bg-emerald-900/60 touch-manipulation"
+                    className="px-2.5 py-1.5 rounded-lg bg-emerald-900/40 border border-emerald-700/50 text-[11px] font-bold text-emerald-200 hover:bg-emerald-900/60 touch-manipulation whitespace-nowrap"
                     onClick={() => openLinkPaymentModal(p)}
                   >
                     Asociar comprobantes
                   </button>
                   {!isSeller && (
-                  <>
-                  <button
-                    type="button"
-                    className="px-2 py-1 rounded-lg bg-red-950/50 border border-red-800/60 text-[11px] font-bold text-red-200 hover:bg-red-900/60 touch-manipulation inline-flex items-center gap-1"
-                    onClick={() => handleDeletePayment(p)}
-                    title="Eliminar recibo"
-                  >
-                    <Trash2 size={12} />
-                    Eliminar
-                  </button>
-                  <button
-                    type="button"
-                    className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-[11px] font-bold text-slate-200 hover:bg-slate-800 touch-manipulation"
-                    onClick={async () => {
-                      const next = window.prompt('Nueva fecha del recibo (YYYY-MM-DD):', String(p.date || '').slice(0, 10));
-                      if (!next) return;
-                      const date = next.trim();
-                      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-                        showToast('error', 'Fecha inválida. Usá formato YYYY-MM-DD');
-                        return;
-                      }
-                      try {
-                        if ((p.source === 'imported' || String(p.id || '').startsWith('mm-')) && p.importedLineOrder && p.customerId) {
-                          await api.updateImportedPaymentDate({
-                            customerId: p.customerId,
-                            importedLineOrder: p.importedLineOrder,
-                            date
-                          });
-                        } else {
-                          await api.updatePaymentDate(p.id, date);
-                        }
-                        showToast('success', 'Fecha del recibo actualizada.');
-                        await loadPayments();
-                      } catch (err: any) {
-                        showToast('error', err?.response?.data?.message || err?.message || 'No se pudo actualizar la fecha');
-                      }
-                    }}
-                    title="Editar fecha del recibo"
-                  >
-                    Editar fecha
-                  </button>
-                  </>
+                    <>
+                      <button
+                        type="button"
+                        className="px-2.5 py-1.5 rounded-lg bg-red-950/50 border border-red-800/60 text-[11px] font-bold text-red-200 hover:bg-red-900/60 touch-manipulation inline-flex items-center gap-1 whitespace-nowrap"
+                        onClick={() => handleDeletePayment(p)}
+                        title="Eliminar recibo"
+                      >
+                        <Trash2 size={12} />
+                        Eliminar
+                      </button>
+                      <button
+                        type="button"
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-[11px] font-bold text-slate-200 hover:bg-slate-800 touch-manipulation whitespace-nowrap"
+                        onClick={async () => {
+                          const next = window.prompt('Nueva fecha del recibo (YYYY-MM-DD):', String(p.date || '').slice(0, 10));
+                          if (!next) return;
+                          const date = next.trim();
+                          if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+                            showToast('error', 'Fecha inválida. Usá formato YYYY-MM-DD');
+                            return;
+                          }
+                          try {
+                            if ((p.source === 'imported' || String(p.id || '').startsWith('mm-')) && p.importedLineOrder && p.customerId) {
+                              await api.updateImportedPaymentDate({
+                                customerId: p.customerId,
+                                importedLineOrder: p.importedLineOrder,
+                                date
+                              });
+                            } else {
+                              await api.updatePaymentDate(p.id, date);
+                            }
+                            showToast('success', 'Fecha del recibo actualizada.');
+                            await loadPayments();
+                          } catch (err: any) {
+                            showToast('error', err?.response?.data?.message || err?.message || 'No se pudo actualizar la fecha');
+                          }
+                        }}
+                        title="Editar fecha del recibo"
+                      >
+                        Editar fecha
+                      </button>
+                    </>
                   )}
-                  <div className="text-sm font-black text-emerald-300 tabular-nums">${formatMoneyAr(Number(p.amount || 0))}</div>
+                </div>
+
+                <div className="hidden lg:block text-sm font-black text-emerald-300 tabular-nums whitespace-nowrap text-right pt-0.5">
+                  ${formatMoneyAr(Number(p.amount || 0))}
                 </div>
               </div>
-            ))}
+              );
+            })}
             {filteredPayments.length > PAYMENTS_PAGE_SIZE && (
               <div className="flex items-center justify-end gap-2 pt-1">
                 <button
