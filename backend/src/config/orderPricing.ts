@@ -1,6 +1,7 @@
 /**
  * `orders.total` y `price_at_moment` = neto gravado (sin IVA).
  * El total de la factura AFIP = neto × 1,21 + percepción IIBB (una sola vez).
+ * Factura E (exportación, cbte_tipo 19): total = neto, sin IVA ni IIBB.
  *
  * Si en algún cliente los precios de lista ya incluyen IVA en el pedido:
  * ORDER_PRICES_INCLUDE_IVA=1 (solo afecta cartera/saldo, no la pantalla Facturación).
@@ -10,6 +11,8 @@ export const ORDER_PRICES_INCLUDE_IVA =
   process.env.ORDER_PRICES_INCLUDE_IVA === 'true';
 
 export const IVA_MULTIPLIER = 1.21;
+/** AFIP WSFEX — Factura de exportación (sin IVA). */
+export const CBTE_FACTURA_E = 19;
 
 export function orderGrossToAfipNeto(gross: number): number {
   const g = Math.round((Number(gross) || 0) * 100) / 100;
@@ -36,19 +39,29 @@ export function sqlNetoAfipToAmountWithIva(netoExpr: string): string {
   return `ROUND((${netoExpr}) * ${IVA_MULTIPLIER}, 2)`;
 }
 
-/** SQL: importe total de factura AFIP (neto del pedido + IVA 21% + IIBB). */
+/** SQL: importe total de factura AFIP (neto + IVA 21% + IIBB; Factura E = solo neto). Requiere alias `i` e `o`. */
 export function sqlInvoiceAmountFromOrderTotal(): string {
-  return `ROUND(COALESCE(o.total, 0) * ${IVA_MULTIPLIER} + COALESCE(i.agip_ret_per, 0), 2)`;
+  return `ROUND(
+    CASE
+      WHEN COALESCE(i.cbte_tipo, 0) = ${CBTE_FACTURA_E} THEN COALESCE(o.total, 0)
+      ELSE COALESCE(o.total, 0) * ${IVA_MULTIPLIER} + COALESCE(i.agip_ret_per, 0)
+    END,
+  2)`;
 }
 
-/** SQL: neto del pedido + IVA (sin IIBB). */
+/** SQL: neto del pedido + IVA (sin IIBB). Factura E no aplica; usar sqlInvoiceAmountFromOrderTotal si hay `i`. */
 export function sqlOrderTotalWithIvaExpr(): string {
   return `ROUND(COALESCE(o.total, 0) * ${IVA_MULTIPLIER}, 2)`;
 }
 
-/** Importe de factura para historial / listados (siempre neto + IVA + IIBB). */
-export function invoiceLedgerImporte(orderTotal: number, agipRetPer = 0): number {
+/** Importe de factura para historial / listados (neto + IVA + IIBB; E = solo neto). */
+export function invoiceLedgerImporte(
+  orderTotal: number,
+  agipRetPer = 0,
+  cbteTipo?: number
+): number {
   const neto = Math.round((Number(orderTotal) || 0) * 100) / 100;
+  if (Number(cbteTipo) === CBTE_FACTURA_E) return neto;
   const agip = Math.round((Number(agipRetPer) || 0) * 100) / 100;
   return Math.round((neto * IVA_MULTIPLIER + agip) * 100) / 100;
 }

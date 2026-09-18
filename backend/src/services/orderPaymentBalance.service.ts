@@ -161,8 +161,10 @@ export const SQL_ORDER_NETO_AFIP = ORDER_PRICES_INCLUDE_IVA
   ? `ROUND((${SQL_ORDER_NETO_GRAVADO}) / ${IVA_MULTIPLIER}, 2)`
   : `(${SQL_ORDER_NETO_GRAVADO})`;
 
-/** Cargo del pedido (líneas con IVA incluido o neto+IVA según config; NC en neto AFIP). */
+/** Cargo del pedido (líneas con IVA incluido o neto+IVA según config; NC en neto AFIP). Factura E: sin IVA. */
 export const SQL_ORDER_CARGO_SALDO = `CASE
+  WHEN EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id AND i.cbte_tipo = 19)
+    THEN ROUND((${SQL_ORDER_BASE_MINUS_NC}), 2)
   WHEN EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
     THEN ROUND(
       (${SQL_ORDER_BASE_MINUS_NC})${
@@ -222,7 +224,7 @@ function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-/** Saldo pendiente de una factura (con IVA) antes de imputar un pago nuevo. */
+/** Saldo pendiente de una factura antes de imputar un pago nuevo (con IVA salvo Factura E). */
 export async function getInvoiceOutstandingConIva(
   invoiceId: string,
   excludePaymentId?: string
@@ -233,8 +235,12 @@ export async function getInvoiceOutstandingConIva(
   const row = (await get(
     `SELECT
        ROUND(
-         GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21
-         + COALESCE(i.agip_ret_per, 0),
+         CASE
+           WHEN COALESCE(i.cbte_tipo, 0) = 19
+             THEN GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0))
+           ELSE GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21
+             + COALESCE(i.agip_ret_per, 0)
+         END,
        2) AS cargo_iva,
        COALESCE((
          SELECT SUM(ROUND(per_pay.applied, 2))
@@ -534,6 +540,234 @@ export async function getOrdersOutstanding(
     });
   }
   return out;
+}
+
+export type PaymentInvoiceLinkDto = {
+  invoiceId: string;
+  label: string;
+  amountApplied: number;
+  /** Saldo que aún debe el cliente en esa factura (después de todos los recibos). */
+  invoiceOutstanding: number;
+};
+
+export type PaymentOrderLinkDto = {
+  orderId: string;
+  label: string;
+  amountApplied: number;
+  orderOutstanding: number;
+};
+
+function formatAfipInvoiceLabel(r: {
+  cbte_tipo?: number | null;
+  punto_venta?: number | null;
+  cbte_desde?: number | null;
+}): string {
+  const tipo =
+    Number(r.cbte_tipo) === 1 ? 'A ' :
+    Number(r.cbte_tipo) === 6 ? 'B ' :
+    Number(r.cbte_tipo) === 11 ? 'C ' :
+    Number(r.cbte_tipo) === 19 ? 'E ' : '';
+  const pv = String(r.punto_venta ?? 0).padStart(5, '0');
+  const nro = String(r.cbte_desde ?? 0).padStart(8, '0');
+  return `${tipo}${pv}-${nro}`.trim();
+}
+
+/**
+ * Para listado de recibos: por cada pago, facturas/pedidos vinculados con
+ * monto imputado de ese recibo y saldo pendiente actual del comprobante.
+ */
+export async function getPaymentAllocationLinksByPaymentIds(
+  paymentIds: string[]
+): Promise<
+  Map<string, { invoiceLinks: PaymentInvoiceLinkDto[]; orderLinks: PaymentOrderLinkDto[] }>
+> {
+  const result = new Map<
+    string,
+    { invoiceLinks: PaymentInvoiceLinkDto[]; orderLinks: PaymentOrderLinkDto[] }
+  >();
+  const ids = Array.from(new Set(paymentIds.map((x) => String(x || '').trim()).filter(Boolean)));
+  for (const id of ids) {
+    result.set(id, { invoiceLinks: [], orderLinks: [] });
+  }
+  if (ids.length === 0) return result;
+
+  const placeholders = ids.map(() => '?').join(',');
+
+  const invRows = (await query(
+    `SELECT
+       pi.payment_id,
+       pi.invoice_id,
+       pi.amount_applied,
+       p.amount AS payment_amount,
+       i.cbte_tipo,
+       i.punto_venta,
+       i.cbte_desde
+     FROM payment_invoices pi
+     JOIN payments p ON p.id = pi.payment_id
+     JOIN invoices i ON i.id = pi.invoice_id
+     WHERE pi.payment_id IN (${placeholders})
+     ORDER BY pi.payment_id, i.cbte_desde`,
+    ids
+  )) as Array<{
+    payment_id: string;
+    invoice_id: string;
+    amount_applied: number | string | null;
+    payment_amount: number | string | null;
+    cbte_tipo: number | null;
+    punto_venta: number | null;
+    cbte_desde: number | null;
+  }>;
+
+  const legacyInvRows = (await query(
+    `SELECT
+       p.id AS payment_id,
+       p.invoice_id,
+       p.amount AS payment_amount,
+       i.cbte_tipo,
+       i.punto_venta,
+       i.cbte_desde
+     FROM payments p
+     JOIN invoices i ON i.id = p.invoice_id
+     WHERE p.id IN (${placeholders})
+       AND p.invoice_id IS NOT NULL
+       AND TRIM(COALESCE(p.invoice_id, '')) <> ''
+       AND NOT EXISTS (
+         SELECT 1 FROM payment_invoices pi
+         WHERE pi.payment_id = p.id AND pi.invoice_id = p.invoice_id
+       )`,
+    ids
+  )) as Array<{
+    payment_id: string;
+    invoice_id: string;
+    payment_amount: number | string | null;
+    cbte_tipo: number | null;
+    punto_venta: number | null;
+    cbte_desde: number | null;
+  }>;
+
+  const orderRows = (await query(
+    `SELECT
+       po.payment_id,
+       po.order_id,
+       po.amount_applied,
+       p.amount AS payment_amount
+     FROM payment_orders po
+     JOIN payments p ON p.id = po.payment_id
+     WHERE po.payment_id IN (${placeholders})
+     ORDER BY po.payment_id, po.order_id`,
+    ids
+  )) as Array<{
+    payment_id: string;
+    order_id: string;
+    amount_applied: number | string | null;
+    payment_amount: number | string | null;
+  }>;
+
+  const legacyOrderRows = (await query(
+    `SELECT p.id AS payment_id, p.order_id, p.amount AS payment_amount
+     FROM payments p
+     WHERE p.id IN (${placeholders})
+       AND p.order_id IS NOT NULL
+       AND TRIM(COALESCE(p.order_id, '')) <> ''
+       AND NOT EXISTS (SELECT 1 FROM payment_orders po WHERE po.payment_id = p.id)
+       AND NOT EXISTS (
+         SELECT 1 FROM payment_invoices pi
+         JOIN invoices i ON i.id = pi.invoice_id
+         WHERE pi.payment_id = p.id AND i.order_id = p.order_id
+       )`,
+    ids
+  )) as Array<{
+    payment_id: string;
+    order_id: string;
+    payment_amount: number | string | null;
+  }>;
+
+  type InvDraft = {
+    paymentId: string;
+    invoiceId: string;
+    label: string;
+    amountApplied: number;
+  };
+  const invDrafts: InvDraft[] = [];
+  for (const r of invRows) {
+    const appliedRaw = Number(r.amount_applied);
+    const applied =
+      Number.isFinite(appliedRaw) && appliedRaw > 0
+        ? round2(appliedRaw)
+        : round2(Number(r.payment_amount) || 0);
+    invDrafts.push({
+      paymentId: r.payment_id,
+      invoiceId: r.invoice_id,
+      label: formatAfipInvoiceLabel(r),
+      amountApplied: applied
+    });
+  }
+  for (const r of legacyInvRows) {
+    invDrafts.push({
+      paymentId: r.payment_id,
+      invoiceId: r.invoice_id,
+      label: formatAfipInvoiceLabel(r),
+      amountApplied: round2(Number(r.payment_amount) || 0)
+    });
+  }
+
+  type OrdDraft = {
+    paymentId: string;
+    orderId: string;
+    amountApplied: number;
+  };
+  const ordDrafts: OrdDraft[] = [];
+  for (const r of orderRows) {
+    const appliedRaw = Number(r.amount_applied);
+    const applied =
+      Number.isFinite(appliedRaw) && appliedRaw > 0
+        ? round2(appliedRaw)
+        : round2(Number(r.payment_amount) || 0);
+    ordDrafts.push({
+      paymentId: r.payment_id,
+      orderId: r.order_id,
+      amountApplied: applied
+    });
+  }
+  for (const r of legacyOrderRows) {
+    ordDrafts.push({
+      paymentId: r.payment_id,
+      orderId: r.order_id,
+      amountApplied: round2(Number(r.payment_amount) || 0)
+    });
+  }
+
+  const uniqueInvoiceIds = Array.from(new Set(invDrafts.map((d) => d.invoiceId)));
+  const uniqueOrderIds = Array.from(new Set(ordDrafts.map((d) => d.orderId)));
+  const invOutstanding = await getInvoicesOutstanding(uniqueInvoiceIds);
+  const ordOutstanding = await getOrdersOutstanding(uniqueOrderIds);
+  const invOutMap = new Map(invOutstanding.map((x) => [x.invoiceId, round2(x.outstanding)]));
+  const ordOutMap = new Map(ordOutstanding.map((x) => [x.orderId, round2(x.outstanding)]));
+
+  for (const d of invDrafts) {
+    const bucket = result.get(d.paymentId);
+    if (!bucket) continue;
+    if (bucket.invoiceLinks.some((x) => x.invoiceId === d.invoiceId)) continue;
+    bucket.invoiceLinks.push({
+      invoiceId: d.invoiceId,
+      label: d.label,
+      amountApplied: d.amountApplied,
+      invoiceOutstanding: invOutMap.get(d.invoiceId) ?? 0
+    });
+  }
+  for (const d of ordDrafts) {
+    const bucket = result.get(d.paymentId);
+    if (!bucket) continue;
+    if (bucket.orderLinks.some((x) => x.orderId === d.orderId)) continue;
+    bucket.orderLinks.push({
+      orderId: d.orderId,
+      label: d.orderId,
+      amountApplied: d.amountApplied,
+      orderOutstanding: ordOutMap.get(d.orderId) ?? 0
+    });
+  }
+
+  return result;
 }
 
 /** Valida pedidos sin factura para imputación de recibo. */

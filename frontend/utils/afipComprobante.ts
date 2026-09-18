@@ -27,7 +27,8 @@ export function isComprobanteExportacion(cbteTipo: number): boolean {
 
 /**
  * Totales desde neto gravado (suma cantidad × precio unitario neto del pedido).
- * AFIP siempre usa neto + IVA 21%; en clase B el comprobante impreso muestra importes finales sin desglosar IVA.
+ * Factura A/B: neto + IVA 21% (+ IIBB). Factura E (exportación): sin IVA ni percepción.
+ * En clase B el comprobante impreso muestra importes finales sin desglosar IVA.
  */
 export function calcTotalesDesdeNetoGravado(
   netoGravado: number,
@@ -43,16 +44,17 @@ export function calcTotalesDesdeNetoGravado(
   factorPrecioImpreso: number;
 } {
   const neto = Math.round((Number(netoGravado) || 0) * 100) / 100;
-  const iva = Math.round(neto * IVA_RATE * 100) / 100;
-  const agip = Math.round((Number(agipRetPer) || 0) * 100) / 100;
+  const esExport = isComprobanteExportacion(cbteTipo);
+  const iva = esExport ? 0 : Math.round(neto * IVA_RATE * 100) / 100;
+  const agip = esExport ? 0 : Math.round((Number(agipRetPer) || 0) * 100) / 100;
   const total = Math.round((neto + iva + agip) * 100) / 100;
-  const discriminaIva = !isComprobanteClaseB(cbteTipo);
+  const discriminaIva = !esExport && !isComprobanteClaseB(cbteTipo);
   return {
     neto,
     iva,
     agip,
     total,
     discriminaIva,
-    factorPrecioImpreso: discriminaIva ? 1 : 1 + IVA_RATE,
+    factorPrecioImpreso: discriminaIva || esExport ? 1 : 1 + IVA_RATE,
   };
 }

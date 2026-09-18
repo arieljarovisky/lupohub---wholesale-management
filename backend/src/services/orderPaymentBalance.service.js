@@ -176,8 +176,10 @@ exports.SQL_ORDER_BASE_MINUS_NC = orderPricing_1.ORDER_PRICES_INCLUDE_IVA
 exports.SQL_ORDER_NETO_AFIP = orderPricing_1.ORDER_PRICES_INCLUDE_IVA
     ? `ROUND((${exports.SQL_ORDER_NETO_GRAVADO}) / ${orderPricing_1.IVA_MULTIPLIER}, 2)`
     : `(${exports.SQL_ORDER_NETO_GRAVADO})`;
-/** Cargo del pedido (líneas con IVA incluido o neto+IVA según config; NC en neto AFIP). */
+/** Cargo del pedido (líneas con IVA incluido o neto+IVA según config; NC en neto AFIP). Factura E: sin IVA. */
 exports.SQL_ORDER_CARGO_SALDO = `CASE
+  WHEN EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id AND i.cbte_tipo = 19)
+    THEN ROUND((${exports.SQL_ORDER_BASE_MINUS_NC}), 2)
   WHEN EXISTS (SELECT 1 FROM invoices i WHERE i.order_id = o.id)
     THEN ROUND(
       (${exports.SQL_ORDER_BASE_MINUS_NC})${orderPricing_1.ORDER_PRICES_INCLUDE_IVA ? '' : ` * ${orderPricing_1.IVA_MULTIPLIER}`} + (${exports.SQL_INVOICE_AGIP_RET_PER}),
@@ -237,8 +239,12 @@ function getInvoiceOutstandingConIva(invoiceId, excludePaymentId) {
         const params = excludePaymentId ? [excludePaymentId, invoiceId] : [invoiceId];
         const row = (yield (0, db_1.get)(`SELECT
        ROUND(
-         GREATEST(0, (${exports.SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21
-         + COALESCE(i.agip_ret_per, 0),
+         CASE
+           WHEN COALESCE(i.cbte_tipo, 0) = 19
+             THEN GREATEST(0, (${exports.SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0))
+           ELSE GREATEST(0, (${exports.SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21
+             + COALESCE(i.agip_ret_per, 0)
+         END,
        2) AS cargo_iva,
        COALESCE((
          SELECT SUM(ROUND(per_pay.applied, 2))

@@ -20,9 +20,14 @@ export function orderAfipNetoToGross(neto: number): number {
   return Math.round(n * IVA_MULTIPLIER * 100) / 100;
 }
 
-/** Total factura AFIP desde neto gravado del pedido. */
-export function invoiceTotalFromOrderNeto(orderTotal: number, agipRetPer = 0): number {
+/** Total factura AFIP desde neto gravado del pedido. Factura E (cbteTipo 19): sin IVA. */
+export function invoiceTotalFromOrderNeto(
+  orderTotal: number,
+  agipRetPer = 0,
+  cbteTipo?: number
+): number {
   const neto = Math.round((Number(orderTotal) || 0) * 100) / 100;
+  if (Number(cbteTipo) === 19) return neto;
   const agip = Math.round((Number(agipRetPer) || 0) * 100) / 100;
   return Math.round((neto * IVA_MULTIPLIER + agip) * 100) / 100;
 }

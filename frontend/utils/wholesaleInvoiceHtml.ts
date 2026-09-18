@@ -480,7 +480,7 @@ export function orderUnitsDisplayCount(order: Order): number | null {
   return null;
 }
 
-/** Total del comprobante AFIP: neto gravado del pedido + IVA 21% + IIBB. */
+/** Total del comprobante AFIP: neto + IVA 21% + IIBB (Factura E: solo neto, sin IVA). */
 export function orderTotalesFacturado(order: Order): OrderFiscalTotalsDisplay | null {
   if (!order.invoice) return null;
   const cbteTipo = Number(order.invoice.cbteTipo ?? 6);

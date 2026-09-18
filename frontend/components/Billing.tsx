@@ -13,6 +13,7 @@ import EmitDebitNoteModal from './EmitDebitNoteModal';
 import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2, Percent, RefreshCcw, FileMinus, ExternalLink, Printer, MoreHorizontal, ChevronDown, Download, Upload, Wallet, FilePlus, FileText, Pencil, Trash2 } from 'lucide-react';
 import { useNotification } from '../context/NotificationContext';
 import { formatMoneyAr } from '../utils/moneyFormat';
+import { formatOrderDate } from '../utils/formatDate';
 import { getStoredOrdersListFilters, setStoredOrdersListFilters } from '../utils/ordersListFilters';
 import { buildCityFilterOptions, cityMatchesFilter } from '../utils/cityNormalize';
 
@@ -475,10 +476,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
           : String(x.numeroDesde || x.numeroHasta || '').trim() || 'Comprobante s/n';
         return {
           invoiceId: x.id,
-          label: `${comprobante} — ${x.customerBusinessName || ''} — ${(() => {
-            const d = new Date(x.fecha);
-            return Number.isNaN(d.getTime()) ? String(x.fecha || '') : d.toLocaleDateString('es-AR');
-          })()} — $${formatMoneyAr(Number(x.importe || 0))}`.trim(),
+          label: `${comprobante} — ${x.customerBusinessName || ''} — ${formatOrderDate(x.fecha)} — $${formatMoneyAr(Number(x.importe || 0))}`.trim(),
           customerId: x.customerId
         };
       });
@@ -487,8 +485,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     rows: Awaited<ReturnType<typeof api.getLinkableOrdersForPayment>>
   ) =>
     rows.map((o) => {
-      const d = new Date(o.date);
-      const dateLabel = Number.isNaN(d.getTime()) ? String(o.date || '') : d.toLocaleDateString('es-AR');
+      const dateLabel = formatOrderDate(o.date);
       const ref = o.remitoNumber ? `Remito ${o.remitoNumber}` : `Pedido ${String(o.orderId).slice(0, 8)}`;
       return {
         orderId: o.orderId,
@@ -719,11 +716,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     [pedidoOptionsInModal]
   );
 
-  const formatDate = (d: any) => {
-    if (!d) return '';
-    const x = new Date(d);
-    return isNaN(x.getTime()) ? String(d) : x.toLocaleDateString('es-AR');
-  };
+  const formatDate = (d: any) => formatOrderDate(d == null ? d : String(d));
 
   const billingTipoBadgeClass = (t: string) => {
     if (t === 'NC') return 'bg-amber-900/40 text-amber-300 border border-amber-700/60';
@@ -1971,81 +1964,209 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
           <div className="py-4 text-slate-500 text-sm">No hay pagos cargados para el filtro actual.</div>
         ) : (
           <div className="space-y-2">
-            {pagedPayments.map((p) => (
-              <div key={p.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-800/70 border border-slate-700 rounded-2xl p-3">
-                <div className="min-w-0">
-                  <div className="text-sm text-white font-bold truncate">{p.customerBusinessName || p.customerId}</div>
-                  <div className="text-xs text-slate-400">
-                    Recibo <span className="font-mono">{p.receiptNumber}</span> — {formatDate(p.date)}{p.sellerName ? ` — ${p.sellerName}` : ''}
-                  </div>
-                  {Array.isArray(p.orderIds) && p.orderIds.length > 0 && (
-                    <div className="text-[11px] text-slate-500 truncate">
-                      Pedidos sin factura:{' '}
-                      {p.orderIds.map((id) => pedidoOptionById.get(id) || id).join(' | ')}
+            {pagedPayments.map((p) => {
+              const invoiceLinks =
+                Array.isArray(p.invoiceLinks) && p.invoiceLinks.length > 0
+                  ? p.invoiceLinks
+                  : (Array.isArray(p.invoiceIds) ? p.invoiceIds : []).map((id) => ({
+                      invoiceId: id,
+                      label: facturaOptionById.get(id) || id,
+                      amountApplied: 0,
+                      invoiceOutstanding: NaN
+                    }));
+              const orderLinks =
+                Array.isArray(p.orderLinks) && p.orderLinks.length > 0
+                  ? p.orderLinks
+                  : (Array.isArray(p.orderIds) ? p.orderIds : []).map((id) => ({
+                      orderId: id,
+                      label: pedidoOptionById.get(id) || id,
+                      amountApplied: 0,
+                      orderOutstanding: NaN
+                    }));
+              const shortLabel = (full: string, fallback: string) => {
+                const head = String(full || '').split(' — ')[0]?.trim();
+                return head || fallback;
+              };
+              return (
+              <div
+                key={p.id}
+                className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_auto_8.5rem] gap-x-3 gap-y-2 bg-slate-800/70 border border-slate-700 rounded-2xl p-3 items-start"
+              >
+                <div className="min-w-0 space-y-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm text-white font-bold truncate">{p.customerBusinessName || p.customerId}</div>
+                      <div className="text-xs text-slate-400 mt-0.5">
+                        Recibo <span className="font-mono text-slate-300">{p.receiptNumber}</span>
+                        <span className="text-slate-600"> · </span>
+                        {formatDate(p.date)}
+                        {p.sellerName ? (
+                          <>
+                            <span className="text-slate-600"> · </span>
+                            {p.sellerName}
+                          </>
+                        ) : null}
+                      </div>
                     </div>
-                  )}
-                  {Array.isArray(p.invoiceIds) && p.invoiceIds.length > 0 && (
-                    <div className="text-[11px] text-slate-500 truncate">
-                      Facturas: {p.invoiceIds.map((id) => facturaOptionById.get(id) || id).join(' | ')}
+                    <div className="lg:hidden shrink-0 text-sm font-black text-emerald-300 tabular-nums">
+                      ${formatMoneyAr(Number(p.amount || 0))}
+                    </div>
+                  </div>
+
+                  {(orderLinks.length > 0 || invoiceLinks.length > 0) && (
+                    <div className="space-y-1.5">
+                      {orderLinks.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-[10px] uppercase tracking-wide font-bold text-slate-500 shrink-0">
+                            Pedidos
+                          </span>
+                          {orderLinks.map((link) => {
+                            const full = pedidoOptionById.get(link.orderId) || link.label || link.orderId;
+                            const debe = Number(link.orderOutstanding);
+                            const imputa = Number(link.amountApplied) || 0;
+                            const titleParts = [
+                              full,
+                              imputa > 0 ? `Imputa $${formatMoneyAr(imputa)}` : '',
+                              Number.isFinite(debe)
+                                ? debe > 0.01
+                                  ? `Debe $${formatMoneyAr(debe)}`
+                                  : 'Saldado'
+                                : ''
+                            ].filter(Boolean);
+                            return (
+                              <span
+                                key={link.orderId}
+                                title={titleParts.join(' · ')}
+                                className="inline-flex max-w-full flex-col sm:flex-row sm:items-baseline gap-0.5 sm:gap-1.5 rounded-md bg-slate-900/80 border border-slate-600/80 px-1.5 py-0.5 text-[11px] text-slate-300"
+                              >
+                                <span className="font-mono truncate">{shortLabel(full, link.orderId)}</span>
+                                {imputa > 0.005 && (
+                                  <span className="text-slate-500 tabular-nums whitespace-nowrap">
+                                    imputa ${formatMoneyAr(imputa)}
+                                  </span>
+                                )}
+                                {Number.isFinite(debe) && (
+                                  debe > 0.01 ? (
+                                    <span className="text-amber-300 font-semibold tabular-nums whitespace-nowrap">
+                                      debe ${formatMoneyAr(debe)}
+                                    </span>
+                                  ) : (
+                                    <span className="text-emerald-400/90 font-semibold whitespace-nowrap">saldado</span>
+                                  )
+                                )}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {invoiceLinks.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-[10px] uppercase tracking-wide font-bold text-slate-500 shrink-0">
+                            Facturas
+                          </span>
+                          {invoiceLinks.map((link) => {
+                            const full = facturaOptionById.get(link.invoiceId) || link.label || link.invoiceId;
+                            const debe = Number(link.invoiceOutstanding);
+                            const imputa = Number(link.amountApplied) || 0;
+                            const titleParts = [
+                              full,
+                              imputa > 0 ? `Imputa $${formatMoneyAr(imputa)}` : '',
+                              Number.isFinite(debe)
+                                ? debe > 0.01
+                                  ? `Debe $${formatMoneyAr(debe)}`
+                                  : 'Saldada'
+                                : ''
+                            ].filter(Boolean);
+                            return (
+                              <span
+                                key={link.invoiceId}
+                                title={titleParts.join(' · ')}
+                                className="inline-flex max-w-full flex-col sm:flex-row sm:items-baseline gap-0.5 sm:gap-1.5 rounded-md bg-emerald-950/40 border border-emerald-800/50 px-1.5 py-0.5 text-[11px] text-emerald-200/90"
+                              >
+                                <span className="font-mono truncate">{shortLabel(full, link.invoiceId)}</span>
+                                {imputa > 0.005 && (
+                                  <span className="text-slate-400 tabular-nums whitespace-nowrap">
+                                    imputa ${formatMoneyAr(imputa)}
+                                  </span>
+                                )}
+                                {Number.isFinite(debe) && (
+                                  debe > 0.01 ? (
+                                    <span className="text-amber-300 font-semibold tabular-nums whitespace-nowrap">
+                                      debe ${formatMoneyAr(debe)}
+                                    </span>
+                                  ) : (
+                                    <span className="text-emerald-400 font-semibold whitespace-nowrap">saldada</span>
+                                  )
+                                )}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
-                <div className="flex items-center gap-2 flex-wrap justify-end">
+
+                <div className="flex items-center gap-2 flex-wrap justify-end lg:justify-start">
                   <button
                     type="button"
-                    className="px-2 py-1 rounded-lg bg-emerald-900/40 border border-emerald-700/50 text-[11px] font-bold text-emerald-200 hover:bg-emerald-900/60 touch-manipulation"
+                    className="px-2.5 py-1.5 rounded-lg bg-emerald-900/40 border border-emerald-700/50 text-[11px] font-bold text-emerald-200 hover:bg-emerald-900/60 touch-manipulation whitespace-nowrap"
                     onClick={() => openLinkPaymentModal(p)}
                   >
                     Asociar comprobantes
                   </button>
                   {!isSeller && (
-                  <>
-                  <button
-                    type="button"
-                    className="px-2 py-1 rounded-lg bg-red-950/50 border border-red-800/60 text-[11px] font-bold text-red-200 hover:bg-red-900/60 touch-manipulation inline-flex items-center gap-1"
-                    onClick={() => handleDeletePayment(p)}
-                    title="Eliminar recibo"
-                  >
-                    <Trash2 size={12} />
-                    Eliminar
-                  </button>
-                  <button
-                    type="button"
-                    className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-[11px] font-bold text-slate-200 hover:bg-slate-800 touch-manipulation"
-                    onClick={async () => {
-                      const next = window.prompt('Nueva fecha del recibo (YYYY-MM-DD):', String(p.date || '').slice(0, 10));
-                      if (!next) return;
-                      const date = next.trim();
-                      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-                        showToast('error', 'Fecha inválida. Usá formato YYYY-MM-DD');
-                        return;
-                      }
-                      try {
-                        if ((p.source === 'imported' || String(p.id || '').startsWith('mm-')) && p.importedLineOrder && p.customerId) {
-                          await api.updateImportedPaymentDate({
-                            customerId: p.customerId,
-                            importedLineOrder: p.importedLineOrder,
-                            date
-                          });
-                        } else {
-                          await api.updatePaymentDate(p.id, date);
-                        }
-                        showToast('success', 'Fecha del recibo actualizada.');
-                        await loadPayments();
-                      } catch (err: any) {
-                        showToast('error', err?.response?.data?.message || err?.message || 'No se pudo actualizar la fecha');
-                      }
-                    }}
-                    title="Editar fecha del recibo"
-                  >
-                    Editar fecha
-                  </button>
-                  </>
+                    <>
+                      <button
+                        type="button"
+                        className="px-2.5 py-1.5 rounded-lg bg-red-950/50 border border-red-800/60 text-[11px] font-bold text-red-200 hover:bg-red-900/60 touch-manipulation inline-flex items-center gap-1 whitespace-nowrap"
+                        onClick={() => handleDeletePayment(p)}
+                        title="Eliminar recibo"
+                      >
+                        <Trash2 size={12} />
+                        Eliminar
+                      </button>
+                      <button
+                        type="button"
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-[11px] font-bold text-slate-200 hover:bg-slate-800 touch-manipulation whitespace-nowrap"
+                        onClick={async () => {
+                          const next = window.prompt('Nueva fecha del recibo (YYYY-MM-DD):', String(p.date || '').slice(0, 10));
+                          if (!next) return;
+                          const date = next.trim();
+                          if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+                            showToast('error', 'Fecha inválida. Usá formato YYYY-MM-DD');
+                            return;
+                          }
+                          try {
+                            if ((p.source === 'imported' || String(p.id || '').startsWith('mm-')) && p.importedLineOrder && p.customerId) {
+                              await api.updateImportedPaymentDate({
+                                customerId: p.customerId,
+                                importedLineOrder: p.importedLineOrder,
+                                date
+                              });
+                            } else {
+                              await api.updatePaymentDate(p.id, date);
+                            }
+                            showToast('success', 'Fecha del recibo actualizada.');
+                            await loadPayments();
+                          } catch (err: any) {
+                            showToast('error', err?.response?.data?.message || err?.message || 'No se pudo actualizar la fecha');
+                          }
+                        }}
+                        title="Editar fecha del recibo"
+                      >
+                        Editar fecha
+                      </button>
+                    </>
                   )}
-                  <div className="text-sm font-black text-emerald-300 tabular-nums">${formatMoneyAr(Number(p.amount || 0))}</div>
+                </div>
+
+                <div className="hidden lg:block text-sm font-black text-emerald-300 tabular-nums whitespace-nowrap text-right pt-0.5">
+                  ${formatMoneyAr(Number(p.amount || 0))}
                 </div>
               </div>
-            ))}
+              );
+            })}
             {filteredPayments.length > PAYMENTS_PAGE_SIZE && (
               <div className="flex items-center justify-end gap-2 pt-1">
                 <button

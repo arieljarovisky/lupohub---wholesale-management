@@ -6,6 +6,7 @@ import {
   allocatePayment,
   getInvoicesOutstanding,
   getOrdersOutstanding,
+  getPaymentAllocationLinksByPaymentIds,
   previewPaymentAllocation,
   relinkPaymentToInvoices,
   syncAllOrderPaymentStatusForCustomer,
@@ -290,8 +291,50 @@ export const listPayments = async (req: any, res: Response) => {
         puntoVta: r.invoice_punto_venta ?? undefined,
         cbteTipo: r.invoice_cbte_tipo ?? undefined,
         cbteDesde: r.invoice_cbte_desde ?? undefined
-      } : undefined
+      } : undefined,
+      invoiceLinks: [] as Array<{
+        invoiceId: string;
+        label: string;
+        amountApplied: number;
+        invoiceOutstanding: number;
+      }>,
+      orderLinks: [] as Array<{
+        orderId: string;
+        label: string;
+        amountApplied: number;
+        orderOutstanding: number;
+      }>
     }));
+
+    try {
+      const linksByPayment = await getPaymentAllocationLinksByPaymentIds(
+        systemPayments.map((p) => p.id)
+      );
+      for (const p of systemPayments) {
+        const links = linksByPayment.get(p.id);
+        if (!links) continue;
+        p.invoiceLinks = links.invoiceLinks;
+        p.orderLinks = links.orderLinks;
+        if (links.invoiceLinks.length > 0) {
+          p.invoiceIds = Array.from(
+            new Set([
+              ...p.invoiceIds,
+              ...links.invoiceLinks.map((l) => l.invoiceId)
+            ])
+          );
+        }
+        if (links.orderLinks.length > 0) {
+          p.orderIds = Array.from(
+            new Set([
+              ...p.orderIds,
+              ...links.orderLinks.map((l) => l.orderId)
+            ])
+          );
+        }
+      }
+    } catch (enrichErr: any) {
+      console.warn('listPayments allocation links:', enrichErr?.message || enrichErr);
+    }
 
     // Integrar recibos importados desde Tango/Multimedias como parte del mismo "sistema".
     // Se omiten si ya existe pago equivalente en tabla payments (fecha + nro + importe).
