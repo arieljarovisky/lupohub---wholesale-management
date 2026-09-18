@@ -3456,6 +3456,8 @@ export const api = {
       status: string | null;
       thumbnail: string | null;
       catalogProductId: string | null;
+      tiendaNubeProductId: string | null;
+      tiendaNubeProductName: string | null;
       ratingAverage: number | null;
       reviewsCount: number;
       ratingLevels: {
@@ -3476,6 +3478,7 @@ export const api = {
         likes: number;
         dislikes: number;
         relevance: number | null;
+        authorName: string | null;
         attributes: Array<{ id?: string; name?: string; value_id?: string; value_name?: string }>;
       }>;
     }>;
@@ -3486,6 +3489,7 @@ export const api = {
       publicationsWithReviews: number;
       reviewsReturned: number;
       ratingAverageGlobal: number | null;
+      linkedToTiendaNube?: number;
       scannedUpTo: number;
     };
   }> => {
@@ -3524,6 +3528,29 @@ export const api = {
     a.href = url;
     const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     a.download = `opiniones_mercadolibre_${stamp}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
+  /** CSV de opiniones ML vinculadas, con product_id de Tienda Nube. */
+  exportMercadoLibreReviewsTiendaNube: async (params?: {
+    include_closed?: boolean;
+    only_with_reviews?: boolean;
+  }): Promise<void> => {
+    const query = new URLSearchParams();
+    if (params?.include_closed) query.set('include_closed', '1');
+    if (params?.only_with_reviews === false) query.set('only_with_reviews', '0');
+    const blob = await getBlob(
+      `/integrations/mercadolibre/reviews-export-tiendanube${query.toString() ? '?' + query.toString() : ''}`,
+      300000
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    a.download = `opiniones_tiendanube_${stamp}.csv`;
     document.body.appendChild(a);
     a.click();
     a.remove();

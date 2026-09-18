@@ -33,6 +33,8 @@ type ItemReviews = {
   permalink: string | null;
   status: string | null;
   thumbnail: string | null;
+  tiendaNubeProductId: string | null;
+  tiendaNubeProductName: string | null;
   ratingAverage: number | null;
   reviewsCount: number;
   ratingLevels: {
@@ -77,6 +79,7 @@ const MercadoLibreReviews: React.FC = () => {
   const [items, setItems] = useState<ItemReviews[]>([]);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [exportingTn, setExportingTn] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState(0);
@@ -89,6 +92,7 @@ const MercadoLibreReviews: React.FC = () => {
     publicationsWithReviews: number;
     reviewsReturned: number;
     ratingAverageGlobal: number | null;
+    linkedToTiendaNube?: number;
   } | null>(null);
   const limit = 15;
   const forceRefreshRef = React.useRef(true);
@@ -154,6 +158,21 @@ const MercadoLibreReviews: React.FC = () => {
     }
   };
 
+  const handleExportTn = async () => {
+    setExportingTn(true);
+    setError(null);
+    try {
+      await api.exportMercadoLibreReviewsTiendaNube({
+        include_closed: includeClosed || undefined,
+        only_with_reviews: true,
+      });
+    } catch (e: any) {
+      setError(e?.message || 'No se pudo exportar el CSV de Tienda Nube');
+    } finally {
+      setExportingTn(false);
+    }
+  };
+
   const page = Math.floor(offset / limit) + 1;
   const pages = Math.max(1, Math.ceil(total / limit));
 
@@ -188,6 +207,16 @@ const MercadoLibreReviews: React.FC = () => {
             {exporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
             Exportar Excel
           </button>
+          <button
+            type="button"
+            onClick={handleExportTn}
+            disabled={exportingTn || loading}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-bold bg-sky-700 hover:bg-sky-600 text-white disabled:opacity-50"
+            title="CSV con product_id de Tienda Nube para importar opiniones"
+          >
+            {exportingTn ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+            CSV Tienda Nube
+          </button>
         </div>
       </div>
 
@@ -199,6 +228,11 @@ const MercadoLibreReviews: React.FC = () => {
           <span className="px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700 text-slate-300">
             Opiniones listadas: <strong className="text-white">{summary.reviewsReturned}</strong>
           </span>
+          {summary.linkedToTiendaNube != null && (
+            <span className="px-3 py-1.5 rounded-lg bg-sky-950/60 border border-sky-800 text-sky-200">
+              Vinculadas a Tienda Nube: <strong className="text-white">{summary.linkedToTiendaNube}</strong>
+            </span>
+          )}
           {summary.ratingAverageGlobal != null && (
             <span className="px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700 text-slate-300 inline-flex items-center gap-2">
               Promedio global: <strong className="text-amber-300">{summary.ratingAverageGlobal}</strong>
@@ -306,6 +340,14 @@ const MercadoLibreReviews: React.FC = () => {
                   <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-xs font-mono text-slate-500">{item.itemId}</span>
+                      {item.tiendaNubeProductId && (
+                        <span
+                          className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-sky-950 text-sky-300 border border-sky-800"
+                          title={item.tiendaNubeProductName || 'Publicación vinculada en Tienda Nube'}
+                        >
+                          TN {item.tiendaNubeProductId}
+                        </span>
+                      )}
                       {item.status && (
                         <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
                           {item.status}

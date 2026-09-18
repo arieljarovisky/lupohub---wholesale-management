@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import axios from 'axios';
 import ExcelJS from 'exceljs';
+import { query } from '../database/db';
 import { getValidMLToken, normalizeMercadoLibreItemId } from './integrations.controller';
 
 const ML_API = 'https://api.mercadolibre.com';
@@ -19,6 +20,7 @@ export type MlReviewRow = {
   likes: number;
   dislikes: number;
   relevance: number | null;
+  authorName: string | null;
   attributes: Array<{ id?: string; name?: string; value_id?: string; value_name?: string }>;
 };
 
@@ -29,6 +31,8 @@ export type MlItemReviewsSummary = {
   status: string | null;
   thumbnail: string | null;
   catalogProductId: string | null;
+  tiendaNubeProductId: string | null;
+  tiendaNubeProductName: string | null;
   ratingAverage: number | null;
   reviewsCount: number;
   ratingLevels: {
@@ -58,6 +62,9 @@ function mapReview(raw: any): MlReviewRow {
       }))
     : [];
   const rateNum = Number(raw?.rate);
+  const author =
+    String(raw?.reviewer?.nickname || raw?.reviewer?.name || raw?.user?.nickname || raw?.author_name || '').trim() ||
+    null;
   return {
     id: raw?.id ?? '',
     title: String(raw?.title ?? raw?.tittle ?? '').trim(),
@@ -69,8 +76,107 @@ function mapReview(raw: any): MlReviewRow {
     likes: Number(raw?.likes) || 0,
     dislikes: Number(raw?.dislikes) || 0,
     relevance: Number.isFinite(Number(raw?.relevance)) ? Number(raw.relevance) : null,
+    authorName: author,
     attributes: attrs,
   };
+}
+
+type TnLink = { productId: string; productName: string };
+
+function setMlTnLink(map: Map<string, TnLink>, mlRaw: unknown, tnId: unknown, name: unknown) {
+  const ml = normalizeMercadoLibreItemId(mlRaw);
+  const tn = tnId != null ? String(tnId).trim() : '';
+  if (!ml || !tn) return;
+  if (map.has(ml)) return;
+  map.set(ml, { productId: tn, productName: String(name || '').trim() });
+}
+
+/** MLA / publicación ML → ID de producto de Tienda Nube si hay vínculo en LupoHub. */
+async function loadMlItemToTiendaNubeMap(): Promise<Map<string, TnLink>> {
+  const map = new Map<string, TnLink>();
+  try {
+    const productRows = (await query(
+      `SELECT mercado_libre_id, tienda_nube_id, name FROM products
+       WHERE mercado_libre_id IS NOT NULL AND TRIM(mercado_libre_id) != ''
+         AND tienda_nube_id IS NOT NULL AND TRIM(tienda_nube_id) != ''`
+    )) as Array<{ mercado_libre_id: string; tienda_nube_id: string; name: string }>;
+    for (const r of productRows || []) {
+      setMlTnLink(map, r.mercado_libre_id, r.tienda_nube_id, r.name);
+    }
+
+    const variantRows = (await query(
+      `SELECT pv.mercado_libre_item_id AS ml_id, p.tienda_nube_id, p.name
+       FROM product_variants pv
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       WHERE pv.mercado_libre_item_id IS NOT NULL AND TRIM(pv.mercado_libre_item_id) != ''
+         AND p.tienda_nube_id IS NOT NULL AND TRIM(p.tienda_nube_id) != ''`
+    )) as Array<{ ml_id: string; tienda_nube_id: string; name: string }>;
+    for (const r of variantRows || []) {
+      setMlTnLink(map, r.ml_id, r.tienda_nube_id, r.name);
+    }
+
+    const pubRows = (await query(
+      `SELECT vp.external_product_id AS ml_id,
+              COALESCE(NULLIF(TRIM(p.tienda_nube_id), ''), NULLIF(TRIM(vp_tn.external_product_id), '')) AS tn_id,
+              p.name
+       FROM variant_publications vp
+       JOIN product_variants pv ON pv.id = vp.variant_id
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       LEFT JOIN variant_publications vp_tn
+         ON vp_tn.variant_id = vp.variant_id AND vp_tn.platform = 'tiendanube'
+       WHERE vp.platform = 'mercadolibre'`
+    )) as Array<{ ml_id: string; tn_id: string | null; name: string }>;
+    for (const r of pubRows || []) {
+      setMlTnLink(map, r.ml_id, r.tn_id, r.name);
+    }
+  } catch (e: any) {
+    console.warn('[ML Reviews] no se pudo armar el mapa ML → Tienda Nube:', e?.message || e);
+  }
+  return map;
+}
+
+async function attachTiendaNubeLinks(list: MlItemReviewsSummary[]): Promise<MlItemReviewsSummary[]> {
+  const map = await loadMlItemToTiendaNubeMap();
+  return list.map((s) => {
+    const link = map.get(normalizeMercadoLibreItemId(s.itemId) || s.itemId);
+    return {
+      ...s,
+      tiendaNubeProductId: link?.productId || null,
+      tiendaNubeProductName: link?.productName || null,
+    };
+  });
+}
+
+function csvCell(value: unknown): string {
+  const s = value == null ? '' : String(value);
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function toYmd(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) {
+    const m = String(iso).match(/^(\d{4}-\d{2}-\d{2})/);
+    return m?.[1] || '';
+  }
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, '0');
+  const da = String(d.getDate()).padStart(2, '0');
+  return `${y}-${mo}-${da}`;
+}
+
+function reviewContentForTn(r: MlReviewRow): string {
+  return [r.title, r.content].filter((x) => x && x.trim()).join('\n').trim();
+}
+
+function tnImportStatus(mlStatus: string): string {
+  const s = (mlStatus || '').toLowerCase();
+  if (s === 'rejected' || s === 'moderated' || s === 'blocked') return 'rejected';
+  if (s === 'pending' || s === 'waiting') return 'pending';
+  return 'published';
 }
 
 function emptyLevels() {
@@ -229,6 +335,8 @@ async function collectAllItemReviews(
       status: info?.status || null,
       thumbnail: info?.thumbnail || null,
       catalogProductId: info?.catalogProductId || null,
+      tiendaNubeProductId: null,
+      tiendaNubeProductName: null,
       ratingAverage: rev.ratingAverage,
       reviewsCount: rev.reviewsCount,
       ratingLevels: rev.ratingLevels,
@@ -291,11 +399,13 @@ export const getMercadoLibreReviews = async (req: Request, res: Response) => {
     const forceRefresh =
       String(req.query.refresh || '') === '1' || String(req.query.refresh || '') === 'true';
 
-    const all = await collectAllItemReviewsCached(mlToken.access_token, String(mlToken.user_id), {
-      includeClosed,
-      onlyWithReviews,
-      forceRefresh,
-    });
+    const all = await attachTiendaNubeLinks(
+      await collectAllItemReviewsCached(mlToken.access_token, String(mlToken.user_id), {
+        includeClosed,
+        onlyWithReviews,
+        forceRefresh,
+      })
+    );
 
     let filtered = all;
     if (q) {
@@ -303,6 +413,8 @@ export const getMercadoLibreReviews = async (req: Request, res: Response) => {
         (s) =>
           s.itemId.toLowerCase().includes(q) ||
           s.title.toLowerCase().includes(q) ||
+          (s.tiendaNubeProductId && s.tiendaNubeProductId.toLowerCase().includes(q)) ||
+          (s.tiendaNubeProductName && s.tiendaNubeProductName.toLowerCase().includes(q)) ||
           s.reviews.some((r) => r.title.toLowerCase().includes(q) || r.content.toLowerCase().includes(q))
       );
     }
@@ -318,6 +430,8 @@ export const getMercadoLibreReviews = async (req: Request, res: Response) => {
         ? Math.round((rated.reduce((a, s) => a + (s.ratingAverage || 0), 0) / rated.length) * 10) / 10
         : null;
 
+    const linkedToTn = filtered.filter((s) => !!s.tiendaNubeProductId).length;
+
     res.json({
       items: page,
       total: filtered.length,
@@ -327,6 +441,7 @@ export const getMercadoLibreReviews = async (req: Request, res: Response) => {
         publicationsWithReviews: filtered.length,
         reviewsReturned: totalReviews,
         ratingAverageGlobal: avgGlobal,
+        linkedToTiendaNube: linkedToTn,
         scannedUpTo: ML_REVIEWS_MAX_ITEMS,
       },
     });
@@ -357,11 +472,13 @@ export const exportMercadoLibreReviewsXlsx = async (req: Request, res: Response)
     const onlyWithReviews =
       String(req.query.only_with_reviews || '1') !== '0' && String(req.query.only_with_reviews || '') !== 'false';
 
-    const all = await collectAllItemReviewsCached(mlToken.access_token, String(mlToken.user_id), {
-      includeClosed,
-      onlyWithReviews,
-      forceRefresh: true,
-    });
+    const all = await attachTiendaNubeLinks(
+      await collectAllItemReviewsCached(mlToken.access_token, String(mlToken.user_id), {
+        includeClosed,
+        onlyWithReviews,
+        forceRefresh: true,
+      })
+    );
 
     const wb = new ExcelJS.Workbook();
     wb.creator = 'LupoHub';
@@ -372,6 +489,8 @@ export const exportMercadoLibreReviewsXlsx = async (req: Request, res: Response)
       { header: 'Item ID', key: 'itemId', width: 16 },
       { header: 'Título', key: 'title', width: 48 },
       { header: 'Estado', key: 'status', width: 12 },
+      { header: 'ID Tienda Nube', key: 'tnId', width: 16 },
+      { header: 'Producto Tienda Nube', key: 'tnName', width: 40 },
       { header: 'Promedio', key: 'avg', width: 10 },
       { header: 'Opiniones (total)', key: 'count', width: 16 },
       { header: '1★', key: 's1', width: 8 },
@@ -387,6 +506,8 @@ export const exportMercadoLibreReviewsXlsx = async (req: Request, res: Response)
         itemId: s.itemId,
         title: s.title,
         status: s.status || '',
+        tnId: s.tiendaNubeProductId || '',
+        tnName: s.tiendaNubeProductName || '',
         avg: s.ratingAverage ?? '',
         count: s.reviewsCount,
         s1: s.ratingLevels.oneStar,
@@ -402,7 +523,10 @@ export const exportMercadoLibreReviewsXlsx = async (req: Request, res: Response)
     wsReviews.columns = [
       { header: 'Item ID', key: 'itemId', width: 16 },
       { header: 'Publicación', key: 'title', width: 40 },
+      { header: 'ID Tienda Nube', key: 'tnId', width: 16 },
+      { header: 'Producto Tienda Nube', key: 'tnName', width: 40 },
       { header: 'Review ID', key: 'reviewId', width: 14 },
+      { header: 'Autor', key: 'author', width: 22 },
       { header: 'Estrellas', key: 'rate', width: 10 },
       { header: 'Título opinión', key: 'revTitle', width: 28 },
       { header: 'Contenido', key: 'content', width: 60 },
@@ -416,13 +540,32 @@ export const exportMercadoLibreReviewsXlsx = async (req: Request, res: Response)
     ];
     wsReviews.getRow(1).font = { bold: true };
 
+    const wsTn = wb.addWorksheet('Importar Tienda Nube');
+    wsTn.columns = [
+      { header: 'author_name', key: 'author_name', width: 24 },
+      { header: 'rating', key: 'rating', width: 10 },
+      { header: 'content', key: 'content', width: 60 },
+      { header: 'product_id', key: 'product_id', width: 14 },
+      { header: 'product_name', key: 'product_name', width: 40 },
+      { header: 'photo_url', key: 'photo_url', width: 12 },
+      { header: 'video_url', key: 'video_url', width: 12 },
+      { header: 'voice_url', key: 'voice_url', width: 12 },
+      { header: 'status', key: 'status', width: 12 },
+      { header: 'created_at', key: 'created_at', width: 14 },
+      { header: 'order_id', key: 'order_id', width: 12 },
+    ];
+    wsTn.getRow(1).font = { bold: true };
+
     for (const s of all) {
       if (!s.reviews.length) {
         if (!onlyWithReviews) {
           wsReviews.addRow({
             itemId: s.itemId,
             title: s.title,
+            tnId: s.tiendaNubeProductId || '',
+            tnName: s.tiendaNubeProductName || '',
             reviewId: '',
+            author: '',
             rate: '',
             revTitle: '',
             content: '(sin opiniones detalladas en API)',
@@ -445,7 +588,10 @@ export const exportMercadoLibreReviewsXlsx = async (req: Request, res: Response)
         wsReviews.addRow({
           itemId: s.itemId,
           title: s.title,
+          tnId: s.tiendaNubeProductId || '',
+          tnName: s.tiendaNubeProductName || '',
           reviewId: r.id,
+          author: r.authorName || '',
           rate: r.rate ?? '',
           revTitle: r.title,
           content: r.content,
@@ -457,6 +603,22 @@ export const exportMercadoLibreReviewsXlsx = async (req: Request, res: Response)
           attrs,
           link: s.permalink || '',
         });
+
+        if (s.tiendaNubeProductId && r.rate != null) {
+          wsTn.addRow({
+            author_name: r.authorName || 'Comprador Mercado Libre',
+            rating: r.rate,
+            content: reviewContentForTn(r),
+            product_id: s.tiendaNubeProductId,
+            product_name: s.tiendaNubeProductName || s.title,
+            photo_url: '',
+            video_url: '',
+            voice_url: '',
+            status: tnImportStatus(r.status),
+            created_at: toYmd(r.dateCreated),
+            order_id: '',
+          });
+        }
       }
     }
 
@@ -469,6 +631,79 @@ export const exportMercadoLibreReviewsXlsx = async (req: Request, res: Response)
     console.error('exportMercadoLibreReviewsXlsx:', error?.response?.data || error.message);
     res.status(error.response?.status || 500).json({
       message: error.message || 'Error al exportar reseñas de Mercado Libre',
+    });
+  }
+};
+
+/**
+ * CSV listo para importar opiniones en Tienda Nube (solo publicaciones vinculadas).
+ * Query: include_closed, only_with_reviews
+ */
+export const exportMercadoLibreReviewsTiendaNubeCsv = async (req: Request, res: Response) => {
+  try {
+    const mlToken = await getValidMLToken();
+    if (!mlToken) {
+      return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
+    }
+
+    const includeClosed = String(req.query.include_closed || '') === '1' || String(req.query.include_closed || '') === 'true';
+    const onlyWithReviews =
+      String(req.query.only_with_reviews || '1') !== '0' && String(req.query.only_with_reviews || '') !== 'false';
+
+    const all = await attachTiendaNubeLinks(
+      await collectAllItemReviewsCached(mlToken.access_token, String(mlToken.user_id), {
+        includeClosed,
+        onlyWithReviews,
+        forceRefresh: true,
+      })
+    );
+
+    const header = [
+      'author_name',
+      'rating',
+      'content',
+      'product_id',
+      'product_name',
+      'photo_url',
+      'video_url',
+      'voice_url',
+      'status',
+      'created_at',
+      'order_id',
+    ];
+    const lines = [header.map(csvCell).join(',')];
+    for (const s of all) {
+      if (!s.tiendaNubeProductId) continue;
+      for (const r of s.reviews) {
+        if (r.rate == null) continue;
+        lines.push(
+          [
+            r.authorName || 'Comprador Mercado Libre',
+            r.rate,
+            reviewContentForTn(r),
+            s.tiendaNubeProductId,
+            s.tiendaNubeProductName || s.title,
+            '',
+            '',
+            '',
+            tnImportStatus(r.status),
+            toYmd(r.dateCreated),
+            '',
+          ]
+            .map(csvCell)
+            .join(',')
+        );
+      }
+    }
+
+    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="opiniones_tiendanube_${stamp}.csv"`);
+    res.send(`\uFEFF${lines.join('\r\n')}`);
+  } catch (error: any) {
+    console.error('exportMercadoLibreReviewsTiendaNubeCsv:', error?.response?.data || error.message);
+    res.status(error.response?.status || 500).json({
+      message: error.message || 'Error al exportar reseñas para Tienda Nube',
     });
   }
 };
