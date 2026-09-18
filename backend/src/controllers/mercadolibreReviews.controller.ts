@@ -20,7 +20,9 @@ export type MlReviewRow = {
   likes: number;
   dislikes: number;
   relevance: number | null;
+  /** Nickname de Mercado Libre del comprador (cuando se puede resolver). */
   authorName: string | null;
+  orderId: string | null;
   attributes: Array<{ id?: string; name?: string; value_id?: string; value_name?: string }>;
 };
 
@@ -52,6 +54,25 @@ function cacheKey(userId: string, includeClosed: boolean, onlyWithReviews: boole
   return `${userId}|c:${includeClosed ? 1 : 0}|o:${onlyWithReviews ? 1 : 0}`;
 }
 
+function ymdKey(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const m = String(iso).match(/^(\d{4}-\d{2}-\d{2})/);
+  if (m?.[1]) return m[1];
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function extractOrderId(raw: any): string | null {
+  const candidates = [raw?.order_id, raw?.order?.id, raw?.orderId, raw?.purchase?.order_id];
+  for (const c of candidates) {
+    if (c == null || c === '' || c === 0 || c === '0') continue;
+    const s = String(c).trim();
+    if (s && s !== '0') return s;
+  }
+  return null;
+}
+
 function mapReview(raw: any): MlReviewRow {
   const attrs = Array.isArray(raw?.attributes)
     ? raw.attributes.map((a: any) => ({
@@ -62,9 +83,16 @@ function mapReview(raw: any): MlReviewRow {
       }))
     : [];
   const rateNum = Number(raw?.rate);
+  // Preferir siempre nickname de ML (usuario), no nombre real.
   const author =
-    String(raw?.reviewer?.nickname || raw?.reviewer?.name || raw?.user?.nickname || raw?.author_name || '').trim() ||
-    null;
+    String(
+      raw?.reviewer?.nickname ||
+        raw?.user?.nickname ||
+        raw?.buyer?.nickname ||
+        raw?.from?.nickname ||
+        raw?.author_nickname ||
+        ''
+    ).trim() || null;
   return {
     id: raw?.id ?? '',
     title: String(raw?.title ?? raw?.tittle ?? '').trim(),
@@ -77,8 +105,154 @@ function mapReview(raw: any): MlReviewRow {
     dislikes: Number(raw?.dislikes) || 0,
     relevance: Number.isFinite(Number(raw?.relevance)) ? Number(raw.relevance) : null,
     authorName: author,
+    orderId: extractOrderId(raw),
     attributes: attrs,
   };
+}
+
+async function fetchOrderBuyerNickname(accessToken: string, orderId: string): Promise<string | null> {
+  try {
+    const res = await axios.get(`${ML_API}/orders/${encodeURIComponent(orderId)}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      timeout: 15000,
+    });
+    const nick = String(res.data?.buyer?.nickname || '').trim();
+    return nick || null;
+  } catch (e: any) {
+    if (e?.response?.status !== 404) {
+      console.warn(`[ML Reviews] order ${orderId}:`, e?.response?.status || e?.message);
+    }
+    return null;
+  }
+}
+
+/** Órdenes de un ítem → nickname por fecha de compra (YYYY-MM-DD). */
+async function fetchItemBuyerNicknamesByDate(
+  accessToken: string,
+  sellerId: string,
+  itemId: string
+): Promise<Map<string, string[]>> {
+  const byDate = new Map<string, string[]>();
+  const addOrder = (order: any) => {
+    const nick = String(order?.buyer?.nickname || '').trim();
+    if (!nick) return;
+    const items: any[] = Array.isArray(order?.order_items) ? order.order_items : [];
+    const matchesItem =
+      items.length === 0 ||
+      items.some((oi) => {
+        const id = normalizeMercadoLibreItemId(oi?.item?.id) || String(oi?.item?.id || '');
+        return id && (id === itemId || mercadoLibreItemIdsLooseMatch(id, itemId));
+      });
+    if (!matchesItem) return;
+    const key = ymdKey(order?.date_created || order?.date_closed);
+    if (!key) return;
+    const list = byDate.get(key) || [];
+    list.push(nick);
+    byDate.set(key, list);
+  };
+
+  let offset = 0;
+  const limit = 50;
+  const maxPages = 4;
+  for (let page = 0; page < maxPages; page++) {
+    try {
+      const res = await axios.get(`${ML_API}/orders/search`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        params: {
+          seller: sellerId,
+          q: itemId,
+          offset,
+          limit,
+          sort: 'date_desc',
+        },
+        timeout: 20000,
+      });
+      const rows: any[] = Array.isArray(res.data?.results) ? res.data.results : [];
+      if (rows.length === 0) break;
+      for (const order of rows) addOrder(order);
+      if (rows.length < limit) break;
+      offset += limit;
+    } catch (e: any) {
+      console.warn(`[ML Reviews] orders/search ${itemId}:`, e?.response?.status || e?.message);
+      break;
+    }
+  }
+  return byDate;
+}
+
+function mercadoLibreItemIdsLooseMatch(a: string, b: string): boolean {
+  const na = normalizeMercadoLibreItemId(a) || a;
+  const nb = normalizeMercadoLibreItemId(b) || b;
+  return !!na && !!nb && na === nb;
+}
+
+/**
+ * La API de opiniones ofusca reviewer_id. Resolvemos el usuario ML (nickname)
+ * desde la orden asociada o por coincidencia ítem + fecha de compra.
+ */
+async function enrichReviewAuthors(
+  accessToken: string,
+  sellerId: string,
+  list: MlItemReviewsSummary[]
+): Promise<void> {
+  const orderIds = new Set<string>();
+  for (const s of list) {
+    for (const r of s.reviews) {
+      if (!r.authorName && r.orderId) orderIds.add(r.orderId);
+    }
+  }
+
+  const nickByOrder = new Map<string, string>();
+  if (orderIds.size > 0) {
+    const ids = [...orderIds];
+    await mapPool(ids, CONCURRENCY, async (orderId) => {
+      const nick = await fetchOrderBuyerNickname(accessToken, orderId);
+      if (nick) nickByOrder.set(orderId, nick);
+      return nick;
+    });
+  }
+
+  const itemsNeedingDateMatch = new Set<string>();
+  for (const s of list) {
+    for (const r of s.reviews) {
+      if (r.authorName) continue;
+      if (r.orderId && nickByOrder.has(r.orderId)) {
+        r.authorName = nickByOrder.get(r.orderId)!;
+        continue;
+      }
+      if (r.buyingDate) itemsNeedingDateMatch.add(s.itemId);
+    }
+  }
+
+  const nickByItemDate = new Map<string, Map<string, string[]>>();
+  if (itemsNeedingDateMatch.size > 0) {
+    const itemIds = [...itemsNeedingDateMatch];
+    await mapPool(itemIds, Math.min(4, CONCURRENCY), async (itemId) => {
+      const map = await fetchItemBuyerNicknamesByDate(accessToken, sellerId, itemId);
+      nickByItemDate.set(itemId, map);
+      return map;
+    });
+  }
+
+  for (const s of list) {
+    const used = new Set<string>();
+    for (const r of s.reviews) {
+      if (r.authorName) continue;
+      if (r.orderId && nickByOrder.has(r.orderId)) {
+        r.authorName = nickByOrder.get(r.orderId)!;
+        continue;
+      }
+      const day = ymdKey(r.buyingDate);
+      if (!day) continue;
+      const pool = nickByItemDate.get(s.itemId)?.get(day);
+      if (!pool?.length) continue;
+      const available = pool.find((n) => !used.has(`${day}:${n}`)) || pool[0];
+      if (available) {
+        r.authorName = available;
+        used.add(`${day}:${available}`);
+      }
+    }
+  }
 }
 
 type TnLink = { productId: string; productName: string };
@@ -349,6 +523,7 @@ async function collectAllItemReviews(
   if (opts?.onlyWithReviews !== false) {
     list = summaries.filter((s) => s.reviewsCount > 0 || (s.reviews && s.reviews.length > 0));
   }
+  await enrichReviewAuthors(accessToken, userId, list);
   list.sort((a, b) => {
     const da = a.ratingAverage ?? -1;
     const db = b.ratingAverage ?? -1;
@@ -415,7 +590,12 @@ export const getMercadoLibreReviews = async (req: Request, res: Response) => {
           s.title.toLowerCase().includes(q) ||
           (s.tiendaNubeProductId && s.tiendaNubeProductId.toLowerCase().includes(q)) ||
           (s.tiendaNubeProductName && s.tiendaNubeProductName.toLowerCase().includes(q)) ||
-          s.reviews.some((r) => r.title.toLowerCase().includes(q) || r.content.toLowerCase().includes(q))
+          s.reviews.some(
+            (r) =>
+              r.title.toLowerCase().includes(q) ||
+              r.content.toLowerCase().includes(q) ||
+              (r.authorName && r.authorName.toLowerCase().includes(q))
+          )
       );
     }
     if (minRate != null) {
@@ -526,7 +706,7 @@ export const exportMercadoLibreReviewsXlsx = async (req: Request, res: Response)
       { header: 'ID Tienda Nube', key: 'tnId', width: 16 },
       { header: 'Producto Tienda Nube', key: 'tnName', width: 40 },
       { header: 'Review ID', key: 'reviewId', width: 14 },
-      { header: 'Autor', key: 'author', width: 22 },
+      { header: 'Usuario ML', key: 'author', width: 22 },
       { header: 'Estrellas', key: 'rate', width: 10 },
       { header: 'Título opinión', key: 'revTitle', width: 28 },
       { header: 'Contenido', key: 'content', width: 60 },

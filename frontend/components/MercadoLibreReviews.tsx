@@ -24,6 +24,7 @@ type ReviewRow = {
   buyingDate: string | null;
   likes: number;
   dislikes: number;
+  authorName: string | null;
   attributes: Array<{ id?: string; name?: string; value_id?: string; value_name?: string }>;
 };
 
@@ -401,7 +402,12 @@ const MercadoLibreReviews: React.FC = () => {
                         >
                           <div className="flex flex-wrap items-center gap-2 mb-1">
                             <Stars value={r.rate} size={12} />
-                            {r.title && <span className="text-sm font-semibold text-slate-200">{r.title}</span>}
+                            <span className="text-sm font-semibold text-amber-200/90">
+                              {r.authorName ? `@${r.authorName}` : 'Comprador ML'}
+                            </span>
+                            {r.title && (
+                              <span className="text-sm text-slate-300 truncate">· {r.title}</span>
+                            )}
                             <span className="text-[11px] text-slate-500 ml-auto">{formatDt(r.dateCreated)}</span>
                           </div>
                           {r.content && <p className="text-sm text-slate-300 whitespace-pre-wrap">{r.content}</p>}
