@@ -15,6 +15,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.TN_FEE_PRESETS = void 0;
 exports.resolveFobPriceListByName = resolveFobPriceListByName;
 exports.resolveFobPriceList = resolveFobPriceList;
+exports.resolvePriceListById = resolvePriceListById;
+exports.resolveWholesalePriceList = resolveWholesalePriceList;
+exports.listPriceListOptions = listPriceListOptions;
+exports.resolveMarginCostPriceList = resolveMarginCostPriceList;
 exports.lookupFobPrice = lookupFobPrice;
 exports.calcFobYield = calcFobYield;
 exports.getIvaMultiplier = getIvaMultiplier;
@@ -119,6 +123,57 @@ function resolveFobPriceList() {
             return Object.assign({ id, name }, maps);
         }
         return { id: null, name: '', byProductId: new Map(), bySku: new Map() };
+    });
+}
+function loadPriceListInfo(id, name) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const maps = yield loadFobMaps(id);
+        return Object.assign({ id, name }, maps);
+    });
+}
+function resolvePriceListById(listId) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const wanted = String(listId || '').trim();
+        if (!wanted)
+            return { id: null, name: '', byProductId: new Map(), bySku: new Map() };
+        const pl = yield (0, db_1.get)('SELECT id, name FROM price_lists WHERE id = ?', [wanted]);
+        if (!(pl === null || pl === void 0 ? void 0 : pl.id))
+            return { id: null, name: '', byProductId: new Map(), bySku: new Map() };
+        return loadPriceListInfo(String(pl.id), String(pl.name || ''));
+    });
+}
+function resolveWholesalePriceList() {
+    return __awaiter(this, void 0, void 0, function* () {
+        const pl = yield (0, db_1.get)(`SELECT id, name FROM price_lists
+     WHERE LOWER(name) LIKE '%mayor%'
+     ORDER BY
+       CASE
+         WHEN LOWER(name) LIKE '%por mayor%' OR LOWER(name) LIKE '%mayorista%' THEN 0
+         ELSE 1
+       END,
+       updated_at DESC,
+       name
+     LIMIT 1`);
+        if (!(pl === null || pl === void 0 ? void 0 : pl.id))
+            return { id: null, name: '', byProductId: new Map(), bySku: new Map() };
+        return loadPriceListInfo(String(pl.id), String(pl.name || ''));
+    });
+}
+function listPriceListOptions() {
+    return __awaiter(this, void 0, void 0, function* () {
+        const rows = yield (0, db_1.query)('SELECT id, name FROM price_lists ORDER BY name');
+        return (rows || []).map((r) => ({ id: String(r.id), name: String(r.name || '') }));
+    });
+}
+function resolveMarginCostPriceList(priceListId) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const explicit = String(priceListId || '').trim();
+        if (explicit)
+            return resolvePriceListById(explicit);
+        const wholesale = yield resolveWholesalePriceList();
+        if (wholesale.id)
+            return wholesale;
+        return resolveFobPriceList();
     });
 }
 function lookupFobPrice(info, productId, sku) {

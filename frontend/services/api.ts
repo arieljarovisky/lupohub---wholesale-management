@@ -3002,10 +3002,14 @@ export const api = {
     limit?: number;
     channel?: 'all' | 'ml' | 'tn';
     tnFeePreset?: string;
+    priceListId?: string;
   }): Promise<{
     config: {
       fobListId: string | null;
       fobListName: string | null;
+      costListId?: string | null;
+      costListName?: string | null;
+      priceLists?: Array<{ id: string; name: string }>;
       ivaPercent: number;
       tnFeePresetId: string;
       tnFeePresetLabel: string;
@@ -3050,6 +3054,7 @@ export const api = {
     if (params?.limit) q.set('limit', String(params.limit));
     if (params?.channel) q.set('channel', params.channel);
     if (params?.tnFeePreset) q.set('tnFeePreset', params.tnFeePreset);
+    if (params?.priceListId) q.set('priceListId', params.priceListId);
     const qs = q.toString();
     return handleRequest(async () => {
       return await request(
@@ -3063,6 +3068,9 @@ export const api = {
       config: {
         fobListId: null,
         fobListName: null,
+        costListId: null,
+        costListName: null,
+        priceLists: [],
         ivaPercent: 21,
         tnFeePresetId: 'tn_mp_instant',
         tnFeePresetLabel: '',
@@ -3152,11 +3160,13 @@ export const api = {
     search?: string;
     channel?: 'all' | 'ml' | 'tn';
     tnFeePreset?: string;
+    priceListId?: string;
   }): Promise<void> => {
     const q = new URLSearchParams();
     if (params?.search) q.set('search', params.search);
     if (params?.channel) q.set('channel', params.channel);
     if (params?.tnFeePreset) q.set('tnFeePreset', params.tnFeePreset);
+    if (params?.priceListId) q.set('priceListId', params.priceListId);
     const qs = q.toString();
     const blob = await getBlob(
       `/integrations/channel-margins/export${qs ? `?${qs}` : ''}`,

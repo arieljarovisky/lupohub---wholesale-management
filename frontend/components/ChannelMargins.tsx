@@ -35,6 +35,8 @@ const marginClass = (m: number | null | undefined) => {
   return 'text-slate-300';
 };
 
+const PRICE_LIST_STORAGE_KEY = 'lupohub.margins.priceListId';
+
 const ChannelMargins: React.FC = () => {
   const { showToast } = useNotification();
   const [loading, setLoading] = useState(true);
@@ -42,6 +44,13 @@ const ChannelMargins: React.FC = () => {
   const [searchDebounced, setSearchDebounced] = useState('');
   const [channel, setChannel] = useState<'all' | 'ml' | 'tn'>('all');
   const [tnFeePreset, setTnFeePreset] = useState('tn_mp_instant');
+  const [priceListId, setPriceListId] = useState(() => {
+    try {
+      return localStorage.getItem(PRICE_LIST_STORAGE_KEY) || '';
+    } catch {
+      return '';
+    }
+  });
   const [page, setPage] = useState(1);
   const [data, setData] = useState<Awaited<ReturnType<typeof api.getChannelMargins>> | null>(null);
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
@@ -62,6 +71,7 @@ const ChannelMargins: React.FC = () => {
         limit: 50,
         channel,
         tnFeePreset,
+        priceListId: priceListId || undefined,
       });
       setData(res);
     } catch (e: unknown) {
@@ -69,7 +79,7 @@ const ChannelMargins: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [searchDebounced, page, channel, tnFeePreset, showToast]);
+  }, [searchDebounced, page, channel, tnFeePreset, priceListId, showToast]);
 
   useEffect(() => {
     load();
@@ -77,7 +87,7 @@ const ChannelMargins: React.FC = () => {
 
   useEffect(() => {
     setPage(1);
-  }, [searchDebounced, channel, tnFeePreset]);
+  }, [searchDebounced, channel, tnFeePreset, priceListId]);
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.limit)) : 1;
 
@@ -142,6 +152,7 @@ const ChannelMargins: React.FC = () => {
         search: searchDebounced || undefined,
         channel,
         tnFeePreset,
+        priceListId: priceListId || data?.config.costListId || data?.config.fobListId || undefined,
       });
       showToast('success', 'Excel descargado');
     } catch (e: unknown) {
@@ -163,7 +174,7 @@ const ChannelMargins: React.FC = () => {
           </h2>
           <p className="text-slate-400 text-sm mt-1 max-w-2xl">
             Una fila por artículo: todas las variantes comparten el mismo precio en ML y TN. Ganancia estimada:
-            precio − comisiones − FOB.
+            precio de venta − comisiones − precio de la lista elegida.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -207,10 +218,10 @@ const ChannelMargins: React.FC = () => {
           <Info size={18} className="text-blue-400 shrink-0 mt-0.5" />
           <div>
             <p>
-              <strong className="text-white">FOB:</strong>{' '}
-              {config.fobListName
-                ? `lista «${config.fobListName}»`
-                : 'sin lista FOB (creá una lista con "fob" en el nombre o definí LUPOHUB_FOB_PRICE_LIST_ID)'}
+              <strong className="text-white">Costo:</strong>{' '}
+              {config.costListName || config.fobListName
+                ? `precio de la lista «${config.costListName || config.fobListName}»`
+                : 'sin lista de precios (creá una lista por mayor o elegí una en el filtro)'}
             </p>
             <p className="mt-1">
               <strong className="text-amber-300">Mercado Libre:</strong> {config.mlListingFeeSource} + CPT cobro{' '}
@@ -224,7 +235,7 @@ const ChannelMargins: React.FC = () => {
         </div>
       )}
 
-      <div className="flex flex-col sm:flex-row gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-end gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
           <input
@@ -235,6 +246,33 @@ const ChannelMargins: React.FC = () => {
             className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-800 border border-slate-600 text-white text-sm"
           />
         </div>
+        <label className="flex flex-col gap-1 min-w-[220px] max-w-full">
+          <span className="text-[10px] uppercase tracking-wider text-emerald-400/90 font-bold px-1">
+            Lista de precios
+          </span>
+        <select
+          value={priceListId || config?.costListId || config?.fobListId || ''}
+          onChange={(e) => {
+            const id = e.target.value;
+            setPriceListId(id);
+            try {
+              if (id) localStorage.setItem(PRICE_LIST_STORAGE_KEY, id);
+              else localStorage.removeItem(PRICE_LIST_STORAGE_KEY);
+            } catch {
+              /* ignore */
+            }
+          }}
+          className="rounded-xl bg-slate-800 border border-emerald-700/50 text-white text-sm px-4 py-2.5 w-full"
+          title="Lista de precios para el costo del margen"
+        >
+          {(config?.priceLists?.length ? config.priceLists : []).map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+          {!config?.priceLists?.length && <option value="">Sin listas de precios</option>}
+        </select>
+        </label>
         <select
           value={channel}
           onChange={(e) => setChannel(e.target.value as 'all' | 'ml' | 'tn')}
@@ -278,7 +316,7 @@ const ChannelMargins: React.FC = () => {
                 />
               </th>
               <th className="p-3">Artículo</th>
-              <th className="p-3">FOB</th>
+              <th className="p-3">Precio lista</th>
               <th className="p-3 text-amber-300">
                 <span className="inline-flex items-center gap-1">
                   <Zap size={12} /> Mercado Libre
@@ -293,7 +331,9 @@ const ChannelMargins: React.FC = () => {
             <tr className="text-[9px] uppercase text-slate-600 border-b border-slate-700/80">
               <th />
               <th />
-              <th className="pb-2 px-3 font-normal">Costo</th>
+              <th className="pb-2 px-3 font-normal">
+                {config?.costListName || config?.fobListName || 'Costo'}
+              </th>
               <th className="pb-2 px-1 font-normal">Precio · Comisión · Ganancia</th>
               <th className="pb-2 px-1 font-normal">Precio · Comisión · Ganancia</th>
             </tr>

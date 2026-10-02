@@ -118,6 +118,58 @@ export async function resolveFobPriceList(): Promise<FobPriceListInfo> {
   return { id: null, name: '', byProductId: new Map(), bySku: new Map() };
 }
 
+async function loadPriceListInfo(id: string, name: string): Promise<FobPriceListInfo> {
+  const maps = await loadFobMaps(id);
+  return { id, name, ...maps };
+}
+
+/** Lista concreta por id. */
+export async function resolvePriceListById(listId: string): Promise<FobPriceListInfo> {
+  const wanted = String(listId || '').trim();
+  if (!wanted) return { id: null, name: '', byProductId: new Map(), bySku: new Map() };
+  const pl = await get('SELECT id, name FROM price_lists WHERE id = ?', [wanted]);
+  if (!pl?.id) return { id: null, name: '', byProductId: new Map(), bySku: new Map() };
+  return loadPriceListInfo(String(pl.id), String((pl as { name?: string }).name || ''));
+}
+
+/** Lista por mayor: nombre con «mayor», priorizando «por mayor» o «mayorista». */
+export async function resolveWholesalePriceList(): Promise<FobPriceListInfo> {
+  const pl = await get(
+    `SELECT id, name FROM price_lists
+     WHERE LOWER(name) LIKE '%mayor%'
+     ORDER BY
+       CASE
+         WHEN LOWER(name) LIKE '%por mayor%' OR LOWER(name) LIKE '%mayorista%' THEN 0
+         ELSE 1
+       END,
+       updated_at DESC,
+       name
+     LIMIT 1`
+  );
+  if (!pl?.id) return { id: null, name: '', byProductId: new Map(), bySku: new Map() };
+  return loadPriceListInfo(String(pl.id), String((pl as { name?: string }).name || ''));
+}
+
+export async function listPriceListOptions(): Promise<Array<{ id: string; name: string }>> {
+  const rows = (await query(`SELECT id, name FROM price_lists ORDER BY name`)) as Array<{
+    id: string;
+    name: string;
+  }>;
+  return (rows || []).map((r) => ({ id: String(r.id), name: String(r.name || '') }));
+}
+
+/**
+ * Costo para márgenes de canal: la lista elegida, si no hay elección la de precio por mayor,
+ * y si no existe ninguna mayorista, la lista FOB.
+ */
+export async function resolveMarginCostPriceList(priceListId?: string | null): Promise<FobPriceListInfo> {
+  const explicit = String(priceListId || '').trim();
+  if (explicit) return resolvePriceListById(explicit);
+  const wholesale = await resolveWholesalePriceList();
+  if (wholesale.id) return wholesale;
+  return resolveFobPriceList();
+}
+
 export function lookupFobPrice(
   info: FobPriceListInfo,
   productId?: string | null,

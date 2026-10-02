@@ -7,7 +7,8 @@ import ExcelJS from 'exceljs';
 import { query, get } from '../database/db';
 import { getValidMLToken } from './integrations.controller';
 import {
-  resolveFobPriceList,
+  resolveMarginCostPriceList,
+  listPriceListOptions,
   lookupFobPrice,
   resolveTnFeePreset,
   listTnFeePresets,
@@ -150,6 +151,7 @@ type ComputeMarginsOpts = {
   search?: string;
   channel?: string;
   tnFeePreset?: string;
+  priceListId?: string;
   page?: number;
   limit?: number;
   paginate?: boolean;
@@ -194,12 +196,15 @@ async function computeChannelMargins(opts: ComputeMarginsOpts = {}) {
     paginate ? [...searchParams, limit, offset] : searchParams
   )) as ProductGroupRow[];
 
-  const fobInfo = await resolveFobPriceList();
+  const [fobInfo, priceLists] = await Promise.all([
+    resolveMarginCostPriceList(opts.priceListId),
+    listPriceListOptions(),
+  ]);
   const tnPreset = resolveTnFeePreset(String(opts.tnFeePreset || ''));
 
   if (productRows.length === 0) {
     return {
-      config: buildConfigResponse(fobInfo, tnPreset),
+      config: buildConfigResponse(fobInfo, tnPreset, priceLists),
       total,
       page: paginate ? page : 1,
       limit: paginate ? limit : total,
@@ -401,7 +406,7 @@ async function computeChannelMargins(opts: ComputeMarginsOpts = {}) {
   }
 
   return {
-    config: buildConfigResponse(fobInfo, tnPreset),
+    config: buildConfigResponse(fobInfo, tnPreset, priceLists),
     total,
     page: paginate ? page : 1,
     limit: paginate ? limit : total,
@@ -420,6 +425,7 @@ export const getChannelMargins = async (req: Request, res: Response) => {
       search: String(req.query.search || ''),
       channel: String(req.query.channel || 'all'),
       tnFeePreset: String(req.query.tnFeePreset || ''),
+      priceListId: String(req.query.priceListId || ''),
       page: parseInt(String(req.query.page || '1'), 10) || 1,
       limit: parseInt(String(req.query.limit || '50'), 10) || 50,
       paginate: true,
@@ -439,6 +445,7 @@ export const exportChannelMarginsXlsx = async (req: Request, res: Response) => {
       search: String(req.query.search || ''),
       channel: String(req.query.channel || 'all'),
       tnFeePreset: String(req.query.tnFeePreset || ''),
+      priceListId: String(req.query.priceListId || ''),
       paginate: false,
     });
 
@@ -456,13 +463,13 @@ export const exportChannelMarginsXlsx = async (req: Request, res: Response) => {
 
     ws.mergeCells('A2:P2');
     ws.getCell('A2').value =
-      `FOB: ${result.config.fobListName || 'sin lista'} | TN: ${result.config.tnFeePresetLabel} | ML CPT: ${result.config.mlPaymentCptPercent}% | Generado: ${new Date().toLocaleString('es-AR')}`;
+      `Lista de precios: ${result.config.fobListName || 'sin lista'} | TN: ${result.config.tnFeePresetLabel} | ML CPT: ${result.config.mlPaymentCptPercent}% | Generado: ${new Date().toLocaleString('es-AR')}`;
 
     const headers = [
       'SKU',
       'Artículo',
       'Variantes',
-      'FOB',
+      'Precio lista',
       'ML Precio',
       'ML Comisión',
       'ML Com. venta',
@@ -557,12 +564,16 @@ export const exportChannelMarginsXlsx = async (req: Request, res: Response) => {
 
 function buildConfigResponse(
   fobInfo: { id: string | null; name: string },
-  tnPreset: { id: string; label: string }
+  tnPreset: { id: string; label: string },
+  priceLists: Array<{ id: string; name: string }> = []
 ) {
   const ivaPercent = Math.round((getIvaMultiplier() - 1) * 10000) / 100;
   return {
     fobListId: fobInfo.id,
     fobListName: fobInfo.name || null,
+    costListId: fobInfo.id,
+    costListName: fobInfo.name || null,
+    priceLists,
     ivaPercent,
     tnFeePresetId: tnPreset.id,
     tnFeePresetLabel: tnPreset.label,
