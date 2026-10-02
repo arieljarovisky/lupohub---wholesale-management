@@ -15,6 +15,7 @@ import {
 import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
 import { ChannelPricesModal } from './ChannelPricesModal';
+import MlPeriodProfitCard from './MlPeriodProfitCard';
 import type { Product } from '../types';
 
 type ArticleRow = Awaited<ReturnType<typeof api.getChannelMargins>>['rows'][number];
@@ -198,6 +199,8 @@ const ChannelMargins: React.FC = () => {
           )}
         </div>
       </div>
+
+      <MlPeriodProfitCard />
 
       {config && (
         <div className="flex items-start gap-3 p-4 rounded-xl bg-slate-800/80 border border-slate-700 text-sm text-slate-300">

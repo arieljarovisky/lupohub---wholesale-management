@@ -78,6 +78,7 @@ import { addCustomerDeliveryAddresses } from './database/add_customer_delivery_a
 import { addCustomerSellerCommission } from './database/add_customer_seller_commission';
 import { addCustomerOpeningBalance } from './database/add_customer_opening_balance';
 import { addPublicationStockBundles } from './database/add_publication_stock_bundles';
+import { addMlChannelInvoicesTable } from './database/add_ml_channel_invoices_table';
 import { addOrdersPerformanceIndexes } from './database/add_orders_performance_indexes';
 import { addSellerPriceLists } from './database/add_seller_price_lists';
 import { initSchema } from './database/init_schema';
@@ -277,6 +278,7 @@ async function initDatabase() {
       await addCustomerSellerCommission();
       await addCustomerOpeningBalance();
       await addPublicationStockBundles();
+      await addMlChannelInvoicesTable();
       await addOrdersPerformanceIndexes();
       await addSellerPriceLists();
       console.log('[DB] Tablas inicializadas correctamente');

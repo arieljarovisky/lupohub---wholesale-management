@@ -3078,6 +3078,76 @@ export const api = {
     }, 'getChannelMargins');
   },
 
+  getMlPeriodInvoice: async (month: string): Promise<{
+    month: string;
+    invoice: { month: string; amount: number; invoiceNumber: string | null; notes: string | null } | null;
+  }> => {
+    return await request(`/integrations/channel-margins/ml-invoice?month=${encodeURIComponent(month)}`, 'GET');
+  },
+
+  saveMlPeriodInvoice: async (body: {
+    month: string;
+    amount: number;
+    invoiceNumber?: string;
+    notes?: string;
+  }): Promise<{ invoice: { month: string; amount: number; invoiceNumber: string | null; notes: string | null } }> => {
+    return await request('/integrations/channel-margins/ml-invoice', 'PUT', body);
+  },
+
+  getMlPeriodProfit: async (month: string) => {
+    return await request<{
+      from: string;
+      to: string;
+      month: string;
+      fobListName: string | null;
+      orderCount: number;
+      salesTotal: number;
+      salesWithFob: number;
+      salesWithoutFob: number;
+      cogs: number;
+      grossProfit: number;
+      invoice: { month: string; amount: number; invoiceNumber: string | null; notes: string | null } | null;
+      netProfit: number;
+      unitsSold: number;
+      unitsReal: number;
+      withFob: Array<{
+        itemId: string;
+        title: string;
+        sku: string;
+        productName: string;
+        pack: number;
+        qty: number;
+        sales: number;
+        cogs: number;
+        profit: number | null;
+      }>;
+      withoutFob: Array<{
+        itemId: string;
+        title: string;
+        sku: string;
+        productName: string;
+        pack: number;
+        qty: number;
+        sales: number;
+      }>;
+    }>(`/integrations/channel-margins/ml-period?month=${encodeURIComponent(month)}`, 'GET', undefined, undefined, 180000);
+  },
+
+  exportMlPeriodProfitExcel: async (month: string): Promise<void> => {
+    const blob = await getBlob(
+      `/integrations/channel-margins/ml-period/export?month=${encodeURIComponent(month)}`,
+      180000
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `MercadoLibre-${month}-ganancia.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
   exportChannelMarginsExcel: async (params?: {
     search?: string;
     channel?: 'all' | 'ml' | 'tn';

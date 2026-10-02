@@ -72,6 +72,12 @@ import { exportMercadolibrePublicationsXlsx } from '../controllers/mercadolibreP
 import { exportMercadoLibreToTiendaNube } from '../controllers/mlToTiendaNubeExport.controller';
 import { getVariantChannelPrices, bulkUpdateChannelPrices } from '../controllers/channelPrices.controller';
 import { getChannelMargins, exportChannelMarginsXlsx } from '../controllers/channelMargins.controller';
+import {
+  exportMlPeriodProfitXlsx,
+  getMlPeriodInvoice,
+  getMlPeriodProfit,
+  putMlPeriodInvoice,
+} from '../controllers/mlPeriodProfit.controller';
 import { exportTiendaNubeSalesReportXlsx } from '../controllers/tiendanubeSalesReport.controller';
 import { exportTiendaNubeProductsCsv } from '../controllers/tiendanubeProductsCsvExport.controller';
 import { exportMercadoLibreSalesReportXlsx } from '../controllers/mercadolibreSalesReport.controller';
@@ -156,6 +162,10 @@ router.post('/variant-channel-prices', authMiddleware, getVariantChannelPrices);
 router.post('/variant-channel-prices/bulk', authMiddleware, bulkUpdateChannelPrices);
 router.get('/channel-margins', authMiddleware, getChannelMargins);
 router.get('/channel-margins/export', authMiddleware, exportChannelMarginsXlsx);
+router.get('/channel-margins/ml-invoice', authMiddleware, getMlPeriodInvoice);
+router.put('/channel-margins/ml-invoice', authMiddleware, putMlPeriodInvoice);
+router.get('/channel-margins/ml-period', authMiddleware, getMlPeriodProfit);
+router.get('/channel-margins/ml-period/export', authMiddleware, exportMlPeriodProfitXlsx);
 router.get('/mercadolibre/auto-message', getMLAutoMessageConfig);
 router.post('/mercadolibre/auto-message', saveMLAutoMessageConfig);
 router.get('/mercadolibre/questions-ai', authMiddleware, getMLQuestionsAiConfig);
