@@ -211,7 +211,10 @@ const ChannelMargins: React.FC = () => {
         </div>
       </div>
 
-      <MlPeriodProfitCard />
+      <MlPeriodProfitCard
+        priceListId={priceListId || data?.config.costListId || data?.config.fobListId || undefined}
+        priceListName={data?.config.costListName || data?.config.fobListName || undefined}
+      />
 
       {config && (
         <div className="flex items-start gap-3 p-4 rounded-xl bg-slate-800/80 border border-slate-700 text-sm text-slate-300">

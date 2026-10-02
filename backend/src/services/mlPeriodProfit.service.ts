@@ -3,7 +3,8 @@ import ExcelJS from 'exceljs';
 import { randomUUID } from 'crypto';
 import { get, query } from '../database/db';
 import { getValidMLToken } from '../controllers/integrations.controller';
-import { fobForItem, loadCompanyFobList, skuFromMlItem } from './companyFinancePnl.service';
+import { resolveMarginCostPriceList } from '../utils/channelMarginUtils';
+import { fobForItem, skuFromMlItem } from './companyFinancePnl.service';
 
 export type MlChannelInvoice = {
   month: string;
@@ -158,7 +159,11 @@ export async function saveMlChannelInvoice(input: {
   };
 }
 
-export async function computeMlPeriodProfit(from: string, to: string): Promise<MlPeriodProfit> {
+export async function computeMlPeriodProfit(
+  from: string,
+  to: string,
+  priceListId?: string | null
+): Promise<MlPeriodProfit> {
   const mlToken = await getValidMLToken();
   if (!mlToken?.access_token || !mlToken.user_id) {
     throw new Error('Mercado Libre no está conectado');
@@ -166,7 +171,7 @@ export async function computeMlPeriodProfit(from: string, to: string): Promise<M
 
   const month = from.slice(0, 7);
   const [fobInfo, pubRows, productRows, invoice] = await Promise.all([
-    loadCompanyFobList(),
+    resolveMarginCostPriceList(priceListId),
     query(
       `SELECT vp.external_product_id, vp.external_variant_id, vp.pack_size,
               p.id AS productId, p.sku, p.name,
@@ -434,7 +439,7 @@ export async function buildMlPeriodProfitWorkbook(data: MlPeriodProfit): Promise
   resumen.addRow(['Lista de costo', data.fobListName || 'FOB']);
   resumen.addRow([
     'Costo de mercadería',
-    'FOB de una unidad × cantidad del pack × unidades vendidas. Un Pack x3 descuenta 3 veces el FOB.',
+    'Precio de la lista × cantidad del pack × unidades vendidas. Un Pack x3 descuenta 3 veces ese precio.',
   ]);
   resumen.addRow([]);
   const head = resumen.addRow(['Concepto', 'Importe', 'Detalle']);
@@ -449,12 +454,12 @@ export async function buildMlPeriodProfitWorkbook(data: MlPeriodProfit): Promise
   };
 
   resumen.addRow(['Órdenes pagadas', data.orderCount, '']);
-  resumen.addRow(['Publicaciones con FOB', data.withFob.length, '']);
-  resumen.addRow(['Publicaciones sin FOB', data.withoutFob.length, 'Ver hoja Sin FOB']);
+  resumen.addRow(['Publicaciones con precio', data.withFob.length, '']);
+  resumen.addRow(['Publicaciones sin precio', data.withoutFob.length, 'Ver hoja Sin precio']);
   resumen.addRow([]);
-  addMoney('Ventas con costo FOB', data.salesWithFob, 'Entran en la ganancia');
-  addMoney('Costo de mercadería', data.cogs, 'FOB × pack × cantidad');
-  addMoney('Ganancia antes de la factura', data.grossProfit, 'Ventas con FOB − mercadería');
+  addMoney('Ventas con costo', data.salesWithFob, 'Entran en la ganancia');
+  addMoney('Costo de mercadería', data.cogs, 'Precio de lista × pack × cantidad');
+  addMoney('Ganancia antes de la factura', data.grossProfit, 'Ventas con precio − mercadería');
   addMoney(
     'Factura Mercado Libre',
     data.invoice?.amount ?? 0,
@@ -464,9 +469,9 @@ export async function buildMlPeriodProfitWorkbook(data: MlPeriodProfit): Promise
   net.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } };
   net.getCell(2).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } };
   resumen.addRow([]);
-  addMoney('Ventas sin FOB (aparte)', data.salesWithoutFob, 'No se les descontó mercadería');
+  addMoney('Ventas sin precio (aparte)', data.salesWithoutFob, 'No se les descontó mercadería');
 
-  const con = wb.addWorksheet('Con FOB');
+  const con = wb.addWorksheet('Con precio');
   headerRow(con, [
     'Publicación',
     'Variación',
@@ -475,7 +480,7 @@ export async function buildMlPeriodProfitWorkbook(data: MlPeriodProfit): Promise
     'Producto',
     'Pack',
     'Origen del pack',
-    'FOB unitario',
+    'Precio unitario',
     'Cantidad vendida',
     'Unidades reales',
     'Ventas',
@@ -543,7 +548,7 @@ export async function buildMlPeriodProfitWorkbook(data: MlPeriodProfit): Promise
   money(tot.getCell(12));
   money(tot.getCell(13));
 
-  const sin = wb.addWorksheet('Sin FOB');
+  const sin = wb.addWorksheet('Sin precio');
   headerRow(sin, [
     'Publicación',
     'Variación',

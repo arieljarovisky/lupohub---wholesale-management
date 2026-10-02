@@ -66,7 +66,7 @@ export const getMlPeriodProfit = async (req: Request, res: Response) => {
     return;
   }
   try {
-    const result = await computeMlPeriodProfit(parsed.from, parsed.to);
+    const result = await computeMlPeriodProfit(parsed.from, parsed.to, String(req.query.priceListId || ''));
     res.json(result);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -84,7 +84,7 @@ export const exportMlPeriodProfitXlsx = async (req: Request, res: Response) => {
     return;
   }
   try {
-    const result = await computeMlPeriodProfit(parsed.from, parsed.to);
+    const result = await computeMlPeriodProfit(parsed.from, parsed.to, String(req.query.priceListId || ''));
     const wb = await buildMlPeriodProfitWorkbook(result);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="MercadoLibre-${parsed.month}-ganancia.xlsx"`);

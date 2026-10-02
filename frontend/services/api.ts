@@ -3102,7 +3102,9 @@ export const api = {
     return await request('/integrations/channel-margins/ml-invoice', 'PUT', body);
   },
 
-  getMlPeriodProfit: async (month: string) => {
+  getMlPeriodProfit: async (month: string, priceListId?: string) => {
+    const q = new URLSearchParams({ month });
+    if (priceListId) q.set('priceListId', priceListId);
     return await request<{
       from: string;
       to: string;
@@ -3138,12 +3140,14 @@ export const api = {
         qty: number;
         sales: number;
       }>;
-    }>(`/integrations/channel-margins/ml-period?month=${encodeURIComponent(month)}`, 'GET', undefined, undefined, 180000);
+    }>(`/integrations/channel-margins/ml-period?${q.toString()}`, 'GET', undefined, undefined, 180000);
   },
 
-  exportMlPeriodProfitExcel: async (month: string): Promise<void> => {
+  exportMlPeriodProfitExcel: async (month: string, priceListId?: string): Promise<void> => {
+    const q = new URLSearchParams({ month });
+    if (priceListId) q.set('priceListId', priceListId);
     const blob = await getBlob(
-      `/integrations/channel-margins/ml-period/export?month=${encodeURIComponent(month)}`,
+      `/integrations/channel-margins/ml-period/export?${q.toString()}`,
       180000
     );
     const url = URL.createObjectURL(blob);

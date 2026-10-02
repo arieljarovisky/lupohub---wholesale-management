@@ -29,7 +29,10 @@ const parseMoney = (raw: string): number | null => {
 const formatMoneyInput = (n: number) =>
   n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-const MlPeriodProfitCard: React.FC = () => {
+const MlPeriodProfitCard: React.FC<{ priceListId?: string; priceListName?: string }> = ({
+  priceListId,
+  priceListName,
+}) => {
   const { showToast } = useNotification();
   const [month, setMonth] = useState(previousMonth);
   const [loading, setLoading] = useState(false);
@@ -58,7 +61,7 @@ const MlPeriodProfitCard: React.FC = () => {
     setResult(null);
     setShowMissing(false);
     void loadInvoice(month);
-  }, [month, loadInvoice]);
+  }, [month, priceListId, loadInvoice]);
 
   const invoiceValue = parseMoney(invoiceAmount);
   const net =
@@ -67,7 +70,7 @@ const MlPeriodProfitCard: React.FC = () => {
   const calculate = async () => {
     setLoading(true);
     try {
-      const res = await api.getMlPeriodProfit(month);
+      const res = await api.getMlPeriodProfit(month, priceListId || undefined);
       setResult(res);
       showToast('success', `Resultado de ${month} calculado`);
     } catch (e: unknown) {
@@ -112,7 +115,7 @@ const MlPeriodProfitCard: React.FC = () => {
   const download = async () => {
     setExporting(true);
     try {
-      await api.exportMlPeriodProfitExcel(month);
+      await api.exportMlPeriodProfitExcel(month, priceListId || undefined);
       showToast('success', 'Excel descargado');
     } catch (e: unknown) {
       showToast('error', e instanceof Error ? e.message : 'No se pudo descargar el Excel');
@@ -130,8 +133,9 @@ const MlPeriodProfitCard: React.FC = () => {
             Resultado Mercado Libre del mes
           </h3>
           <p className="text-slate-400 text-sm mt-1 max-w-2xl">
-            Ventas pagadas menos el costo FOB. Si la publicación es un pack, el costo se multiplica por esa cantidad
-            (un Pack x3 descuenta 3 veces el FOB). Después se resta la factura de Mercado Libre, que es lo que hay que pagar.
+            Ventas pagadas menos el precio de {priceListName ? `«${priceListName}»` : 'la lista elegida'}. Si la
+            publicación es un pack, el costo se multiplica por esa cantidad (un Pack x3 descuenta 3 veces ese precio).
+            Después se resta la factura de Mercado Libre, que es lo que hay que pagar.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -164,8 +168,13 @@ const MlPeriodProfitCard: React.FC = () => {
 
       {result && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <Metric label="Ventas con FOB" value={fmt(result.salesWithFob)} hint={`${result.orderCount} órdenes`} />
-          <Metric label="Costo mercadería" value={fmt(result.cogs)} hint={result.fobListName || 'FOB'} negative />
+          <Metric label="Ventas con costo" value={fmt(result.salesWithFob)} hint={`${result.orderCount} órdenes`} />
+          <Metric
+            label="Costo mercadería"
+            value={fmt(result.cogs)}
+            hint={result.fobListName || priceListName || 'Lista de precios'}
+            negative
+          />
           <Metric label="Antes de la factura" value={fmt(result.grossProfit)} />
           <Metric
             label="Ganancia neta"
@@ -233,7 +242,7 @@ const MlPeriodProfitCard: React.FC = () => {
             className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left text-sm bg-slate-800/80 hover:bg-slate-800"
           >
             <span className="text-slate-200">
-              Sin FOB: {result.withoutFob.length} publicaciones · ventas {fmt(result.salesWithoutFob)}
+              Sin precio en la lista: {result.withoutFob.length} publicaciones · ventas {fmt(result.salesWithoutFob)}
             </span>
             <span className="text-slate-500 text-xs">{showMissing ? 'Ocultar' : 'Ver'}</span>
           </button>
