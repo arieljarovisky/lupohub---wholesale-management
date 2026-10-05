@@ -2349,17 +2349,14 @@ function articlePrefixForPackSku(sku) {
 }
 function fetchMlUserProductChildPackVariations(userProductId, accessToken, sellerId) {
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c, _d, _e, _f;
-        const upResolved = yield (0, integrations_controller_1.resolveMercadoLibreUserProductItems)(userProductId, sellerId, accessToken);
+        const familyResolved = yield (0, integrations_controller_1.resolveMercadoLibreUserProductFamilyItemIds)(userProductId, sellerId, accessToken);
         const idSet = new Set();
         const addId = (raw) => {
             const id = (0, integrations_controller_1.normalizeMercadoLibreItemId)(raw) || String(raw || '').trim();
             if (id && /^ML[A-Z]{0,5}\d+$/i.test(id))
                 idSet.add(id);
         };
-        for (const id of upResolved.debug.rawItemIds)
-            addId(id);
-        for (const id of upResolved.itemCandidates)
+        for (const id of familyResolved.itemIds)
             addId(id);
         // Un solo UP suele ser 1 MLA; el pack completo está en la familia / mismos hermanos.
         let seedItem = null;
@@ -2368,47 +2365,13 @@ function fetchMlUserProductChildPackVariations(userProductId, accessToken, selle
             if (seedItem)
                 break;
         }
-        // family_id del User Product → todos los UP de la familia → todos sus MLA.
-        try {
-            const upMeta = yield axios_1.default.get(`https://api.mercadolibre.com/user-products/${encodeURIComponent(userProductId)}`, {
-                headers: { Authorization: `Bearer ${accessToken}` },
-                validateStatus: () => true
+        if (familyResolved.familyId) {
+            console.log('[ML pack] Familia UP expandida', {
+                userProductId,
+                familyId: familyResolved.familyId,
+                familyUpCount: familyResolved.userProductIds.length,
+                itemIds: idSet.size
             });
-            const familyId = ((_a = upMeta === null || upMeta === void 0 ? void 0 : upMeta.data) === null || _a === void 0 ? void 0 : _a.family_id) != null ? String(upMeta.data.family_id).trim() : '';
-            const siteId = String(((_b = upMeta === null || upMeta === void 0 ? void 0 : upMeta.data) === null || _b === void 0 ? void 0 : _b.site_id) || (seedItem === null || seedItem === void 0 ? void 0 : seedItem.site_id) || 'MLA').trim() || 'MLA';
-            if (familyId) {
-                const famRes = yield axios_1.default.get(`https://api.mercadolibre.com/sites/${encodeURIComponent(siteId)}/user-products-families/${encodeURIComponent(familyId)}`, {
-                    headers: { Authorization: `Bearer ${accessToken}` },
-                    validateStatus: () => true
-                });
-                const familyUps = Array.isArray((_c = famRes === null || famRes === void 0 ? void 0 : famRes.data) === null || _c === void 0 ? void 0 : _c.user_products)
-                    ? famRes.data.user_products
-                    : Array.isArray((_d = famRes === null || famRes === void 0 ? void 0 : famRes.data) === null || _d === void 0 ? void 0 : _d.results)
-                        ? famRes.data.results
-                        : Array.isArray(famRes === null || famRes === void 0 ? void 0 : famRes.data)
-                            ? famRes.data
-                            : [];
-                for (const entry of familyUps) {
-                    const upId = typeof entry === 'string'
-                        ? entry
-                        : String((_f = (_e = entry === null || entry === void 0 ? void 0 : entry.id) !== null && _e !== void 0 ? _e : entry === null || entry === void 0 ? void 0 : entry.user_product_id) !== null && _f !== void 0 ? _f : '').trim();
-                    if (!/^MLAU\d+$/i.test(upId))
-                        continue;
-                    const children = yield (0, integrations_controller_1.resolveMercadoLibreUserProductItems)(upId, sellerId, accessToken);
-                    for (const id of children.debug.rawItemIds)
-                        addId(id);
-                }
-                console.log('[ML pack] Familia UP expandida', {
-                    userProductId,
-                    familyId,
-                    siteId,
-                    familyUpCount: familyUps.length,
-                    itemIds: idSet.size
-                });
-            }
-        }
-        catch (e) {
-            console.warn('[ML pack] No se pudo expandir family_id:', (e === null || e === void 0 ? void 0 : e.message) || e);
         }
         if (seedItem) {
             const familyName = mlFamilyNameFromItem(seedItem);
@@ -2429,7 +2392,7 @@ function fetchMlUserProductChildPackVariations(userProductId, accessToken, selle
         const rawIds = Array.from(idSet);
         console.log('[ML pack] Ítems para pack MLAU', {
             userProductId,
-            fromUpSearch: upResolved.debug.rawItemIds.length,
+            fromUpSearch: familyResolved.itemIds.length,
             expandedTotal: rawIds.length,
             sample: rawIds.slice(0, 8)
         });

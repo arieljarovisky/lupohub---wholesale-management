@@ -6,6 +6,7 @@ const mercadolibrePublicationsExport_controller_1 = require("../controllers/merc
 const mlToTiendaNubeExport_controller_1 = require("../controllers/mlToTiendaNubeExport.controller");
 const channelPrices_controller_1 = require("../controllers/channelPrices.controller");
 const channelMargins_controller_1 = require("../controllers/channelMargins.controller");
+const mlPeriodProfit_controller_1 = require("../controllers/mlPeriodProfit.controller");
 const tiendanubeSalesReport_controller_1 = require("../controllers/tiendanubeSalesReport.controller");
 const tiendanubeProductsCsvExport_controller_1 = require("../controllers/tiendanubeProductsCsvExport.controller");
 const mercadolibreSalesReport_controller_1 = require("../controllers/mercadolibreSalesReport.controller");
@@ -35,6 +36,7 @@ router.get('/mercadolibre/orders', integrations_controller_1.getMercadoLibreOrde
 router.get('/mercadolibre/questions', integrations_controller_1.getMercadoLibreQuestions);
 router.get('/mercadolibre/reviews', auth_1.authMiddleware, mercadolibreReviews_controller_1.getMercadoLibreReviews);
 router.get('/mercadolibre/reviews-export', auth_1.authMiddleware, mercadolibreReviews_controller_1.exportMercadoLibreReviewsXlsx);
+router.get('/mercadolibre/reviews-export-tiendanube', auth_1.authMiddleware, mercadolibreReviews_controller_1.exportMercadoLibreReviewsTiendaNubeCsv);
 router.get('/mercadolibre/stock', integrations_controller_1.getMercadoLibreStock);
 router.get('/mercadolibre/stock/totals', integrations_controller_1.getMercadoLibreStockTotals);
 /** Métricas Mercado Ads (Product Ads): anunciantes, campañas y anuncios por publicación. */
@@ -54,6 +56,10 @@ router.post('/variant-channel-prices', auth_1.authMiddleware, channelPrices_cont
 router.post('/variant-channel-prices/bulk', auth_1.authMiddleware, channelPrices_controller_1.bulkUpdateChannelPrices);
 router.get('/channel-margins', auth_1.authMiddleware, channelMargins_controller_1.getChannelMargins);
 router.get('/channel-margins/export', auth_1.authMiddleware, channelMargins_controller_1.exportChannelMarginsXlsx);
+router.get('/channel-margins/ml-invoice', auth_1.authMiddleware, mlPeriodProfit_controller_1.getMlPeriodInvoice);
+router.put('/channel-margins/ml-invoice', auth_1.authMiddleware, mlPeriodProfit_controller_1.putMlPeriodInvoice);
+router.get('/channel-margins/ml-period', auth_1.authMiddleware, mlPeriodProfit_controller_1.getMlPeriodProfit);
+router.get('/channel-margins/ml-period/export', auth_1.authMiddleware, mlPeriodProfit_controller_1.exportMlPeriodProfitXlsx);
 router.get('/mercadolibre/auto-message', integrations_controller_1.getMLAutoMessageConfig);
 router.post('/mercadolibre/auto-message', integrations_controller_1.saveMLAutoMessageConfig);
 router.get('/mercadolibre/questions-ai', auth_1.authMiddleware, integrations_controller_1.getMLQuestionsAiConfig);

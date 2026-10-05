@@ -5251,7 +5251,9 @@ export const invoiceTiendaNubeOrdersBulk = async (req: Request, res: Response) =
     const orderIdsRaw = Array.isArray(req.body?.orderIds) ? req.body.orderIds : [];
     const orderIds: string[] = Array.from(new Set(orderIdsRaw.map((x: any) => String(x).trim()).filter(Boolean)));
     const cbteTipoFromBody = req.body?.cbteTipo;
-    const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? (cbteTipoFromBody as 1 | 6) : undefined;
+    const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6 || cbteTipoFromBody === 11)
+      ? (cbteTipoFromBody as 1 | 6 | 11)
+      : undefined;
 
     if (!orderIds.length) return res.status(400).json({ message: 'Debes enviar orderIds con al menos una orden' });
     if (orderIds.length > 100) return res.status(400).json({ message: 'Máximo 100 órdenes por lote' });
@@ -5422,7 +5424,9 @@ export const invoiceMercadoLibreOrdersBulk = async (req: Request, res: Response)
     const orderIdsRaw = Array.isArray(req.body?.orderIds) ? req.body.orderIds : [];
     const orderIds: string[] = Array.from(new Set(orderIdsRaw.map((x: any) => String(x).trim()).filter(Boolean)));
     const cbteTipoFromBody = req.body?.cbteTipo;
-    const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6) ? (cbteTipoFromBody as 1 | 6) : undefined;
+    const forceCbteTipo = (cbteTipoFromBody === 1 || cbteTipoFromBody === 6 || cbteTipoFromBody === 11)
+      ? (cbteTipoFromBody as 1 | 6 | 11)
+      : undefined;
 
     if (!orderIds.length) return res.status(400).json({ message: 'Debes enviar orderIds con al menos una orden' });
     if (orderIds.length > 100) return res.status(400).json({ message: 'Máximo 100 órdenes por lote' });

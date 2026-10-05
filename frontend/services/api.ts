@@ -1735,7 +1735,7 @@ export const api = {
   emitirFactura: async (
     orderId: string,
     body?: {
-      cbteTipo?: 1 | 6 | 19;
+      cbteTipo?: 1 | 6 | 11 | 19;
       dstCmp?: number;
       monedaId?: string;
       monedaCtz?: number;
@@ -1813,7 +1813,7 @@ export const api = {
    */
   reemitirFacturaConAgip: async (
     orderId: string,
-    body?: { cbteTipo?: 1 | 6 }
+    body?: { cbteTipo?: 1 | 6 | 11 }
   ): Promise<{
     message?: string;
     creditNote?: Record<string, unknown>;
@@ -3352,7 +3352,7 @@ export const api = {
     }, { orders: [], total: 0 }, 'getTiendaNubeOrders');
   },
 
-  invoiceTiendaNubeOrdersBulk: async (payload: { orderIds: Array<string | number>; cbteTipo?: 1 | 6 }): Promise<{
+  invoiceTiendaNubeOrdersBulk: async (payload: { orderIds: Array<string | number>; cbteTipo?: 1 | 6 | 11 }): Promise<{
     message: string;
     summary: { total: number; invoiced: number; alreadyInvoiced: number; skippedUnpaid: number; errors: number };
     results: Array<{ orderId: string; status: string; message?: string; cae?: string; cbteTipo?: number; cbteDesde?: number; cbteHasta?: number }>;
@@ -3641,7 +3641,7 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
-  invoiceMercadoLibreOrdersBulk: async (payload: { orderIds: Array<string | number>; cbteTipo?: 1 | 6 }): Promise<{
+  invoiceMercadoLibreOrdersBulk: async (payload: { orderIds: Array<string | number>; cbteTipo?: 1 | 6 | 11 }): Promise<{
     message: string;
     summary: { total: number; invoiced: number; alreadyInvoiced: number; skippedUnpaid: number; errors: number };
     results: Array<{ orderId: string; status: string; message?: string; cae?: string; cbteTipo?: number; cbteDesde?: number; cbteHasta?: number }>;

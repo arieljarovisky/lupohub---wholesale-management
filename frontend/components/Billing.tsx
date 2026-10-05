@@ -729,12 +729,12 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
       return item.tipo === 'NC' ? 'NC (manual)' : item.tipo === 'ND' ? 'ND (manual)' : 'Factura (manual)';
     }
     if (item.tipo === 'NC') {
-      return item.cbteTipo === 3 ? 'NC A' : item.cbteTipo === 8 ? 'NC B' : 'NC';
+      return item.cbteTipo === 3 ? 'NC A' : item.cbteTipo === 8 ? 'NC B' : item.cbteTipo === 13 ? 'NC C' : 'NC';
     }
     if (item.tipo === 'ND') {
-      return item.cbteTipo === 2 ? 'ND A' : item.cbteTipo === 7 ? 'ND B' : 'ND';
+      return item.cbteTipo === 2 ? 'ND A' : item.cbteTipo === 7 ? 'ND B' : item.cbteTipo === 12 ? 'ND C' : 'ND';
     }
-    return item.cbteTipo === 1 ? 'Factura A' : item.cbteTipo === 6 ? 'Factura B' : 'Factura';
+    return item.cbteTipo === 1 ? 'Factura A' : item.cbteTipo === 6 ? 'Factura B' : item.cbteTipo === 11 ? 'Factura C' : 'Factura';
   };
 
   const formatComprobanteNumero = (item: any) => {
