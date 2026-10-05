@@ -546,7 +546,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
                 invoiceId: String(inv.id || ''),
                 numero: formatAfipComprobanteNumero(Number(inv.punto_venta || 0), Number(inv.cbte_desde || 0)),
                 agipRetPer: agipRet,
-                importeConIibb: (0, orderPricing_1.invoiceLedgerImporte)(Number(inv.total || 0), agipRet)
+                importeConIibb: (0, orderPricing_1.invoiceLedgerImporte)(Number(inv.total || 0), agipRet, Number(inv.cbte_tipo))
             });
         }
         const orderSaldoAsEntries = orderSaldoRows.filter((ord) => movementOnOrAfterOpening(ord.order_date)).map((ord, idx) => {
@@ -574,7 +574,7 @@ const getCustomerMultimediaLedger = (req, res) => __awaiter(void 0, void 0, void
             .filter((inv) => ledgerMovementVisibleAfterOpening(openingBalanceDate, inv.invoice_created_at, inv.line_date, inv.order_date))
             .map((inv, idx) => {
             const agipRet = Number(inv.agip_ret_per || 0);
-            const importe = (0, orderPricing_1.invoiceLedgerImporte)(Number(inv.total || 0), agipRet);
+            const importe = (0, orderPricing_1.invoiceLedgerImporte)(Number(inv.total || 0), agipRet, Number(inv.cbte_tipo));
             const numero = formatAfipComprobanteNumero(Number(inv.punto_venta || 0), Number(inv.cbte_desde || 0));
             const lineDate = inv.invoice_created_at || inv.line_date || inv.order_date;
             const orderId = String(inv.order_id || '');

@@ -2079,7 +2079,9 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
 
     const cbteTipoFromBody = req.body?.cbteTipo;
     const forceCbteTipo =
-      cbteTipoFromBody === 1 || cbteTipoFromBody === 6 ? (cbteTipoFromBody as 1 | 6) : undefined;
+      cbteTipoFromBody === 1 || cbteTipoFromBody === 6 || cbteTipoFromBody === 11
+        ? (cbteTipoFromBody as 1 | 6 | 11)
+        : undefined;
 
     const { emitirNotaCredito: emitirNCAfip, emitirFactura: emitirAfip } = await import('../services/afip.service');
 
@@ -2319,11 +2321,13 @@ export const emitirFactura = async (req: any, res: any) => {
     const isFacturaE =
       cbteTipoFromBody === 19 ||
       cbteTipoFromBody === '19' ||
-      (isExportClient && cbteTipoFromBody !== 1 && cbteTipoFromBody !== 6 && cbteTipoFromBody !== '1' && cbteTipoFromBody !== '6');
+      (isExportClient && cbteTipoFromBody !== 1 && cbteTipoFromBody !== 6 && cbteTipoFromBody !== 11 && cbteTipoFromBody !== '1' && cbteTipoFromBody !== '6' && cbteTipoFromBody !== '11');
     const forceCbteTipo =
-      cbteTipoFromBody === 1 || cbteTipoFromBody === 6 ? (cbteTipoFromBody as 1 | 6) : undefined;
+      cbteTipoFromBody === 1 || cbteTipoFromBody === 6 || cbteTipoFromBody === 11
+        ? (cbteTipoFromBody as 1 | 6 | 11)
+        : undefined;
     if (isFacturaE && forceCbteTipo) {
-      return res.status(400).json({ message: 'cbteTipo inválido: use 19 para Factura E, o 1/6 para A/B.' });
+      return res.status(400).json({ message: 'cbteTipo inválido: use 19 para Factura E, o 1/6/11 para A/B/C.' });
     }
 
     const netFromItems = await getOrderNetFromLineItems(id);

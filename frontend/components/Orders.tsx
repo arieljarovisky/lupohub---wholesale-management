@@ -423,7 +423,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const [restoringMayoristaStockId, setRestoringMayoristaStockId] = useState<string | null>(null);
   const [showEmitirFacturaModal, setShowEmitirFacturaModal] = useState(false);
   const [orderToEmitFactura, setOrderToEmitFactura] = useState<Order | null>(null);
-  const [emitirFacturaTipo, setEmitirFacturaTipo] = useState<'auto' | 'A' | 'B' | 'E'>('auto');
+  const [emitirFacturaTipo, setEmitirFacturaTipo] = useState<'auto' | 'A' | 'B' | 'C' | 'E'>('auto');
   const [emitirFacturaSaleCondition, setEmitirFacturaSaleCondition] = useState<CondicionVentaFactura>('Contado');
   const [emitirFacturaDstCmp, setEmitirFacturaDstCmp] = useState('');
   const [emitirFacturaMonedaId, setEmitirFacturaMonedaId] = useState('PES');
@@ -619,6 +619,16 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     return tieneCuit && esRI ? 'A' : 'B';
   };
 
+  /** Tipo de factura sugerido según condición IVA del cliente (incluye C para monotributistas/exentos). */
+  const getTipoFacturaSugeridoParaCliente = (order: Order): 'A' | 'B' | 'C' | 'E' => {
+    const customer = customers.find(c => c.id === order.customerId);
+    if (customer?.isExportClient) return 'E';
+    const condicion = (customer?.condicionIva ?? '').toLowerCase();
+    const esRI = condicion.includes('responsable inscripto') && !condicion.includes('no inscripto');
+    const tieneCuit = customer?.cuit && String(customer.cuit).replace(/\D/g, '').length >= 10;
+    return tieneCuit && esRI ? 'A' : 'B';
+  };
+
   const resolveExportDstCmpForOrder = (order: Order): number | null => {
     if (emitirFacturaDstCmp.trim()) {
       const n = Number(emitirFacturaDstCmp);
@@ -630,10 +640,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     return null;
   };
 
-  const getCbteTipoFromEmitSelection = (order: Order): 1 | 6 | 19 => {
+  const getCbteTipoFromEmitSelection = (order: Order): 1 | 6 | 11 | 19 => {
     if (emitirFacturaTipo === 'E') return 19;
     if (emitirFacturaTipo === 'A') return 1;
     if (emitirFacturaTipo === 'B') return 6;
+    if (emitirFacturaTipo === 'C') return 11;
     if (customers.find((c) => c.id === order.customerId)?.isExportClient) return 19;
     return getTipoFacturaParaCliente(order) === 'A' ? 1 : 6;
   };
@@ -665,8 +676,8 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         },
       };
     }
-    if (emitirFacturaTipo === 'A' || emitirFacturaTipo === 'B') {
-      return { body: { cbteTipo: cbteTipo as 1 | 6 } };
+    if (emitirFacturaTipo === 'A' || emitirFacturaTipo === 'B' || emitirFacturaTipo === 'C') {
+      return { body: { cbteTipo: cbteTipo as 1 | 6 | 11 } };
     }
     return { body: undefined };
   };
@@ -2805,7 +2816,12 @@ const Orders: React.FC<OrdersProps> = React.memo(({
               <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-600 hover:bg-slate-700/50 cursor-pointer">
                 <input type="radio" name="tipoFactura" checked={emitirFacturaTipo === 'B'} onChange={() => setEmitirFacturaTipo('B')} className="rounded border-slate-500 text-emerald-500" />
                 <span className="text-white font-medium">Factura B</span>
-                <span className="text-slate-500 text-xs">(Consumidor final / Monotributo)</span>
+                <span className="text-slate-500 text-xs">(Consumidor final / Monotributo — emisor RI)</span>
+              </label>
+              <label className="flex items-center gap-3 p-3 rounded-xl border border-teal-700/60 hover:bg-teal-950/30 cursor-pointer">
+                <input type="radio" name="tipoFactura" checked={emitirFacturaTipo === 'C'} onChange={() => setEmitirFacturaTipo('C')} className="rounded border-slate-500 text-teal-400" />
+                <span className="text-white font-medium">Factura C</span>
+                <span className="text-slate-500 text-xs">(Emisor Monotributo / Exento — sin IVA)</span>
               </label>
               <label className="flex items-center gap-3 p-3 rounded-xl border border-indigo-700/60 hover:bg-indigo-950/30 cursor-pointer">
                 <input type="radio" name="tipoFactura" checked={emitirFacturaTipo === 'E'} onChange={() => setEmitirFacturaTipo('E')} className="rounded border-slate-500 text-indigo-400" />

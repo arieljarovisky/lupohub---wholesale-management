@@ -1905,7 +1905,9 @@ const reemitirFacturaConAgip = (req, res) => __awaiter(void 0, void 0, void 0, f
             });
         }
         const cbteTipoFromBody = (_a = req.body) === null || _a === void 0 ? void 0 : _a.cbteTipo;
-        const forceCbteTipo = cbteTipoFromBody === 1 || cbteTipoFromBody === 6 ? cbteTipoFromBody : undefined;
+        const forceCbteTipo = cbteTipoFromBody === 1 || cbteTipoFromBody === 6 || cbteTipoFromBody === 11
+            ? cbteTipoFromBody
+            : undefined;
         const { emitirNotaCredito: emitirNCAfip, emitirFactura: emitirAfip } = yield Promise.resolve().then(() => __importStar(require('../services/afip.service')));
         // NC total de reemisión: solo neto + IVA en AFIP (sin percepción IIBB). El IIBB se informa en la factura nueva.
         const ncResult = yield emitirNCAfip({
@@ -2116,10 +2118,12 @@ const emitirFactura = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         const isExportClient = Number(customerRow.is_export_client) === 1;
         const isFacturaE = cbteTipoFromBody === 19 ||
             cbteTipoFromBody === '19' ||
-            (isExportClient && cbteTipoFromBody !== 1 && cbteTipoFromBody !== 6 && cbteTipoFromBody !== '1' && cbteTipoFromBody !== '6');
-        const forceCbteTipo = cbteTipoFromBody === 1 || cbteTipoFromBody === 6 ? cbteTipoFromBody : undefined;
+            (isExportClient && cbteTipoFromBody !== 1 && cbteTipoFromBody !== 6 && cbteTipoFromBody !== 11 && cbteTipoFromBody !== '1' && cbteTipoFromBody !== '6' && cbteTipoFromBody !== '11');
+        const forceCbteTipo = cbteTipoFromBody === 1 || cbteTipoFromBody === 6 || cbteTipoFromBody === 11
+            ? cbteTipoFromBody
+            : undefined;
         if (isFacturaE && forceCbteTipo) {
-            return res.status(400).json({ message: 'cbteTipo inválido: use 19 para Factura E, o 1/6 para A/B.' });
+            return res.status(400).json({ message: 'cbteTipo inválido: use 19 para Factura E, o 1/6/11 para A/B/C.' });
         }
         const netFromItems = yield getOrderNetFromLineItems(id);
         if (!PICKING_DONE_STATUSES_AFIP.has(String(orderRow.status || ''))) {

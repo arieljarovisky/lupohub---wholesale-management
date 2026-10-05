@@ -17,15 +17,18 @@ const PTO_VTA_DEFAULT = 1;
 const PTO_VTA_EXPORT_DEFAULT = 10;
 /** Moneda por defecto Factura E en LupoHub. */
 const MONEDA_EXPORT_DEFAULT = 'PES';
-/** Factura A (CUIT) = 1, Factura B (consumidor final) = 6 */
+/** Factura A (CUIT) = 1, Factura B (consumidor final) = 6, Factura C (Monotributo/Exento) = 11 */
 const TIPO_CBTE_A = 1;
 const TIPO_CBTE_B = 6;
-/** Nota de Crédito A = 3, Nota de Crédito B = 8 */
+const TIPO_CBTE_C = 11;
+/** Nota de Crédito A = 3, Nota de Crédito B = 8, Nota de Crédito C = 13 */
 const TIPO_NC_A = 3;
 const TIPO_NC_B = 8;
-/** Nota de Débito A = 2, Nota de Débito B = 7 */
+const TIPO_NC_C = 13;
+/** Nota de Débito A = 2, Nota de Débito B = 7, Nota de Débito C = 12 */
 const TIPO_ND_A = 2;
 const TIPO_ND_B = 7;
+const TIPO_ND_C = 12;
 /** Factura E (exportación) = 19 — web service WSFEX, no WSFE */
 export const TIPO_CBTE_E = 19;
 /** Exportación definitiva de bienes (prendas) */
@@ -398,9 +401,10 @@ export function getAfipIssuerData(): { cuit: string; businessName?: string; addr
  * Regla (si no se fuerza tipo):
  * - Responsable Inscripto => Factura A
  * - Otros (Monotributo, Exento, CF, etc.) => Factura B
- * @param forceCbteTipo - Si es 1 o 6, se usa ese tipo (A o B) en lugar de calcular por cliente.
+ * @param forceCbteTipo - Si es 1, 6 u 11, se usa ese tipo (A, B o C) en lugar de calcular por cliente.
+ *   Factura C (11) es para emisores monotributistas o exentos que venden a cualquier cliente.
  */
-export async function emitirFactura(order: OrderForAfip, customer: CustomerForAfip, forceCbteTipo?: 1 | 6): Promise<InvoiceResult> {
+export async function emitirFactura(order: OrderForAfip, customer: CustomerForAfip, forceCbteTipo?: 1 | 6 | 11): Promise<InvoiceResult> {
   const config = getConfig();
   const { cuit, puntoVta } = config;
 
@@ -412,7 +416,7 @@ export async function emitirFactura(order: OrderForAfip, customer: CustomerForAf
     condicionIvaDesc.includes('responsable inscripto') && !condicionIvaDesc.includes('no inscripto');
 
   let tipoCbte: number;
-  if (forceCbteTipo === TIPO_CBTE_A || forceCbteTipo === TIPO_CBTE_B) {
+  if (forceCbteTipo === TIPO_CBTE_A || forceCbteTipo === TIPO_CBTE_B || forceCbteTipo === TIPO_CBTE_C) {
     tipoCbte = forceCbteTipo;
   } else {
     tipoCbte = tieneCuit && esResponsableInscripto ? TIPO_CBTE_A : TIPO_CBTE_B;
@@ -426,8 +430,11 @@ export async function emitirFactura(order: OrderForAfip, customer: CustomerForAf
     docTipo = DOC_TIPO_CUIT;
     docNro = parseInt(cuitCliente, 10);
     condicionIva = IVA_RESPONSABLE_INSCRIPTO;
+  } else if (tipoCbte === TIPO_CBTE_C) {
+    docTipo = tieneCuit ? DOC_TIPO_CUIT : DOC_TIPO_CF;
+    docNro = tieneCuit ? parseInt(cuitCliente, 10) : 0;
+    condicionIva = tieneCuit ? CONSUMIDOR_FINAL : CONSUMIDOR_FINAL;
   } else {
-    // Factura B: AFIP 10243 solo acepta condiciones válidas para clase B (4, 5, 7, 8, 9, 10, 15). No 1 ni 6.
     docTipo = tieneCuit ? DOC_TIPO_CUIT : DOC_TIPO_CF;
     docNro = tieneCuit ? parseInt(cuitCliente, 10) : 0;
     if (!tieneCuit) {
@@ -441,7 +448,6 @@ export async function emitirFactura(order: OrderForAfip, customer: CustomerForAf
     } else if (condicionIvaDesc.includes('no alcanzado')) {
       condicionIva = 15; // IVA No Alcanzado
     } else {
-      // Monotributo, RI y resto: para Factura B usar 5 (CF) por restricción AFIP
       condicionIva = CONSUMIDOR_FINAL;
     }
   }
@@ -454,13 +460,18 @@ export async function emitirFactura(order: OrderForAfip, customer: CustomerForAf
       `El total neto (${impNeto.toFixed(2)}) supera el máximo permitido por AFIP para un comprobante (${AFIP_MAX_IMP_NETO.toFixed(2)}).`
     );
   }
-  const impIva = Math.round(impNeto * 0.21 * 100) / 100;
+
+  const esFacturaC = tipoCbte === TIPO_CBTE_C;
+  const impIva = esFacturaC ? 0 : Math.round(impNeto * 0.21 * 100) / 100;
 
   const perc = order.iibbPercepcion;
   const rawTrib =
     perc != null && perc !== undefined ? Number((perc as { importe?: unknown }).importe) : 0;
-  const impTributo =
-    Number.isFinite(rawTrib) && rawTrib > 0.005 ? Math.round(rawTrib * 100) / 100 : 0;
+  const impTributo = esFacturaC
+    ? 0
+    : Number.isFinite(rawTrib) && rawTrib > 0.005
+      ? Math.round(rawTrib * 100) / 100
+      : 0;
   const rawBase = perc != null ? Number((perc as { baseImp?: unknown }).baseImp) : 0;
   const baseIibb =
     Number.isFinite(rawBase) && rawBase > 0 ? Math.round(rawBase * 100) / 100 : impNeto;
@@ -519,17 +530,18 @@ export async function emitirFactura(order: OrderForAfip, customer: CustomerForAf
     FchVtoPago: null,
     ImpTotal: total,
     ImpTotConc: 0,
-    ImpNeto: impNeto,
-    ImpOpEx: 0,
+    ImpNeto: esFacturaC ? 0 : impNeto,
+    ImpOpEx: esFacturaC ? impNeto : 0,
     ImpIVA: impIva,
     ImpTrib: impTributo,
     MonId: 'PES',
     MonCotiz: 1,
     CondicionIVAReceptorId: condicionIva,
-    Iva: [
-      { Id: ID_IVA_21, BaseImp: impNeto, Importe: impIva }
-    ]
   };
+
+  if (!esFacturaC) {
+    data.Iva = [{ Id: ID_IVA_21, BaseImp: impNeto, Importe: impIva }];
+  }
 
   if (impTributo > 0) {
     // Id 99 = otros / percepción IIBB (ejemplo oficial AfipSDK). Descripción en castellano sin caracteres raros.
@@ -600,15 +612,16 @@ export async function emitirNotaCredito(
   // Tipo de nota de crédito según tipo de FACTURA original:
   // - Factura A (1)  -> NC A (3)
   // - Factura B (6)  -> NC B (8)
+  // - Factura C (11) -> NC C (13)
   const tipoFacturaOriginal = facturaOriginal.cbteTipo;
   let tipoCbte: number;
   if (tipoFacturaOriginal === TIPO_CBTE_A) {
     tipoCbte = TIPO_NC_A;
   } else if (tipoFacturaOriginal === TIPO_CBTE_B) {
     tipoCbte = TIPO_NC_B;
+  } else if (tipoFacturaOriginal === TIPO_CBTE_C) {
+    tipoCbte = TIPO_NC_C;
   } else {
-    // Fallback: si por algún motivo viene otro tipo, usamos NC B (más permisiva) para evitar error 10040,
-    // siempre asociada al tipo real de la factura en CbtesAsoc.
     tipoCbte = TIPO_NC_B;
   }
 
@@ -620,25 +633,24 @@ export async function emitirNotaCredito(
   const condicionIvaDesc = (customer.condicionIva ?? '').toLowerCase();
   let condicionIva: number;
   if (tipoCbte === TIPO_NC_A) {
-    // NC A: receptor Responsable Inscripto, exige CUIT
     if (!tieneCuit) {
       throw new Error('Para Nota de Crédito A el cliente debe tener CUIT cargado.');
     }
     condicionIva = IVA_RESPONSABLE_INSCRIPTO;
+  } else if (tipoCbte === TIPO_NC_C) {
+    condicionIva = CONSUMIDOR_FINAL;
   } else {
-    // NC B: solo 4, 5, 7, 8, 9, 10, 15. 1 y 6 no son válidos.
     if (!tieneCuit) {
       condicionIva = CONSUMIDOR_FINAL;
     } else if (condicionIvaDesc.includes('exento')) {
-      condicionIva = 4; // IVA Sujeto Exento
+      condicionIva = 4;
     } else if (condicionIvaDesc.includes('no categorizado')) {
-      condicionIva = 7; // Sujeto No Categorizado
+      condicionIva = 7;
     } else if (condicionIvaDesc.includes('consumidor final')) {
       condicionIva = CONSUMIDOR_FINAL;
     } else if (condicionIvaDesc.includes('no alcanzado')) {
-      condicionIva = 15; // IVA No Alcanzado
+      condicionIva = 15;
     } else {
-      // Monotributo, RI u otros: usar 5 (CF) para cumplir validación AFIP en NC B
       condicionIva = CONSUMIDOR_FINAL;
     }
   }
@@ -651,13 +663,17 @@ export async function emitirNotaCredito(
       `El monto neto de la nota de crédito (${impNeto.toFixed(2)}) supera el máximo permitido por AFIP (${AFIP_MAX_IMP_NETO.toFixed(2)}).`
     );
   }
-  const impIva = Math.round(impNeto * 0.21 * 100) / 100;
+  const esNcC = tipoCbte === TIPO_NC_C;
+  const impIva = esNcC ? 0 : Math.round(impNeto * 0.21 * 100) / 100;
 
   const perc = iibbPercepcion;
   const rawTrib =
     perc != null && perc !== undefined ? Number((perc as { importe?: unknown }).importe) : 0;
-  const impTributo =
-    Number.isFinite(rawTrib) && rawTrib > 0.005 ? Math.round(rawTrib * 100) / 100 : 0;
+  const impTributo = esNcC
+    ? 0
+    : Number.isFinite(rawTrib) && rawTrib > 0.005
+      ? Math.round(rawTrib * 100) / 100
+      : 0;
   const rawBase = perc != null ? Number((perc as { baseImp?: unknown }).baseImp) : 0;
   const baseIibb =
     Number.isFinite(rawBase) && rawBase > 0 ? Math.round(rawBase * 100) / 100 : impNeto;
@@ -712,14 +728,13 @@ export async function emitirNotaCredito(
     FchVtoPago: null,
     ImpTotal: total,
     ImpTotConc: 0,
-    ImpNeto: impNeto,
-    ImpOpEx: 0,
+    ImpNeto: esNcC ? 0 : impNeto,
+    ImpOpEx: esNcC ? impNeto : 0,
     ImpIVA: impIva,
     ImpTrib: impTributo,
     MonId: 'PES',
     MonCotiz: 1,
     CondicionIVAReceptorId: condicionIva,
-    // AFIP exige tipo de comprobante asociado en formato válido (ej. "01", "06"). Código 10040 si el tipo es inválido.
     CbtesAsoc: [
       {
         Tipo: String(facturaOriginal.cbteTipo).padStart(2, '0'),
@@ -727,10 +742,11 @@ export async function emitirNotaCredito(
         Nro: facturaOriginal.cbteDesde
       }
     ],
-    Iva: [
-      { Id: ID_IVA_21, BaseImp: impNeto, Importe: impIva }
-    ]
   };
+
+  if (!esNcC) {
+    data.Iva = [{ Id: ID_IVA_21, BaseImp: impNeto, Importe: impIva }];
+  }
 
   if (impTributo > 0) {
     data.Tributos = [
@@ -777,11 +793,15 @@ function resolveCondicionIvaForNotaAsociada(
   condicionIvaDesc: string
 ): number {
   const isClaseA = tipoCbte === TIPO_NC_A || tipoCbte === TIPO_ND_A;
+  const isClaseC = tipoCbte === TIPO_NC_C || tipoCbte === TIPO_ND_C;
   if (isClaseA) {
     if (!tieneCuit) {
       throw new Error('Para comprobante clase A el cliente debe tener CUIT cargado.');
     }
     return IVA_RESPONSABLE_INSCRIPTO;
+  }
+  if (isClaseC) {
+    return CONSUMIDOR_FINAL;
   }
   if (!tieneCuit) return CONSUMIDOR_FINAL;
   if (condicionIvaDesc.includes('exento')) return 4;
@@ -816,6 +836,8 @@ export async function emitirNotaDebito(
     tipoCbte = TIPO_ND_A;
   } else if (tipoFacturaOriginal === TIPO_CBTE_B) {
     tipoCbte = TIPO_ND_B;
+  } else if (tipoFacturaOriginal === TIPO_CBTE_C) {
+    tipoCbte = TIPO_ND_C;
   } else {
     tipoCbte = TIPO_ND_B;
   }
@@ -834,13 +856,17 @@ export async function emitirNotaDebito(
       `El monto neto de la nota de débito (${impNeto.toFixed(2)}) supera el máximo permitido por AFIP (${AFIP_MAX_IMP_NETO.toFixed(2)}).`
     );
   }
-  const impIva = impNeto > 0 ? Math.round(impNeto * 0.21 * 100) / 100 : 0;
+  const esNdC = tipoCbte === TIPO_ND_C;
+  const impIva = esNdC ? 0 : impNeto > 0 ? Math.round(impNeto * 0.21 * 100) / 100 : 0;
 
   const perc = iibbPercepcion;
   const rawTrib =
     perc != null && perc !== undefined ? Number((perc as { importe?: unknown }).importe) : 0;
-  const impTributo =
-    Number.isFinite(rawTrib) && rawTrib > 0.005 ? Math.round(rawTrib * 100) / 100 : 0;
+  const impTributo = esNdC
+    ? 0
+    : Number.isFinite(rawTrib) && rawTrib > 0.005
+      ? Math.round(rawTrib * 100) / 100
+      : 0;
   const rawBase = perc != null ? Number((perc as { baseImp?: unknown }).baseImp) : 0;
   const baseIibb =
     Number.isFinite(rawBase) && rawBase > 0
@@ -903,8 +929,8 @@ export async function emitirNotaDebito(
     FchVtoPago: null,
     ImpTotal: total,
     ImpTotConc: 0,
-    ImpNeto: impNeto,
-    ImpOpEx: 0,
+    ImpNeto: esNdC ? 0 : impNeto,
+    ImpOpEx: esNdC ? impNeto : 0,
     ImpIVA: impIva,
     ImpTrib: impTributo,
     MonId: 'PES',
@@ -919,7 +945,7 @@ export async function emitirNotaDebito(
     ]
   };
 
-  if (impNeto > 0) {
+  if (impNeto > 0 && !esNdC) {
     data.Iva = [{ Id: ID_IVA_21, BaseImp: impNeto, Importe: impIva }];
   }
 
