@@ -57,6 +57,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [importingPaymentsExcel, setImportingPaymentsExcel] = useState(false);
   const [exportingByCustomerFile, setExportingByCustomerFile] = useState(false);
   const [exportingMovimientosSistema, setExportingMovimientosSistema] = useState(false);
+  const [exportingJurisdiccionMl, setExportingJurisdiccionMl] = useState(false);
   const [importingAgipPadron, setImportingAgipPadron] = useState(false);
   const [billingPage, setBillingPage] = useState(1);
   const [paymentsPage, setPaymentsPage] = useState(1);
@@ -312,6 +313,35 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
         err?.message ||
         'Error exportando TXT Ret/Per';
       showToast('error', msg);
+    }
+  };
+
+  /** Excel de facturas del Facturador de Mercado Libre, mismo formato que Ventas por jurisdicción. */
+  const handleExportVentasJurisdiccionMl = async () => {
+    const d = (desde || '').trim();
+    const h = (hasta || '').trim();
+    if (!d || !h) {
+      showToast('error', 'Elegí Desde y Hasta. Para marzo y abril, por ejemplo, 2026-03-01 y 2026-04-30.');
+      return;
+    }
+    setExportingJurisdiccionMl(true);
+    showToast('info', 'Consultando AFIP y armando el Excel de Mercado Libre. Puede tardar un minuto.');
+    try {
+      const result = await api.exportVentasJurisdiccionMl({ desde: d, hasta: h });
+      if (result.incomplete) {
+        showToast(
+          'warning',
+          `Se descargaron ${result.count} comprobantes. AFIP todavía no cubre todo el rango: volvé a descargar las mismas fechas para completar marzo y abril.`
+        );
+      } else if (result.count === 0) {
+        showToast('warning', 'No hay facturas de Mercado Libre en ese rango.');
+      } else {
+        showToast('success', `Excel de Mercado Libre descargado (${result.count} comprobantes).`);
+      }
+    } catch (err: any) {
+      showToast('error', err?.message || 'Error exportando Ventas por Jurisdicción de Mercado Libre');
+    } finally {
+      setExportingJurisdiccionMl(false);
     }
   };
 
@@ -1335,6 +1365,16 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                     <button type="button" role="menuitem" className={actionMenuItemClass} onClick={() => { setActionsMenuOpen(false); void handleExportVentasJurisdiccion(); }}>
                       <FileSpreadsheet size={16} className="text-indigo-400 shrink-0" />
                       Ventas por jurisdicción
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={exportingJurisdiccionMl}
+                      className={actionMenuItemClass}
+                      onClick={() => { setActionsMenuOpen(false); void handleExportVentasJurisdiccionMl(); }}
+                    >
+                      {exportingJurisdiccionMl ? <Loader2 size={16} className="animate-spin shrink-0" /> : <FileSpreadsheet size={16} className="text-amber-300 shrink-0" />}
+                      Ventas por jurisdicción (Mercado Libre)
                     </button>
                     <button
                       type="button"

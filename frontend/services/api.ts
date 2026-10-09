@@ -4616,6 +4616,57 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
+  /**
+   * Excel de ventas por jurisdicción del Facturador de Mercado Libre.
+   * La primera descarga de un rango largo (ej. marzo y abril) puede venir incompleta: hay que repetirla.
+   */
+  exportVentasJurisdiccionMl: async (params: {
+    desde: string;
+    hasta: string;
+  }): Promise<{ incomplete: boolean; count: number; filename: string }> => {
+    const qs = new URLSearchParams({ desde: params.desde, hasta: params.hasta }).toString();
+    let blob: Blob;
+    let headers: Record<string, string | undefined>;
+    try {
+      const res = await getBlobResponse(`/billing/export-ventas-jurisdiccion-ml?${qs}`, 180000);
+      blob = res.blob;
+      headers = res.headers;
+    } catch (err: any) {
+      const data = err?.response?.data;
+      let message = '';
+      if (data instanceof Blob) {
+        try {
+          const parsed = JSON.parse(await data.text());
+          if (typeof parsed?.message === 'string') message = parsed.message;
+        } catch {
+          message = '';
+        }
+      }
+      throw new Error(message || err?.message || 'Error exportando ventas por jurisdicción de Mercado Libre');
+    }
+    const headerGet = (name: string): string => {
+      const bag = headers as Record<string, string | undefined> & { get?: (key: string) => string | undefined };
+      return String(bag[name] || bag.get?.(name) || '');
+    };
+    const incomplete = headerGet('x-afip-sync-incomplete') === '1';
+    const count = Number(headerGet('x-export-count') || 0);
+    const yyyymmFrom = (params.desde || '').slice(0, 7).replace('-', '');
+    const yyyymmTo = (params.hasta || '').slice(0, 7).replace('-', '');
+    const fallbackName = yyyymmFrom && yyyymmTo && yyyymmFrom !== yyyymmTo
+      ? `VENTAS_JURISDICCION_ML_${yyyymmFrom}_${yyyymmTo}.xlsx`
+      : `VENTAS_JURISDICCION_ML_${yyyymmFrom || 'rango'}.xlsx`;
+    const filename = getFilenameFromContentDisposition(headerGet('content-disposition')) || fallbackName;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    return { incomplete, count: Number.isFinite(count) ? count : 0, filename };
+  },
+
   exportRetPerTxt: async (params?: { desde?: string; hasta?: string; month?: string; customerId?: string; province?: string }): Promise<void> => {
     const queryParams = new URLSearchParams();
     if (params?.desde) queryParams.append('desde', params.desde);

@@ -8,6 +8,7 @@ import {
   importAgipPadronChunk,
   exportBillingByCustomersFile,
   exportVentasJurisdiccionXlsx,
+  exportVentasJurisdiccionMlXlsx,
   printBilling,
   deleteImportedBillingEntry,
   deleteLocalAfipComprobante
@@ -61,6 +62,7 @@ router.get('/export', exportBilling);
 router.get('/print', printBilling);
 router.get('/export-retper', exportRetPerTxt);
 router.get('/export-ventas-jurisdiccion', exportVentasJurisdiccionXlsx);
+router.get('/export-ventas-jurisdiccion-ml', exportVentasJurisdiccionMlXlsx);
 router.post('/export-by-customers-file', uploadAgipPadronFile, exportBillingByCustomersFile);
 router.post('/agip-padron/import/start', importAgipPadronStart);
 router.post('/agip-padron/import/chunk', importAgipPadronChunk);

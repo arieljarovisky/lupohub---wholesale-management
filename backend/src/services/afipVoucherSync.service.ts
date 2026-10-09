@@ -10,8 +10,8 @@ import {
   isAfipConfigured,
 } from './afip.service';
 
-/** Tipos de comprobante a sincronizar: FA/ND/NC A-B-C. */
-const CBTE_TIPOS_SYNC = [1, 2, 3, 6, 7, 8, 11, 12, 13] as const;
+/** Tipos de comprobante a sincronizar: primero B (típico del Facturador ML), después A y C. */
+const CBTE_TIPOS_SYNC = [6, 8, 7, 1, 3, 2, 11, 13, 12] as const;
 
 /** PV del Facturador de Mercado Libre por defecto. Override: AFIP_ML_PTO_VTA=22 o "22,23". */
 const ML_PTO_VTA_DEFAULT = 22;
@@ -299,10 +299,59 @@ export async function syncAfipVouchersForDateRange(opts: {
       if (!last || last < 1) continue;
 
       const bounds = await getSyncedBounds(puntoVenta, cbteTipo);
+      const needsHistory =
+        bounds.maxNro === 0 || !bounds.minFecha || bounds.minFecha > opts.desde;
 
-      // 1) Forward: números nuevos desde el máximo local hasta el último de AFIP.
-      if (bounds.maxNro < last) {
-        const forwardFrom = bounds.maxNro + 1;
+      // Historial primero: si el caché está vacío, arrancar en el comprobante 1
+      // gasta el cupo en años viejos y nunca llega al rango pedido (ej. marzo/abril).
+      if (needsHistory && budget.left > 0) {
+        const startDown = bounds.minNro > 0 ? bounds.minNro - 1 : last;
+        const backNums: number[] = [];
+        for (let n = startDown; n >= 1 && backNums.length < budget.left; n -= 1) {
+          backNums.push(n);
+        }
+
+        let consecutiveOlder = 0;
+        const BATCH = Math.max(CONCURRENCY * 4, 12);
+        for (let offset = 0; offset < backNums.length && budget.left > 0; offset += BATCH) {
+          const batch = backNums.slice(offset, offset + BATCH).slice(0, budget.left);
+          const batchResults = await mapPool(batch, CONCURRENCY, async (n) => {
+            const r = await fetchAndStoreVoucher(puntoVenta, cbteTipo, n, sourceHint);
+            return { n, ...r };
+          });
+          scanned += batchResults.length;
+          budget.left -= batchResults.length;
+          upserted += batchResults.filter((r) => r.stored).length;
+
+          batchResults.sort((a, b) => b.n - a.n);
+          for (const r of batchResults) {
+            if (!r.fecha) continue;
+            if (r.fecha < opts.desde) {
+              consecutiveOlder += 1;
+              if (consecutiveOlder >= 8) {
+                offset = backNums.length;
+                break;
+              }
+            } else {
+              consecutiveOlder = 0;
+            }
+          }
+          if (consecutiveOlder >= 8) break;
+        }
+
+        const boundsFinal = await getSyncedBounds(puntoVenta, cbteTipo);
+        if (
+          budget.left <= 0 &&
+          (boundsFinal.maxNro === 0 || !boundsFinal.minFecha || boundsFinal.minFecha > opts.desde)
+        ) {
+          incomplete = true;
+        }
+      }
+
+      // Adelante: números nuevos desde el máximo local hasta el último de AFIP.
+      const boundsAfter = await getSyncedBounds(puntoVenta, cbteTipo);
+      if (budget.left > 0 && boundsAfter.maxNro < last) {
+        const forwardFrom = boundsAfter.maxNro + 1;
         const forwardNums: number[] = [];
         for (let n = forwardFrom; n <= last && forwardNums.length < budget.left; n += 1) {
           forwardNums.push(n);
@@ -316,63 +365,6 @@ export async function syncAfipVouchersForDateRange(opts: {
         scanned += forwardResults.length;
         budget.left -= forwardResults.length;
         upserted += forwardResults.filter((r) => r.stored).length;
-      }
-
-      // 2) Backfill: si no hay datos o el más viejo es posterior a `desde`, bajar desde min local.
-      const boundsAfter = await getSyncedBounds(puntoVenta, cbteTipo);
-      const needsBackfill =
-        boundsAfter.maxNro === 0 ||
-        !boundsAfter.minFecha ||
-        boundsAfter.minFecha > opts.desde;
-
-      if (needsBackfill && budget.left > 0) {
-        const startDown =
-          boundsAfter.minNro > 0 ? boundsAfter.minNro - 1 : Math.min(last, boundsAfter.maxNro || last);
-        const backNums: number[] = [];
-        for (let n = startDown; n >= 1 && backNums.length < budget.left; n -= 1) {
-          backNums.push(n);
-        }
-
-        let consecutiveOlder = 0;
-        // Procesar en lotes para poder cortar al salir del rango.
-        const BATCH = Math.max(CONCURRENCY * 4, 12);
-        for (let offset = 0; offset < backNums.length && budget.left > 0; offset += BATCH) {
-          const batch = backNums.slice(offset, offset + BATCH).slice(0, budget.left);
-          const batchResults = await mapPool(batch, CONCURRENCY, async (n) => {
-            const r = await fetchAndStoreVoucher(puntoVenta, cbteTipo, n, sourceHint);
-            return { n, ...r };
-          });
-          scanned += batchResults.length;
-          budget.left -= batchResults.length;
-          upserted += batchResults.filter((r) => r.stored).length;
-
-          // Ordenar por nro descendente para evaluar corte por fecha.
-          batchResults.sort((a, b) => b.n - a.n);
-          for (const r of batchResults) {
-            if (!r.fecha) continue;
-            if (r.fecha < opts.desde) {
-              consecutiveOlder += 1;
-              if (consecutiveOlder >= 8) {
-                // Suficiente evidencia de que salimos del rango pedido.
-                budget.left = budget.left; // no-op, salimos del for externo
-                offset = backNums.length;
-                break;
-              }
-            } else {
-              consecutiveOlder = 0;
-            }
-          }
-          if (consecutiveOlder >= 8) break;
-        }
-
-        // Si aún no cubrimos `desde` y se acabó el presupuesto, marcar incomplete.
-        const boundsFinal = await getSyncedBounds(puntoVenta, cbteTipo);
-        if (
-          budget.left <= 0 &&
-          (boundsFinal.maxNro === 0 || !boundsFinal.minFecha || boundsFinal.minFecha > opts.desde)
-        ) {
-          incomplete = true;
-        }
       }
     }
     if (budget.left <= 0) incomplete = true;
