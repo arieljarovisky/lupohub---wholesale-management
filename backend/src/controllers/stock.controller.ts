@@ -3,7 +3,8 @@ import { query, execute, get } from '../database/db';
 import { touchProductUpdatedAtByVariantId } from '../utils/touchProductUpdatedAt';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
-import { tnPutWithRetry } from '../utils/tiendanubeClient';
+import { tnGetWithRetry, tnPutWithRetry } from '../utils/tiendanubeClient';
+import { buildTnStockUpdateBody, readTnVariantStock } from '../utils/tnVariantStock';
 import { skuToCanonicalString } from '../utils/skuString';
 import { persistDespachoFobFromList } from '../utils/despachoFob';
 import { codigoTalleParaSku, nombreTalleDesdeCodigo, TALLE_CODIGO_A_NOMBRE } from '../talles-tango';
@@ -14,6 +15,7 @@ import {
 } from '../utils/colorCodeCanonical';
 
 const SYNC_DEBOUNCE_MS = 2800;
+const TN_STOCK_USER_AGENT = process.env.TIENDA_NUBE_USER_AGENT || 'LupoHub (support@lupo.ar)';
 const pendingSyncByVariant: Record<string, { timeout: NodeJS.Timeout; stock: number }> = {};
 
 /** Cancela el sync diferido de una variante (evita que un debounce viejo pise un ajuste manual recién hecho). */
@@ -598,6 +600,7 @@ export const syncStockToExternalPlatforms = async (
       `SELECT id, platform, external_product_id, external_variant_id, pack_size FROM variant_publications WHERE variant_id = ?`,
       [variantId]
     );
+    const syncedTnKeys = new Set<string>();
 
     if (publications && (publications as any[]).length > 0) {
       const { loadVariantMlLinkContext, filterMlPublicationsForSync, filterTnPublicationsForSync } = await import(
@@ -615,6 +618,9 @@ export const syncStockToExternalPlatforms = async (
         const pack = Math.max(1, Number(pub.pack_size) || 1);
         const stockToSend = stockForPlatform(newStock, pack);
         if (pub.platform === 'tiendanube' && pub.external_variant_id && platforms.has('tiendanube')) {
+          const tnKey = `${String(pub.external_product_id).trim()}/${String(pub.external_variant_id).trim()}`;
+          if (syncedTnKeys.has(tnKey)) continue;
+          syncedTnKeys.add(tnKey);
           const label = `TN pub=${pub.external_product_id}/${pub.external_variant_id}`;
           result.tnAttempted++;
           tasks.push(
@@ -647,9 +653,10 @@ export const syncStockToExternalPlatforms = async (
       await Promise.all(tasks);
     }
 
-    // Si faltó ML o TN en publications (o no había pubs), completar con columnas legacy.
+    // La pantalla de inventario lee la variante TN de las columnas. Si solo se
+    // actualizó una publicación distinta, el número de TN no cambia.
     const needLegacyMl = platforms.has('mercadolibre') && result.mlAttempted === 0;
-    const needLegacyTn = platforms.has('tiendanube') && result.tnAttempted === 0;
+    const needLegacyTn = platforms.has('tiendanube');
     if (needLegacyMl || needLegacyTn) {
       const variant = await get(
         `SELECT pv.id, pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
@@ -671,7 +678,12 @@ export const syncStockToExternalPlatforms = async (
         const stockTN = stockForPlatform(newStock, variant.tn_pack);
         const stockML = stockForPlatform(newStock, variant.ml_pack);
 
-        if (needLegacyTn && variant.tienda_nube_id && variant.tienda_nube_variant_id) {
+        const legacyTnKey =
+          variant.tienda_nube_id && variant.tienda_nube_variant_id
+            ? `${String(variant.tienda_nube_id).trim()}/${String(variant.tienda_nube_variant_id).trim()}`
+            : '';
+        if (needLegacyTn && legacyTnKey && !syncedTnKeys.has(legacyTnKey)) {
+          syncedTnKeys.add(legacyTnKey);
           const label = `TN legacy=${variant.tienda_nube_id}/${variant.tienda_nube_variant_id}`;
           result.tnAttempted++;
           const ok = await runExternalSyncWithRetries(label, () =>
@@ -718,7 +730,7 @@ export const syncStockToExternalPlatforms = async (
   return result;
 };
 
-// Actualizar stock en Tienda Nube
+// Actualizar stock en Tienda Nube. Con sucursales el total visible es la suma de inventory_levels.
 export const updateTiendaNubeStock = async (
   productId: string,
   variantId: string,
@@ -734,21 +746,40 @@ export const updateTiendaNubeStock = async (
       return false;
     }
 
-    await tnPutWithRetry(
-      axios,
-      `https://api.tiendanube.com/v1/${integration.store_id}/products/${productId}/variants/${variantId}`,
-      { stock },
-      {
-        headers: {
-          'Authentication': `bearer ${integration.access_token}`,
-          'Content-Type': 'application/json',
-          'User-Agent': 'LupoHub (lupohub@example.com)'
-        }
-      },
-      { maxRetries: 4 }
-    );
+    const qty = Math.max(0, Math.floor(Number(stock) || 0));
+    const url = `https://api.tiendanube.com/v1/${integration.store_id}/products/${productId}/variants/${variantId}`;
+    const headers = {
+      Authentication: `bearer ${integration.access_token}`,
+      'Content-Type': 'application/json',
+      'User-Agent': TN_STOCK_USER_AGENT,
+    };
 
-    console.log(`[TN Stock] Actualizado producto ${productId} variante ${variantId} a ${stock} unidades`);
+    let current: any = null;
+    try {
+      const got = await tnGetWithRetry(axios, url, { headers, validateStatus: () => true });
+      if (got.status === 200) current = got.data;
+    } catch {
+      current = null;
+    }
+
+    const body = buildTnStockUpdateBody(qty, current);
+    let putRes: { data?: unknown } | undefined;
+    try {
+      putRes = (await tnPutWithRetry(axios, url, body, { headers }, { maxRetries: 4 })) as { data?: unknown };
+    } catch (firstError) {
+      if (!body.inventory_levels) throw firstError;
+      putRes = (await tnPutWithRetry(axios, url, { stock: qty }, { headers }, { maxRetries: 2 })) as {
+        data?: unknown;
+      };
+    }
+
+    const shown = readTnVariantStock(putRes?.data);
+    if (shown != null && shown !== qty) {
+      console.warn(`[TN Stock] Se envió ${qty} a ${productId}/${variantId} pero TN quedó en ${shown}`);
+      return false;
+    }
+
+    console.log(`[TN Stock] Actualizado producto ${productId} variante ${variantId} a ${qty} unidades`);
     return true;
   } catch (error: any) {
     console.error('[TN Stock] Error:', error.response?.data || error.message);

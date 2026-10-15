@@ -2822,9 +2822,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           const displayName = rawName ? `${skuLabel} - ${rawName}` : skuLabel;
           const codigoLabel = `Código: ${skuLabel}`;
           const articleProductId = (groupVariants[0] as any)?.product_id as string | undefined;
+          const variantsForSync = loadedVariants[groupKey]?.length ? loadedVariants[groupKey] : groupVariants;
           const articleVariantIds = Array.from(
             new Set(
-              (groupVariants || [])
+              (variantsForSync || [])
                 .map((v: any) => String(v?.id || '').trim())
                 .filter(Boolean)
             )

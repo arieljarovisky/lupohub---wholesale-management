@@ -52,11 +52,13 @@ const touchProductUpdatedAt_1 = require("../utils/touchProductUpdatedAt");
 const axios_1 = __importDefault(require("axios"));
 const uuid_1 = require("uuid");
 const tiendanubeClient_1 = require("../utils/tiendanubeClient");
+const tnVariantStock_1 = require("../utils/tnVariantStock");
 const skuString_1 = require("../utils/skuString");
 const despachoFob_1 = require("../utils/despachoFob");
 const talles_tango_1 = require("../talles-tango");
 const colorCodeCanonical_1 = require("../utils/colorCodeCanonical");
 const SYNC_DEBOUNCE_MS = 2800;
+const TN_STOCK_USER_AGENT = process.env.TIENDA_NUBE_USER_AGENT || 'LupoHub (support@lupo.ar)';
 const pendingSyncByVariant = {};
 /** Cancela el sync diferido de una variante (evita que un debounce viejo pise un ajuste manual recién hecho). */
 function flushPendingExternalSync(variantId) {
@@ -505,6 +507,7 @@ const syncStockToExternalPlatforms = (variantId, newStock, opts) => __awaiter(vo
         };
         const skuLabel = matchOpts.sku || variantId;
         const publications = yield (0, db_1.query)(`SELECT id, platform, external_product_id, external_variant_id, pack_size FROM variant_publications WHERE variant_id = ?`, [variantId]);
+        const syncedTnKeys = new Set();
         if (publications && publications.length > 0) {
             const { loadVariantMlLinkContext, filterMlPublicationsForSync, filterTnPublicationsForSync } = yield Promise.resolve().then(() => __importStar(require('../services/variantPublicationFilter')));
             const linkCtx = yield loadVariantMlLinkContext(variantId);
@@ -519,6 +522,10 @@ const syncStockToExternalPlatforms = (variantId, newStock, opts) => __awaiter(vo
                 const pack = Math.max(1, Number(pub.pack_size) || 1);
                 const stockToSend = stockForPlatform(newStock, pack);
                 if (pub.platform === 'tiendanube' && pub.external_variant_id && platforms.has('tiendanube')) {
+                    const tnKey = `${String(pub.external_product_id).trim()}/${String(pub.external_variant_id).trim()}`;
+                    if (syncedTnKeys.has(tnKey))
+                        continue;
+                    syncedTnKeys.add(tnKey);
                     const label = `TN pub=${pub.external_product_id}/${pub.external_variant_id}`;
                     result.tnAttempted++;
                     tasks.push(runExternalSyncWithRetries(label, () => (0, exports.updateTiendaNubeStock)(pub.external_product_id, pub.external_variant_id, stockToSend)).then((ok) => {
@@ -542,9 +549,9 @@ const syncStockToExternalPlatforms = (variantId, newStock, opts) => __awaiter(vo
             // Paralelo: ML y TN reciben el mismo stock casi a la vez (menos “ML ya actualizó y TN no”).
             yield Promise.all(tasks);
         }
-        // Si faltó ML o TN en publications (o no había pubs), completar con columnas legacy.
+        // La pantalla lee la variante TN de las columnas. Si solo se actualizó otra publicación, el número no cambia.
         const needLegacyMl = platforms.has('mercadolibre') && result.mlAttempted === 0;
-        const needLegacyTn = platforms.has('tiendanube') && result.tnAttempted === 0;
+        const needLegacyTn = platforms.has('tiendanube');
         if (needLegacyMl || needLegacyTn) {
             const variant = yield (0, db_1.get)(`SELECT pv.id, pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
                 p.tienda_nube_id, p.mercado_libre_id, pv.sku, pv.external_sku,
@@ -561,7 +568,11 @@ const syncStockToExternalPlatforms = (variantId, newStock, opts) => __awaiter(vo
                         : null;
                 const stockTN = stockForPlatform(newStock, variant.tn_pack);
                 const stockML = stockForPlatform(newStock, variant.ml_pack);
-                if (needLegacyTn && variant.tienda_nube_id && variant.tienda_nube_variant_id) {
+                const legacyTnKey = variant.tienda_nube_id && variant.tienda_nube_variant_id
+                    ? `${String(variant.tienda_nube_id).trim()}/${String(variant.tienda_nube_variant_id).trim()}`
+                    : '';
+                if (needLegacyTn && legacyTnKey && !syncedTnKeys.has(legacyTnKey)) {
+                    syncedTnKeys.add(legacyTnKey);
                     const label = `TN legacy=${variant.tienda_nube_id}/${variant.tienda_nube_variant_id}`;
                     result.tnAttempted++;
                     const ok = yield runExternalSyncWithRetries(label, () => (0, exports.updateTiendaNubeStock)(variant.tienda_nube_id, variant.tienda_nube_variant_id, stockTN));
@@ -614,14 +625,38 @@ const updateTiendaNubeStock = (productId, variantId, stock) => __awaiter(void 0,
             console.log('[TN Stock] No hay integración configurada');
             return false;
         }
-        yield (0, tiendanubeClient_1.tnPutWithRetry)(axios_1.default, `https://api.tiendanube.com/v1/${integration.store_id}/products/${productId}/variants/${variantId}`, { stock }, {
-            headers: {
-                'Authentication': `bearer ${integration.access_token}`,
-                'Content-Type': 'application/json',
-                'User-Agent': 'LupoHub (lupohub@example.com)'
-            }
-        }, { maxRetries: 4 });
-        console.log(`[TN Stock] Actualizado producto ${productId} variante ${variantId} a ${stock} unidades`);
+        const qty = Math.max(0, Math.floor(Number(stock) || 0));
+        const url = `https://api.tiendanube.com/v1/${integration.store_id}/products/${productId}/variants/${variantId}`;
+        const headers = {
+            'Authentication': `bearer ${integration.access_token}`,
+            'Content-Type': 'application/json',
+            'User-Agent': TN_STOCK_USER_AGENT
+        };
+        let current = null;
+        try {
+            const got = yield (0, tiendanubeClient_1.tnGetWithRetry)(axios_1.default, url, { headers, validateStatus: () => true });
+            if (got.status === 200)
+                current = got.data;
+        }
+        catch (_b) {
+            current = null;
+        }
+        const body = (0, tnVariantStock_1.buildTnStockUpdateBody)(qty, current);
+        let putRes;
+        try {
+            putRes = yield (0, tiendanubeClient_1.tnPutWithRetry)(axios_1.default, url, body, { headers }, { maxRetries: 4 });
+        }
+        catch (firstError) {
+            if (!body.inventory_levels)
+                throw firstError;
+            putRes = yield (0, tiendanubeClient_1.tnPutWithRetry)(axios_1.default, url, { stock: qty }, { headers }, { maxRetries: 2 });
+        }
+        const shown = (0, tnVariantStock_1.readTnVariantStock)(putRes === null || putRes === void 0 ? void 0 : putRes.data);
+        if (shown != null && shown !== qty) {
+            console.warn(`[TN Stock] Se envió ${qty} a ${productId}/${variantId} pero TN quedó en ${shown}`);
+            return false;
+        }
+        console.log(`[TN Stock] Actualizado producto ${productId} variante ${variantId} a ${qty} unidades`);
         return true;
     }
     catch (error) {

@@ -4,6 +4,7 @@ import { execute, query, get } from '../database/db';
 import { v4 as uuidv4 } from 'uuid';
 import { deleteProductById } from './products.controller';
 import { tnPostWithRetry, tnPutWithRetry } from '../utils/tiendanubeClient';
+import { readTnVariantStock } from '../utils/tnVariantStock';
 import * as mlQuestionsAi from '../services/mlQuestionsAi.service';
 import {
   fetchAllTiendaNubeProductVariants,
@@ -3718,17 +3719,9 @@ export const syncAllStockToTiendaNube = async (req: Request, res: Response) => {
           const stockToSend = Math.floor(stockHub / pack);
           const externalId = `${v.tienda_nube_id}/${v.tienda_nube_variant_id}`;
           try {
-            await axios.put(
-              `https://api.tiendanube.com/v1/${integration.store_id}/products/${v.tienda_nube_id}/variants/${v.tienda_nube_variant_id}`,
-              { stock: stockToSend },
-              {
-                headers: {
-                  'Authentication': `bearer ${integration.access_token}`,
-                  'Content-Type': 'application/json',
-                  'User-Agent': TN_USER_AGENT
-                }
-              }
-            );
+            const { updateTiendaNubeStock } = await import('./stock.controller');
+            const ok = await updateTiendaNubeStock(v.tienda_nube_id, v.tienda_nube_variant_id, stockToSend);
+            if (!ok) throw new Error('Tienda Nube no aplicó el stock');
             updated++;
             logs.push(`[OK] ${v.sku}: ${stockHub} un. → ${stockToSend} (pack x${pack})`);
           } catch (e: any) {
@@ -4350,7 +4343,8 @@ export const getVariantExternalStocks = async (req: Request, res: Response) => {
           for (const variantId of variantIdsInProduct) {
             const tnVid = variantToTnVariant.get(variantId);
             const tv = tnVariants.find((v: any) => String(v.id) === String(tnVid));
-            if (tv != null && typeof tv.stock === 'number') stocks[variantId].stockTN = tv.stock;
+            const tnQty = readTnVariantStock(tv);
+            if (tnQty != null) stocks[variantId].stockTN = tnQty;
           }
         } catch {
           // ignore per-product errors
@@ -4477,17 +4471,9 @@ export const syncAllStockFromMercadoLibre = async (req: Request, res: Response) 
         try {
           const pack = Math.max(1, Number((v as any).tn_pack) || 1);
           const stockToSend = Math.floor(Number(v.stock || 0) / pack);
-          await axios.put(
-            `https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${v.tienda_nube_id}/variants/${v.tienda_nube_variant_id}`,
-            { stock: stockToSend },
-            {
-              headers: {
-                'Authentication': `bearer ${tnIntegration.access_token}`,
-                'Content-Type': 'application/json',
-                'User-Agent': TN_USER_AGENT
-              }
-            }
-          );
+          const { updateTiendaNubeStock } = await import('./stock.controller');
+          const ok = await updateTiendaNubeStock(String(v.tienda_nube_id), String(v.tienda_nube_variant_id), stockToSend);
+          if (!ok) throw new Error('Tienda Nube no aplicó el stock');
           tnUpdated++;
           logs.push(`[TN] ${v.sku}: ${stockToSend}`);
         } catch (e: any) {
@@ -4628,17 +4614,9 @@ export const importStockFromMercadoLibre = async (req: Request, res: Response) =
         try {
           const pack = Math.max(1, Number((v as any).tn_pack) || 1);
           const stockToSend = Math.floor(Number(v.stock || 0) / pack);
-          await axios.put(
-            `https://api.tiendanube.com/v1/${tnIntegration.store_id}/products/${v.tienda_nube_id}/variants/${v.tienda_nube_variant_id}`,
-            { stock: stockToSend },
-            {
-              headers: {
-                'Authentication': `bearer ${tnIntegration.access_token}`,
-                'Content-Type': 'application/json',
-                'User-Agent': TN_USER_AGENT
-              }
-            }
-          );
+          const { updateTiendaNubeStock } = await import('./stock.controller');
+          const ok = await updateTiendaNubeStock(String(v.tienda_nube_id), String(v.tienda_nube_variant_id), stockToSend);
+          if (!ok) throw new Error('Tienda Nube no aplicó el stock');
           tnUpdated++;
           logs.push(`[TN] ${v.sku}: ${stockToSend}`);
         } catch (e: any) {
