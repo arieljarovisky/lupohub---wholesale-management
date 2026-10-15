@@ -3163,8 +3163,39 @@ Equipo Lupo`;
 };
 
 /** Sincronización automática ML → TN (sin tocar inventario local). ML = fuente de verdad para canales. Incluye variantes con publicación padre (mercado_libre_id + variant_id) y variantes con publicación propia (mercado_libre_item_id). */
+let autoSyncMLtoTNRunning = false;
+
 export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: number }> {
-  const mlToken = await getValidMLToken();
+  // Una corrida puede tardar más que el intervalo; no superponer dos corridas.
+  if (autoSyncMLtoTNRunning) {
+    console.log('[AutoSync ML→TN] Ya hay una corrida en curso, se omite esta.');
+    return { updated: 0, errors: 0 };
+  }
+  autoSyncMLtoTNRunning = true;
+  try {
+    return await runAutoSyncMLtoTNOnce();
+  } finally {
+    autoSyncMLtoTNRunning = false;
+  }
+}
+
+/** GET de un ítem ML; registra el motivo si falla en vez de devolver null en silencio. */
+async function fetchMlItemForAutoSync(itemId: string, accessToken: string): Promise<any | null> {
+  try {
+    const r = await axios.get(`https://api.mercadolibre.com/items/${itemId}?include_attributes=all`, {
+      headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+    return r.data;
+  } catch (e: any) {
+    console.warn(
+      `[AutoSync ML→TN] GET ítem ML ${itemId} falló: ${e.response?.status ?? ''} ${e.response?.data?.message || e.message}`
+    );
+    return null;
+  }
+}
+
+async function runAutoSyncMLtoTNOnce(): Promise<{ updated: number; errors: number }> {
+  let mlToken = await getValidMLToken();
   const tnIntegration = await get(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`);
   if (!mlToken || !tnIntegration?.access_token || !tnIntegration?.store_id) {
     return { updated: 0, errors: 0 };
@@ -3195,11 +3226,10 @@ export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: nu
     const batchSize = 10;
     for (let i = 0; i < mlIds.length; i += batchSize) {
       const batch = mlIds.slice(i, i + batchSize);
-      const itemPromises = batch.map((id: string) =>
-        axios.get(`https://api.mercadolibre.com/items/${id}?include_attributes=all`, {
-          headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
-        }).then(r => r.data).catch(() => null)
-      );
+      // La corrida dura varios minutos: renovar el token si está por vencer.
+      mlToken = (await getValidMLToken()) || mlToken;
+      const accessToken = mlToken.access_token;
+      const itemPromises = batch.map((id: string) => fetchMlItemForAutoSync(id, accessToken));
       const items = await Promise.all(itemPromises);
       for (let j = 0; j < batch.length; j++) {
         const item = items[j];
@@ -3274,11 +3304,9 @@ export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: nu
     const batchSize = 10;
     for (let i = 0; i < rowsByItem.length; i += batchSize) {
       const batch = rowsByItem.slice(i, i + batchSize) as any[];
-      const itemPromises = batch.map((row: any) =>
-        axios.get(`https://api.mercadolibre.com/items/${row.ml_item_id}?include_attributes=all`, {
-          headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
-        }).then(r => r.data).catch(() => null)
-      );
+      mlToken = (await getValidMLToken()) || mlToken;
+      const accessToken = mlToken.access_token;
+      const itemPromises = batch.map((row: any) => fetchMlItemForAutoSync(row.ml_item_id, accessToken));
       const items = await Promise.all(itemPromises);
       for (let j = 0; j < batch.length; j++) {
         const item = items[j];
@@ -3297,7 +3325,7 @@ export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: nu
         } else {
           let itemForMatch = item;
           try {
-            itemForMatch = await enrichMlItemVariationsForMatch(item, mlToken.access_token, (url, cfg) =>
+            itemForMatch = await enrichMlItemVariationsForMatch(item, accessToken, (url, cfg) =>
               axios.get(url, cfg)
             );
           } catch {
