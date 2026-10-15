@@ -763,17 +763,20 @@ export const updateTiendaNubeStock = async (
     }
 
     const body = buildTnStockUpdateBody(qty, current);
-    let putRes: { data?: unknown } | undefined;
     try {
-      putRes = (await tnPutWithRetry(axios, url, body, { headers }, { maxRetries: 4 })) as { data?: unknown };
+      await tnPutWithRetry(axios, url, body, { headers }, { maxRetries: 4 });
     } catch (firstError) {
       if (!body.inventory_levels) throw firstError;
-      putRes = (await tnPutWithRetry(axios, url, { stock: qty }, { headers }, { maxRetries: 2 })) as {
-        data?: unknown;
-      };
+      await tnPutWithRetry(axios, url, { stock: qty }, { headers }, { maxRetries: 2 });
     }
 
-    const shown = readTnVariantStock(putRes?.data);
+    let shown: number | null = null;
+    try {
+      const check = await tnGetWithRetry(axios, url, { headers, validateStatus: () => true });
+      if (check.status === 200) shown = readTnVariantStock(check.data);
+    } catch {
+      shown = null;
+    }
     if (shown != null && shown !== qty) {
       console.warn(`[TN Stock] Se envió ${qty} a ${productId}/${variantId} pero TN quedó en ${shown}`);
       return false;

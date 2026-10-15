@@ -642,16 +642,23 @@ const updateTiendaNubeStock = (productId, variantId, stock) => __awaiter(void 0,
             current = null;
         }
         const body = (0, tnVariantStock_1.buildTnStockUpdateBody)(qty, current);
-        let putRes;
         try {
-            putRes = yield (0, tiendanubeClient_1.tnPutWithRetry)(axios_1.default, url, body, { headers }, { maxRetries: 4 });
+            yield (0, tiendanubeClient_1.tnPutWithRetry)(axios_1.default, url, body, { headers }, { maxRetries: 4 });
         }
         catch (firstError) {
             if (!body.inventory_levels)
                 throw firstError;
-            putRes = yield (0, tiendanubeClient_1.tnPutWithRetry)(axios_1.default, url, { stock: qty }, { headers }, { maxRetries: 2 });
+            yield (0, tiendanubeClient_1.tnPutWithRetry)(axios_1.default, url, { stock: qty }, { headers }, { maxRetries: 2 });
         }
-        const shown = (0, tnVariantStock_1.readTnVariantStock)(putRes === null || putRes === void 0 ? void 0 : putRes.data);
+        let shown = null;
+        try {
+            const check = yield (0, tiendanubeClient_1.tnGetWithRetry)(axios_1.default, url, { headers, validateStatus: () => true });
+            if (check.status === 200)
+                shown = (0, tnVariantStock_1.readTnVariantStock)(check.data);
+        }
+        catch (_c) {
+            shown = null;
+        }
         if (shown != null && shown !== qty) {
             console.warn(`[TN Stock] Se envió ${qty} a ${productId}/${variantId} pero TN quedó en ${shown}`);
             return false;
