@@ -71,7 +71,14 @@ function formatComprobanteLabel(
   sinDetalle?: boolean
 ): string {
   if (sinDetalle || (!puntoVta && !cbteDesde)) return 'Sin nº AFIP';
-  const letra = cbteTipo === 1 || cbteTipo === 3 ? 'A' : cbteTipo === 6 || cbteTipo === 8 ? 'B' : '';
+  const letra =
+    cbteTipo === 1 || cbteTipo === 3 || cbteTipo === 2
+      ? 'A'
+      : cbteTipo === 11 || cbteTipo === 13 || cbteTipo === 12
+        ? 'C'
+        : cbteTipo === 6 || cbteTipo === 8 || cbteTipo === 7
+          ? 'B'
+          : '';
   const pv = String(Number(puntoVta) || 0).padStart(5, '0');
   const num = String(Number(cbteDesde) || 0).padStart(8, '0');
   return `${letra} ${pv}-${num}`.trim();
@@ -82,8 +89,8 @@ const canManage = (role?: string) =>
 
 function defaultCbteTipo(tipo: 'FACTURA' | 'NC', letra?: string): number {
   const L = String(letra || 'B').toUpperCase();
-  if (tipo === 'FACTURA') return L === 'A' ? 1 : 6;
-  return L === 'A' ? 3 : 8;
+  if (tipo === 'FACTURA') return L === 'A' ? 1 : L === 'C' ? 11 : 6;
+  return L === 'A' ? 3 : L === 'C' ? 13 : 8;
 }
 
 type CreateManualInput = {
@@ -276,13 +283,13 @@ function validateCreateFields(parsed: ReturnType<typeof parseCreateBody>) {
     if (!Number.isFinite(cbteTipo) || !Number.isFinite(cbteDesde)) {
       return 'Tipo y número de comprobante inválidos';
     }
-    const facTipos = [1, 6];
-    const ncTipos = [3, 8];
+    const facTipos = [1, 6, 11];
+    const ncTipos = [3, 8, 13];
     if (tipo === 'FACTURA' && !facTipos.includes(cbteTipo)) {
-      return 'Factura: use tipo 1 (A) o 6 (B)';
+      return 'Factura: use tipo 1 (A), 6 (B) u 11 (C)';
     }
     if (tipo === 'NC' && !ncTipos.includes(cbteTipo)) {
-      return 'NC: use tipo 3 (A) o 8 (B)';
+      return 'NC: use tipo 3 (A), 8 (B) o 13 (C)';
     }
   }
 
@@ -569,7 +576,17 @@ function rowToManualResponse(row: any) {
   const pv = Number(row.punto_venta) || 0;
   const cbteDesde = Number(row.cbte_desde) || 0;
   const letra =
-    tipo === 'FACTURA' ? (cbteTipo === 1 ? 'A' : 'B') : cbteTipo === 3 ? 'A' : 'B';
+    tipo === 'FACTURA'
+      ? cbteTipo === 1
+        ? 'A'
+        : cbteTipo === 11
+          ? 'C'
+          : 'B'
+      : cbteTipo === 3
+        ? 'A'
+        : cbteTipo === 13
+          ? 'C'
+          : 'B';
   return {
     id: row.id,
     customerId: row.customer_id,

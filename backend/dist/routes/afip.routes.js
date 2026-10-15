@@ -75,26 +75,7 @@ router.get('/consultar-comprobante', auth_1.authMiddleware, (req, res) => {
             res.status(400).json({ error: message });
     });
 });
-/** Catálogos WSFEX para Factura E: paises | monedas | incoterms */
-router.get('/exportacion/:tipo', auth_1.authMiddleware, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    const tipo = (req.params.tipo || '').toLowerCase();
-    if (!['paises', 'monedas', 'incoterms', 'umed', 'tipo_expo'].includes(tipo)) {
-        return res.status(400).json({ error: 'tipo debe ser paises, monedas, incoterms, umed o tipo_expo' });
-    }
-    if (!(0, afip_service_1.isAfipConfigured)()) {
-        return res.status(400).json({ error: 'AFIP no está configurado.' });
-    }
-    try {
-        const data = yield (0, afip_service_1.getWsfexParametros)(tipo);
-        return res.json({ tipo, data, puntoVentaExport: (0, afip_service_1.getAfipExportPuntoVenta)() });
-    }
-    catch (err) {
-        const message = (err === null || err === void 0 ? void 0 : err.message) || String(err) || 'Error consultando parámetros WSFEX.';
-        if (!res.headersSent)
-            return res.status(400).json({ error: message });
-    }
-}));
-/** Diagnóstico WSFEX: PV exportación y último comprobante E autorizado. */
+/** Diagnóstico WSFEX: PV exportación, listado FEEWS y último comprobante E. */
 router.get('/exportacion/diagnostico', auth_1.authMiddleware, (_req, res) => __awaiter(void 0, void 0, void 0, function* () {
     if (!(0, afip_service_1.isAfipConfigured)()) {
         return res.status(400).json({ error: 'AFIP no está configurado.' });
@@ -105,6 +86,25 @@ router.get('/exportacion/diagnostico', auth_1.authMiddleware, (_req, res) => __a
     }
     catch (err) {
         const message = (err === null || err === void 0 ? void 0 : err.message) || String(err) || 'Error en diagnóstico WSFEX.';
+        if (!res.headersSent)
+            return res.status(400).json({ error: message });
+    }
+}));
+/** Catálogos WSFEX para Factura E: paises | monedas | incoterms | puntos_venta | … */
+router.get('/exportacion/:tipo', auth_1.authMiddleware, (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const tipo = (req.params.tipo || '').toLowerCase();
+    if (!['paises', 'monedas', 'incoterms', 'umed', 'tipo_expo', 'puntos_venta'].includes(tipo)) {
+        return res.status(400).json({ error: 'tipo debe ser paises, monedas, incoterms, umed, tipo_expo o puntos_venta' });
+    }
+    if (!(0, afip_service_1.isAfipConfigured)()) {
+        return res.status(400).json({ error: 'AFIP no está configurado.' });
+    }
+    try {
+        const data = yield (0, afip_service_1.getWsfexParametros)(tipo);
+        return res.json({ tipo, data, puntoVentaExport: (0, afip_service_1.getAfipExportPuntoVenta)() });
+    }
+    catch (err) {
+        const message = (err === null || err === void 0 ? void 0 : err.message) || String(err) || 'Error consultando parámetros WSFEX.';
         if (!res.headersSent)
             return res.status(400).json({ error: message });
     }

@@ -68,6 +68,8 @@ exports.consultarComprobanteAfip = consultarComprobanteAfip;
 exports.getAfipExportPuntoVenta = getAfipExportPuntoVenta;
 exports.getWsfexParametros = getWsfexParametros;
 exports.getLastExportVoucherNumber = getLastExportVoucherNumber;
+exports.parseWsfexPuntosVenta = parseWsfexPuntosVenta;
+exports.getWsfexPuntosVentaExportacion = getWsfexPuntosVentaExportacion;
 exports.getWsfexExportDiagnostico = getWsfexExportDiagnostico;
 exports.emitirFacturaExportacion = emitirFacturaExportacion;
 const fs = __importStar(require("fs"));
@@ -78,15 +80,18 @@ const PTO_VTA_DEFAULT = 1;
 const PTO_VTA_EXPORT_DEFAULT = 10;
 /** Moneda por defecto Factura E en LupoHub. */
 const MONEDA_EXPORT_DEFAULT = 'PES';
-/** Factura A (CUIT) = 1, Factura B (consumidor final) = 6 */
+/** Factura A (CUIT) = 1, Factura B (consumidor final) = 6, Factura C (Monotributo/Exento) = 11 */
 const TIPO_CBTE_A = 1;
 const TIPO_CBTE_B = 6;
-/** Nota de Crédito A = 3, Nota de Crédito B = 8 */
+const TIPO_CBTE_C = 11;
+/** Nota de Crédito A = 3, Nota de Crédito B = 8, Nota de Crédito C = 13 */
 const TIPO_NC_A = 3;
 const TIPO_NC_B = 8;
-/** Nota de Débito A = 2, Nota de Débito B = 7 */
+const TIPO_NC_C = 13;
+/** Nota de Débito A = 2, Nota de Débito B = 7, Nota de Débito C = 12 */
 const TIPO_ND_A = 2;
 const TIPO_ND_B = 7;
+const TIPO_ND_C = 12;
 /** Factura E (exportación) = 19 — web service WSFEX, no WSFE */
 exports.TIPO_CBTE_E = 19;
 /** Exportación definitiva de bienes (prendas) */
@@ -392,7 +397,8 @@ function getAfipIssuerData() {
  * Regla (si no se fuerza tipo):
  * - Responsable Inscripto => Factura A
  * - Otros (Monotributo, Exento, CF, etc.) => Factura B
- * @param forceCbteTipo - Si es 1 o 6, se usa ese tipo (A o B) en lugar de calcular por cliente.
+ * @param forceCbteTipo - Si es 1, 6 u 11, se usa ese tipo (A, B o C) en lugar de calcular por cliente.
+ *   Factura C (11) es para emisores monotributistas o exentos que venden a cualquier cliente.
  */
 function emitirFactura(order, customer, forceCbteTipo) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -404,7 +410,7 @@ function emitirFactura(order, customer, forceCbteTipo) {
         const condicionIvaDesc = ((_a = customer.condicionIva) !== null && _a !== void 0 ? _a : '').toLowerCase();
         const esResponsableInscripto = condicionIvaDesc.includes('responsable inscripto') && !condicionIvaDesc.includes('no inscripto');
         let tipoCbte;
-        if (forceCbteTipo === TIPO_CBTE_A || forceCbteTipo === TIPO_CBTE_B) {
+        if (forceCbteTipo === TIPO_CBTE_A || forceCbteTipo === TIPO_CBTE_B || forceCbteTipo === TIPO_CBTE_C) {
             tipoCbte = forceCbteTipo;
         }
         else {
@@ -420,8 +426,12 @@ function emitirFactura(order, customer, forceCbteTipo) {
             docNro = parseInt(cuitCliente, 10);
             condicionIva = IVA_RESPONSABLE_INSCRIPTO;
         }
+        else if (tipoCbte === TIPO_CBTE_C) {
+            docTipo = tieneCuit ? DOC_TIPO_CUIT : DOC_TIPO_CF;
+            docNro = tieneCuit ? parseInt(cuitCliente, 10) : 0;
+            condicionIva = tieneCuit ? CONSUMIDOR_FINAL : CONSUMIDOR_FINAL;
+        }
         else {
-            // Factura B: AFIP 10243 solo acepta condiciones válidas para clase B (4, 5, 7, 8, 9, 10, 15). No 1 ni 6.
             docTipo = tieneCuit ? DOC_TIPO_CUIT : DOC_TIPO_CF;
             docNro = tieneCuit ? parseInt(cuitCliente, 10) : 0;
             if (!tieneCuit) {
@@ -440,7 +450,6 @@ function emitirFactura(order, customer, forceCbteTipo) {
                 condicionIva = 15; // IVA No Alcanzado
             }
             else {
-                // Monotributo, RI y resto: para Factura B usar 5 (CF) por restricción AFIP
                 condicionIva = CONSUMIDOR_FINAL;
             }
         }
@@ -451,10 +460,15 @@ function emitirFactura(order, customer, forceCbteTipo) {
         if (impNeto > AFIP_MAX_IMP_NETO) {
             throw new Error(`El total neto (${impNeto.toFixed(2)}) supera el máximo permitido por AFIP para un comprobante (${AFIP_MAX_IMP_NETO.toFixed(2)}).`);
         }
-        const impIva = Math.round(impNeto * 0.21 * 100) / 100;
+        const esFacturaC = tipoCbte === TIPO_CBTE_C;
+        const impIva = esFacturaC ? 0 : Math.round(impNeto * 0.21 * 100) / 100;
         const perc = order.iibbPercepcion;
         const rawTrib = perc != null && perc !== undefined ? Number(perc.importe) : 0;
-        const impTributo = Number.isFinite(rawTrib) && rawTrib > 0.005 ? Math.round(rawTrib * 100) / 100 : 0;
+        const impTributo = esFacturaC
+            ? 0
+            : Number.isFinite(rawTrib) && rawTrib > 0.005
+                ? Math.round(rawTrib * 100) / 100
+                : 0;
         const rawBase = perc != null ? Number(perc.baseImp) : 0;
         const baseIibb = Number.isFinite(rawBase) && rawBase > 0 ? Math.round(rawBase * 100) / 100 : impNeto;
         const rawAlic = perc != null ? Number(perc.alicuota) : 0;
@@ -504,17 +518,17 @@ function emitirFactura(order, customer, forceCbteTipo) {
             FchVtoPago: null,
             ImpTotal: total,
             ImpTotConc: 0,
-            ImpNeto: impNeto,
-            ImpOpEx: 0,
+            ImpNeto: esFacturaC ? 0 : impNeto,
+            ImpOpEx: esFacturaC ? impNeto : 0,
             ImpIVA: impIva,
             ImpTrib: impTributo,
             MonId: 'PES',
             MonCotiz: 1,
             CondicionIVAReceptorId: condicionIva,
-            Iva: [
-                { Id: ID_IVA_21, BaseImp: impNeto, Importe: impIva }
-            ]
         };
+        if (!esFacturaC) {
+            data.Iva = [{ Id: ID_IVA_21, BaseImp: impNeto, Importe: impIva }];
+        }
         if (impTributo > 0) {
             // Id 99 = otros / percepción IIBB (ejemplo oficial AfipSDK). Descripción en castellano sin caracteres raros.
             data.Tributos = [
@@ -563,6 +577,7 @@ function emitirNotaCredito(facturaOriginal, customer, amountToCredit, iibbPercep
         // Tipo de nota de crédito según tipo de FACTURA original:
         // - Factura A (1)  -> NC A (3)
         // - Factura B (6)  -> NC B (8)
+        // - Factura C (11) -> NC C (13)
         const tipoFacturaOriginal = facturaOriginal.cbteTipo;
         let tipoCbte;
         if (tipoFacturaOriginal === TIPO_CBTE_A) {
@@ -571,9 +586,10 @@ function emitirNotaCredito(facturaOriginal, customer, amountToCredit, iibbPercep
         else if (tipoFacturaOriginal === TIPO_CBTE_B) {
             tipoCbte = TIPO_NC_B;
         }
+        else if (tipoFacturaOriginal === TIPO_CBTE_C) {
+            tipoCbte = TIPO_NC_C;
+        }
         else {
-            // Fallback: si por algún motivo viene otro tipo, usamos NC B (más permisiva) para evitar error 10040,
-            // siempre asociada al tipo real de la factura en CbtesAsoc.
             tipoCbte = TIPO_NC_B;
         }
         // DocTipo / DocNro iguales que en factura
@@ -583,31 +599,31 @@ function emitirNotaCredito(facturaOriginal, customer, amountToCredit, iibbPercep
         const condicionIvaDesc = ((_a = customer.condicionIva) !== null && _a !== void 0 ? _a : '').toLowerCase();
         let condicionIva;
         if (tipoCbte === TIPO_NC_A) {
-            // NC A: receptor Responsable Inscripto, exige CUIT
             if (!tieneCuit) {
                 throw new Error('Para Nota de Crédito A el cliente debe tener CUIT cargado.');
             }
             condicionIva = IVA_RESPONSABLE_INSCRIPTO;
         }
+        else if (tipoCbte === TIPO_NC_C) {
+            condicionIva = CONSUMIDOR_FINAL;
+        }
         else {
-            // NC B: solo 4, 5, 7, 8, 9, 10, 15. 1 y 6 no son válidos.
             if (!tieneCuit) {
                 condicionIva = CONSUMIDOR_FINAL;
             }
             else if (condicionIvaDesc.includes('exento')) {
-                condicionIva = 4; // IVA Sujeto Exento
+                condicionIva = 4;
             }
             else if (condicionIvaDesc.includes('no categorizado')) {
-                condicionIva = 7; // Sujeto No Categorizado
+                condicionIva = 7;
             }
             else if (condicionIvaDesc.includes('consumidor final')) {
                 condicionIva = CONSUMIDOR_FINAL;
             }
             else if (condicionIvaDesc.includes('no alcanzado')) {
-                condicionIva = 15; // IVA No Alcanzado
+                condicionIva = 15;
             }
             else {
-                // Monotributo, RI u otros: usar 5 (CF) para cumplir validación AFIP en NC B
                 condicionIva = CONSUMIDOR_FINAL;
             }
         }
@@ -618,10 +634,15 @@ function emitirNotaCredito(facturaOriginal, customer, amountToCredit, iibbPercep
         if (impNeto > AFIP_MAX_IMP_NETO) {
             throw new Error(`El monto neto de la nota de crédito (${impNeto.toFixed(2)}) supera el máximo permitido por AFIP (${AFIP_MAX_IMP_NETO.toFixed(2)}).`);
         }
-        const impIva = Math.round(impNeto * 0.21 * 100) / 100;
+        const esNcC = tipoCbte === TIPO_NC_C;
+        const impIva = esNcC ? 0 : Math.round(impNeto * 0.21 * 100) / 100;
         const perc = iibbPercepcion;
         const rawTrib = perc != null && perc !== undefined ? Number(perc.importe) : 0;
-        const impTributo = Number.isFinite(rawTrib) && rawTrib > 0.005 ? Math.round(rawTrib * 100) / 100 : 0;
+        const impTributo = esNcC
+            ? 0
+            : Number.isFinite(rawTrib) && rawTrib > 0.005
+                ? Math.round(rawTrib * 100) / 100
+                : 0;
         const rawBase = perc != null ? Number(perc.baseImp) : 0;
         const baseIibb = Number.isFinite(rawBase) && rawBase > 0 ? Math.round(rawBase * 100) / 100 : impNeto;
         const rawAlic = perc != null ? Number(perc.alicuota) : 0;
@@ -667,14 +688,13 @@ function emitirNotaCredito(facturaOriginal, customer, amountToCredit, iibbPercep
             FchVtoPago: null,
             ImpTotal: total,
             ImpTotConc: 0,
-            ImpNeto: impNeto,
-            ImpOpEx: 0,
+            ImpNeto: esNcC ? 0 : impNeto,
+            ImpOpEx: esNcC ? impNeto : 0,
             ImpIVA: impIva,
             ImpTrib: impTributo,
             MonId: 'PES',
             MonCotiz: 1,
             CondicionIVAReceptorId: condicionIva,
-            // AFIP exige tipo de comprobante asociado en formato válido (ej. "01", "06"). Código 10040 si el tipo es inválido.
             CbtesAsoc: [
                 {
                     Tipo: String(facturaOriginal.cbteTipo).padStart(2, '0'),
@@ -682,10 +702,10 @@ function emitirNotaCredito(facturaOriginal, customer, amountToCredit, iibbPercep
                     Nro: facturaOriginal.cbteDesde
                 }
             ],
-            Iva: [
-                { Id: ID_IVA_21, BaseImp: impNeto, Importe: impIva }
-            ]
         };
+        if (!esNcC) {
+            data.Iva = [{ Id: ID_IVA_21, BaseImp: impNeto, Importe: impIva }];
+        }
         if (impTributo > 0) {
             data.Tributos = [
                 {
@@ -718,11 +738,15 @@ function emitirNotaCredito(facturaOriginal, customer, amountToCredit, iibbPercep
 }
 function resolveCondicionIvaForNotaAsociada(tipoCbte, tieneCuit, condicionIvaDesc) {
     const isClaseA = tipoCbte === TIPO_NC_A || tipoCbte === TIPO_ND_A;
+    const isClaseC = tipoCbte === TIPO_NC_C || tipoCbte === TIPO_ND_C;
     if (isClaseA) {
         if (!tieneCuit) {
             throw new Error('Para comprobante clase A el cliente debe tener CUIT cargado.');
         }
         return IVA_RESPONSABLE_INSCRIPTO;
+    }
+    if (isClaseC) {
+        return CONSUMIDOR_FINAL;
     }
     if (!tieneCuit)
         return CONSUMIDOR_FINAL;
@@ -758,6 +782,9 @@ function emitirNotaDebito(facturaOriginal, customer, amountToDebit, iibbPercepci
         else if (tipoFacturaOriginal === TIPO_CBTE_B) {
             tipoCbte = TIPO_ND_B;
         }
+        else if (tipoFacturaOriginal === TIPO_CBTE_C) {
+            tipoCbte = TIPO_ND_C;
+        }
         else {
             tipoCbte = TIPO_ND_B;
         }
@@ -772,10 +799,15 @@ function emitirNotaDebito(facturaOriginal, customer, amountToDebit, iibbPercepci
         if (impNeto > AFIP_MAX_IMP_NETO) {
             throw new Error(`El monto neto de la nota de débito (${impNeto.toFixed(2)}) supera el máximo permitido por AFIP (${AFIP_MAX_IMP_NETO.toFixed(2)}).`);
         }
-        const impIva = impNeto > 0 ? Math.round(impNeto * 0.21 * 100) / 100 : 0;
+        const esNdC = tipoCbte === TIPO_ND_C;
+        const impIva = esNdC ? 0 : impNeto > 0 ? Math.round(impNeto * 0.21 * 100) / 100 : 0;
         const perc = iibbPercepcion;
         const rawTrib = perc != null && perc !== undefined ? Number(perc.importe) : 0;
-        const impTributo = Number.isFinite(rawTrib) && rawTrib > 0.005 ? Math.round(rawTrib * 100) / 100 : 0;
+        const impTributo = esNdC
+            ? 0
+            : Number.isFinite(rawTrib) && rawTrib > 0.005
+                ? Math.round(rawTrib * 100) / 100
+                : 0;
         const rawBase = perc != null ? Number(perc.baseImp) : 0;
         const baseIibb = Number.isFinite(rawBase) && rawBase > 0
             ? Math.round(rawBase * 100) / 100
@@ -828,8 +860,8 @@ function emitirNotaDebito(facturaOriginal, customer, amountToDebit, iibbPercepci
             FchVtoPago: null,
             ImpTotal: total,
             ImpTotConc: 0,
-            ImpNeto: impNeto,
-            ImpOpEx: 0,
+            ImpNeto: esNdC ? 0 : impNeto,
+            ImpOpEx: esNdC ? impNeto : 0,
             ImpIVA: impIva,
             ImpTrib: impTributo,
             MonId: 'PES',
@@ -843,7 +875,7 @@ function emitirNotaDebito(facturaOriginal, customer, amountToDebit, iibbPercepci
                 }
             ]
         };
-        if (impNeto > 0) {
+        if (impNeto > 0 && !esNdC) {
             data.Iva = [{ Id: ID_IVA_21, BaseImp: impNeto, Importe: impIva }];
         }
         if (impTributo > 0) {
@@ -1203,7 +1235,7 @@ function arsToMonedaExport(arsAmount, monedaId, monedaCtz) {
     }
     return Math.round((ars / ctz) * 100) / 100;
 }
-/** Catálogos WSFEX: paises | monedas | incoterms | umed | tipo_expo */
+/** Catálogos WSFEX: paises | monedas | incoterms | umed | tipo_expo | puntos_venta */
 function getWsfexParametros(tipo) {
     return __awaiter(this, void 0, void 0, function* () {
         const methodMap = {
@@ -1211,7 +1243,8 @@ function getWsfexParametros(tipo) {
             monedas: 'FEXGetPARAM_MON',
             incoterms: 'FEXGetPARAM_Incoterms',
             umed: 'FEXGetPARAM_UMed',
-            tipo_expo: 'FEXGetPARAM_Tipo_Expo'
+            tipo_expo: 'FEXGetPARAM_Tipo_Expo',
+            puntos_venta: 'FEXGetPARAM_PtoVenta'
         };
         const method = methodMap[tipo];
         if (!method)
@@ -1236,16 +1269,124 @@ function getLastExportVoucherNumber(puntoVta_1) {
         return Number.isFinite(nro) ? nro : 0;
     });
 }
+function isWsfexPuntoVentaBaja(fecha) {
+    const f = (fecha || '').trim();
+    if (!f)
+        return false;
+    const normalized = f.toUpperCase();
+    if (normalized === '00000000' || normalized === 'NULL' || normalized === '-' || normalized === '0') {
+        return false;
+    }
+    return true;
+}
+function isWsfexPuntoVentaBlocked(flag) {
+    const s = String(flag !== null && flag !== void 0 ? flag : '').trim().toUpperCase();
+    return s === 'S' || s === 'SI' || s === 'Y' || s === '1';
+}
+function mapWsfexPuntoVentaRow(row) {
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
+    const n = Number((_d = (_c = (_b = (_a = row.Pve_Nro) !== null && _a !== void 0 ? _a : row.pve_nro) !== null && _b !== void 0 ? _b : row.PveNro) !== null && _c !== void 0 ? _c : row.Nro) !== null && _d !== void 0 ? _d : row.nro);
+    if (!Number.isFinite(n) || n <= 0)
+        return null;
+    const baja = String((_g = (_f = (_e = row.Pve_FchBaja) !== null && _e !== void 0 ? _e : row.pve_fchbaja) !== null && _f !== void 0 ? _f : row.PveFchBaja) !== null && _g !== void 0 ? _g : '').trim();
+    return {
+        number: n,
+        blocked: isWsfexPuntoVentaBlocked((_j = (_h = row.Pve_Bloqueado) !== null && _h !== void 0 ? _h : row.pve_bloqueado) !== null && _j !== void 0 ? _j : row.PveBloqueado),
+        bajaFecha: baja || undefined
+    };
+}
+/** Puntos de venta habilitados para Factura E (FEEWS) según AFIP. */
+function parseWsfexPuntosVenta(raw) {
+    var _a, _b, _c;
+    const parsed = [];
+    const seen = new Set();
+    const push = (row) => {
+        if (!row || seen.has(row.number))
+            return;
+        seen.add(row.number);
+        parsed.push(row);
+    };
+    const root = (raw && typeof raw === 'object' ? raw : {});
+    const result = ((_a = root.FEXGetPARAM_PtoVentaResult) !== null && _a !== void 0 ? _a : root);
+    const get = ((_b = result.FEXResultGet) !== null && _b !== void 0 ? _b : result);
+    let rows = (_c = get.ClsFEXResponse_PtoVenta) !== null && _c !== void 0 ? _c : get.clsFEXResponse_PtoVenta;
+    if (rows) {
+        const list = Array.isArray(rows) ? rows : [rows];
+        for (const row of list) {
+            if (row && typeof row === 'object')
+                push(mapWsfexPuntoVentaRow(row));
+        }
+    }
+    if (!parsed.length) {
+        walkWsfexNodes(raw, (key, _value, parent) => {
+            if (key !== 'Pve_Nro' && key !== 'pve_nro' && key !== 'PveNro')
+                return;
+            push(mapWsfexPuntoVentaRow(parent));
+        });
+    }
+    return parsed.sort((a, b) => a.number - b.number);
+}
+function getWsfexPuntosVentaExportacion() {
+    return __awaiter(this, void 0, void 0, function* () {
+        const raw = yield getWsfexParametros('puntos_venta');
+        return parseWsfexPuntosVenta(raw);
+    });
+}
+function wsfexPuntosVentaActivos(puntos) {
+    return puntos.filter((p) => !p.blocked && !isWsfexPuntoVentaBaja(p.bajaFecha));
+}
+const ARCA_PV_EXPORT_INSTRUCTIONS = 'En ARCA (con clave fiscal) → Administración de puntos de venta y domicilios → Agregar punto de venta → ' +
+    'elegí «RECE para aplicativo y web services» o «Comprobantes de Exportación - Web Services» (FEEWS). ' +
+    'Luego en Railway definí AFIP_PTO_VTA_EXPORT con el número que te asigne ARCA.';
+function assertExportPuntoVentaValido(puntoVta) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const puntos = yield getWsfexPuntosVentaExportacion();
+        const activos = wsfexPuntosVentaActivos(puntos);
+        if (activos.some((p) => p.number === puntoVta))
+            return;
+        const lista = activos.map((p) => String(p.number)).join(', ');
+        throw new Error(lista
+            ? `El punto de venta ${puntoVta} no está habilitado para Factura E (WSFEX). En Railway configurá AFIP_PTO_VTA_EXPORT con uno de estos PV de exportación: ${lista}. (El PV ${process.env.AFIP_PTO_VTA || '?'} es para Factura A/B, no sirve para exportación.)`
+            : `AFIP no tiene ningún punto de venta de exportación (FEEWS) para tu CUIT. ${ARCA_PV_EXPORT_INSTRUCTIONS}`);
+    });
+}
+function friendlyWsfexErrorMessage(obs) {
+    if (!obs)
+        return null;
+    if (obs.includes('[1510]') || obs.toLowerCase().includes('punto_vta')) {
+        const pv = getAfipExportPuntoVenta();
+        return (`AFIP rechazó la Factura E: el punto de venta ${pv} no es válido para exportación (error 1510). ` +
+            `Creá en ARCA un PV tipo «Comprobantes de Exportación - Web Services» (FEEWS) — no uses el PV de Factura A/B — ` +
+            `y configurá AFIP_PTO_VTA_EXPORT en Railway con ese número.`);
+    }
+    return obs.startsWith('AFIP rechazó') ? obs : `AFIP rechazó la Factura E: ${obs}`;
+}
 /** Diagnóstico WSFEX: último comprobante tipo 19 en PV exportación. */
 function getWsfexExportDiagnostico() {
     return __awaiter(this, void 0, void 0, function* () {
         const puntoVentaExport = getAfipExportPuntoVenta();
-        const ultimoCbteTipo19 = yield getLastExportVoucherNumber(puntoVentaExport, exports.TIPO_CBTE_E);
+        const puntosVentaExportacion = yield getWsfexPuntosVentaExportacion();
+        const activos = wsfexPuntosVentaActivos(puntosVentaExportacion);
+        const puntoVentaConfiguradoValido = activos.some((p) => p.number === puntoVentaExport);
+        let ultimoCbteTipo19 = null;
+        let ultimoCbteError = null;
+        if (puntoVentaConfiguradoValido) {
+            try {
+                ultimoCbteTipo19 = yield getLastExportVoucherNumber(puntoVentaExport, exports.TIPO_CBTE_E);
+            }
+            catch (err) {
+                ultimoCbteError = (err === null || err === void 0 ? void 0 : err.message) || String(err);
+            }
+        }
         return {
             wsfexService: getWsfexServiceId(),
             puntoVentaExport,
+            puntoVentaConfiguradoValido,
+            puntosVentaExportacion,
+            puntosVentaExportacionActivos: activos.map((p) => p.number),
             ultimoCbteTipo19,
-            proximoCbteTipo19: ultimoCbteTipo19 + 1
+            proximoCbteTipo19: ultimoCbteTipo19 != null ? ultimoCbteTipo19 + 1 : null,
+            ultimoCbteError
         };
     });
 }
@@ -1258,6 +1399,7 @@ function emitirFacturaExportacion(order, customer, items, params) {
         var _a, _b, _c, _d;
         const config = getConfig();
         const puntoVta = getAfipExportPuntoVenta();
+        yield assertExportPuntoVentaValido(puntoVta);
         const dstCmp = Number(params.dstCmp);
         if (!Number.isFinite(dstCmp) || dstCmp <= 0) {
             throw new Error('País destino (dstCmp) inválido. Consultá /api/afip/exportacion/paises.');
@@ -1363,9 +1505,9 @@ function emitirFacturaExportacion(order, customer, items, params) {
             const obs = formatWsfexObservaciones(res);
             const detail = summarizeWsfexResponse(res);
             console.error('[AFIP WSFEX] FEXAuthorize sin CAE:', detail);
-            throw new Error(obs
-                ? `AFIP rechazó la Factura E: ${obs}`
-                : `AFIP no devolvió CAE (PV export ${puntoVta}, ws ${getWsfexServiceId()}). Verificá wsfex autorizado y PV de exportación en ARCA. Detalle: ${detail}`);
+            const friendly = friendlyWsfexErrorMessage(obs);
+            throw new Error(friendly ||
+                `AFIP no devolvió CAE (PV export ${puntoVta}, ws ${getWsfexServiceId()}). Detalle: ${detail}`);
         }
         return {
             cae: String(cae),

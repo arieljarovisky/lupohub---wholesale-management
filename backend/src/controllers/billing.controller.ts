@@ -4,6 +4,11 @@ import * as XLSX from 'xlsx';
 import { cityMatchesFilter } from '../utils/cityNormalize';
 import { syncOrderPaymentStatus } from '../services/orderPaymentBalance.service';
 import { sqlInvoiceAmountFromOrderTotal } from '../config/orderPricing';
+import {
+  afipCbteTipoToJurisdiccionTipo,
+  getMercadoLibreAfipPuntosVenta,
+  syncAfipVouchersForDateRange,
+} from '../services/afipVoucherSync.service';
 
 const SQL_INVOICE_IMPORTE_EXPR = sqlInvoiceAmountFromOrderTotal();
 
@@ -1811,6 +1816,317 @@ export const exportVentasJurisdiccionXlsx = async (req: Request, res: Response) 
   } catch (error: any) {
     console.error('exportVentasJurisdiccionXlsx:', error);
     return res.status(500).json({ message: 'Error exportando ventas por jurisdicción' });
+  }
+};
+
+function cuitDigits(value: unknown): string {
+  return String(value ?? '').replace(/\D/g, '');
+}
+
+function splitTotalConIva(total: number, cbteTipo: number): { sinIva: number; iva: number } {
+  const t = round2(Math.abs(Number(total) || 0));
+  const n = Number(cbteTipo);
+  if (n === 11 || n === 12 || n === 13) return { sinIva: t, iva: 0 };
+  const sinIva = round2(t / 1.21);
+  return { sinIva, iva: round2(t - sinIva) };
+}
+
+type JurisdiccionMlRow = {
+  tipo: 'FAC' | 'CDE';
+  fecha: string;
+  cbteTipo: number;
+  puntoVenta: number;
+  cbteDesde: number;
+  sinIva: number;
+  iva: number;
+  otros: number;
+  importe: number;
+  razon: string;
+  provCode: string;
+  provName: string;
+};
+
+/**
+ * Excel "Ventas por Jurisdicción" de comprobantes del Facturador de Mercado Libre
+ * (puntos de venta AFIP configurados, por defecto 22) más facturas ML emitidas desde el sistema.
+ * Misma grilla que el export mayorista. La provincia sale del cliente del sistema si el CUIT coincide.
+ */
+export const exportVentasJurisdiccionMlXlsx = async (req: Request, res: Response) => {
+  try {
+    const authUser = (req as any).user;
+    if (authUser?.role === 'SELLER') {
+      return res.status(403).json({ message: 'Este reporte no está disponible para vendedores' });
+    }
+
+    const { desde, hasta } = req.query as { desde?: string; hasta?: string };
+    if (!desde || !hasta || !/^\d{4}-\d{2}-\d{2}$/.test(desde) || !/^\d{4}-\d{2}-\d{2}$/.test(hasta)) {
+      return res.status(400).json({ message: 'Faltan parámetros desde / hasta (YYYY-MM-DD)' });
+    }
+    if (desde > hasta) {
+      return res.status(400).json({ message: 'La fecha Desde no puede ser posterior a Hasta' });
+    }
+
+    const puntosVenta = getMercadoLibreAfipPuntosVenta();
+    const ph = puntosVenta.map(() => '?').join(',');
+
+    const customerRows = (await query(
+      `SELECT cuit, business_name, name, city, delivery_addresses
+       FROM customers
+       WHERE cuit IS NOT NULL AND TRIM(cuit) <> ''`
+    )) as any[];
+    const customersByCuit = new Map<string, { name: string; city: unknown; delivery: unknown }>();
+    for (const c of customerRows) {
+      const key = cuitDigits(c.cuit);
+      if (key.length < 7 || customersByCuit.has(key)) continue;
+      customersByCuit.set(key, {
+        name: String(c.business_name || c.name || '').trim(),
+        city: c.city,
+        delivery: c.delivery_addresses,
+      });
+    }
+
+    const resolveParty = (docNro: unknown, fallbackName?: string) => {
+      const digits = cuitDigits(docNro);
+      const customer = digits.length >= 7 ? customersByCuit.get(digits) : undefined;
+      const razon = customer?.name || String(fallbackName || '').trim() || (digits ? digits : 'CONSUMIDOR FINAL');
+      if (!customer) return { razon, provCode: '', provName: '' };
+      const city = resolveCustomerCityForProvincia(customer.city, customer.delivery);
+      const prov = detectProvincia(city);
+      return { razon, provCode: prov.code, provName: prov.name };
+    };
+
+    const applySign = (tipo: 'FAC' | 'CDE', sinIva: number, iva: number, otros: number, importe: number) => {
+      if (tipo !== 'CDE') return { sinIva, iva, otros, importe };
+      return {
+        sinIva: round2(-Math.abs(sinIva)),
+        iva: round2(-Math.abs(iva)),
+        otros: round2(-Math.abs(otros)),
+        importe: round2(-Math.abs(importe)),
+      };
+    };
+
+    const seen = new Set<string>();
+    const out: JurisdiccionMlRow[] = [];
+
+    if (puntosVenta.length) {
+      const synced = (await query(
+        `SELECT punto_venta, cbte_tipo, cbte_desde, DATE_FORMAT(fecha, '%Y-%m-%d') AS fecha,
+                imp_neto, imp_iva, imp_trib, imp_total, doc_nro
+         FROM afip_synced_vouchers
+         WHERE punto_venta IN (${ph}) AND fecha >= ? AND fecha <= ?
+         ORDER BY fecha ASC, punto_venta ASC, cbte_tipo ASC, cbte_desde ASC`,
+        [...puntosVenta, desde, hasta]
+      )) as any[];
+
+      for (const r of synced) {
+        const puntoVenta = Number(r.punto_venta) || 0;
+        const cbteTipo = Number(r.cbte_tipo) || 0;
+        const cbteDesde = Number(r.cbte_desde) || 0;
+        const key = `${puntoVenta}|${cbteTipo}|${cbteDesde}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        const tipo = afipCbteTipoToJurisdiccionTipo(cbteTipo);
+        let sinIva = round2(Number(r.imp_neto) || 0);
+        let iva = round2(Number(r.imp_iva) || 0);
+        let otros = round2(Number(r.imp_trib) || 0);
+        let importe = round2(sinIva + iva + otros);
+        if (Math.abs(importe) < 0.005) {
+          importe = round2(Number(r.imp_total) || 0);
+          sinIva = importe;
+          iva = 0;
+          otros = 0;
+        }
+        const signed = applySign(tipo, sinIva, iva, otros, importe);
+        const party = resolveParty(r.doc_nro);
+        const fechaRaw = r.fecha instanceof Date ? r.fecha.toISOString().slice(0, 10) : String(r.fecha || '').slice(0, 10);
+        out.push({
+          tipo,
+          fecha: fechaRaw,
+          cbteTipo,
+          puntoVenta,
+          cbteDesde,
+          ...signed,
+          razon: party.razon,
+          provCode: party.provCode,
+          provName: party.provName,
+        });
+      }
+    }
+
+    const external = (await query(
+      `SELECT punto_venta, cbte_tipo, cbte_desde, DATE_FORMAT(created_at, '%Y-%m-%d') AS fecha, total, customer_name, customer_cuit
+       FROM external_invoices
+       WHERE source = 'MERCADOLIBRE'
+         AND DATE(created_at) >= ? AND DATE(created_at) <= ?`,
+      [desde, hasta]
+    )) as any[];
+
+    for (const r of external) {
+      const puntoVenta = Number(r.punto_venta) || 0;
+      const cbteTipo = Number(r.cbte_tipo) || 0;
+      const cbteDesde = Number(r.cbte_desde) || 0;
+      const key = `${puntoVenta}|${cbteTipo}|${cbteDesde}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const tipo = afipCbteTipoToJurisdiccionTipo(cbteTipo);
+      const split = splitTotalConIva(Number(r.total) || 0, cbteTipo);
+      const signed = applySign(tipo, split.sinIva, split.iva, 0, round2(split.sinIva + split.iva));
+      const party = resolveParty(r.customer_cuit, r.customer_name);
+      const fechaRaw = r.fecha instanceof Date ? r.fecha.toISOString().slice(0, 10) : String(r.fecha || '').slice(0, 10);
+      out.push({
+        tipo,
+        fecha: fechaRaw,
+        cbteTipo,
+        puntoVenta,
+        cbteDesde,
+        ...signed,
+        razon: party.razon,
+        provCode: party.provCode,
+        provName: party.provName,
+      });
+    }
+
+    // Completa hacia atrás/adelante los comprobantes del facturador que todavía no están cacheados.
+    // Tope bajo para que el proxy no corte la descarga; si falta historial, hay que volver a exportar.
+    let sync: Awaited<ReturnType<typeof syncAfipVouchersForDateRange>>;
+    try {
+      sync = await syncAfipVouchersForDateRange({
+        desde,
+        hasta,
+        puntosVenta,
+        maxCalls: 150,
+      });
+    } catch (syncErr: any) {
+      console.error('exportVentasJurisdiccionMlXlsx sync:', syncErr);
+      sync = {
+        puntosVenta,
+        scanned: 0,
+        upserted: 0,
+        incomplete: true,
+        skipped: false,
+        message: syncErr?.message || 'No se pudo consultar AFIP en esta pasada.',
+      };
+    }
+
+    if (puntosVenta.length && (sync.upserted > 0 || sync.scanned > 0)) {
+      const syncedAfter = (await query(
+        `SELECT punto_venta, cbte_tipo, cbte_desde, DATE_FORMAT(fecha, '%Y-%m-%d') AS fecha,
+                imp_neto, imp_iva, imp_trib, imp_total, doc_nro
+         FROM afip_synced_vouchers
+         WHERE punto_venta IN (${ph}) AND fecha >= ? AND fecha <= ?
+         ORDER BY fecha ASC, punto_venta ASC, cbte_tipo ASC, cbte_desde ASC`,
+        [...puntosVenta, desde, hasta]
+      )) as any[];
+      for (const r of syncedAfter) {
+        const puntoVenta = Number(r.punto_venta) || 0;
+        const cbteTipo = Number(r.cbte_tipo) || 0;
+        const cbteDesde = Number(r.cbte_desde) || 0;
+        const key = `${puntoVenta}|${cbteTipo}|${cbteDesde}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const tipo = afipCbteTipoToJurisdiccionTipo(cbteTipo);
+        let sinIva = round2(Number(r.imp_neto) || 0);
+        let iva = round2(Number(r.imp_iva) || 0);
+        let otros = round2(Number(r.imp_trib) || 0);
+        let importe = round2(sinIva + iva + otros);
+        if (Math.abs(importe) < 0.005) {
+          importe = round2(Number(r.imp_total) || 0);
+          sinIva = importe;
+          iva = 0;
+          otros = 0;
+        }
+        const signed = applySign(tipo, sinIva, iva, otros, importe);
+        const party = resolveParty(r.doc_nro);
+        const fechaRaw = r.fecha instanceof Date ? r.fecha.toISOString().slice(0, 10) : String(r.fecha || '').slice(0, 10);
+        out.push({
+          tipo,
+          fecha: fechaRaw,
+          cbteTipo,
+          puntoVenta,
+          cbteDesde,
+          ...signed,
+          razon: party.razon,
+          provCode: party.provCode,
+          provName: party.provName,
+        });
+      }
+    }
+
+    if (sync.skipped && out.length === 0) {
+      return res.status(503).json({
+        message: sync.message || 'AFIP no está configurado: no se pueden traer las facturas de Mercado Libre.',
+      });
+    }
+
+    out.sort((a, b) => a.fecha.localeCompare(b.fecha) || a.puntoVenta - b.puntoVenta || a.cbteDesde - b.cbteDesde);
+
+    const data: any[][] = out.map((r) => {
+      const letra = letraFromCbteTipo(r.cbteTipo);
+      const pv = String(r.puntoVenta).padStart(4, '0');
+      const nro = String(r.cbteDesde).padStart(8, '0');
+      return [
+        r.provCode,
+        r.provName,
+        toExcelSerialDate(r.fecha),
+        r.tipo,
+        `${letra}${pv}${nro}`,
+        r.razon,
+        r.sinIva,
+        r.iva,
+        r.otros,
+        r.importe,
+        '',
+        '',
+        '',
+      ];
+    });
+
+    const headers = [
+      'COD_PROVI', 'NOM_PROVI', 'FECHA_EMI', 'T_COMP', 'N_COMP',
+      'RAZON_SOC', 'SIN_IVA', 'IMP_IVA', 'IMPUEST', 'IMPORTE',
+      'COD_TRANSP', 'NOM_TRANSP', ''
+    ];
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...data]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Hoja1');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    const yyyymmFrom = desde.slice(0, 7).replace('-', '');
+    const yyyymmTo = hasta.slice(0, 7).replace('-', '');
+    const filename = yyyymmFrom === yyyymmTo
+      ? `VENTAS_JURISDICCION_ML_${yyyymmFrom}.xlsx`
+      : `VENTAS_JURISDICCION_ML_${yyyymmFrom}_${yyyymmTo}.xlsx`;
+
+    let rangeIncomplete = sync.incomplete;
+    if (puntosVenta.length) {
+      const coverage = (await get(
+        `SELECT DATE_FORMAT(MIN(fecha), '%Y-%m-%d') AS min_fecha,
+                DATE_FORMAT(MAX(fecha), '%Y-%m-%d') AS max_fecha
+         FROM afip_synced_vouchers
+         WHERE punto_venta IN (${ph})`,
+        puntosVenta
+      )) as { min_fecha?: string | null; max_fecha?: string | null } | undefined;
+      const minFecha = String(coverage?.min_fecha || '').slice(0, 10);
+      const maxFecha = String(coverage?.max_fecha || '').slice(0, 10);
+      if (minFecha && maxFecha && minFecha <= desde && maxFecha >= hasta) {
+        rangeIncomplete = false;
+      }
+    }
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('X-Afip-Sync-Incomplete', rangeIncomplete ? '1' : '0');
+    res.setHeader('X-Export-Count', String(out.length));
+    res.setHeader(
+      'Access-Control-Expose-Headers',
+      'Content-Disposition, X-Afip-Sync-Incomplete, X-Export-Count'
+    );
+    return res.send(buffer);
+  } catch (error: any) {
+    console.error('exportVentasJurisdiccionMlXlsx:', error);
+    return res.status(500).json({ message: 'Error exportando ventas por jurisdicción de Mercado Libre' });
   }
 };
 

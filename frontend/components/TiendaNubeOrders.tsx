@@ -101,7 +101,7 @@ const TiendaNubeOrders: React.FC = () => {
     chunksTotal: number;
   } | null>(null);
   const [selectingAllFiltered, setSelectingAllFiltered] = useState(false);
-  const [bulkCbteTipo, setBulkCbteTipo] = useState<'auto' | 'A' | 'B'>('auto');
+  const [bulkCbteTipo, setBulkCbteTipo] = useState<'auto' | 'A' | 'B' | 'C'>('auto');
   const [downloadingInvoiceId, setDownloadingInvoiceId] = useState<string | null>(null);
   const [assigningTrackingOrderId, setAssigningTrackingOrderId] = useState<number | null>(null);
   const [bulkLabelsGenerating, setBulkLabelsGenerating] = useState(false);
@@ -626,7 +626,7 @@ const TiendaNubeOrders: React.FC = () => {
     setBulkInvoicing(true);
     setBulkProgress(null);
     try {
-      const cbteTipo = bulkCbteTipo === 'A' ? 1 : bulkCbteTipo === 'B' ? 6 : undefined;
+      const cbteTipo = bulkCbteTipo === 'A' ? 1 : bulkCbteTipo === 'B' ? 6 : bulkCbteTipo === 'C' ? 11 : undefined;
       const ids = Array.from(new Set(selectedOrderIds));
       const chunkSize = 100;
       const chunksTotal = Math.ceil(ids.length / chunkSize);
@@ -686,13 +686,14 @@ const TiendaNubeOrders: React.FC = () => {
         <div className="flex flex-wrap items-center gap-2">
           <select
             value={bulkCbteTipo}
-            onChange={(e) => setBulkCbteTipo(e.target.value as 'auto' | 'A' | 'B')}
+            onChange={(e) => setBulkCbteTipo(e.target.value as 'auto' | 'A' | 'B' | 'C')}
             className="bg-slate-900/70 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-slate-200"
             title="Tipo de factura para lote"
           >
             <option value="auto">Tipo: Auto</option>
             <option value="A">Tipo: Factura A</option>
             <option value="B">Tipo: Factura B</option>
+            <option value="C">Tipo: Factura C</option>
           </select>
           <button
             onClick={selectAllVisiblePaid}

@@ -93,6 +93,7 @@ const add_customer_delivery_addresses_1 = require("./database/add_customer_deliv
 const add_customer_seller_commission_1 = require("./database/add_customer_seller_commission");
 const add_customer_opening_balance_1 = require("./database/add_customer_opening_balance");
 const add_publication_stock_bundles_1 = require("./database/add_publication_stock_bundles");
+const add_ml_channel_invoices_table_1 = require("./database/add_ml_channel_invoices_table");
 const add_orders_performance_indexes_1 = require("./database/add_orders_performance_indexes");
 const add_seller_price_lists_1 = require("./database/add_seller_price_lists");
 const init_schema_1 = require("./database/init_schema");
@@ -289,6 +290,7 @@ function initDatabase() {
                 yield (0, add_customer_seller_commission_1.addCustomerSellerCommission)();
                 yield (0, add_customer_opening_balance_1.addCustomerOpeningBalance)();
                 yield (0, add_publication_stock_bundles_1.addPublicationStockBundles)();
+                yield (0, add_ml_channel_invoices_table_1.addMlChannelInvoicesTable)();
                 yield (0, add_orders_performance_indexes_1.addOrdersPerformanceIndexes)();
                 yield (0, add_seller_price_lists_1.addSellerPriceLists)();
                 console.log('[DB] Tablas inicializadas correctamente');

@@ -324,9 +324,36 @@ const listPayments = (req, res) => __awaiter(void 0, void 0, void 0, function* (
                     puntoVta: (_h = r.invoice_punto_venta) !== null && _h !== void 0 ? _h : undefined,
                     cbteTipo: (_j = r.invoice_cbte_tipo) !== null && _j !== void 0 ? _j : undefined,
                     cbteDesde: (_k = r.invoice_cbte_desde) !== null && _k !== void 0 ? _k : undefined
-                } : undefined
+                } : undefined,
+                invoiceLinks: [],
+                orderLinks: []
             });
         });
+        try {
+            const linksByPayment = yield (0, orderPaymentBalance_service_1.getPaymentAllocationLinksByPaymentIds)(systemPayments.map((p) => p.id));
+            for (const p of systemPayments) {
+                const links = linksByPayment.get(p.id);
+                if (!links)
+                    continue;
+                p.invoiceLinks = links.invoiceLinks;
+                p.orderLinks = links.orderLinks;
+                if (links.invoiceLinks.length > 0) {
+                    p.invoiceIds = Array.from(new Set([
+                        ...p.invoiceIds,
+                        ...links.invoiceLinks.map((l) => l.invoiceId)
+                    ]));
+                }
+                if (links.orderLinks.length > 0) {
+                    p.orderIds = Array.from(new Set([
+                        ...p.orderIds,
+                        ...links.orderLinks.map((l) => l.orderId)
+                    ]));
+                }
+            }
+        }
+        catch (enrichErr) {
+            console.warn('listPayments allocation links:', (enrichErr === null || enrichErr === void 0 ? void 0 : enrichErr.message) || enrichErr);
+        }
         // Integrar recibos importados desde Tango/Multimedias como parte del mismo "sistema".
         // Se omiten si ya existe pago equivalente en tabla payments (fecha + nro + importe).
         const includeImportedReceipts = !invoiceId && !orderId;
