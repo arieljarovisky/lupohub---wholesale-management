@@ -174,7 +174,8 @@ function syncPrimaryMlAssignment(
     if (fromMap?.trim()) variationId = fromMap.trim();
   }
   if (!variationId) {
-    return { ...a, ml: '', mlItemId: undefined };
+    // No borrar el vínculo ya guardado si esta publicación no tiene la variación a mano.
+    return a;
   }
   const withSourceKey = setMlVariationForItem(a, primaryItem, variationId);
   const realItemId = (a.mlItemId && String(a.mlItemId).trim()) || primaryItem;
@@ -630,9 +631,9 @@ function buildMlCatalogSources(opts: {
     packSizeById.set(norm, Math.max(packSizeById.get(norm) || 1, pack));
   };
 
-  if (canonicalX1) addSource(canonicalX1, 1);
+  if (canonicalX1) addSource(canonicalX1, packSizeById.get(canonicalX1) || 1);
   for (const [id, pack] of packSizeById) {
-    if (pack > 1) addSource(id, pack);
+    addSource(id, pack);
   }
 
   return { sourceIds, packSizeById, catalogLinkedNorms };
@@ -1970,45 +1971,98 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
     return added;
   };
 
-  /** Quita publicaciones ML/TN que pertenecen al vínculo principal de otra variante del mismo artículo. */
-  const cleanupSiblingPublications = async () => {
-    const primaryMlByVariant = new Map<string, string | null>();
-    const allPrimaryMl = new Set<string>();
+  /** Deja en cada publicación ya vinculada el pack que figura en el paso 1. */
+  const persistSourcePackSizes = async () => {
     for (const v of variants) {
-      const primary = primaryMlItemIdFromAssignment(assignments[v.variantId]);
-      primaryMlByVariant.set(v.variantId, primary);
-      if (primary) allPrimaryMl.add(normalizeMercadoLibreItemId(primary) || primary);
+      const pubs = await api.getVariantPublications(v.variantId).catch(() => []);
+      for (const pub of pubs) {
+        if (pub.platform === 'mercadolibre' && pub.external_product_id) {
+          const src = mlSources.find((s) => mercadoLibreItemIdsMatch(s.id, String(pub.external_product_id)));
+          if (!src) continue;
+          const pack = Math.max(1, src.packSize ?? packMl);
+          if (Math.max(1, Number(pub.pack_size) || 1) === pack) continue;
+          await api.addVariantPublication(v.variantId, {
+            platform: 'mercadolibre',
+            externalProductId: String(pub.external_product_id),
+            externalVariantId: String(pub.external_variant_id || ''),
+            packSize: pack,
+          }).catch(() => undefined);
+        }
+        if (pub.platform === 'tiendanube' && pub.external_product_id) {
+          const src = tnSources.find(
+            (s) => normalizedTnCatalogId(s.id) === normalizedTnCatalogId(pub.external_product_id)
+          );
+          if (!src) continue;
+          const pack = Math.max(1, src.packSize ?? packTn);
+          if (Math.max(1, Number(pub.pack_size) || 1) === pack) continue;
+          await api.addVariantPublication(v.variantId, {
+            platform: 'tiendanube',
+            externalProductId: String(pub.external_product_id),
+            externalVariantId: String(pub.external_variant_id || ''),
+            packSize: pack,
+          }).catch(() => undefined);
+        }
+      }
     }
+  };
 
-    const primaryTnByVariant = new Map<string, string | null>();
-    const allPrimaryTn = new Set<string>();
-    for (const v of variants) {
-      const a = assignments[v.variantId];
-      const key = tnAssignmentKey(a?.tn?.trim() || '', a?.tnProductId);
-      primaryTnByVariant.set(v.variantId, key);
-      if (key) allPrimaryTn.add(key);
-    }
+  /** Quita solo una variación copiada en la variante equivocada. No toca las publicaciones del paso 1. */
+  const cleanupSiblingPublications = async () => {
+    const variantOwnsMlPublication = (variantId: string, productId: string, variationId: string) => {
+      const a = assignments[variantId];
+      const own = primaryMlItemIdFromAssignment(a);
+      if (own && mercadoLibreItemIdsMatch(own, productId)) return true;
+      for (const [itemId, assignedVariation] of Object.entries(a?.mlByItemId || {})) {
+        if (!mercadoLibreItemIdsMatch(itemId, productId) && itemId !== productId) continue;
+        if (!variationId || !assignedVariation || assignedVariation === variationId) return true;
+      }
+      const ml = (a?.ml || '').trim();
+      if (variationId && ml === variationId) return true;
+      return false;
+    };
 
     let removed = 0;
     for (const v of variants) {
       const pubs = await api.getVariantPublications(v.variantId).catch(() => []);
-      const ownMl = primaryMlByVariant.get(v.variantId);
-      const ownMlNorm = ownMl ? normalizeMercadoLibreItemId(ownMl) || ownMl : null;
-      const ownTn = primaryTnByVariant.get(v.variantId);
       for (const pub of pubs) {
         if (pub.platform === 'mercadolibre' && pub.external_product_id) {
-          const id = normalizeMercadoLibreItemId(pub.external_product_id) || String(pub.external_product_id).trim();
-          if (id && id !== ownMlNorm && allPrimaryMl.has(id)) {
-            await api.deleteVariantPublication(v.variantId, pub.id);
-            removed++;
-          }
+          const id = String(pub.external_product_id).trim();
+          const keptBySource = mlSources.some((s) => mercadoLibreItemIdsMatch(s.id, id));
+          if (keptBySource) continue;
+          const variationId = String(pub.external_variant_id || '').trim();
+          if (variantOwnsMlPublication(v.variantId, id, variationId)) continue;
+          if (!variationId) continue;
+          const takenByOther = variants.some(
+            (other) => other.variantId !== v.variantId && variantOwnsMlPublication(other.variantId, id, variationId)
+          );
+          if (!takenByOther) continue;
+          await api.deleteVariantPublication(v.variantId, pub.id);
+          removed++;
         }
         if (pub.platform === 'tiendanube' && pub.external_variant_id) {
+          const productId = String(pub.external_product_id || '').trim();
+          const keptBySource = tnSources.some(
+            (s) => normalizedTnCatalogId(s.id) === normalizedTnCatalogId(productId)
+          );
+          if (keptBySource) continue;
           const key = tnAssignmentKey(String(pub.external_variant_id), pub.external_product_id);
-          if (key && key !== ownTn && allPrimaryTn.has(key)) {
-            await api.deleteVariantPublication(v.variantId, pub.id);
-            removed++;
-          }
+          if (!key) continue;
+          const ownKey = tnAssignmentKey(
+            assignments[v.variantId]?.tn?.trim() || '',
+            assignments[v.variantId]?.tnProductId
+          );
+          if (key === ownKey) continue;
+          const takenByOther = variants.some((other) => {
+            if (other.variantId === v.variantId) return false;
+            const otherKey = tnAssignmentKey(
+              assignments[other.variantId]?.tn?.trim() || '',
+              assignments[other.variantId]?.tnProductId
+            );
+            return otherKey === key;
+          });
+          if (!takenByOther) continue;
+          await api.deleteVariantPublication(v.variantId, pub.id);
+          removed++;
         }
       }
     }
@@ -2060,6 +2114,8 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       }
       const mlUnlinks = variants.filter((v) => {
         const a = saveAssignments[v.variantId];
+        // Con publicaciones en el paso 1, guardar no desvincula: solo el botón Desvincular lo hace.
+        if (mlSources.length > 0) return false;
         return variantHadMlLink(v.externalIds) && !hasMlAssignment(a);
       });
       const links = variants
@@ -2123,8 +2179,9 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
         updated = (res as any)?.updated ?? links.length;
         synced = (res as any)?.synced ?? 0;
       }
-      const removed = await cleanupSiblingPublications();
       const extraPubs = await syncAllSourcePublications();
+      await persistSourcePackSizes();
+      const removed = await cleanupSiblingPublications();
       onImportComplete?.();
       setSuggestedLinkIds(new Set());
       const removedNote = removed > 0 ? ` Se quitaron ${removed} publicación(es) duplicada(s) de otras variantes.` : '';

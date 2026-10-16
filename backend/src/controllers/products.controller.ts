@@ -707,16 +707,9 @@ export const updateVariantExternalIds = async (req: any, res: any) => {
     const mlPubItemId = mlItemOnVariant
       || (mlVarOnVariant && productRow?.mercado_libre_id ? String(productRow.mercado_libre_id).trim() : null);
 
-    // Solo borrar publicaciones de una plataforma si se desvincula explícitamente (no al actualizar el vínculo principal).
-    if (hasTnVar && (!tnProductId || !tnVariantId)) {
-      await execute(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'tiendanube'`, [variantId]);
-    }
-    if (hasMlVar || hasMlItem) {
-      const hasAnyMl = !!mlPubItemId || !!mlVarOnVariant;
-      if (!hasAnyMl) {
-        await execute(`DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'mercadolibre'`, [variantId]);
-      }
-    }
+    // No borrar variant_publications acá. Limpiar las columnas del vínculo principal
+    // no tiene que llevarse packs ni otras publicaciones. La desvinculación total
+    // pasa por unlinkProductPlatforms; una publicación suelta, por deleteVariantPublication.
 
     // Upsert del vínculo principal sin borrar otras publicaciones del mismo canal.
     if (tnProductId && tnVariantId) {
@@ -731,7 +724,7 @@ export const updateVariantExternalIds = async (req: any, res: any) => {
       await execute(
         `INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
          VALUES (?, ?, 'mercadolibre', ?, ?, ?)
-         ON DUPLICATE KEY UPDATE external_product_id = VALUES(external_product_id), external_variant_id = VALUES(external_variant_id), pack_size = VALUES(pack_size)`,
+         ON DUPLICATE KEY UPDATE pack_size = IF(pack_size > 1, pack_size, VALUES(pack_size))`,
         [uuidv4(), variantId, mlPubItemId, mlVarOnVariant || '', mlPack]
       );
     }
@@ -1001,9 +994,9 @@ export const bulkLinkVariants = async (req: Request, res: Response) => {
 
       if (tnVarId && tnProdId) {
         await execute(
-          `INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
-           VALUES (?, ?, 'tiendanube', ?, ?, ?)
-           ON DUPLICATE KEY UPDATE external_product_id = VALUES(external_product_id), pack_size = VALUES(pack_size)`,
+        `INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
+         VALUES (?, ?, 'tiendanube', ?, ?, ?)
+         ON DUPLICATE KEY UPDATE pack_size = IF(pack_size > 1, pack_size, VALUES(pack_size))`,
           [uuidv4(), variantId, tnProdId, tnVarId, tnPack]
         );
       }
@@ -1014,7 +1007,7 @@ export const bulkLinkVariants = async (req: Request, res: Response) => {
           await execute(
             `INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
              VALUES (?, ?, 'mercadolibre', ?, ?, ?)
-             ON DUPLICATE KEY UPDATE external_product_id = VALUES(external_product_id), external_variant_id = VALUES(external_variant_id), pack_size = VALUES(pack_size)`,
+             ON DUPLICATE KEY UPDATE pack_size = IF(pack_size > 1, pack_size, VALUES(pack_size))`,
             [uuidv4(), variantId, pubItemId, mlVarId || '', mlPack]
           );
         }
