@@ -84,7 +84,9 @@ import { addSellerPriceLists } from './database/add_seller_price_lists';
 import { initSchema } from './database/init_schema';
 import { ensureAdminUser } from './database/ensure_admin_user';
 import { testConnection } from './database/db';
-import { runAutoSyncMLtoTN } from './controllers/integrations.controller';
+import stockSyncRoutes from './routes/stockSync.routes';
+import { ensureStockEngineSchema } from './stockEngine/schema';
+import { startStockEngine } from './stockEngine';
 
 dotenv.config();
 
@@ -186,6 +188,7 @@ app.use('/api/sizes', sizeRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/integrations', integrationRoutes);
 app.use('/api/stock', stockRoutes);
+app.use('/api/stock-sync', stockSyncRoutes);
 app.use('/api/publication-bundles', publicationStockBundlesRoutes);
 app.use('/api/despachos', despachosRoutes);
 app.use('/api/users', usersRoutes);
@@ -281,7 +284,9 @@ async function initDatabase() {
       await addMlChannelInvoicesTable();
       await addOrdersPerformanceIndexes();
       await addSellerPriceLists();
+      await ensureStockEngineSchema();
       console.log('[DB] Tablas inicializadas correctamente');
+      startStockEngine();
       return;
     } catch (err: any) {
       console.error(`[DB] Intento ${attempt} fallido:`, err?.code || err?.message);
@@ -299,11 +304,5 @@ initDatabase().catch(console.error);
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
-  const intervalMin = Math.max(1, parseInt(process.env.SYNC_ML_TN_INTERVAL_MINUTES || '30', 10));
-  const intervalMs = intervalMin * 60 * 1000;
-  if (process.env.SYNC_ML_TN_AUTO !== '0' && process.env.SYNC_ML_TN_AUTO !== 'false') {
-    runAutoSyncMLtoTN().catch(() => {});
-    setInterval(() => runAutoSyncMLtoTN().catch(() => {}), intervalMs);
-    console.log(`[AutoSync] ML → TN cada ${intervalMin} min`);
-  }
+  // El stock se sincroniza con el motor de stock (src/stockEngine), que arranca cuando la base está lista.
 });

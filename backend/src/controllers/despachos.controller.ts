@@ -31,13 +31,13 @@ const getAssignedTotalByProductId = async (productId: string): Promise<number> =
 
 /** Suma cantidad al stock de depósito de una variante (ingreso por despacho). */
 async function incrementVariantDepotStock(variantId: string, cantidadNum: number): Promise<void> {
-  const stockRow = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [variantId]);
-  const currentStock = Number(stockRow?.stock || 0);
-  await execute(
-    `INSERT INTO stocks (variant_id, stock) VALUES (?, ?)
-     ON DUPLICATE KEY UPDATE stock = ?`,
-    [variantId, currentStock + cantidadNum, currentStock + cantidadNum]
-  );
+  const qty = Math.floor(Number(cantidadNum) || 0);
+  if (!qty) return;
+  // Vía el motor de stock: queda en el historial y se envía a ML/TN.
+  const { applyEntries } = await import('../stockEngine/ledger');
+  await applyEntries([
+    { variantId, delta: qty, type: 'IMPORTACION_DESPACHO_GRID', reference: 'Ingreso por despacho' },
+  ]);
 }
 
 // Obtener todos los despachos

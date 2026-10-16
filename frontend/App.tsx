@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, lazy, Suspense, useCallback, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
-import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Percent, Megaphone, Wallet, ChevronRight, MessageCircle, Star } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Percent, Megaphone, Wallet, ChevronRight, MessageCircle, Star, RefreshCw } from 'lucide-react';
 import { isCompanyFinanceUser, COMPANY_FINANCE_VIEW } from './utils/companyFinanceAccess';
 import {
   MARKETING_HUB_VIEW,
@@ -61,6 +61,7 @@ const MercadoLibreOrders = lazyWithReload(() => import('./components/MercadoLibr
 const MercadoLibreProductAds = lazyWithReload(() => import('./components/MercadoLibreProductAds'));
 const BulkInvoicing = lazyWithReload(() => import('./components/BulkInvoicing'));
 const StockHistory = lazyWithReload(() => import('./components/StockHistory'));
+const StockSync = lazyWithReload(() => import('./components/StockSync'));
 const Despachos = lazyWithReload(() => import('./components/Despachos'));
 const SellersCommissions = lazyWithReload(() => import('./components/SellersCommissions'));
 const ChannelMargins = lazyWithReload(() => import('./components/ChannelMargins'));
@@ -153,6 +154,7 @@ const App: React.FC = () => {
   const allowedByRole: Record<string, Role[]> = {
     dashboard: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
     inventory: [Role.ADMIN, Role.WAREHOUSE, Role.DEPOSITO],
+    stock_sync: [Role.ADMIN, Role.WAREHOUSE, Role.DEPOSITO],
     link_group: [Role.ADMIN, Role.WAREHOUSE, Role.DEPOSITO],
     orders: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER, Role.DEPOSITO],
     create_order: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER],
@@ -999,6 +1001,7 @@ const App: React.FC = () => {
     { title: 'Principal', items: [
       { id: 'dashboard', label: 'Inicio', icon: LayoutDashboard, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
       { id: 'inventory', label: 'Inventario', icon: Package, roles: [Role.ADMIN, Role.WAREHOUSE, Role.DEPOSITO] },
+      { id: 'stock_sync', label: 'Stock y ventas', icon: RefreshCw, roles: [Role.ADMIN, Role.WAREHOUSE, Role.DEPOSITO] },
       { id: 'stock_history', label: 'Historial Stock', icon: History, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'despachos', label: 'Despachos', icon: Ship, roles: [Role.ADMIN] },
     ]},
@@ -1171,6 +1174,7 @@ const App: React.FC = () => {
                  {baseView === META_ADS_VIEW && 'Meta Ads — campañas'}
                  {baseView === GOOGLE_ADS_VIEW && 'Google Ads — campañas'}
                  {baseView === 'stock_history' && 'Historial de Stock'}
+                 {baseView === 'stock_sync' && 'Stock y ventas'}
                  {baseView === 'despachos' && 'Despachos'}
                  {baseView === 'customers' && 'Clientes'}
                  {baseView === 'sellers' && (currentUser.role === Role.SELLER ? 'Mis comisiones' : 'Vendedores y comisiones')}
@@ -1464,6 +1468,11 @@ const App: React.FC = () => {
           {baseView === 'stock_history' && (
             <Suspense fallback={<ViewFallback />}>
               <StockHistory />
+            </Suspense>
+          )}
+          {baseView === 'stock_sync' && (
+            <Suspense fallback={<ViewFallback />}>
+              <StockSync />
             </Suspense>
           )}
           {baseView === 'despachos' && (

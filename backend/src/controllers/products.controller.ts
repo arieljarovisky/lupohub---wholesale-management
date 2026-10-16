@@ -1741,7 +1741,11 @@ export const importTangoArticles = async (req: Request, res: Response) => {
             if (keepStockOnExistingVariants) {
               stockUpdatesSkipped++;
             } else {
-              await execute(`UPDATE stocks SET stock = ? WHERE variant_id = ?`, [r.initialStock, variantId]);
+              // Vía el motor de stock: queda en el historial y se envía a ML/TN.
+              const { applyEntries } = await import('../stockEngine/ledger');
+              await applyEntries([
+                { variantId, setTo: Math.floor(Number(r.initialStock) || 0), type: 'IMPORTACION_EXCEL', reference: 'Importación de artículos' },
+              ]);
             }
           }
         }

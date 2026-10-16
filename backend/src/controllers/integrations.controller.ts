@@ -2222,8 +2222,8 @@ export const handleTiendaNubeWebhook = async (req: Request, res: Response) => {
       }
     }
 
-    // Al cancelar una orden, restaurar el stock que se había descontado
-    if (event === 'order/cancelled') {
+    // Al cancelar (o reembolsar) una orden, restaurar el stock que se había descontado
+    if (event === 'order/cancelled' || event === 'order/updated') {
       const orderId = req.body.id ?? req.body.order_id ?? req.body.order?.id ?? req.body.data?.id ?? req.body.data?.order_id;
       if (orderId) {
         processTiendaNubeOrderCancelled(String(orderId)).catch((err: any) =>
@@ -2241,269 +2241,20 @@ export const handleTiendaNubeWebhook = async (req: Request, res: Response) => {
   }
 };
 
-// Procesar orden de Tienda Nube y descontar stock
+// Procesar orden de Tienda Nube (pagada, cancelada o actualizada) con el motor de stock.
+// El motor decide qué hacer según el estado real de la orden en Tienda Nube y nunca descuenta dos veces.
 const processTiendaNubeOrder = async (orderId: string) => {
   try {
-    const integration = await get(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
-    if (!integration?.access_token) return;
-
-    const storeId = integration.store_id || integration.user_id;
-    if (!storeId) {
-      console.error('[TN Order] No hay store_id ni user_id en la integración');
-      return;
-    }
-
-    // Idempotencia: no descontar dos veces la misma orden (p. ej. si TN reenvía el webhook)
-    const alreadyProcessed = await get(
-      `SELECT id FROM stock_movements WHERE movement_type = 'VENTA_TIENDA_NUBE' AND reference = ? LIMIT 1`,
-      [`Orden TN: ${orderId}`]
-    );
-    if (alreadyProcessed) {
-      console.log(`[TN Order] Orden ${orderId} ya procesada, omitiendo`);
-      return;
-    }
-
-    const headers = {
-      'Authentication': `bearer ${integration.access_token}`,
-      'User-Agent': TN_USER_AGENT
-    };
-
-    let orderRes = await axios.get(
-      `https://api.tiendanube.com/v1/${storeId}/orders/${orderId}`,
-      { headers, validateStatus: () => true }
-    );
-
-    // Si 404, puede que el webhook haya enviado el "number" (ej. 1909) en vez del "id" interno; buscar por q
-    if (orderRes.status === 404) {
-      const searchRes = await axios.get(
-        `https://api.tiendanube.com/v1/${storeId}/orders`,
-        { params: { q: orderId, per_page: 1 }, headers, validateStatus: () => true }
-      );
-      if (searchRes.status === 200 && Array.isArray(searchRes.data) && searchRes.data.length > 0) {
-        const foundId = searchRes.data[0].id;
-        console.log(`[TN Order] Orden encontrada por número: ${orderId} -> id ${foundId}`);
-        orderRes = await axios.get(
-          `https://api.tiendanube.com/v1/${storeId}/orders/${foundId}`,
-          { headers }
-        );
-      }
-    }
-
-    if (orderRes.status !== 200) {
-      const errBody = orderRes.data && typeof orderRes.data === 'object' ? JSON.stringify(orderRes.data) : orderRes.data;
-      console.error(`[TN Order] Error al obtener orden ${orderId}: HTTP ${orderRes.status}. Si es 403, reconectá Tienda Nube (falta scope read_orders). Respuesta:`, errBody);
-      return;
-    }
-
-    const order = orderRes.data;
-    const productCount = Array.isArray(order.products) ? order.products.length : 0;
-    console.log(`[TN Order] Procesando orden ${orderId}, payment_status: ${order.payment_status}, productos: ${productCount}`);
-
-    // Solo descontar cuando la venta está pagada
-    if (order.payment_status !== 'paid') {
-      console.log(`[TN Order] Orden ${orderId} no está pagada (${order.payment_status}), ignorando`);
-      return;
-    }
-
-    const { deductVariantStockForChannelSale } = await import('./stock.controller');
-
-    let discountedCount = 0;
-    for (const item of order.products || []) {
-      const tnVariantIdRaw = item.variant_id ?? item.variantId;
-      const tnVariantId = tnVariantIdRaw != null ? String(tnVariantIdRaw) : null;
-      const tnProductId = item.product_id != null ? String(item.product_id) : '';
-      const quantity = Math.max(0, parseInt(String(item.quantity ?? 0), 10) || 0);
-      const itemSku = (item.sku || item.variant_sku || '').toString().trim();
-
-      if (quantity === 0) continue;
-
-      if (tnProductId || tnVariantId) {
-        const { findBundleByListing, deductStockForBundleListing } = await import(
-          '../services/publicationStockBundle.service'
-        );
-        const bundle = await findBundleByListing(
-          'tiendanube',
-          tnProductId || tnVariantId || '',
-          tnVariantId || ''
-        );
-        if (bundle?.items?.length) {
-          const { ok, blocked, lines } = await deductStockForBundleListing(
-            bundle,
-            quantity,
-            'VENTA_TIENDA_NUBE',
-            `Orden TN: ${orderId}`
-          );
-          if (blocked) {
-            console.warn(
-              `[TN Order] Pack multicolor BLOQUEADO (stock insuficiente) "${bundle.label || bundle.externalProductId}": ${lines.join('; ')}`
-            );
-          } else if (ok) {
-            discountedCount++;
-            console.log(
-              `[TN Order] Pack multicolor "${bundle.label || bundle.externalProductId}": ${lines.join('; ')}`
-            );
-          }
-          continue;
-        }
-      }
-
-      let variant: { id: string; current_stock: number; tn_pack?: number } | null = null;
-      if (tnVariantId) {
-        const fromPub = await get(
-          `SELECT vp.variant_id AS id, COALESCE(vp.pack_size, 1) AS tn_pack FROM variant_publications vp WHERE vp.platform = 'tiendanube' AND vp.external_variant_id = ? LIMIT 1`,
-          [tnVariantId]
-        );
-        if (fromPub?.id) {
-          const row = await get(`SELECT stock AS current_stock FROM stocks WHERE variant_id = ?`, [fromPub.id]);
-          variant = { id: fromPub.id, current_stock: Number(row?.current_stock ?? 0), tn_pack: Math.max(1, Number(fromPub.tn_pack) || 1) };
-        }
-      }
-      if (!variant?.id && tnVariantId) {
-        variant = await get(
-          `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
-           FROM product_variants pv
-           JOIN product_colors pc ON pc.id = pv.product_color_id
-           JOIN products p ON p.id = pc.product_id
-           LEFT JOIN stocks s ON s.variant_id = pv.id
-           WHERE pv.tienda_nube_variant_id = ?`,
-          [tnVariantId]
-        );
-      }
-      if (!variant?.id && itemSku) {
-        variant = await get(
-          `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
-           FROM product_variants pv
-           JOIN product_colors pc ON pc.id = pv.product_color_id
-           JOIN products p ON p.id = pc.product_id
-           LEFT JOIN stocks s ON s.variant_id = pv.id
-           WHERE COALESCE(pv.external_sku, pv.sku) = ? OR pv.sku = ?`,
-          [itemSku, itemSku]
-        );
-      }
-      if (!variant?.id && itemSku) {
-        variant = await get(
-          `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
-           FROM product_variants pv
-           LEFT JOIN stocks s ON s.variant_id = pv.id
-           JOIN product_colors pc ON pc.id = pv.product_color_id
-           JOIN products p ON p.id = pc.product_id
-           WHERE p.sku = ? OR pv.sku LIKE ? OR pv.external_sku = ?`,
-          [itemSku, `${itemSku}%`, itemSku]
-        );
-      }
-      if (!variant?.id && itemSku) {
-        const skuNorm = normalizeSkuForMatch(itemSku);
-        const skuNormNoZero = skuNorm.replace(/^0+/, '');
-        if (skuNorm) {
-          variant = await get(
-            `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
-             FROM product_variants pv
-             LEFT JOIN stocks s ON s.variant_id = pv.id
-             JOIN product_colors pc ON pc.id = pv.product_color_id
-             JOIN products p ON p.id = pc.product_id
-             WHERE (
-               REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '') = ?
-               OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '')) = ?
-               OR REPLACE(REPLACE(REPLACE(UPPER(TRIM(p.sku)), '-', ''), '/', ''), ' ', '') = ?
-               OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(UPPER(TRIM(p.sku)), '-', ''), '/', ''), ' ', '')) = ?
-             )
-             LIMIT 1`,
-            [skuNorm, skuNormNoZero, skuNorm, skuNormNoZero]
-          );
-        }
-      }
-
-      if (variant?.id) {
-        const tnPack = Math.max(1, Number(variant.tn_pack) || 1);
-        const unitsToDeduct = quantity * tnPack;
-        const result = await deductVariantStockForChannelSale(
-          variant.id,
-          unitsToDeduct,
-          'VENTA_TIENDA_NUBE',
-          `Orden TN: ${orderId}`,
-          true
-        );
-        if (result.blocked) {
-          console.warn(
-            `[TN Order] BLOQUEADO: stock insuficiente variante ${variant.id} (tiene ${result.previousStock}, pide ${result.unitsToDeduct}) orden ${orderId}`
-          );
-        } else if (result.ok) {
-          discountedCount++;
-          console.log(
-            `[TN Order] Descontado ${result.unitsToDeduct} un. (${quantity} × pack x${tnPack}) variante ${variant.id}, stock: ${result.previousStock} -> ${result.newStock}; actualizado ML y TN`
-          );
-        } else {
-          console.error(`[TN Order] No se pudo actualizar stock para variante ${variant.id}`);
-        }
-      } else {
-        console.warn(`[TN Order] Variante no encontrada: variant_id=${tnVariantId} sku=${itemSku}. Vinculá la variante en Inventario (IDs de Tienda Nube) para que el stock se descuente.`);
-      }
-    }
-    if (discountedCount === 0 && productCount > 0) {
-      console.warn(`[TN Order] Orden ${orderId}: no se descontó stock de ningún ítem (variantes no vinculadas o no encontradas).`);
-    } else if (discountedCount > 0) {
-      console.log(`[TN Order] Orden ${orderId}: descontado stock de ${discountedCount} ítem(s).`);
-    }
+    const { ingestTiendaNubeOrderById } = await import('../stockEngine/channelOrders');
+    const r = await ingestTiendaNubeOrderById(orderId);
+    console.log(`[TN Order] ${orderId}: ${r.message} (estado ${r.state}, descontadas ${r.applied}, devueltas ${r.reverted}, sin identificar ${r.unmatched})`);
   } catch (error: any) {
-    console.error('[TN Order] Error procesando orden:', error.message);
+    console.error(`[TN Order] Error procesando orden ${orderId}:`, error?.message || error);
   }
 };
 
-/** Restaurar stock cuando se cancela una orden de Tienda Nube (revierte los movimientos VENTA_TIENDA_NUBE de esa orden). */
-const processTiendaNubeOrderCancelled = async (orderId: string) => {
-  try {
-    const ref = `Orden TN: ${orderId}`;
-    const cancelRef = `Cancelación orden TN: ${orderId}`;
-
-    const alreadyRestored = await get(
-      `SELECT id FROM stock_movements WHERE movement_type = 'CANCEL_VENTA_TIENDA_NUBE' AND reference = ? LIMIT 1`,
-      [cancelRef]
-    );
-    if (alreadyRestored) {
-      console.log(`[TN Order] Cancelación orden ${orderId} ya procesada, omitiendo`);
-      return;
-    }
-
-    const movements = await query(
-      `SELECT variant_id, quantity_change FROM stock_movements
-       WHERE movement_type = 'VENTA_TIENDA_NUBE' AND reference = ?
-       ORDER BY created_at`,
-      [ref]
-    );
-    if (!movements?.length) {
-      console.log(`[TN Order] No hay movimientos de venta para orden ${orderId} (no se había descontado o orden distinta)`);
-      return;
-    }
-
-    const { updateVariantStock } = await import('./stock.controller');
-    let restoredCount = 0;
-    for (const m of movements) {
-      const amountToRestore = Math.abs(Number(m.quantity_change) || 0);
-      if (amountToRestore <= 0) continue;
-
-      const row = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [m.variant_id]);
-      const currentStock = Number(row?.stock ?? 0);
-      const newStock = currentStock + amountToRestore;
-
-      const ok = await updateVariantStock(
-        m.variant_id,
-        newStock,
-        'CANCEL_VENTA_TIENDA_NUBE',
-        cancelRef,
-        true
-      );
-      if (ok) {
-        restoredCount++;
-        console.log(`[TN Order] Restaurado ${amountToRestore} para variante ${m.variant_id}, stock: ${currentStock} -> ${newStock}`);
-      }
-    }
-    if (restoredCount > 0) {
-      console.log(`[TN Order] Orden ${orderId} cancelada: restaurado stock de ${restoredCount} ítem(s).`);
-    }
-  } catch (error: any) {
-    console.error('[TN Order] Error restaurando stock por cancelación:', error.message);
-  }
-};
+/** Cancelación: mismo flujo (el motor ve que la orden está cancelada y devuelve el stock). */
+const processTiendaNubeOrderCancelled = processTiendaNubeOrder;
 
 /** Prueba manual: procesar una orden de Tienda Nube por ID (mismo flujo que el webhook). Útil para verificar que el stock se descuenta. */
 export const testTiendaNubeOrder = async (req: Request, res: Response) => {
@@ -2736,7 +2487,8 @@ export const handleMercadoLibreWebhook = async (req: Request, res: Response) => 
         return parts.length > 0 ? parts[parts.length - 1] : '';
       })();
       if (orderId) {
-        await processMercadoLibreOrder(orderId);
+        // Responder enseguida a ML; el procesamiento sigue en segundo plano (y el chequeo periódico lo cubre si falla).
+        void processMercadoLibreOrder(orderId);
       } else {
         console.warn('[ML Webhook] No se pudo extraer orderId desde resource:', resourceRaw);
       }
@@ -2774,275 +2526,18 @@ export const handleMercadoLibreWebhook = async (req: Request, res: Response) => 
   }
 };
 
-// Procesar orden de Mercado Libre y descontar stock
+// Procesar orden de Mercado Libre con el motor de stock (pagada → descuenta; cancelada → devuelve).
 const processMercadoLibreOrder = async (orderId: string) => {
-  // Lock efímero para evitar doble procesamiento concurrente del mismo orderId (MySQL en prod).
-  await execute(
-    `CREATE TABLE IF NOT EXISTS integration_order_locks (
-      platform VARCHAR(64) NOT NULL,
-      external_order_id VARCHAR(191) NOT NULL,
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (platform, external_order_id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
-  );
-  const lockPlatform = 'mercadolibre';
-  let lockAcquired = false;
   try {
-    try {
-      await execute(
-        `INSERT INTO integration_order_locks (platform, external_order_id) VALUES (?, ?)`,
-        [lockPlatform, orderId]
-      );
-      lockAcquired = true;
-    } catch (e: any) {
-      const msg = String(e?.message || '');
-      const dup =
-        msg.includes('UNIQUE constraint failed') ||
-        msg.includes('SQLITE_CONSTRAINT') ||
-        e?.code === 'ER_DUP_ENTRY' ||
-        msg.includes('Duplicate entry');
-      if (dup) {
-        console.log(`[ML Order] Orden ${orderId} en procesamiento concurrente, omitiendo`);
-        return;
-      }
-      throw e;
-    }
-
-    const mlToken = await getValidMLToken();
-    if (!mlToken) return;
-
-    const orderRes = await axios.get(
-      `https://api.mercadolibre.com/orders/${orderId}`,
-      {
-        headers: { 'Authorization': `Bearer ${mlToken.access_token}` }
-      }
-    );
-
-    const order = orderRes.data;
-    console.log(`[ML Order] Procesando orden ${orderId}, estado: ${order.status}`);
-
-    // Solo procesar órdenes pagadas
-    if (order.status !== 'paid') {
-      console.log(`[ML Order] Orden ${orderId} no está pagada, ignorando`);
-      return;
-    }
-
-    // Enviar mensaje de agradecimiento al comprador
-    await sendThankYouMessage(orderId, order, mlToken.access_token);
-
-    const { deductVariantStockForChannelSale } = await import('./stock.controller');
-
-    for (const [itemIndex, item] of (order.order_items || []).entries()) {
-      const mlItemId = item.item?.id;
-      const mlVariationId = item.item?.variation_id;
-      const quantity = item.quantity;
-      const lineRef = mlOrderLineReference(orderId, mlItemId, mlVariationId, itemIndex);
-      let itemSku = (item.item?.sku || item.sku || '').toString().trim();
-      if (!itemSku) {
-        itemSku = await resolveMlOrderItemSku(mlToken.access_token, mlItemId, mlVariationId);
-      }
-
-      if (mlItemId) {
-        const { findBundleByListing, deductStockForBundleListing } = await import(
-          '../services/publicationStockBundle.service'
-        );
-        const extVar = (mlVariationId && String(mlVariationId).trim()) || '';
-        const bundle = await findBundleByListing('mercadolibre', mlItemId, extVar);
-        if (bundle?.items?.length) {
-          if (await isMlOrderLineAlreadyProcessed(orderId, lineRef)) {
-            console.log(`[ML Order] Línea ${itemIndex + 1} de orden ${orderId} ya procesada (pack), omitiendo`);
-            continue;
-          }
-          const { ok, blocked, lines } = await deductStockForBundleListing(
-            bundle,
-            quantity,
-            'VENTA_MERCADO_LIBRE',
-            lineRef
-          );
-          if (blocked) {
-            console.warn(
-              `[ML Order] Pack multicolor BLOQUEADO (stock insuficiente) "${bundle.label || bundle.externalProductId}": ${lines.join('; ')}`
-            );
-          } else if (ok) {
-            console.log(
-              `[ML Order] Pack multicolor "${bundle.label || bundle.externalProductId}": ${lines.join('; ')}`
-            );
-          }
-          continue;
-        }
-      }
-
-      let variant: { id: string; current_stock: number; ml_pack?: number } | null = null;
-      if (mlItemId) {
-        const extVariantId = (mlVariationId && String(mlVariationId).trim()) || '';
-        const fromPub = await get(
-          `SELECT vp.variant_id AS id, COALESCE(vp.pack_size, 1) AS ml_pack FROM variant_publications vp WHERE vp.platform = 'mercadolibre' AND vp.external_product_id = ? AND vp.external_variant_id = ? LIMIT 1`,
-          [mlItemId, extVariantId]
-        );
-        if (fromPub?.id) {
-          const row = await get(`SELECT stock AS current_stock FROM stocks WHERE variant_id = ?`, [fromPub.id]);
-          variant = { id: fromPub.id, current_stock: Number(row?.current_stock ?? 0), ml_pack: Math.max(1, Number(fromPub.ml_pack) || 1) };
-        }
-      }
-      // Priorizar variation_id antes que item_id suelto (publicación con variaciones).
-      if (!variant?.id && mlVariationId) {
-        variant = await get(
-          `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
-           FROM product_variants pv
-           JOIN product_colors pc ON pc.id = pv.product_color_id
-           JOIN products p ON p.id = pc.product_id
-           LEFT JOIN stocks s ON s.variant_id = pv.id
-           WHERE pv.mercado_libre_variant_id = ?`,
-          [mlVariationId]
-        );
-      }
-      // Fallback legacy: publicación propia por variante (sin variation_id en ML).
-      if (!variant?.id && mlItemId && !mlVariationId) {
-        variant = await get(
-          `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
-           FROM product_variants pv
-           JOIN product_colors pc ON pc.id = pv.product_color_id
-           JOIN products p ON p.id = pc.product_id
-           LEFT JOIN stocks s ON s.variant_id = pv.id
-           WHERE pv.mercado_libre_item_id = ?
-           LIMIT 1`,
-          [mlItemId]
-        );
-      }
-      // Fallback por producto padre ML: cuando el vínculo está en products.mercado_libre_id
-      // y la venta viene sin variation_id.
-      if (!variant?.id && mlItemId) {
-        if (itemSku) {
-          const skuNorm = normalizeSkuForMatch(itemSku);
-          const skuNormNoZero = skuNorm.replace(/^0+/, '');
-          variant = await get(
-            `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
-             FROM products p
-             JOIN product_colors pc ON pc.product_id = p.id
-             JOIN product_variants pv ON pv.product_color_id = pc.id
-             LEFT JOIN stocks s ON s.variant_id = pv.id
-             WHERE p.mercado_libre_id = ?
-               AND (
-                 REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '') = ?
-                 OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '')) = ?
-               )
-             LIMIT 1`,
-            [mlItemId, skuNorm, skuNormNoZero]
-          );
-        }
-        // Si sigue sin match y el artículo local tiene una sola variante, usarla
-        if (!variant?.id) {
-          variant = await get(
-            `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
-             FROM products p
-             JOIN product_colors pc ON pc.product_id = p.id
-             JOIN product_variants pv ON pv.product_color_id = pc.id
-             LEFT JOIN stocks s ON s.variant_id = pv.id
-             WHERE p.mercado_libre_id = ?
-             GROUP BY pv.id, s.stock, p.mercado_libre_pack_size
-             ORDER BY pv.id
-             LIMIT 1`,
-            [mlItemId]
-          );
-          const countRow = await get(
-            `SELECT COUNT(*) AS n
-             FROM products p
-             JOIN product_colors pc ON pc.product_id = p.id
-             JOIN product_variants pv ON pv.product_color_id = pc.id
-             WHERE p.mercado_libre_id = ?`,
-            [mlItemId]
-          );
-          if (Number(countRow?.n || 0) !== 1) {
-            variant = null;
-          }
-        }
-      }
-      if (!variant?.id && itemSku) {
-        variant = await get(
-          `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
-           FROM product_variants pv
-           JOIN product_colors pc ON pc.id = pv.product_color_id
-           JOIN products p ON p.id = pc.product_id
-           LEFT JOIN stocks s ON s.variant_id = pv.id
-           WHERE COALESCE(pv.external_sku, pv.sku) = ? OR pv.sku = ?`,
-          [itemSku, itemSku]
-        );
-      }
-      if (!variant?.id && itemSku) {
-        variant = await get(
-          `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
-           FROM product_variants pv
-           LEFT JOIN stocks s ON s.variant_id = pv.id
-           JOIN product_colors pc ON pc.id = pv.product_color_id
-           JOIN products p ON p.id = pc.product_id
-           WHERE p.sku = ? OR pv.sku LIKE ? OR pv.external_sku = ?`,
-          [itemSku, `${itemSku}%`, itemSku]
-        );
-      }
-      if (!variant?.id && itemSku) {
-        const skuNorm = normalizeSkuForMatch(itemSku);
-        const skuNormNoZero = skuNorm.replace(/^0+/, '');
-        if (skuNorm) {
-          variant = await get(
-            `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
-             FROM product_variants pv
-             LEFT JOIN stocks s ON s.variant_id = pv.id
-             JOIN product_colors pc ON pc.id = pv.product_color_id
-             JOIN products p ON p.id = pc.product_id
-             WHERE (
-               REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '') = ?
-               OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '')) = ?
-               OR REPLACE(REPLACE(REPLACE(UPPER(TRIM(p.sku)), '-', ''), '/', ''), ' ', '') = ?
-               OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(UPPER(TRIM(p.sku)), '-', ''), '/', ''), ' ', '')) = ?
-             )
-             LIMIT 1`,
-            [skuNorm, skuNormNoZero, skuNorm, skuNormNoZero]
-          );
-        }
-      }
-
-      if (variant?.id) {
-        if (await isMlOrderLineAlreadyProcessed(orderId, lineRef, variant.id)) {
-          console.log(`[ML Order] Línea ${itemIndex + 1} de orden ${orderId} ya procesada, omitiendo variante ${variant.id}`);
-          continue;
-        }
-        const mlPack = Math.max(1, Number(variant.ml_pack) || 1);
-        const unitsToDeduct = quantity * mlPack;
-        const result = await deductVariantStockForChannelSale(
-          variant.id,
-          unitsToDeduct,
-          'VENTA_MERCADO_LIBRE',
-          lineRef,
-          true
-        );
-        if (result.blocked) {
-          console.warn(
-            `[ML Order] BLOQUEADO: stock insuficiente variante ${variant.id} (tiene ${result.previousStock}, pide ${result.unitsToDeduct}) orden ${orderId}`
-          );
-        } else if (result.ok) {
-          console.log(
-            `[ML Order] Descontado ${result.unitsToDeduct} un. (${quantity} × pack x${mlPack}) variante ${variant.id}, stock: ${result.previousStock} -> ${result.newStock}; actualizado ML y TN`
-          );
-        } else {
-          console.error(`[ML Order] No se pudo actualizar stock para variante ${variant.id} orden ${orderId}`);
-        }
-      } else if (mlVariationId || itemSku) {
-        console.log(`[ML Order] Variante no encontrada para ML item_id=${mlItemId} variation_id=${mlVariationId} sku=${itemSku}`);
-      }
+    const { ingestMercadoLibreOrderById } = await import('../stockEngine/channelOrders');
+    const { result, raw } = await ingestMercadoLibreOrderById(orderId);
+    console.log(`[ML Order] ${orderId}: ${result.message} (estado ${result.state}, descontadas ${result.applied}, devueltas ${result.reverted}, sin identificar ${result.unmatched})`);
+    if (raw?.status === 'paid' && result.state !== 'pre_cutover') {
+      const mlToken = await getValidMLToken();
+      if (mlToken) await sendThankYouMessage(orderId, raw, mlToken.access_token);
     }
   } catch (error: any) {
-    console.error('[ML Order] Error procesando orden:', error.message);
-  } finally {
-    if (lockAcquired) {
-      try {
-        await execute(
-          `DELETE FROM integration_order_locks WHERE platform = ? AND external_order_id = ?`,
-          [lockPlatform, orderId]
-        );
-      } catch {
-        // No romper flujo por falla al limpiar lock efimero.
-      }
-    }
+    console.error(`[ML Order] Error procesando orden ${orderId}:`, error?.message || error);
   }
 };
 
@@ -3166,17 +2661,11 @@ Equipo Lupo`;
 let autoSyncMLtoTNRunning = false;
 
 export async function runAutoSyncMLtoTN(): Promise<{ updated: number; errors: number }> {
-  // Una corrida puede tardar más que el intervalo; no superponer dos corridas.
-  if (autoSyncMLtoTNRunning) {
-    console.log('[AutoSync ML→TN] Ya hay una corrida en curso, se omite esta.');
-    return { updated: 0, errors: 0 };
-  }
-  autoSyncMLtoTNRunning = true;
-  try {
-    return await runAutoSyncMLtoTNOnce();
-  } finally {
-    autoSyncMLtoTNRunning = false;
-  }
+  // Desactivado: copiaba el stock de ML a TN sin pasar por el Hub y pisaba datos.
+  // Ahora el Hub es la única fuente de verdad y la cola de sincronización lo manda a ML y TN.
+  void autoSyncMLtoTNRunning;
+  void runAutoSyncMLtoTNOnce;
+  return { updated: 0, errors: 0 };
 }
 
 /** GET de un ítem ML; registra el motivo si falla en vez de devolver null en silencio. */

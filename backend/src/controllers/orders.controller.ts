@@ -11,6 +11,12 @@ import {
   wholesaleOrderStockManualRestoreReference,
   resolveVariantIdForGridCell,
 } from './stock.controller';
+import {
+  forgetWholesaleOrder,
+  releaseWholesaleStock,
+  syncWholesaleOrderStock,
+  wholesaleStockState,
+} from '../stockEngine/wholesale';
 import { v4 as uuidv4 } from 'uuid';
 import { normalizeMatrixImportArticleSku } from '../utils/matrixImportSku';
 import {
@@ -738,32 +744,14 @@ export const getOrders = async (req: any, res: any) => {
     let mayoristaStockRestoredByOrder: Record<string, boolean> = {};
     try {
       if (orderIds.length > 0) {
-        const refs = orderIds.map((oid: string) => `Pedido: ${oid}`);
-        const rph = refs.map(() => '?').join(',');
-        const mRows = await query(
-          `SELECT DISTINCT reference FROM stock_movements
-           WHERE movement_type = 'PEDIDO_MAYORISTA' AND reference IN (${rph})`,
-          refs
-        );
-        const appliedRefs = new Set((mRows as { reference: string }[]).map((r) => r.reference));
+        const ph = orderIds.map(() => '?').join(',');
+        const stRows = await query(`SELECT id, stock_state FROM orders WHERE id IN (${ph})`, orderIds);
+        const stateById = new Map((stRows as any[]).map((r) => [String(r.id), r.stock_state ? String(r.stock_state) : null]));
         for (const oid of orderIds) {
-          mayoristaStockAppliedByOrder[oid] = appliedRefs.has(`Pedido: ${oid}`);
-        }
-        const restoreRefs = orderIds.flatMap((oid: string) => [
-          wholesaleOrderStockManualRestoreReference(oid),
-          `Cancelación pedido: ${oid}`,
-        ]);
-        const restorePh = restoreRefs.map(() => '?').join(',');
-        const restoreRows = await query(
-          `SELECT DISTINCT reference FROM stock_movements
-           WHERE movement_type = 'DEVOLUCION' AND reference IN (${restorePh})`,
-          restoreRefs
-        );
-        const restoredRefs = new Set((restoreRows as { reference: string }[]).map((r) => r.reference));
-        for (const oid of orderIds) {
-          mayoristaStockRestoredByOrder[oid] =
-            restoredRefs.has(wholesaleOrderStockManualRestoreReference(oid)) ||
-            restoredRefs.has(`Cancelación pedido: ${oid}`);
+          const st = stateById.get(oid) ?? null;
+          // Un solo botón por vez: "Restaurar" si está descontado; "Descontar" si no lo está (o ya se devolvió).
+          mayoristaStockAppliedByOrder[oid] = st === 'deducted';
+          mayoristaStockRestoredByOrder[oid] = st === 'released';
         }
         mayoristaStockLoaded = true;
       }
@@ -1088,18 +1076,12 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
     conn.release();
   }
 
-  // Showroom: descontar stock ya (equivalente a haber terminado picking).
-  // Pedidos normales: se descuenta al pasar a Falta controlar / Controlado / Despachado.
-  if (isShowroomSale && !noStockImpact) {
-    try {
-      const { deductStockForOrder } = await import('./stock.controller');
-      const result = await deductStockForOrder(orderId);
-      if (!result.success) {
-        console.error('Showroom: errores descontando stock:', result.errors);
-      }
-    } catch (stockErr) {
-      console.error('Showroom: falló descuento de stock:', stockErr);
-    }
+  // Stock: el motor decide. Showroom (o pedido creado ya armado) descuenta al instante;
+  // los demás descuentan al pasar a Falta controlar / Controlado / Despachado.
+  try {
+    await syncWholesaleOrderStock(orderId, { previousStatus: null });
+  } catch (stockErr) {
+    console.error('Pedido creado: falló el ajuste de stock:', stockErr);
   }
 
   return buildPersistedOrderResponse(orderId, newOrder, despachoWarnings);
@@ -1154,13 +1136,7 @@ export const markShowroomReady = async (req: any, res: any) => {
       ['Controlado', user.id, id]
     );
 
-    if (!Number(orderRow.no_stock_impact) && !(await isMayoristaStockDeductedForWholesale(id))) {
-      const { deductStockForOrder } = await import('./stock.controller');
-      const result = await deductStockForOrder(id);
-      if (!result.success) {
-        console.error('markShowroomReady stock:', result.errors);
-      }
-    }
+    await syncWholesaleOrderStock(id, { previousStatus: String(orderRow.status || '') });
 
     const orderResponse = await buildPersistedOrderResponse(id, { id, customerId: '', items: [], total: 0, status: 'Controlado' as any, date: '' }, []);
     res.json({ ...orderResponse, message: 'Pedido listo para facturar (showroom)' });
@@ -1507,36 +1483,6 @@ export const updateOrderStatus = async (req: any, res: any) => {
       });
     }
 
-    // Descontar stock cuando finaliza picking (Falta controlar / Controlado / Despachado).
-    const pickingDoneStatuses = ['Falta controlar', 'Controlado', 'Despachado'];
-    const entersPickingDone =
-      !pickingDoneStatuses.includes(previousStatus) &&
-      pickingDoneStatuses.includes(nextStatus);
-    if (
-      entersPickingDone &&
-      !noStockImpact &&
-      !(await isMayoristaStockDeductedForWholesale(id))
-    ) {
-      const { deductStockForOrder } = await import('./stock.controller');
-      const result = await deductStockForOrder(id);
-      
-      if (!result.success) {
-        console.error('Errores descontando stock:', result.errors);
-      }
-    }
-
-    // Si se cancela y el stock ya estaba descontado de verdad, restaurar.
-    const hadStockDeducted =
-      !noStockImpact && (await isMayoristaStockDeductedForWholesale(id));
-    if (nextStatus === 'Cancelado' && hadStockDeducted && !(await isWholesaleStockRestoredForOrder(id))) {
-      const { restoreStockForOrder } = await import('./stock.controller');
-      const result = await restoreStockForOrder(id);
-      
-      if (!result.success) {
-        console.error('Errores restaurando stock:', result.errors);
-      }
-    }
-
     // Documentar quién prepara/despacha y cuándo
     if ((nextStatus === 'Preparando' || nextStatus === 'Preparación') && pickedBy) {
       await execute("UPDATE orders SET status = ?, picked_by = ? WHERE id = ?", [nextStatus, pickedBy, id]);
@@ -1548,6 +1494,8 @@ export const updateOrderStatus = async (req: any, res: any) => {
     } else {
       await execute("UPDATE orders SET status = ? WHERE id = ?", [nextStatus, id]);
     }
+    // Stock: descuenta al terminar el armado, devuelve al cancelar (el motor nunca lo hace dos veces).
+    await syncWholesaleOrderStock(id, { previousStatus });
     res.json({ id, status: nextStatus, previousStatus });
   } catch (error) {
     console.error('Error updating order status:', error);
@@ -1578,6 +1526,9 @@ export const updateOrder = async (req: any, res: any) => {
       (updated as any).paymentStatus === 'pagado' || (updated as any).paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
     const noStockImpact = (updated as any).noStockImpact === true || (updated as any).no_stock_impact === 1 ? 1 : 0;
     const notesForSql = normalizeOrderNotes((updated as any).notes);
+    const before = await get('SELECT status FROM orders WHERE id = ?', [id]);
+    const previousStatusForStock: string | undefined =
+      before && String(before.status || '') !== String(updated.status || '') ? String(before.status || '') : undefined;
     await execute(
       'UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ?, payment_status = ?, no_stock_impact = ?, notes = ? WHERE id = ?',
       [updated.customerId, sellerId, sqlDate, updated.status, updated.total, paymentStatus, noStockImpact, notesForSql, id]
@@ -1624,6 +1575,8 @@ export const updateOrder = async (req: any, res: any) => {
         );
       }
     }
+    // Stock: si el pedido ya tenía stock descontado, se ajusta a los ítems/armado nuevos.
+    await syncWholesaleOrderStock(id, { previousStatus: previousStatusForStock });
     const created = await get(
       `SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
               o.created_by, o.notes, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
@@ -1814,7 +1767,7 @@ export const applyMayoristaStockDeduction = async (req: any, res: any) => {
     if (order.status === 'Cancelado') {
       return res.status(400).json({ message: 'No aplica a pedidos cancelados.' });
     }
-    if (await isMayoristaStockDeductedForWholesale(id)) {
+    if ((await wholesaleStockState(id)) === 'deducted') {
       return res.json({
         id,
         alreadyApplied: true,
@@ -1933,19 +1886,10 @@ export const deleteOrder = async (req: any, res: any) => {
         message: "No se puede eliminar un pedido que tiene factura emitida. La factura sigue vigente en AFIP. Para anular el efecto fiscal emití una nota de crédito."
       });
     }
-    const currentOrder = await get("SELECT status, no_stock_impact FROM orders WHERE id = ?", [id]);
-    const hadStockDeducted =
-      !currentOrder?.no_stock_impact &&
-      (await isMayoristaStockDeductedForWholesale(id));
-    if (hadStockDeducted && !(await isWholesaleStockRestoredForOrder(id))) {
-      const { restoreStockForOrder } = await import('./stock.controller');
-      const result = await restoreStockForOrder(id);
-      if (!result.success) {
-        console.error('Errores restaurando stock al eliminar pedido:', result.errors);
-        return res.status(500).json({ message: 'Error restaurando stock: ' + (result.errors?.join(', ') || 'desconocido') });
-      }
-    }
+    // Devolver al stock lo que el pedido tenía tomado (si tenía algo).
+    await releaseWholesaleStock(id, 'delete');
     await execute("DELETE FROM orders WHERE id = ?", [id]);
+    await forgetWholesaleOrder(id).catch(() => undefined);
     res.json({ id });
   } catch (error) {
     console.error(error);

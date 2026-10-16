@@ -1,6 +1,5 @@
 import { Request, Response } from 'express';
 import { query, execute, get } from '../database/db';
-import { touchProductUpdatedAtByVariantId } from '../utils/touchProductUpdatedAt';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { tnGetWithRetry, tnPutWithRetry } from '../utils/tiendanubeClient';
@@ -13,19 +12,16 @@ import {
   digitsOnlyColorCode,
   normalizeColorCodeForImportValue,
 } from '../utils/colorCodeCanonical';
+import { applyEntries, enqueueSync, MovementType } from '../stockEngine/ledger';
+import { pushVariant } from '../stockEngine/syncQueue';
+import {
+  applyWholesaleStock,
+  releaseWholesaleStock,
+  returnWholesaleUnits,
+  wholesaleStockState,
+} from '../stockEngine/wholesale';
 
-const SYNC_DEBOUNCE_MS = 2800;
 const TN_STOCK_USER_AGENT = process.env.TIENDA_NUBE_USER_AGENT || 'LupoHub (support@lupo.ar)';
-const pendingSyncByVariant: Record<string, { timeout: NodeJS.Timeout; stock: number }> = {};
-
-/** Cancela el sync diferido de una variante (evita que un debounce viejo pise un ajuste manual recién hecho). */
-function flushPendingExternalSync(variantId: string): void {
-  const prev = pendingSyncByVariant[variantId];
-  if (prev) {
-    clearTimeout(prev.timeout);
-    delete pendingSyncByVariant[variantId];
-  }
-}
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
@@ -168,48 +164,13 @@ async function withRetry429409<T>(fn: () => Promise<T>, retries = 5): Promise<T>
   }
 }
 
-// Tipos de movimiento de stock
-export type StockMovementType = 
-  | 'PEDIDO_MAYORISTA'
-  | 'VENTA_TIENDA_NUBE'
-  | 'VENTA_MERCADO_LIBRE'
-  | 'CANCEL_VENTA_TIENDA_NUBE'
-  | 'AJUSTE_MANUAL'
-  | 'DEVOLUCION'
-  | 'IMPORTACION_TN'
-  | 'IMPORTACION_ML'
-  | 'IMPORTACION_EXCEL'
-  | 'IMPORTACION_DESPACHO_GRID'
-  | 'SNAPSHOT_INICIAL';
+// Tipos de movimiento de stock (definidos en el motor de stock).
+export type StockMovementType = MovementType;
 
-interface StockMovement {
-  variantId: string;
-  quantity: number;
-  type: StockMovementType;
-  reference?: string;
-}
-
-// Registrar movimiento de stock en historial
-export const logStockMovement = async (
-  variantId: string,
-  previousStock: number,
-  newStock: number,
-  movementType: StockMovementType,
-  reference?: string
-) => {
-  try {
-    await execute(
-      `INSERT INTO stock_movements (id, variant_id, previous_stock, new_stock, quantity_change, movement_type, reference, created_at)
-       VALUES (UUID(), ?, ?, ?, ?, ?, ?, NOW())`,
-      [variantId, previousStock, newStock, newStock - previousStock, movementType, reference || null]
-    );
-  } catch (error) {
-    console.error('Error logging stock movement:', error);
-    throw error;
-  }
-};
-
-// Actualizar stock de una variante
+/**
+ * Cambia el stock de una variante a `newStock` (vía el libro de stock: atómico + historial + cola ML/TN).
+ * Se mantiene la firma vieja para no romper a quienes la usan.
+ */
 export const updateVariantStock = async (
   variantId: string,
   newStock: number,
@@ -218,39 +179,12 @@ export const updateVariantStock = async (
   syncExternal: boolean = true
 ): Promise<boolean> => {
   try {
-    const currentStockRow = await get(
-      `SELECT stock FROM stocks WHERE variant_id = ?`,
-      [variantId]
+    await applyEntries(
+      [{ variantId, setTo: Math.floor(Number(newStock) || 0), type: movementType, reference: reference ?? null }],
+      { syncExternal }
     );
-    const previousStock = currentStockRow?.stock || 0;
-
-    await execute(
-      `INSERT INTO stocks (variant_id, stock) VALUES (?, ?)
-       ON DUPLICATE KEY UPDATE stock = ?`,
-      [variantId, newStock, newStock]
-    );
-
-    await logStockMovement(variantId, previousStock, newStock, movementType, reference);
-    await touchProductUpdatedAtByVariantId(variantId);
-
-    if (syncExternal) {
-      // Ajuste desde inventario: sin debounce de 2,8s (TN parecía no actualizar hasta el 2º cambio).
-      // Pedidos/importaciones masivas siguen con debounce para no saturar APIs.
-      if (movementType === 'AJUSTE_MANUAL') {
-        flushPendingExternalSync(variantId);
-        const toSync = newStock;
-        void syncStockToExternalPlatforms(variantId, toSync).catch(err =>
-          console.error('[Sync AJUSTE_MANUAL] Error:', err?.message || err)
-        );
-      } else {
-        scheduleSyncToExternalPlatforms(variantId, newStock);
-      }
-    }
-
-    void import('../services/publicationStockBundle.service')
-      .then((m) => m.syncBundlesContainingVariant(variantId))
-      .catch((err) => console.warn('[Bundle sync]', err?.message || err));
-
+    // Un ajuste a mano se manda aunque el número no haya cambiado (sirve para "volver a enviar").
+    if (syncExternal && movementType === 'AJUSTE_MANUAL') await enqueueSync([variantId], 0);
     return true;
   } catch (error) {
     console.error('Error updating variant stock:', error);
@@ -266,7 +200,7 @@ export type ChannelSaleDeductResult = {
   unitsToDeduct?: number;
 };
 
-/** Descuenta stock por venta ML/TN solo si hay unidades suficientes; si no, bloquea sin registrar movimiento. */
+/** Descuenta stock por venta de canal. Nunca bloquea: si no alcanza, el stock queda negativo y se deja un aviso. */
 export const deductVariantStockForChannelSale = async (
   variantId: string,
   unitsToDeduct: number,
@@ -275,40 +209,29 @@ export const deductVariantStockForChannelSale = async (
   syncExternal: boolean = true
 ): Promise<ChannelSaleDeductResult> => {
   const units = Math.max(0, Math.floor(Number(unitsToDeduct) || 0));
-  if (units <= 0) {
-    return { ok: true, previousStock: 0, newStock: 0, unitsToDeduct: 0 };
+  if (units <= 0) return { ok: true, previousStock: 0, newStock: 0, unitsToDeduct: 0 };
+  try {
+    const [r] = await applyEntries(
+      [
+        {
+          variantId,
+          delta: -units,
+          type: movementType,
+          reference: reference ?? null,
+          alertIfNegative: `Venta sin stock suficiente (${units} u.). Revisá el stock real.`,
+        },
+      ],
+      { syncExternal }
+    );
+    return { ok: true, previousStock: r.previousStock, newStock: r.newStock, unitsToDeduct: units };
+  } catch (error) {
+    console.error('Error deducting channel sale:', error);
+    return { ok: false };
   }
-
-  const currentStockRow = await get(`SELECT COALESCE(stock, 0) AS stock FROM stocks WHERE variant_id = ?`, [variantId]);
-  const previousStock = Number(currentStockRow?.stock) || 0;
-
-  if (previousStock < units) {
-    return { ok: false, blocked: true, previousStock, unitsToDeduct: units };
-  }
-
-  const newStock = previousStock - units;
-  const ok = await updateVariantStock(variantId, newStock, movementType, reference, syncExternal);
-  return { ok, previousStock, newStock, unitsToDeduct: units };
 };
-
-// Unidades a descontar por ítem: si sell_as_pack=1, quantity está en packs → multiplicar por mayorista_pack_size
-function unitsToDeductForOrderItem(quantity: number, sellAsPack: boolean | number, mayoristaPackSize: number | null | undefined): number {
-  const packSize = Math.max(1, Number(mayoristaPackSize) || 1);
-  return sellAsPack ? quantity * packSize : quantity;
-}
 
 /** Texto de referencia en `stock_movements` para el descuento de un pedido mayorista. */
 export const wholesaleOrderStockReference = (orderId: string) => `Pedido: ${orderId}`;
-
-/** Indica si ya se registró al menos un movimiento PEDIDO_MAYORISTA para este pedido (idempotencia). */
-export const isMayoristaStockDeductedForWholesale = async (orderId: string): Promise<boolean> => {
-  const ref = wholesaleOrderStockReference(orderId);
-  const row = await get(
-    `SELECT 1 AS ok FROM stock_movements WHERE movement_type = 'PEDIDO_MAYORISTA' AND reference = ? LIMIT 1`,
-    [ref]
-  );
-  return !!row;
-};
 
 /** Referencia DEVOLUCION al restaurar stock sin cancelar el pedido. */
 export const wholesaleOrderStockManualRestoreReference = (orderId: string) => `Restauración pedido: ${orderId}`;
@@ -316,250 +239,79 @@ export const wholesaleOrderStockManualRestoreReference = (orderId: string) => `R
 /** Referencia DEVOLUCION al cancelar/eliminar pedido. */
 export const wholesaleOrderStockCancelRestoreReference = (orderId: string) => `Cancelación pedido: ${orderId}`;
 
-/** True si el stock de este pedido ya fue devuelto al inventario (manual o por cancelación). */
-export const isWholesaleStockRestoredForOrder = async (orderId: string): Promise<boolean> => {
-  const refs = [
-    wholesaleOrderStockManualRestoreReference(orderId),
-    wholesaleOrderStockCancelRestoreReference(orderId),
-  ];
-  const row = await get(
-    `SELECT 1 AS ok FROM stock_movements
-     WHERE movement_type = 'DEVOLUCION' AND reference IN (?, ?) LIMIT 1`,
-    refs
-  );
-  return !!row;
+/** True si el pedido tiene (o tuvo y se devolvió) stock descontado. */
+export const isMayoristaStockDeductedForWholesale = async (orderId: string): Promise<boolean> => {
+  return (await wholesaleStockState(orderId)) !== null;
 };
 
-// Descontar stock por pedido mayorista
+/** True si el stock de este pedido fue devuelto al inventario (manual, NC o cancelación). */
+export const isWholesaleStockRestoredForOrder = async (orderId: string): Promise<boolean> => {
+  return (await wholesaleStockState(orderId)) === 'released';
+};
+
+/** Descontar stock de un pedido mayorista (idempotente: si ya estaba descontado no vuelve a descontar). */
 export const deductStockForOrder = async (orderId: string): Promise<{ success: boolean; errors: string[] }> => {
-  const errors: string[] = [];
-
   try {
-    const meta = await get(
-      `SELECT COALESCE(no_stock_impact, 0) AS no_stock_impact, status FROM orders WHERE id = ?`,
-      [orderId]
-    ) as { no_stock_impact?: number; status?: string } | undefined;
-    const usePicked =
-      !Number(meta?.no_stock_impact) &&
-      ['Falta controlar', 'Controlado', 'Despachado'].includes(String(meta?.status || ''));
-
-    const items = await query(
-      `SELECT oi.variant_id, oi.quantity, COALESCE(oi.picked, 0) AS picked, COALESCE(oi.sell_as_pack, 0) AS sell_as_pack, pv.sku,
-              COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size,
-              s.stock AS current_stock
-       FROM order_items oi
-       JOIN product_variants pv ON pv.id = oi.variant_id
-       JOIN product_colors pc ON pc.id = pv.product_color_id
-       JOIN products p ON p.id = pc.product_id
-       LEFT JOIN stocks s ON s.variant_id = oi.variant_id
-       WHERE oi.order_id = ?`,
-      [orderId]
-    );
-
-    const unitsByVariant = new Map<string, { units: number; sku: string }>();
-    for (const item of items as any[]) {
-      const rawQ = Math.max(0, Math.floor(Number(item.quantity) || 0));
-      const p = Math.max(0, Math.floor(Number(item.picked) || 0));
-      const baseQty = usePicked ? Math.min(rawQ, p) : rawQ;
-      const units = unitsToDeductForOrderItem(baseQty, item.sell_as_pack, item.mayorista_pack_size);
-      const vid = item.variant_id as string;
-      const prev = unitsByVariant.get(vid);
-      if (prev) prev.units += units;
-      else unitsByVariant.set(vid, { units, sku: item.sku || vid });
-    }
-
-    for (const [variantId, { units, sku }] of unitsByVariant) {
-      const stockRow = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [variantId]);
-      const currentStock = stockRow?.stock ?? 0;
-      const newStock = Math.max(0, Number(currentStock) - units);
-
-      const success = await updateVariantStock(
-        variantId,
-        newStock,
-        'PEDIDO_MAYORISTA',
-        `Pedido: ${orderId}`
-      );
-
-      if (!success) {
-        errors.push(`Error actualizando stock para variante ${sku || variantId}`);
-      }
-    }
-
-    return { success: errors.length === 0, errors };
+    await applyWholesaleStock(orderId);
+    return { success: true, errors: [] };
   } catch (error: any) {
     console.error('Error deducting stock for order:', error);
-    return { success: false, errors: [error.message] };
+    return { success: false, errors: [error?.message || String(error)] };
   }
 };
 
-// Restaurar stock de un pedido mayorista (cancelación, NC o restauración manual).
+/** Devolver al stock todo lo que tomó un pedido mayorista (cancelación, NC total o restauración manual). */
 export const restoreStockForOrder = async (
   orderId: string,
   referenceNote?: string
 ): Promise<{ success: boolean; errors: string[] }> => {
-  const devolucionRef = referenceNote?.trim() || wholesaleOrderStockCancelRestoreReference(orderId);
-  const errors: string[] = [];
-
   try {
-    const meta = await get(
-      `SELECT COALESCE(no_stock_impact, 0) AS no_stock_impact, status FROM orders WHERE id = ?`,
-      [orderId]
-    ) as { no_stock_impact?: number; status?: string } | undefined;
-    const usePicked =
-      !Number(meta?.no_stock_impact) &&
-      ['Falta controlar', 'Controlado', 'Despachado'].includes(String(meta?.status || ''));
-
-    const items = await query(
-      `SELECT oi.variant_id, oi.quantity, COALESCE(oi.picked, 0) AS picked, COALESCE(oi.sell_as_pack, 0) AS sell_as_pack, pv.sku,
-              COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size,
-              s.stock AS current_stock
-       FROM order_items oi
-       JOIN product_variants pv ON pv.id = oi.variant_id
-       JOIN product_colors pc ON pc.id = pv.product_color_id
-       JOIN products p ON p.id = pc.product_id
-       LEFT JOIN stocks s ON s.variant_id = oi.variant_id
-       WHERE oi.order_id = ?`,
-      [orderId]
-    );
-
-    const unitsByVariant = new Map<string, { units: number; sku: string }>();
-    for (const item of items as any[]) {
-      const rawQ = Math.max(0, Math.floor(Number(item.quantity) || 0));
-      const p = Math.max(0, Math.floor(Number(item.picked) || 0));
-      const baseQty = usePicked ? Math.min(rawQ, p) : rawQ;
-      const units = unitsToDeductForOrderItem(baseQty, item.sell_as_pack, item.mayorista_pack_size);
-      const vid = item.variant_id as string;
-      const prev = unitsByVariant.get(vid);
-      if (prev) prev.units += units;
-      else unitsByVariant.set(vid, { units, sku: item.sku || vid });
-    }
-
-    for (const [variantId, { units, sku }] of unitsByVariant) {
-      const stockRow = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [variantId]);
-      const currentStock = stockRow?.stock ?? 0;
-      const newStock = Number(currentStock) + units;
-
-      const success = await updateVariantStock(
-        variantId,
-        newStock,
-        'DEVOLUCION',
-        devolucionRef
-      );
-
-      if (!success) {
-        errors.push(`Error restaurando stock para variante ${sku || variantId}`);
-      }
-    }
-
-    return { success: errors.length === 0, errors };
+    const reason = referenceNote === wholesaleOrderStockManualRestoreReference(orderId) ? 'manual_restore' : 'credit_note';
+    await releaseWholesaleStock(orderId, reason);
+    return { success: true, errors: [] };
   } catch (error: any) {
     console.error('Error restoring stock for order:', error);
-    return { success: false, errors: [error.message] };
+    return { success: false, errors: [error?.message || String(error)] };
   }
 };
 
-// Restaurar stock para un item particular del pedido (NC parcial)
-export const restoreStockForOrderItem = async (orderId: string, itemIndex: number, quantity?: number): Promise<{ success: boolean; errors: string[] }> => {
-  const errors: string[] = [];
+/** Nota de crédito parcial: devuelve unidades de un ítem (solo si el pedido había descontado). */
+export const restoreStockForOrderItem = async (
+  orderId: string,
+  itemIndex: number,
+  quantity?: number
+): Promise<{ success: boolean; errors: string[] }> => {
   try {
     const items = await query(
-      `SELECT oi.variant_id, oi.quantity, COALESCE(oi.sell_as_pack, 0) AS sell_as_pack, pv.sku,
-              COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size,
-              s.stock AS current_stock
+      `SELECT oi.variant_id, oi.quantity, COALESCE(oi.sell_as_pack, 0) AS sell_as_pack,
+              COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size
        FROM order_items oi
        JOIN product_variants pv ON pv.id = oi.variant_id
        JOIN product_colors pc ON pc.id = pv.product_color_id
        JOIN products p ON p.id = pc.product_id
-       LEFT JOIN stocks s ON s.variant_id = oi.variant_id
        WHERE oi.order_id = ?
        ORDER BY oi.id`,
       [orderId]
     );
-
     if (!items || (items as any[]).length === 0) {
       return { success: false, errors: ['No hay ítems para este pedido.'] };
     }
-
     if (itemIndex < 0 || itemIndex >= (items as any[]).length) {
       return { success: false, errors: ['itemIndex inválido para este pedido.'] };
     }
-
     const item = (items as any[])[itemIndex];
     const qty = quantity != null ? quantity : Number(item.quantity || 0);
     if (isNaN(qty) || qty <= 0 || qty > Number(item.quantity || 0)) {
       return { success: false, errors: [`quantity inválida. Debe ser 1..${item.quantity}`] };
     }
-
-    const units = unitsToDeductForOrderItem(qty, item.sell_as_pack, item.mayorista_pack_size);
-    const currentStock = Number(item.current_stock || 0);
-    const newStock = currentStock + units;
-
-    const success = await updateVariantStock(
-      item.variant_id,
-      newStock,
-      'DEVOLUCION',
-      `Nota de crédito pedido: ${orderId}`
-    );
-
-    if (!success) {
-      errors.push(`Error restaurando stock para variante ${item.sku || item.variant_id}`);
-    }
-
-    return { success: errors.length === 0, errors };
+    const units = Number(item.sell_as_pack) ? qty * Math.max(1, Number(item.mayorista_pack_size) || 1) : qty;
+    await returnWholesaleUnits(orderId, String(item.variant_id), units);
+    return { success: true, errors: [] };
   } catch (error: any) {
     console.error('Error restoring stock for order item:', error);
-    return { success: false, errors: [error.message] };
+    return { success: false, errors: [error?.message || String(error)] };
   }
 };
-
-// Aplicar pack size: stock en app es por unidad; en ML/TN puede ser por pack (ej. pack x2 → enviar stock/2).
-function stockForPlatform(localStock: number, packSize: number | null | undefined): number {
-  const n = Math.max(0, Number(packSize) || 1);
-  return n <= 0 ? localStock : Math.floor(localStock / n);
-}
-
-// Programar sincronización con debounce para evitar demasiadas llamadas a ML/TN (429 / conflict).
-function scheduleSyncToExternalPlatforms(variantId: string, newStock: number): void {
-  const prev = pendingSyncByVariant[variantId];
-  if (prev) clearTimeout(prev.timeout);
-  pendingSyncByVariant[variantId] = {
-    stock: newStock,
-    timeout: setTimeout(() => {
-      const entry = pendingSyncByVariant[variantId];
-      const stockToSync = entry?.stock ?? newStock;
-      delete pendingSyncByVariant[variantId];
-      syncStockToExternalPlatforms(variantId, stockToSync).catch(err =>
-        console.error('[Sync debounced] Error:', err?.message || err)
-      );
-    }, SYNC_DEBOUNCE_MS)
-  };
-}
-
-async function runExternalSyncWithRetries(
-  label: string,
-  run: () => Promise<boolean>,
-  attempts: number = 3,
-  isStale?: () => boolean
-): Promise<boolean> {
-  let lastOk = false;
-  for (let i = 1; i <= attempts; i++) {
-    // Si ya se pidió un stock más nuevo para esta variante, no reenviar este valor viejo
-    // (antes un reintento pisaba en TN el valor correcto con uno anterior).
-    if (isStale?.()) {
-      console.log(`[Sync] ${label}: omitido, hay un stock más nuevo en cola.`);
-      return true;
-    }
-    try {
-      lastOk = await run();
-      if (lastOk) return true;
-    } catch (error: any) {
-      console.warn(`[Sync] ${label} intento ${i}/${attempts} con excepción:`, error?.message || error);
-    }
-    if (i < attempts) await sleep(1200 * i);
-  }
-  console.warn(`[Sync] ${label} no se pudo sincronizar tras ${attempts} intentos.`);
-  return false;
-}
 
 export type SyncExternalPlatform = 'mercadolibre' | 'tiendanube';
 
@@ -571,210 +323,38 @@ export type SyncStockExternalResult = {
   logs: string[];
 };
 
-const ALL_SYNC_PLATFORMS: SyncExternalPlatform[] = ['mercadolibre', 'tiendanube'];
-
-// Cola por variante: los syncs de una misma variante se ejecutan en orden, nunca en paralelo.
-const variantSyncChains = new Map<string, Promise<unknown>>();
-// Último pedido de sync por variante+plataforma; un sync viejo no reintenta si hay uno más nuevo.
-const variantSyncGeneration = new Map<string, number>();
-
-// Sincronizar stock a publicaciones vinculadas (variant_publications). Si no hay ninguna, fallback a columnas legacy.
-export const syncStockToExternalPlatforms = (
+/**
+ * Envía YA el stock actual (de la base) de una variante a sus publicaciones.
+ * `_newStock` se ignora a propósito: siempre se manda lo que dice el Hub en este momento.
+ */
+export const syncStockToExternalPlatforms = async (
   variantId: string,
-  newStock: number,
+  _newStock?: number,
   opts?: { platforms?: SyncExternalPlatform[] }
 ): Promise<SyncStockExternalResult> => {
-  const platforms = new Set(
-    (opts?.platforms?.length ? opts.platforms : ALL_SYNC_PLATFORMS).filter(Boolean)
-  );
-  const myGeneration: Partial<Record<SyncExternalPlatform, number>> = {};
-  for (const p of platforms) {
-    const key = `${variantId}:${p}`;
-    const gen = (variantSyncGeneration.get(key) || 0) + 1;
-    variantSyncGeneration.set(key, gen);
-    myGeneration[p] = gen;
-  }
-  const isStale = (p: SyncExternalPlatform) => variantSyncGeneration.get(`${variantId}:${p}`) !== myGeneration[p];
-
-  const prev = variantSyncChains.get(variantId) ?? Promise.resolve();
-  const run = prev.then(() => runSyncStockToExternalPlatforms(variantId, newStock, platforms, isStale));
-  const tail = run.catch(() => undefined);
-  variantSyncChains.set(variantId, tail);
-  void tail.then(() => {
-    if (variantSyncChains.get(variantId) === tail) variantSyncChains.delete(variantId);
-  });
-  return run;
-};
-
-const runSyncStockToExternalPlatforms = async (
-  variantId: string,
-  newStock: number,
-  platforms: Set<SyncExternalPlatform>,
-  isStale: (p: SyncExternalPlatform) => boolean
-): Promise<SyncStockExternalResult> => {
   const result: SyncStockExternalResult = { mlAttempted: 0, mlOk: 0, tnAttempted: 0, tnOk: 0, logs: [] };
-  const tnStale = () => isStale('tiendanube');
-  const mlStale = () => isStale('mercadolibre');
   try {
-    const variantMeta = await get(
-      `SELECT pv.id, COALESCE(pv.external_sku, pv.sku) AS sku,
-              c.name AS color_name, sz.size_code AS size_code
-       FROM product_variants pv
-       JOIN product_colors pc ON pc.id = pv.product_color_id
-       LEFT JOIN colors c ON c.id = pc.color_id
-       LEFT JOIN sizes sz ON sz.id = pv.size_id
-       WHERE pv.id = ?`,
-      [variantId]
-    );
-    const matchOpts = {
-      sku: variantMeta?.sku != null ? String(variantMeta.sku) : null,
-      color: variantMeta?.color_name != null ? String(variantMeta.color_name) : null,
-      size: variantMeta?.size_code != null ? String(variantMeta.size_code) : null,
-      variantId,
-      mlVariationId: null as string | null,
-    };
-    const skuLabel = matchOpts.sku || variantId;
-
-    const publications = await query(
-      `SELECT id, platform, external_product_id, external_variant_id, pack_size FROM variant_publications WHERE variant_id = ?`,
-      [variantId]
-    );
-    const syncedTnKeys = new Set<string>();
-
-    if (publications && (publications as any[]).length > 0) {
-      const { loadVariantMlLinkContext, filterMlPublicationsForSync, filterTnPublicationsForSync } = await import(
-        '../services/variantPublicationFilter'
-      );
-      const linkCtx = await loadVariantMlLinkContext(variantId);
-      const pubsToSync = linkCtx
-        ? [
-            ...(platforms.has('tiendanube') ? filterTnPublicationsForSync(publications as any[], linkCtx) : []),
-            ...(platforms.has('mercadolibre') ? filterMlPublicationsForSync(publications as any[], linkCtx) : [])
-          ]
-        : (publications as any[]).filter((p) => platforms.has(p.platform));
-      const tasks: Promise<void>[] = [];
-      for (const pub of pubsToSync) {
-        const pack = Math.max(1, Number(pub.pack_size) || 1);
-        const stockToSend = stockForPlatform(newStock, pack);
-        if (pub.platform === 'tiendanube' && pub.external_variant_id && platforms.has('tiendanube')) {
-          const tnKey = `${String(pub.external_product_id).trim()}/${String(pub.external_variant_id).trim()}`;
-          if (syncedTnKeys.has(tnKey)) continue;
-          syncedTnKeys.add(tnKey);
-          const label = `TN pub=${pub.external_product_id}/${pub.external_variant_id}`;
-          result.tnAttempted++;
-          tasks.push(
-            runExternalSyncWithRetries(label, () =>
-              updateTiendaNubeStock(pub.external_product_id, pub.external_variant_id, stockToSend),
-              3,
-              tnStale
-            ).then((ok) => {
-              if (ok) result.tnOk++;
-              result.logs.push(ok ? `[OK] ${skuLabel} → ${label} = ${stockToSend}` : `[ERROR] ${skuLabel} → ${label}`);
-            })
-          );
-        } else if (pub.platform === 'mercadolibre' && platforms.has('mercadolibre')) {
-          const itemId = pub.external_product_id;
-          const variationId = (pub.external_variant_id && String(pub.external_variant_id).trim()) || null;
-          const label = variationId ? `ML item=${itemId} var=${variationId}` : `ML item=${itemId}`;
-          result.mlAttempted++;
-          tasks.push(
-            runExternalSyncWithRetries(label, () =>
-              updateMercadoLibreStockByItem(itemId, stockToSend, {
-                ...matchOpts,
-                mlVariationId: variationId,
-              }),
-              3,
-              mlStale
-            ).then((ok) => {
-              if (ok) result.mlOk++;
-              result.logs.push(ok ? `[OK] ${skuLabel} → ${label} = ${stockToSend}` : `[ERROR] ${skuLabel} → ${label}`);
-            })
-          );
-        }
+    const outcome = await pushVariant(variantId, opts?.platforms);
+    for (const r of outcome.results) {
+      const ok = r.result.ok;
+      if (r.target.platform === 'tiendanube') {
+        result.tnAttempted++;
+        if (ok) result.tnOk++;
+      } else {
+        result.mlAttempted++;
+        if (ok) result.mlOk++;
       }
-      // Paralelo: ML y TN reciben el mismo stock casi a la vez (menos “ML ya actualizó y TN no”).
-      await Promise.all(tasks);
-    }
-
-    // La pantalla de inventario lee la variante TN de las columnas. Si solo se
-    // actualizó una publicación distinta, el número de TN no cambia.
-    const needLegacyMl = platforms.has('mercadolibre') && result.mlAttempted === 0;
-    const needLegacyTn = platforms.has('tiendanube');
-    if (needLegacyMl || needLegacyTn) {
-      const variant = await get(
-        `SELECT pv.id, pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
-                p.tienda_nube_id, p.mercado_libre_id, pv.sku, pv.external_sku,
-                COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack,
-                COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
-         FROM product_variants pv
-         JOIN product_colors pc ON pc.id = pv.product_color_id
-         JOIN products p ON p.id = pc.product_id
-         WHERE pv.id = ?`,
-        [variantId]
+      result.logs.push(
+        r.result.ok
+          ? `[OK] ${variantId} → ${r.target.label} = ${r.qty}${r.result.skipped ? ` (${r.result.skipped})` : ''}`
+          : `[ERROR] ${variantId} → ${r.target.label}: ${r.result.error}`
       );
-      if (variant) {
-        matchOpts.mlVariationId =
-          variant.mercado_libre_variant_id != null && String(variant.mercado_libre_variant_id).trim() !== ''
-            ? String(variant.mercado_libre_variant_id).trim()
-            : null;
-
-        const stockTN = stockForPlatform(newStock, variant.tn_pack);
-        const stockML = stockForPlatform(newStock, variant.ml_pack);
-
-        const legacyTnKey =
-          variant.tienda_nube_id && variant.tienda_nube_variant_id
-            ? `${String(variant.tienda_nube_id).trim()}/${String(variant.tienda_nube_variant_id).trim()}`
-            : '';
-        if (needLegacyTn && legacyTnKey && !syncedTnKeys.has(legacyTnKey)) {
-          syncedTnKeys.add(legacyTnKey);
-          const label = `TN legacy=${variant.tienda_nube_id}/${variant.tienda_nube_variant_id}`;
-          result.tnAttempted++;
-          const ok = await runExternalSyncWithRetries(label, () =>
-            updateTiendaNubeStock(variant.tienda_nube_id, variant.tienda_nube_variant_id, stockTN),
-            3,
-            tnStale
-          );
-          if (ok) result.tnOk++;
-          result.logs.push(ok ? `[OK] ${skuLabel} → ${label} = ${stockTN}` : `[ERROR] ${skuLabel} → ${label}`);
-        }
-        // Publicación propia por variante (mercado_libre_item_id) tiene prioridad sobre el ítem
-        // padre del producto (mercado_libre_id).
-        const ownMlItemId =
-          variant.mercado_libre_item_id != null && String(variant.mercado_libre_item_id).trim() !== ''
-            ? String(variant.mercado_libre_item_id).trim()
-            : null;
-        const parentMlId =
-          variant.mercado_libre_id != null && String(variant.mercado_libre_id).trim() !== ''
-            ? String(variant.mercado_libre_id).trim()
-            : null;
-        if (needLegacyMl) {
-          if (ownMlItemId) {
-            const label = `ML legacy item=${ownMlItemId}`;
-            result.mlAttempted++;
-            const ok = await runExternalSyncWithRetries(label, () =>
-              updateMercadoLibreStockByItem(ownMlItemId, stockML, matchOpts),
-              3,
-              mlStale
-            );
-            if (ok) result.mlOk++;
-            result.logs.push(ok ? `[OK] ${skuLabel} → ${label} = ${stockML}` : `[ERROR] ${skuLabel} → ${label}`);
-          } else if (parentMlId) {
-            const label = `ML legacy=${parentMlId}`;
-            result.mlAttempted++;
-            const ok = await runExternalSyncWithRetries(label, () =>
-              updateMercadoLibreStockByItem(parentMlId, stockML, matchOpts),
-              3,
-              mlStale
-            );
-            if (ok) result.mlOk++;
-            result.logs.push(ok ? `[OK] ${skuLabel} → ${label} = ${stockML}` : `[ERROR] ${skuLabel} → ${label}`);
-          }
-        }
-      }
     }
-  } catch (error) {
-    console.error('Error syncing stock to external platforms:', error);
-    result.logs.push(`[ERROR] variant=${variantId}: ${(error as any)?.message || error}`);
+    // Si algo falló, que la cola lo reintente sola.
+    if (outcome.results.some((r) => !r.result.ok)) await enqueueSync([variantId], 30000);
+  } catch (error: any) {
+    result.logs.push(`[ERROR] variant=${variantId}: ${error?.message || error}`);
+    await enqueueSync([variantId], 30000).catch(() => undefined);
   }
   return result;
 };

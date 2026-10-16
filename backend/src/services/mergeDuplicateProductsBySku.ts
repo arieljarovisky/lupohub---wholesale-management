@@ -172,6 +172,10 @@ export async function mergeTwoVariants(
 
   await execute(`UPDATE order_items SET variant_id = ? WHERE variant_id = ?`, [toVariantId, fromVariantId]);
 
+  // Motor de stock: lo que cada pedido/venta tenía tomado pasa a la variante que queda (si no, se descontaría dos veces).
+  const { moveVariantStockRecords } = await import('../stockEngine/wholesale');
+  await moveVariantStockRecords(fromVariantId, toVariantId);
+
   const dupDis = (await query(`SELECT id, despacho_id, cantidad FROM despacho_items WHERE variant_id = ?`, [
     fromVariantId,
   ])) as any[];

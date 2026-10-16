@@ -24,6 +24,7 @@
     "auto-allocate-payments": "npx ts-node scripts/auto-allocate-unallocated-payments.ts",
     "auto-allocate-payments:dry-run": "npx ts-node scripts/auto-allocate-unallocated-payments.ts --dry-run",
     "test:lupo-webhook": "ts-node src/tests/lupoStockWebhook.test.ts",
+    "test:stock-engine": "ts-node src/tests/stockEngine.logic.test.ts",
     "test-webhook-stock": "ts-node scripts/send-lupo-stock-webhook-test.ts",
     "download-tn-category-images": "ts-node scripts/download-tiendanube-category-images.ts"
   },
