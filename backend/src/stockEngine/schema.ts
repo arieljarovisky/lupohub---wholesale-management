@@ -102,6 +102,16 @@ export async function ensureStockEngineSchema(): Promise<void> {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
 
+  // Vínculos que el usuario quitó: no se vuelven a usar aunque sigan en columnas viejas del producto.
+  await execute(`
+    CREATE TABLE IF NOT EXISTS stock_sync_exclusions (
+      variant_id VARCHAR(36) NOT NULL,
+      target_key VARCHAR(191) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (variant_id, target_key)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
   await execute(`
     CREATE TABLE IF NOT EXISTS channel_orders (
       platform VARCHAR(20) NOT NULL,

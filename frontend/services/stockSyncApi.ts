@@ -57,6 +57,30 @@ export type StockSyncOverview = {
 
 type Msg = { message: string };
 
+export type RemoteOption = {
+  id: string;
+  label: string;
+  sku: string;
+  stock: number | null;
+  suggested: boolean;
+  usedBy: string[];
+};
+
+export type VariantLink = {
+  key: string;
+  platform: 'mercadolibre' | 'tiendanube';
+  label: string;
+  productId: string;
+  externalVariantId: string;
+  isBundle: boolean;
+  ok: boolean | null;
+  error: string | null;
+  canFix: boolean;
+  remoteTitle: string | null;
+  remoteError: string | null;
+  options: RemoteOption[];
+};
+
 export const stockSyncApi = {
   overview: () => request<StockSyncOverview>('/stock-sync/overview'),
   searchVariants: (q: string) =>
@@ -70,6 +94,12 @@ export const stockSyncApi = {
   dismissAlert: (id: string) => request<{ ok: boolean }>(`/stock-sync/alerts/${encodeURIComponent(id)}/dismiss`, 'POST', {}),
   dismissAllAlerts: () => request<{ ok: boolean }>('/stock-sync/alerts/dismiss-all', 'POST', {}),
   checkOrders: () => request<Msg>('/stock-sync/check-orders', 'POST', {}, undefined, 120000),
+  links: (variantId: string) =>
+    request<{ links: VariantLink[] }>(`/stock-sync/links/${encodeURIComponent(variantId)}`, 'GET', undefined, undefined, 60000).then((r) => r.links),
+  fixLink: (variantId: string, key: string, externalVariantId: string) =>
+    request<Msg>(`/stock-sync/links/${encodeURIComponent(variantId)}/fix`, 'POST', { key, externalVariantId }),
+  removeLink: (variantId: string, key: string) =>
+    request<Msg>(`/stock-sync/links/${encodeURIComponent(variantId)}/remove`, 'POST', { key }),
   reprocessOrder: (platform: 'tiendanube' | 'mercadolibre', orderId: string) =>
     request<Msg & { state: string }>('/stock-sync/reprocess-order', 'POST', { platform, orderId }, undefined, 60000),
 };

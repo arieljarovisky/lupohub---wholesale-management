@@ -312,3 +312,36 @@ export const reprocessOrder = async (req: Request, res: Response) => {
     res.status(500).json({ message: e?.message || 'No pude procesar esa venta.' });
   }
 };
+
+export const getLinks = async (req: Request, res: Response) => {
+  try {
+    const { getVariantLinks } = await import('./links');
+    res.json({ links: await getVariantLinks(String(req.params.variantId)) });
+  } catch (e: any) {
+    console.error('[StockSync links]', e);
+    res.status(500).json({ message: 'No pude cargar los vínculos. Probá de nuevo.' });
+  }
+};
+
+export const fixLink = async (req: Request, res: Response) => {
+  try {
+    const { fixVariantLink } = await import('./links');
+    const key = String(req.body?.key || '');
+    const externalVariantId = String(req.body?.externalVariantId || '');
+    if (!key || !externalVariantId) return res.status(400).json({ message: 'Elegí una variación.' });
+    res.json({ message: await fixVariantLink(String(req.params.variantId), key, externalVariantId) });
+  } catch (e: any) {
+    res.status(400).json({ message: e?.message || 'No pude corregir el vínculo.' });
+  }
+};
+
+export const removeLink = async (req: Request, res: Response) => {
+  try {
+    const { removeVariantLink } = await import('./links');
+    const key = String(req.body?.key || '');
+    if (!key) return res.status(400).json({ message: 'Falta el vínculo.' });
+    res.json({ message: await removeVariantLink(String(req.params.variantId), key) });
+  } catch (e: any) {
+    res.status(400).json({ message: e?.message || 'No pude quitar el vínculo.' });
+  }
+};

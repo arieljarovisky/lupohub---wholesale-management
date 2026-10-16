@@ -5,6 +5,9 @@ import {
   dismissAlert,
   dismissAllAlerts,
   dismissLine,
+  fixLink,
+  getLinks,
+  removeLink,
   getOverview,
   reprocessOrder,
   resolveLine,
@@ -31,6 +34,9 @@ router.get('/variants', searchVariants);
 router.post('/resync-all', resyncAll);
 router.post('/retry-all', retryAll);
 router.post('/retry/:variantId', retryOne);
+router.get('/links/:variantId', getLinks);
+router.post('/links/:variantId/fix', fixLink);
+router.post('/links/:variantId/remove', removeLink);
 router.post('/unmatched/:lineId/resolve', resolveLine);
 router.post('/unmatched/:lineId/dismiss', dismissLine);
 router.post('/alerts/dismiss-all', dismissAllAlerts);

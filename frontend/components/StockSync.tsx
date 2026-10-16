@@ -12,10 +12,11 @@ import {
   ShoppingBag,
   ShoppingCart,
   WifiOff,
+  Wrench,
   X,
   Zap,
 } from 'lucide-react';
-import { stockSyncApi, StockSyncOverview, SyncVariant } from '../services/stockSyncApi';
+import { stockSyncApi, StockSyncOverview, SyncVariant, VariantLink } from '../services/stockSyncApi';
 import { useNotification } from '../context/NotificationContext';
 
 const REFRESH_MS = 15000;
@@ -269,12 +270,196 @@ const ChooseProductModal: React.FC<{
   );
 };
 
+/** Ventana para corregir o quitar un vínculo roto con Mercado Libre / Tienda Nube. */
+const FixLinkModal: React.FC<{
+  variant: SyncVariant;
+  onClose: () => void;
+  onDone: () => void;
+}> = ({ variant, onClose, onDone }) => {
+  const { showToast, showConfirm } = useNotification();
+  const [links, setLinks] = useState<VariantLink[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [picked, setPicked] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState<string | null>(null);
+
+  const loadLinks = useCallback(async () => {
+    setError(null);
+    try {
+      const l = await stockSyncApi.links(variant.variantId);
+      setLinks(l);
+      const pre: Record<string, string> = {};
+      for (const link of l) {
+        const sug = link.options.find((o) => o.suggested);
+        if (sug) pre[link.key] = sug.id;
+      }
+      setPicked(pre);
+    } catch (e: any) {
+      setError(e?.message || 'No pude cargar los vínculos.');
+    }
+  }, [variant.variantId]);
+
+  useEffect(() => {
+    loadLinks();
+  }, [loadLinks]);
+
+  const fix = async (link: VariantLink) => {
+    const id = picked[link.key];
+    if (!id) return;
+    setSaving(`fix-${link.key}`);
+    try {
+      const r = await stockSyncApi.fixLink(variant.variantId, link.key, id);
+      showToast('success', r.message);
+      onDone();
+    } catch (e: any) {
+      showToast('error', e?.message || 'No pude corregir el vínculo.');
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const remove = (link: VariantLink) =>
+    showConfirm({
+      title: 'Quitar vínculo',
+      message: `${link.label} ya no va a recibir el stock de ${variantName(variant)}. ¿Seguro?`,
+      confirmLabel: 'Sí, quitar',
+      cancelLabel: 'Volver',
+      onConfirm: async () => {
+        setSaving(`remove-${link.key}`);
+        try {
+          const r = await stockSyncApi.removeLink(variant.variantId, link.key);
+          showToast('success', r.message);
+          onDone();
+        } catch (e: any) {
+          showToast('error', e?.message || 'No pude quitar el vínculo.');
+        } finally {
+          setSaving(null);
+        }
+      },
+    });
+
+  const broken = (links || []).filter((l) => l.ok === false);
+  const healthy = (links || []).filter((l) => l.ok !== false);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-end sm:items-center justify-center sm:p-6" role="dialog" aria-modal="true">
+      <div className="bg-slate-900 border border-slate-700 rounded-t-2xl sm:rounded-2xl w-full max-w-xl max-h-[90vh] flex flex-col">
+        <div className="flex items-start justify-between gap-3 p-4 border-b border-slate-800">
+          <div className="min-w-0">
+            <h3 className="text-lg font-bold text-white">Arreglar vínculo</h3>
+            <p className="text-sm text-slate-400 truncate">
+              {variantName(variant)} · stock {variant.stock}
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300" aria-label="Cerrar">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="p-4 space-y-4 overflow-y-auto">
+          {error && (
+            <div className="text-sm text-red-300 flex items-center justify-between gap-2">
+              {error}
+              <Btn onClick={loadLinks} icon={<RefreshCw size={14} />}>
+                Reintentar
+              </Btn>
+            </div>
+          )}
+          {!links && !error && (
+            <p className="text-sm text-slate-400 flex items-center gap-2">
+              <Loader2 size={14} className="animate-spin" /> Consultando la publicación…
+            </p>
+          )}
+          {links && broken.length === 0 && (
+            <p className="text-sm text-emerald-300 flex items-center gap-2">
+              <CheckCircle2 size={16} /> Ya no hay vínculos con error. Tocá Actualizar.
+            </p>
+          )}
+
+          {broken.map((link) => (
+            <div key={link.key} className="rounded-lg border border-amber-500/40 overflow-hidden">
+              <div className="px-3 py-2 bg-amber-500/10 flex items-center gap-2">
+                <PlatformIcon platform={link.platform} />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-semibold truncate" title={link.remoteTitle || link.label}>
+                    {link.remoteTitle || link.label}
+                  </div>
+                  <div className="text-xs text-amber-200 truncate" title={link.error || ''}>
+                    {shortReason(link.error || '')} · {link.label}
+                  </div>
+                </div>
+              </div>
+
+              {link.remoteError && <p className="px-3 py-2 text-xs text-slate-300">{link.remoteError}</p>}
+
+              {link.options.length > 0 && (
+                <>
+                  <div className="px-3 pt-2 text-xs text-slate-400">Elegí la variación correcta:</div>
+                  <ul className="max-h-60 overflow-y-auto divide-y divide-slate-800">
+                    {link.options.map((o) => (
+                      <li key={o.id}>
+                        <label className="px-3 py-2 flex items-center gap-3 cursor-pointer hover:bg-slate-800/60">
+                          <input
+                            type="radio"
+                            name={`opt-${link.key}`}
+                            checked={picked[link.key] === o.id}
+                            onChange={() => setPicked((p) => ({ ...p, [link.key]: o.id }))}
+                            className="w-4 h-4 accent-blue-500"
+                          />
+                          <span className="flex-1 min-w-0">
+                            <span className="block text-sm text-white truncate">
+                              {o.label}
+                              {o.suggested && <span className="ml-2 px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-xs">Sugerida</span>}
+                            </span>
+                            <span className="block text-xs text-slate-400 truncate">
+                              {o.sku || 'sin código'}
+                              {o.usedBy.length > 0 && <span className="text-amber-300"> · ya usada por {o.usedBy[0]}{o.usedBy.length > 1 ? ` y ${o.usedBy.length - 1} más` : ''}</span>}
+                            </span>
+                          </span>
+                          {o.stock != null && <span className="text-xs text-slate-400 shrink-0">stock {o.stock}</span>}
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+
+              <div className="px-3 py-2 border-t border-slate-800 flex flex-wrap justify-end gap-2">
+                <Btn tone="ghost" loading={saving === `remove-${link.key}`} onClick={() => remove(link)} icon={<X size={14} />}>
+                  Quitar vínculo
+                </Btn>
+                {link.options.length > 0 && (
+                  <Btn
+                    tone="primary"
+                    disabled={!picked[link.key] || picked[link.key] === link.externalVariantId}
+                    loading={saving === `fix-${link.key}`}
+                    onClick={() => fix(link)}
+                    icon={<CheckCircle2 size={14} />}
+                  >
+                    Usar esta variación
+                  </Btn>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {healthy.length > 0 && (
+            <div className="text-xs text-slate-500">
+              Funcionan bien: {healthy.map((l) => l.label).join(' · ')}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const StockSync: React.FC = () => {
   const { showToast, showConfirm } = useNotification();
   const [data, setData] = useState<StockSyncOverview | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [choosing, setChoosing] = useState<StockSyncOverview['unmatched'][number] | null>(null);
+  const [fixing, setFixing] = useState<SyncVariant | null>(null);
   const [tab, setTab] = useState<Tab>('review');
   const [filter, setFilter] = useState<ReviewFilter>('all');
   const [shown, setShown] = useState(PAGE);
@@ -538,15 +723,18 @@ const StockSync: React.FC = () => {
                           {targets.length > 1 && ` (+${targets.length - 1})`} · próximo intento {clock(f.nextTryAt)}
                         </div>
                       </div>
-                      <Btn
-                        tone="ghost"
-                        title="Reintentar ahora"
-                        loading={busy === `retry-${f.variant.variantId}`}
-                        onClick={() => run(`retry-${f.variant.variantId}`, () => stockSyncApi.retryOne(f.variant.variantId))}
-                        icon={<RefreshCw size={14} />}
-                      >
-                        Reintentar
-                      </Btn>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Btn tone="primary" onClick={() => setFixing(f.variant)} icon={<Wrench size={14} />}>
+                          Arreglar
+                        </Btn>
+                        <Btn
+                          tone="ghost"
+                          title="Reintentar ahora"
+                          loading={busy === `retry-${f.variant.variantId}`}
+                          onClick={() => run(`retry-${f.variant.variantId}`, () => stockSyncApi.retryOne(f.variant.variantId))}
+                          icon={<RefreshCw size={14} />}
+                        />
+                      </div>
                     </li>
                   );
                 }
@@ -709,6 +897,17 @@ const StockSync: React.FC = () => {
             </div>
           )}
         </div>
+      )}
+
+      {fixing && (
+        <FixLinkModal
+          variant={fixing}
+          onClose={() => setFixing(null)}
+          onDone={() => {
+            setFixing(null);
+            load();
+          }}
+        />
       )}
 
       {choosing && (

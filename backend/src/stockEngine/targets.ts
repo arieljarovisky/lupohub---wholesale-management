@@ -57,7 +57,11 @@ export async function resolveTargets(variantId: string): Promise<SyncTarget[]> {
     size: trim(meta.size_code) || null,
   };
   const targets: SyncTarget[] = [];
-  const seen = new Set<string>();
+  // Vínculos quitados a mano por el usuario: se saltean siempre.
+  const excluded = (await query(`SELECT target_key FROM stock_sync_exclusions WHERE variant_id = ?`, [variantId]).catch(
+    () => []
+  )) as any[];
+  const seen = new Set<string>(excluded.map((r) => String(r.target_key)));
   const add = (t: SyncTarget) => {
     if (seen.has(t.key)) return;
     seen.add(t.key);
