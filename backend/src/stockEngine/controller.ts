@@ -10,6 +10,7 @@ import {
   resolveUnmatchedLine,
 } from './channelOrders';
 import { checkRecentOrders } from './index';
+import { isDeadLinkError } from './links';
 
 const VARIANT_LABEL_SQL = `
   SELECT pv.id, p.name AS product_name, p.sku AS product_sku, COALESCE(pv.external_sku, pv.sku) AS sku,
@@ -79,7 +80,7 @@ export const getOverview = async (_req: Request, res: Response) => {
       query(
         `SELECT q.variant_id, q.attempts, q.last_error, q.due_at, q.updated_at
          FROM stock_sync_queue q WHERE q.attempts > 0
-         ORDER BY q.updated_at DESC LIMIT 50`
+         ORDER BY q.updated_at DESC LIMIT 500`
       ),
       query(
         `SELECT l.id, l.platform, l.external_order_id, l.sku, l.title, l.quantity, l.external_item_id, l.external_variant_id,
@@ -109,16 +110,27 @@ export const getOverview = async (_req: Request, res: Response) => {
     ];
     const variants = await variantsById(ids);
 
-    const failingTargets = (failingRows as any[]).length
+    const allTargets = (failingRows as any[]).length
       ? await query(
-          `SELECT variant_id, label, last_error FROM stock_sync_targets WHERE ok = 0 AND variant_id IN (?)`,
+          `SELECT variant_id, platform, label, ok, last_error FROM stock_sync_targets WHERE variant_id IN (?)`,
           [(failingRows as any[]).map((r) => String(r.variant_id))]
         )
       : [];
-    const targetsByVariant = new Map<string, Array<{ label: string; error: string }>>();
-    for (const t of failingTargets as any[]) {
+    // Plataformas que funcionan bien para cada variante (para detectar vínculos viejos).
+    const okPlatforms = new Map<string, Set<string>>();
+    for (const t of allTargets as any[]) {
+      if (!Number(t.ok)) continue;
+      const set = okPlatforms.get(String(t.variant_id)) ?? new Set<string>();
+      set.add(String(t.platform));
+      okPlatforms.set(String(t.variant_id), set);
+    }
+    const targetsByVariant = new Map<string, Array<{ label: string; error: string; stale: boolean }>>();
+    for (const t of allTargets as any[]) {
+      if (Number(t.ok)) continue;
+      const error = String(t.last_error || '');
+      const stale = isDeadLinkError(error) && !!okPlatforms.get(String(t.variant_id))?.has(String(t.platform));
       const list = targetsByVariant.get(String(t.variant_id)) ?? [];
-      list.push({ label: String(t.label || ''), error: String(t.last_error || '') });
+      list.push({ label: String(t.label || ''), error, stale });
       targetsByVariant.set(String(t.variant_id), list);
     }
 
@@ -344,5 +356,19 @@ export const removeLink = async (req: Request, res: Response) => {
     res.json({ message: await removeVariantLink(String(req.params.variantId), key) });
   } catch (e: any) {
     res.status(400).json({ message: e?.message || 'No pude quitar el vínculo.' });
+  }
+};
+
+export const cleanupStaleLinks = async (_req: Request, res: Response) => {
+  try {
+    const { removeStaleLinks } = await import('./links');
+    const n = await removeStaleLinks();
+    res.json({
+      removed: n,
+      message: n ? `Listo, quité ${n} vínculo(s) viejo(s). Las publicaciones principales siguen funcionando.` : 'No había vínculos viejos para quitar.',
+    });
+  } catch (e: any) {
+    console.error('[StockSync cleanup]', e);
+    res.status(500).json({ message: 'No pude limpiar los vínculos. Probá de nuevo.' });
   }
 };

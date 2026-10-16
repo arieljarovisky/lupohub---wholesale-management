@@ -587,6 +587,7 @@ const StockSync: React.FC = () => {
     !data.connections.tiendanube ? 'Tienda Nube' : null,
   ].filter(Boolean) as string[];
   const problems = data.unmatched.length + data.failing.length + data.alerts.length;
+  const staleCount = data.failing.reduce((n, f) => n + f.targets.filter((t) => t.stale).length, 0);
   const sending = Math.max(0, data.queue.pending - data.queue.failing);
 
   // Estado general en una línea.
@@ -696,9 +697,29 @@ const StockSync: React.FC = () => {
           {data.failing.length > 0 && (filter === 'all' || filter === 'failing') && (
             <div className="flex items-center justify-between gap-3 px-3 py-2 bg-slate-900/80 border-b border-slate-800">
               <span className="text-xs text-slate-400">Las publicaciones con error se reintentan solas.</span>
-              <Btn tone="ghost" loading={busy === 'retry-all'} onClick={() => run('retry-all', () => stockSyncApi.retryAll())} icon={<RefreshCw size={14} />}>
-                Reintentar todas
-              </Btn>
+              <div className="flex items-center gap-1">
+                {staleCount > 0 && (
+                  <Btn
+                    tone="primary"
+                    loading={busy === 'cleanup'}
+                    icon={<Wrench size={14} />}
+                    onClick={() =>
+                      showConfirm({
+                        title: 'Limpiar vínculos viejos',
+                        message: `Voy a quitar ${staleCount} vínculo(s) a publicaciones que ya no tienen ese producto. Solo los de productos que tienen otra publicación funcionando bien, así que ninguno se queda sin sincronizar. ¿Seguimos?`,
+                        confirmLabel: 'Sí, limpiar',
+                        cancelLabel: 'Volver',
+                        onConfirm: () => run('cleanup', () => stockSyncApi.cleanupStaleLinks()),
+                      })
+                    }
+                  >
+                    Limpiar vínculos viejos ({staleCount})
+                  </Btn>
+                )}
+                <Btn tone="ghost" loading={busy === 'retry-all'} onClick={() => run('retry-all', () => stockSyncApi.retryAll())} icon={<RefreshCw size={14} />}>
+                  Reintentar todas
+                </Btn>
+              </div>
             </div>
           )}
           {reviewRows.length === 0 ? (
@@ -749,8 +770,12 @@ const StockSync: React.FC = () => {
                 }
                 if (row.kind === 'failing') {
                   const f = row.item;
-                  const targets = f.targets.length ? f.targets : [{ label: '', error: f.error }];
+                  const targets: Array<{ label: string; error: string; stale?: boolean }> = f.targets.length
+                    ? f.targets
+                    : [{ label: '', error: f.error }];
                   const full = targets.map((t) => `${t.label ? `${t.label}: ` : ''}${t.error}`).join('\n');
+                  const allStale = targets.every((t) => t.stale);
+                  const itemId = (targets[0]?.label.match(/\b(ML[A-Z]{1,2}\d+|\d{6,})\b/) || [])[1];
                   return (
                     <li key={row.key} className="px-3 py-2.5 flex items-center gap-3 hover:bg-slate-900/60">
                       <PlatformIcon platform={platformOf(`${targets[0]?.label || ''} ${targets[0]?.error || ''}`)} />
@@ -759,8 +784,18 @@ const StockSync: React.FC = () => {
                           <ProductLink variant={f.variant} /> <span className="font-normal text-slate-400">· stock {f.variant.stock}</span>
                         </div>
                         <div className="text-xs text-slate-400 truncate" title={full}>
-                          <span className="text-amber-300">{shortReason(targets[0]?.error || '')}</span>
-                          {targets.length > 1 && ` (+${targets.length - 1})`} · próximo intento {clock(f.nextTryAt)}
+                          {allStale ? (
+                            <>
+                              <span className="text-slate-300">Vínculo viejo{itemId ? ` (${itemId})` : ''}: esa publicación ya no tiene este producto.</span>{' '}
+                              <span className="text-emerald-300">La publicación principal está bien.</span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="text-amber-300">{shortReason(targets[0]?.error || '')}</span>
+                              {itemId && ` (${itemId})`}
+                              {targets.length > 1 && ` (+${targets.length - 1})`} · próximo intento {clock(f.nextTryAt)}
+                            </>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">

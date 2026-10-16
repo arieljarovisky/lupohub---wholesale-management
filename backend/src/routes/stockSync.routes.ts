@@ -2,6 +2,7 @@ import { NextFunction, Request, Response, Router } from 'express';
 import { authMiddleware } from '../middleware/auth';
 import {
   checkOrdersNow,
+  cleanupStaleLinks,
   dismissAlert,
   dismissAllAlerts,
   dismissLine,
@@ -34,6 +35,7 @@ router.get('/variants', searchVariants);
 router.post('/resync-all', resyncAll);
 router.post('/retry-all', retryAll);
 router.post('/retry/:variantId', retryOne);
+router.post('/links/cleanup-stale', cleanupStaleLinks);
 router.get('/links/:variantId', getLinks);
 router.post('/links/:variantId/fix', fixLink);
 router.post('/links/:variantId/remove', removeLink);

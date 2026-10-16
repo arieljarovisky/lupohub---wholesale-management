@@ -9,12 +9,21 @@ import { buildTnStockUpdateBody, readTnVariantStock } from '../utils/tnVariantSt
 import {
   enrichMlItemVariationsForMatch,
   matchMlVariationForVariantLink,
+  mlVariationSkuFromApi,
+  skusCompatible,
 } from '../utils/mlVariationMatch';
 import { fetchMlItem, getMlAccessToken, mlErrorMessage, withMlRetry } from './mlClient';
 
 export type PushResult =
-  | { ok: true; skipped?: string }
+  | {
+      ok: true;
+      skipped?: string;
+      /** La variación guardada ya no existía y se encontró la correcta por código exacto: hay que actualizar el vínculo. */
+      healedVariationId?: string;
+    }
   | { ok: false; error: string; permanent?: boolean };
+
+const ML_UNDER_REVIEW = 'Publicación en revisión en Mercado Libre: no deja cambiar el stock hasta que la liberen';
 
 const TN_USER_AGENT = process.env.TIENDA_NUBE_USER_AGENT || 'LupoHub (support@lupo.ar)';
 
@@ -99,6 +108,9 @@ export async function pushMercadoLibre(
     if (item.status === 'closed') {
       return { ok: true, skipped: 'Publicación finalizada en Mercado Libre' };
     }
+    if (item.status === 'under_review' || item.status === 'inactive') {
+      return { ok: true, skipped: ML_UNDER_REVIEW };
+    }
     if (item.shipping?.logistic_type === 'fulfillment') {
       return { ok: true, skipped: 'Publicación en FULL: el stock lo maneja Mercado Libre' };
     }
@@ -135,7 +147,13 @@ export async function pushMercadoLibre(
         error: `No encuentro la variación en la publicación ${itemId}${variationId ? ` (variación ${variationId} ya no está)` : ''}. Revisá el vínculo.`,
       };
     }
-    if (Number(target.available_quantity) === units) return { ok: true };
+    // La variación guardada desapareció pero encontramos la correcta con el MISMO código: se corrige el vínculo solo.
+    let healedVariationId: string | undefined;
+    if (variationId && String(target.id) !== String(variationId)) {
+      const remoteSku = mlVariationSkuFromApi(target).trim();
+      if (hints.sku && remoteSku && skusCompatible(String(hints.sku), remoteSku)) healedVariationId = String(target.id);
+    }
+    if (Number(target.available_quantity) === units) return { ok: true, healedVariationId };
 
     try {
       await withMlRetry(() =>
@@ -160,9 +178,10 @@ export async function pushMercadoLibre(
         axios.put(`https://api.mercadolibre.com/items/${itemId}`, { variations: payload }, { headers })
       );
     }
-    return { ok: true };
+    return { ok: true, healedVariationId };
   } catch (e: any) {
     const status = e?.response?.status;
+    if (/under_review/i.test(mlErrorMessage(e))) return { ok: true, skipped: ML_UNDER_REVIEW };
     if (status === 401 || status === 403) {
       return { ok: false, error: `Mercado Libre rechazó el cambio: ${mlErrorMessage(e)}` };
     }

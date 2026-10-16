@@ -298,3 +298,35 @@ export async function removeVariantLink(variantId: string, key: string): Promise
   await retryVariantNow(variantId);
   return 'Listo, vínculo quitado. Esa publicación ya no recibe el stock de este producto.';
 }
+
+/** Errores que significan "este vínculo apunta a algo que ya no existe" (no se arreglan reintentando). */
+export function isDeadLinkError(error: string): boolean {
+  return /no encuentro la variaci|ya no existe|no existe en mercado libre|no se encontr/i.test(error || '');
+}
+
+/**
+ * Quita los vínculos viejos: los que apuntan a algo que ya no existe, SOLO cuando ese producto
+ * tiene otra publicación en la misma plataforma que funciona bien (o sea, no se queda sin sincronizar).
+ */
+export async function removeStaleLinks(): Promise<number> {
+  const rows = (await query(
+    `SELECT t.variant_id, t.target_key, t.platform, t.last_error
+     FROM stock_sync_targets t
+     WHERE t.ok = 0
+       AND EXISTS (
+         SELECT 1 FROM stock_sync_targets o
+         WHERE o.variant_id = t.variant_id AND o.platform = t.platform AND o.ok = 1
+       )`
+  )) as any[];
+  let removed = 0;
+  for (const r of rows) {
+    if (!isDeadLinkError(String(r.last_error || ''))) continue;
+    try {
+      await removeVariantLink(String(r.variant_id), String(r.target_key));
+      removed++;
+    } catch (e: any) {
+      console.warn(`[StockSync cleanup] ${r.variant_id} ${r.target_key}:`, e?.message || e);
+    }
+  }
+  return removed;
+}

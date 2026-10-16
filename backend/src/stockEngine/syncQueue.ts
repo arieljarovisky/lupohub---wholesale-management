@@ -56,6 +56,26 @@ async function recordTarget(variantId: string, target: SyncTarget, qty: number, 
   );
 }
 
+/** Apunta el vínculo de ML a la variación nueva (misma publicación, mismo código). */
+async function healMlLink(variantId: string, target: SyncTarget, newVar: string): Promise<void> {
+  const oldVar = target.externalVariantId || '';
+  await execute(
+    `UPDATE IGNORE variant_publications SET external_variant_id = ?
+     WHERE variant_id = ? AND platform = 'mercadolibre' AND external_product_id = ? AND external_variant_id = ?`,
+    [newVar, variantId, target.productId, oldVar]
+  );
+  // Si ya existía un vínculo con la variación nueva, el UPDATE IGNORE deja el viejo: se borra.
+  await execute(
+    `DELETE FROM variant_publications WHERE variant_id = ? AND platform = 'mercadolibre' AND external_product_id = ? AND external_variant_id = ?`,
+    [variantId, target.productId, oldVar]
+  );
+  await execute(
+    `UPDATE product_variants SET mercado_libre_variant_id = ? WHERE id = ? AND COALESCE(mercado_libre_variant_id, '') = ?`,
+    [newVar, variantId, oldVar]
+  );
+  console.log(`[StockSync] Vínculo corregido solo: variante ${variantId} → ${target.productId} variación ${oldVar || '-'} → ${newVar}`);
+}
+
 /** Manda el stock actual de una variante a todas sus publicaciones (o solo a las plataformas pedidas). */
 export async function pushVariant(
   variantId: string,
@@ -70,6 +90,16 @@ export async function pushVariant(
   for (const target of targets) {
     const { qty, result } = await pushTarget(target, stock);
     results.push({ target, qty, result });
+    if (result.ok && result.healedVariationId) {
+      await healMlLink(variantId, target, result.healedVariationId).catch((e) =>
+        console.warn('[StockSync] No pude guardar el vínculo corregido:', e?.message || e)
+      );
+      // El estado se guarda con la clave nueva; la vieja se borra abajo al limpiar.
+      const healed = { ...target, key: `ml:${target.productId}/${result.healedVariationId}`, externalVariantId: result.healedVariationId };
+      await recordTarget(variantId, healed, qty, result).catch(() => undefined);
+      targets[targets.indexOf(target)] = healed;
+      continue;
+    }
     await recordTarget(variantId, target, qty, result).catch(() => undefined);
   }
   // Limpiar estados de publicaciones que ya no están vinculadas.

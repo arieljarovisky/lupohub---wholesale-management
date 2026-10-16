@@ -21,7 +21,8 @@ export type StockSyncOverview = {
     variant: SyncVariant;
     attempts: number;
     nextTryAt: string;
-    targets: Array<{ label: string; error: string }>;
+    /** stale = vínculo viejo: apunta a algo que ya no existe, pero el producto tiene otra publicación que anda bien. */
+    targets: Array<{ label: string; error: string; stale?: boolean }>;
     error: string;
   }>;
   unmatched: Array<{
@@ -100,6 +101,7 @@ export const stockSyncApi = {
     request<{ links: VariantLink[] }>(`/stock-sync/links/${encodeURIComponent(variantId)}`, 'GET', undefined, undefined, 60000).then((r) => r.links),
   fixLink: (variantId: string, key: string, externalVariantId: string) =>
     request<Msg>(`/stock-sync/links/${encodeURIComponent(variantId)}/fix`, 'POST', { key, externalVariantId }),
+  cleanupStaleLinks: () => request<Msg & { removed: number }>('/stock-sync/links/cleanup-stale', 'POST', {}, undefined, 120000),
   removeLink: (variantId: string, key: string) =>
     request<Msg>(`/stock-sync/links/${encodeURIComponent(variantId)}/remove`, 'POST', { key }),
   reprocessOrder: (platform: 'tiendanube' | 'mercadolibre', orderId: string) =>
