@@ -3,6 +3,8 @@ import { request } from './httpClient';
 export type SyncVariant = {
   variantId: string;
   productName: string;
+  /** Código del artículo (padre); se usa para abrirlo en Inventario. */
+  productSku?: string;
   sku: string;
   color: string;
   size: string;

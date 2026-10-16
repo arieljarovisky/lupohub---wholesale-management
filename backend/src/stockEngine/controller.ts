@@ -25,6 +25,7 @@ function variantDto(r: any) {
   return {
     variantId: String(r.id),
     productName: r.product_name ?? '',
+    productSku: r.product_sku ?? '',
     sku: r.sku ?? '',
     color: r.color_name ?? '',
     size: r.size_code ?? '',

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { stockSyncApi, StockSyncOverview, SyncVariant, VariantLink } from '../services/stockSyncApi';
 import { useNotification } from '../context/NotificationContext';
+import { INVENTORY_STORAGE_KEY } from '../utils/inventoryUtils';
 
 const REFRESH_MS = 15000;
 const PAGE = 15;
@@ -63,11 +64,50 @@ function shortReason(error: string): string {
   return e.length > 90 ? `${e.slice(0, 90)}…` : e || 'Error desconocido';
 }
 
-function platformOf(label: string): 'mercadolibre' | 'tiendanube' | null {
-  if (/mercado libre/i.test(label)) return 'mercadolibre';
-  if (/tienda nube/i.test(label)) return 'tiendanube';
+function platformOf(text: string): 'mercadolibre' | 'tiendanube' | null {
+  if (/mercado libre|\bML[A-Z]{1,2}\d/i.test(text)) return 'mercadolibre';
+  if (/tienda nube/i.test(text)) return 'tiendanube';
   return null;
 }
+
+/** Abre Inventario con el artículo ya buscado (y los filtros limpios). */
+function openInInventory(v: SyncVariant | null | undefined) {
+  if (!v) return;
+  const search = (v.productSku || v.sku || v.productName || '').trim();
+  try {
+    sessionStorage.setItem(
+      INVENTORY_STORAGE_KEY,
+      JSON.stringify({
+        search,
+        page: 1,
+        subView: 'mine',
+        hideZeroStock: false,
+        showHiddenVariants: false,
+        filterSize: 'ALL',
+        filterCategory: 'ALL',
+        filterColor: 'ALL',
+      })
+    );
+  } catch {
+    /* si el navegador no deja guardar, igual se abre Inventario */
+  }
+  window.location.hash = 'inventory';
+}
+
+/** Nombre del artículo que, al tocarlo, lleva a Inventario. */
+const ProductLink: React.FC<{ variant: SyncVariant | null | undefined; className?: string }> = ({ variant, className = '' }) =>
+  variant ? (
+    <button
+      type="button"
+      onClick={() => openInInventory(variant)}
+      title="Ver en Inventario"
+      className={`text-left hover:text-blue-300 hover:underline underline-offset-2 focus:outline-none focus-visible:text-blue-300 ${className}`}
+    >
+      {variantName(variant)}
+    </button>
+  ) : (
+    <span className={className}>Producto</span>
+  );
 
 const PlatformIcon: React.FC<{ platform: string | null; size?: number }> = ({ platform, size = 16 }) =>
   platform === 'mercadolibre' ? (
@@ -347,7 +387,7 @@ const FixLinkModal: React.FC<{
           <div className="min-w-0">
             <h3 className="text-lg font-bold text-white">Arreglar vínculo</h3>
             <p className="text-sm text-slate-400 truncate">
-              {variantName(variant)} · stock {variant.stock}
+              <ProductLink variant={variant} /> · stock {variant.stock}
             </p>
           </div>
           <button type="button" onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-300" aria-label="Cerrar">
@@ -713,10 +753,10 @@ const StockSync: React.FC = () => {
                   const full = targets.map((t) => `${t.label ? `${t.label}: ` : ''}${t.error}`).join('\n');
                   return (
                     <li key={row.key} className="px-3 py-2.5 flex items-center gap-3 hover:bg-slate-900/60">
-                      <PlatformIcon platform={platformOf(targets[0]?.label || '')} />
+                      <PlatformIcon platform={platformOf(`${targets[0]?.label || ''} ${targets[0]?.error || ''}`)} />
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-semibold truncate">
-                          {variantName(f.variant)} <span className="font-normal text-slate-400">· stock {f.variant.stock}</span>
+                          <ProductLink variant={f.variant} /> <span className="font-normal text-slate-400">· stock {f.variant.stock}</span>
                         </div>
                         <div className="text-xs text-slate-400 truncate" title={full}>
                           <span className="text-amber-300">{shortReason(targets[0]?.error || '')}</span>
@@ -744,7 +784,7 @@ const StockSync: React.FC = () => {
                     <AlertTriangle size={16} className="text-amber-300 shrink-0" />
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-semibold truncate">
-                        {a.variant ? variantName(a.variant) : 'Producto'}
+                        <ProductLink variant={a.variant} />
                         {a.variant && <span className={`font-normal ${a.variant.stock < 0 ? 'text-red-300' : 'text-slate-400'}`}> · stock {a.variant.stock}</span>}
                       </div>
                       <div className="text-xs text-slate-400 truncate" title={a.message}>
@@ -797,7 +837,8 @@ const StockSync: React.FC = () => {
                     <div className="flex-1 min-w-0">
                       <div className="text-sm truncate">
                         <span className="font-semibold">{m.what}</span>
-                        <span className="text-slate-400"> · {variantName(m.variant)}</span>
+                        <span className="text-slate-400"> · </span>
+                        <ProductLink variant={m.variant} className="text-slate-400" />
                       </div>
                       <div className="text-xs text-slate-500">{timeAgo(m.date)}</div>
                     </div>
