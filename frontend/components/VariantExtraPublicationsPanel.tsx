@@ -7,8 +7,7 @@ import {
   extractMercadoLibreVariationIdFromUrl,
 } from '../utils/mercadoLibreItemId';
 import { normalizeTiendaNubeProductId, extractTiendaNubeVariantFromUrl } from '../utils/tiendaNubeUrl';
-
-const PACK_OPTIONS = [1, 2, 3, 6, 12] as const;
+import PackSizeInput from './PackSizeInput';
 
 type Platform = 'mercadolibre' | 'tiendanube';
 
@@ -406,22 +405,12 @@ const VariantExtraPublicationsPanel: React.FC<VariantExtraPublicationsPanelProps
 
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[11px] text-slate-500">Pack:</span>
-            {PACK_OPTIONS.map((n) => (
-              <button
-                key={n}
-                type="button"
-                onClick={() => setAddPubPackSize(n)}
-                className={`min-w-[32px] px-2 py-1 rounded-md text-xs font-bold ${
-                  addPubPackSize === n
-                    ? isMl
-                      ? 'bg-amber-500 text-white'
-                      : 'bg-cyan-500 text-white'
-                    : 'bg-slate-700 text-slate-400'
-                }`}
-              >
-                x{n}
-              </button>
-            ))}
+            <PackSizeInput
+              tone={isMl ? 'amber' : 'cyan'}
+              value={addPubPackSize}
+              onChange={setAddPubPackSize}
+            />
+            <span className="text-[10px] text-slate-500">unidades por venta</span>
           </div>
 
           <button

@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { api } from '../services/api';
 import VariantExtraPublicationsPanel from './VariantExtraPublicationsPanel';
+import PackSizeInput from './PackSizeInput';
 import { labelTalle, codigoTalleParaSku } from '../utils/tallesTango';
 import { sizesAreBizDuplicatePair, sizesMatchForLink, getSizeCanonicalSet, colorsMatchForLink } from '../utils/inventoryUtils';
 import { normalizeMercadoLibreItemId, mercadoLibreItemIdsMatch, mercadoLibreItemIdCandidates } from '../utils/mercadoLibreItemId';
@@ -68,8 +69,6 @@ function dedupeMlCatalogRows(rows: MlVariationRow[]): MlVariationRow[] {
 }
 
 const norm = (s: string) => (s || '').toString().trim().toLowerCase().replace(/\s+/g, ' ');
-
-const PACK_OPTIONS = [1, 2, 3, 6, 12] as const;
 
 type RowLinkStatus = 'complete' | 'partial' | 'empty';
 
@@ -2374,23 +2373,12 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                     className="flex flex-wrap items-center gap-2 px-2.5 py-2 rounded-lg bg-slate-900/50 border border-amber-800/30"
                   >
                     <span className="flex-1 min-w-0 font-mono text-xs text-amber-100 truncate">{src.id}</span>
-                    <div className="flex items-center gap-0.5 shrink-0">
-                      {PACK_OPTIONS.map((n) => (
-                        <button
-                          key={n}
-                          type="button"
-                          onClick={() => updateMlSourcePack(src.id, n)}
-                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors ${
-                            srcPack === n
-                              ? 'bg-amber-600 text-white'
-                              : 'bg-slate-800 text-slate-400 hover:text-amber-200'
-                          }`}
-                          title={`Pack x${n}`}
-                        >
-                          x{n}
-                        </button>
-                      ))}
-                    </div>
+                    <PackSizeInput
+                      compact
+                      tone="amber"
+                      value={srcPack}
+                      onChange={(n) => updateMlSourcePack(src.id, n)}
+                    />
                     {src.variationCount != null && (
                       <span className="text-[10px] text-emerald-400 shrink-0">{src.variationCount} var.</span>
                     )}
@@ -2480,23 +2468,12 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                     className="flex flex-wrap items-center gap-2 px-2.5 py-2 rounded-lg bg-slate-900/50 border border-cyan-800/30"
                   >
                     <span className="flex-1 min-w-0 font-mono text-xs text-cyan-100 truncate">{src.id}</span>
-                    <div className="flex items-center gap-0.5 shrink-0">
-                      {PACK_OPTIONS.map((n) => (
-                        <button
-                          key={n}
-                          type="button"
-                          onClick={() => updateTnSourcePack(src.id, n)}
-                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition-colors ${
-                            srcPack === n
-                              ? 'bg-cyan-600 text-white'
-                              : 'bg-slate-800 text-slate-400 hover:text-cyan-200'
-                          }`}
-                          title={`Pack x${n}`}
-                        >
-                          x{n}
-                        </button>
-                      ))}
-                    </div>
+                    <PackSizeInput
+                      compact
+                      tone="cyan"
+                      value={srcPack}
+                      onChange={(n) => updateTnSourcePack(src.id, n)}
+                    />
                     {src.variationCount != null && (
                       <span className="text-[10px] text-emerald-400 shrink-0">{src.variationCount} var.</span>
                     )}

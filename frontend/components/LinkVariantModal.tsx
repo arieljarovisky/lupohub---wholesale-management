@@ -21,10 +21,9 @@ import {
   extractMercadoLibreVariationIdFromUrl,
 } from '../utils/mercadoLibreItemId';
 import { normalizeTiendaNubeProductId, extractTiendaNubeVariantFromUrl } from '../utils/tiendaNubeUrl';
+import PackSizeInput from './PackSizeInput';
 
 const INVENTORY_PRODUCT_FETCH_OPTS = { includeRelated: false } as const;
-const PACK_OPTIONS = [1, 2, 3, 6, 12] as const;
-
 type Platform = 'mercadolibre' | 'tiendanube';
 
 type ExternalVariantRow = {
@@ -576,22 +575,12 @@ const LinkVariantModal: React.FC<LinkVariantModalProps> = ({ variant, onClose, o
 
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-[11px] text-slate-500 w-full sm:w-auto">Pack:</span>
-              {PACK_OPTIONS.map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  onClick={() => setAddPubPackSize(n)}
-                  className={`min-w-[36px] px-2 py-1.5 rounded-md text-xs font-bold ${
-                    addPubPackSize === n
-                      ? isMl
-                        ? 'bg-amber-500 text-white'
-                        : 'bg-cyan-500 text-white'
-                      : 'bg-slate-700 text-slate-400'
-                  }`}
-                >
-                  x{n}
-                </button>
-              ))}
+              <PackSizeInput
+                tone={isMl ? 'amber' : 'cyan'}
+                value={addPubPackSize}
+                onChange={setAddPubPackSize}
+              />
+              <span className="text-[10px] text-slate-500">unidades por venta</span>
             </div>
 
             <button
@@ -636,32 +625,14 @@ const LinkVariantModal: React.FC<LinkVariantModalProps> = ({ variant, onClose, o
             <div className="space-y-2">
               <div>
                 <span className="text-[10px] text-amber-400 font-semibold">ML</span>
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {PACK_OPTIONS.map((n) => (
-                    <button
-                      key={n}
-                      type="button"
-                      onClick={() => setLinkPackMl(n)}
-                      className={`px-2 py-1 rounded text-xs font-bold ${linkPackMl === n ? 'bg-amber-500 text-white' : 'bg-slate-700 text-slate-400'}`}
-                    >
-                      x{n}
-                    </button>
-                  ))}
+                <div className="mt-1">
+                  <PackSizeInput tone="amber" value={linkPackMl} onChange={setLinkPackMl} />
                 </div>
               </div>
               <div>
                 <span className="text-[10px] text-cyan-400 font-semibold">TN</span>
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {PACK_OPTIONS.map((n) => (
-                    <button
-                      key={n}
-                      type="button"
-                      onClick={() => setLinkPackTn(n)}
-                      className={`px-2 py-1 rounded text-xs font-bold ${linkPackTn === n ? 'bg-cyan-500 text-white' : 'bg-slate-700 text-slate-400'}`}
-                    >
-                      x{n}
-                    </button>
-                  ))}
+                <div className="mt-1">
+                  <PackSizeInput tone="cyan" value={linkPackTn} onChange={setLinkPackTn} />
                 </div>
               </div>
             </div>
