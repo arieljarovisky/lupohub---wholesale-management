@@ -538,10 +538,17 @@ function scheduleSyncToExternalPlatforms(variantId: string, newStock: number): v
 async function runExternalSyncWithRetries(
   label: string,
   run: () => Promise<boolean>,
-  attempts: number = 3
+  attempts: number = 3,
+  isStale?: () => boolean
 ): Promise<boolean> {
   let lastOk = false;
   for (let i = 1; i <= attempts; i++) {
+    // Si ya se pidió un stock más nuevo para esta variante, no reenviar este valor viejo
+    // (antes un reintento pisaba en TN el valor correcto con uno anterior).
+    if (isStale?.()) {
+      console.log(`[Sync] ${label}: omitido, hay un stock más nuevo en cola.`);
+      return true;
+    }
     try {
       lastOk = await run();
       if (lastOk) return true;
@@ -566,16 +573,48 @@ export type SyncStockExternalResult = {
 
 const ALL_SYNC_PLATFORMS: SyncExternalPlatform[] = ['mercadolibre', 'tiendanube'];
 
+// Cola por variante: los syncs de una misma variante se ejecutan en orden, nunca en paralelo.
+const variantSyncChains = new Map<string, Promise<unknown>>();
+// Último pedido de sync por variante+plataforma; un sync viejo no reintenta si hay uno más nuevo.
+const variantSyncGeneration = new Map<string, number>();
+
 // Sincronizar stock a publicaciones vinculadas (variant_publications). Si no hay ninguna, fallback a columnas legacy.
-export const syncStockToExternalPlatforms = async (
+export const syncStockToExternalPlatforms = (
   variantId: string,
   newStock: number,
   opts?: { platforms?: SyncExternalPlatform[] }
 ): Promise<SyncStockExternalResult> => {
-  const result: SyncStockExternalResult = { mlAttempted: 0, mlOk: 0, tnAttempted: 0, tnOk: 0, logs: [] };
   const platforms = new Set(
     (opts?.platforms?.length ? opts.platforms : ALL_SYNC_PLATFORMS).filter(Boolean)
   );
+  const myGeneration: Partial<Record<SyncExternalPlatform, number>> = {};
+  for (const p of platforms) {
+    const key = `${variantId}:${p}`;
+    const gen = (variantSyncGeneration.get(key) || 0) + 1;
+    variantSyncGeneration.set(key, gen);
+    myGeneration[p] = gen;
+  }
+  const isStale = (p: SyncExternalPlatform) => variantSyncGeneration.get(`${variantId}:${p}`) !== myGeneration[p];
+
+  const prev = variantSyncChains.get(variantId) ?? Promise.resolve();
+  const run = prev.then(() => runSyncStockToExternalPlatforms(variantId, newStock, platforms, isStale));
+  const tail = run.catch(() => undefined);
+  variantSyncChains.set(variantId, tail);
+  void tail.then(() => {
+    if (variantSyncChains.get(variantId) === tail) variantSyncChains.delete(variantId);
+  });
+  return run;
+};
+
+const runSyncStockToExternalPlatforms = async (
+  variantId: string,
+  newStock: number,
+  platforms: Set<SyncExternalPlatform>,
+  isStale: (p: SyncExternalPlatform) => boolean
+): Promise<SyncStockExternalResult> => {
+  const result: SyncStockExternalResult = { mlAttempted: 0, mlOk: 0, tnAttempted: 0, tnOk: 0, logs: [] };
+  const tnStale = () => isStale('tiendanube');
+  const mlStale = () => isStale('mercadolibre');
   try {
     const variantMeta = await get(
       `SELECT pv.id, COALESCE(pv.external_sku, pv.sku) AS sku,
@@ -625,7 +664,9 @@ export const syncStockToExternalPlatforms = async (
           result.tnAttempted++;
           tasks.push(
             runExternalSyncWithRetries(label, () =>
-              updateTiendaNubeStock(pub.external_product_id, pub.external_variant_id, stockToSend)
+              updateTiendaNubeStock(pub.external_product_id, pub.external_variant_id, stockToSend),
+              3,
+              tnStale
             ).then((ok) => {
               if (ok) result.tnOk++;
               result.logs.push(ok ? `[OK] ${skuLabel} → ${label} = ${stockToSend}` : `[ERROR] ${skuLabel} → ${label}`);
@@ -641,7 +682,9 @@ export const syncStockToExternalPlatforms = async (
               updateMercadoLibreStockByItem(itemId, stockToSend, {
                 ...matchOpts,
                 mlVariationId: variationId,
-              })
+              }),
+              3,
+              mlStale
             ).then((ok) => {
               if (ok) result.mlOk++;
               result.logs.push(ok ? `[OK] ${skuLabel} → ${label} = ${stockToSend}` : `[ERROR] ${skuLabel} → ${label}`);
@@ -687,7 +730,9 @@ export const syncStockToExternalPlatforms = async (
           const label = `TN legacy=${variant.tienda_nube_id}/${variant.tienda_nube_variant_id}`;
           result.tnAttempted++;
           const ok = await runExternalSyncWithRetries(label, () =>
-            updateTiendaNubeStock(variant.tienda_nube_id, variant.tienda_nube_variant_id, stockTN)
+            updateTiendaNubeStock(variant.tienda_nube_id, variant.tienda_nube_variant_id, stockTN),
+            3,
+            tnStale
           );
           if (ok) result.tnOk++;
           result.logs.push(ok ? `[OK] ${skuLabel} → ${label} = ${stockTN}` : `[ERROR] ${skuLabel} → ${label}`);
@@ -707,7 +752,9 @@ export const syncStockToExternalPlatforms = async (
             const label = `ML legacy item=${ownMlItemId}`;
             result.mlAttempted++;
             const ok = await runExternalSyncWithRetries(label, () =>
-              updateMercadoLibreStockByItem(ownMlItemId, stockML, matchOpts)
+              updateMercadoLibreStockByItem(ownMlItemId, stockML, matchOpts),
+              3,
+              mlStale
             );
             if (ok) result.mlOk++;
             result.logs.push(ok ? `[OK] ${skuLabel} → ${label} = ${stockML}` : `[ERROR] ${skuLabel} → ${label}`);
@@ -715,7 +762,9 @@ export const syncStockToExternalPlatforms = async (
             const label = `ML legacy=${parentMlId}`;
             result.mlAttempted++;
             const ok = await runExternalSyncWithRetries(label, () =>
-              updateMercadoLibreStockByItem(parentMlId, stockML, matchOpts)
+              updateMercadoLibreStockByItem(parentMlId, stockML, matchOpts),
+              3,
+              mlStale
             );
             if (ok) result.mlOk++;
             result.logs.push(ok ? `[OK] ${skuLabel} → ${label} = ${stockML}` : `[ERROR] ${skuLabel} → ${label}`);
