@@ -2242,15 +2242,230 @@ export const handleTiendaNubeWebhook = async (req: Request, res: Response) => {
 };
 
 // Procesar orden de Tienda Nube y descontar stock
-const processTiendaNubeOrder = async (orderId: string) => {
+/** Busca la variante del hub para una línea de venta TN (vínculo guardado, columnas legacy o SKU). */
+async function resolveTnSaleLineVariant(
+  tnVariantId: string | null,
+  itemSku: string
+): Promise<{ id: string; current_stock: number; tn_pack?: number } | null> {
+  let variant: { id: string; current_stock: number; tn_pack?: number } | null = null;
+  if (tnVariantId) {
+    const fromPub = await get(
+      `SELECT vp.variant_id AS id, COALESCE(vp.pack_size, 1) AS tn_pack FROM variant_publications vp WHERE vp.platform = 'tiendanube' AND vp.external_variant_id = ? LIMIT 1`,
+      [tnVariantId]
+    );
+    if (fromPub?.id) {
+      const row = await get(`SELECT stock AS current_stock FROM stocks WHERE variant_id = ?`, [fromPub.id]);
+      variant = { id: fromPub.id, current_stock: Number(row?.current_stock ?? 0), tn_pack: Math.max(1, Number(fromPub.tn_pack) || 1) };
+    }
+  }
+  if (!variant?.id && tnVariantId) {
+    variant = await get(
+      `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
+       FROM product_variants pv
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       LEFT JOIN stocks s ON s.variant_id = pv.id
+       WHERE pv.tienda_nube_variant_id = ?`,
+      [tnVariantId]
+    );
+  }
+  if (!variant?.id && itemSku) {
+    variant = await get(
+      `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
+       FROM product_variants pv
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       LEFT JOIN stocks s ON s.variant_id = pv.id
+       WHERE COALESCE(pv.external_sku, pv.sku) = ? OR pv.sku = ?`,
+      [itemSku, itemSku]
+    );
+  }
+  if (!variant?.id && itemSku) {
+    variant = await get(
+      `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
+       FROM product_variants pv
+       LEFT JOIN stocks s ON s.variant_id = pv.id
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       WHERE p.sku = ? OR pv.sku LIKE ? OR pv.external_sku = ?`,
+      [itemSku, `${itemSku}%`, itemSku]
+    );
+  }
+  if (!variant?.id && itemSku) {
+    const skuNorm = normalizeSkuForMatch(itemSku);
+    const skuNormNoZero = skuNorm.replace(/^0+/, '');
+    if (skuNorm) {
+      variant = await get(
+        `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
+         FROM product_variants pv
+         LEFT JOIN stocks s ON s.variant_id = pv.id
+         JOIN product_colors pc ON pc.id = pv.product_color_id
+         JOIN products p ON p.id = pc.product_id
+         WHERE (
+           REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '') = ?
+           OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '')) = ?
+           OR REPLACE(REPLACE(REPLACE(UPPER(TRIM(p.sku)), '-', ''), '/', ''), ' ', '') = ?
+           OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(UPPER(TRIM(p.sku)), '-', ''), '/', ''), ' ', '')) = ?
+         )
+         LIMIT 1`,
+        [skuNorm, skuNormNoZero, skuNorm, skuNormNoZero]
+      );
+    }
+  }
+  return variant?.id ? variant : null;
+}
+
+/** Busca la variante del hub para una línea de venta ML (vínculo guardado, columnas legacy o SKU). */
+async function resolveMlSaleLineVariant(
+  mlItemId: string | number | undefined,
+  mlVariationId: string | number | undefined,
+  itemSku: string
+): Promise<{ id: string; current_stock: number; ml_pack?: number } | null> {
+  let variant: { id: string; current_stock: number; ml_pack?: number } | null = null;
+  if (mlItemId) {
+    const extVariantId = (mlVariationId && String(mlVariationId).trim()) || '';
+    const fromPub = await get(
+      `SELECT vp.variant_id AS id, COALESCE(vp.pack_size, 1) AS ml_pack FROM variant_publications vp WHERE vp.platform = 'mercadolibre' AND vp.external_product_id = ? AND vp.external_variant_id = ? LIMIT 1`,
+      [mlItemId, extVariantId]
+    );
+    if (fromPub?.id) {
+      const row = await get(`SELECT stock AS current_stock FROM stocks WHERE variant_id = ?`, [fromPub.id]);
+      variant = { id: fromPub.id, current_stock: Number(row?.current_stock ?? 0), ml_pack: Math.max(1, Number(fromPub.ml_pack) || 1) };
+    }
+  }
+  // Priorizar variation_id antes que item_id suelto (publicación con variaciones).
+  if (!variant?.id && mlVariationId) {
+    variant = await get(
+      `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
+       FROM product_variants pv
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       LEFT JOIN stocks s ON s.variant_id = pv.id
+       WHERE pv.mercado_libre_variant_id = ?`,
+      [mlVariationId]
+    );
+  }
+  // Fallback legacy: publicación propia por variante (sin variation_id en ML).
+  if (!variant?.id && mlItemId && !mlVariationId) {
+    variant = await get(
+      `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
+       FROM product_variants pv
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       LEFT JOIN stocks s ON s.variant_id = pv.id
+       WHERE pv.mercado_libre_item_id = ?
+       LIMIT 1`,
+      [mlItemId]
+    );
+  }
+  // Fallback por producto padre ML: cuando el vínculo está en products.mercado_libre_id
+  // y la venta viene sin variation_id.
+  if (!variant?.id && mlItemId) {
+    if (itemSku) {
+      const skuNorm = normalizeSkuForMatch(itemSku);
+      const skuNormNoZero = skuNorm.replace(/^0+/, '');
+      variant = await get(
+        `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
+         FROM products p
+         JOIN product_colors pc ON pc.product_id = p.id
+         JOIN product_variants pv ON pv.product_color_id = pc.id
+         LEFT JOIN stocks s ON s.variant_id = pv.id
+         WHERE p.mercado_libre_id = ?
+           AND (
+             REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '') = ?
+             OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '')) = ?
+           )
+         LIMIT 1`,
+        [mlItemId, skuNorm, skuNormNoZero]
+      );
+    }
+    // Si sigue sin match y el artículo local tiene una sola variante, usarla
+    if (!variant?.id) {
+      variant = await get(
+        `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
+         FROM products p
+         JOIN product_colors pc ON pc.product_id = p.id
+         JOIN product_variants pv ON pv.product_color_id = pc.id
+         LEFT JOIN stocks s ON s.variant_id = pv.id
+         WHERE p.mercado_libre_id = ?
+         GROUP BY pv.id, s.stock, p.mercado_libre_pack_size
+         ORDER BY pv.id
+         LIMIT 1`,
+        [mlItemId]
+      );
+      const countRow = await get(
+        `SELECT COUNT(*) AS n
+         FROM products p
+         JOIN product_colors pc ON pc.product_id = p.id
+         JOIN product_variants pv ON pv.product_color_id = pc.id
+         WHERE p.mercado_libre_id = ?`,
+        [mlItemId]
+      );
+      if (Number(countRow?.n || 0) !== 1) {
+        variant = null;
+      }
+    }
+  }
+  if (!variant?.id && itemSku) {
+    variant = await get(
+      `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
+       FROM product_variants pv
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       LEFT JOIN stocks s ON s.variant_id = pv.id
+       WHERE COALESCE(pv.external_sku, pv.sku) = ? OR pv.sku = ?`,
+      [itemSku, itemSku]
+    );
+  }
+  if (!variant?.id && itemSku) {
+    variant = await get(
+      `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
+       FROM product_variants pv
+       LEFT JOIN stocks s ON s.variant_id = pv.id
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       WHERE p.sku = ? OR pv.sku LIKE ? OR pv.external_sku = ?`,
+      [itemSku, `${itemSku}%`, itemSku]
+    );
+  }
+  if (!variant?.id && itemSku) {
+    const skuNorm = normalizeSkuForMatch(itemSku);
+    const skuNormNoZero = skuNorm.replace(/^0+/, '');
+    if (skuNorm) {
+      variant = await get(
+        `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
+         FROM product_variants pv
+         LEFT JOIN stocks s ON s.variant_id = pv.id
+         JOIN product_colors pc ON pc.id = pv.product_color_id
+         JOIN products p ON p.id = pc.product_id
+         WHERE (
+           REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '') = ?
+           OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '')) = ?
+           OR REPLACE(REPLACE(REPLACE(UPPER(TRIM(p.sku)), '-', ''), '/', ''), ' ', '') = ?
+           OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(UPPER(TRIM(p.sku)), '-', ''), '/', ''), ' ', '')) = ?
+         )
+         LIMIT 1`,
+        [skuNorm, skuNormNoZero, skuNorm, skuNormNoZero]
+      );
+    }
+  }
+  return variant?.id ? variant : null;
+}
+
+/**
+ * @param opts.onlyNewLines Reprocesar una orden ya descontada solo para las líneas que todavía no
+ *   generaron movimiento (p. ej. después de asociar a mano una línea sin artículo).
+ */
+const processTiendaNubeOrder = async (orderId: string, opts?: { onlyNewLines?: boolean }): Promise<number> => {
+  const onlyNewLines = opts?.onlyNewLines === true;
   try {
     const integration = await get(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
-    if (!integration?.access_token) return;
+    if (!integration?.access_token) return 0;
 
     const storeId = integration.store_id || integration.user_id;
     if (!storeId) {
       console.error('[TN Order] No hay store_id ni user_id en la integración');
-      return;
+      return 0;
     }
 
     // Idempotencia: no descontar dos veces la misma orden (p. ej. si TN reenvía el webhook)
@@ -2258,9 +2473,17 @@ const processTiendaNubeOrder = async (orderId: string) => {
       `SELECT id FROM stock_movements WHERE movement_type = 'VENTA_TIENDA_NUBE' AND reference = ? LIMIT 1`,
       [`Orden TN: ${orderId}`]
     );
-    if (alreadyProcessed) {
+    if (alreadyProcessed && !onlyNewLines) {
       console.log(`[TN Order] Orden ${orderId} ya procesada, omitiendo`);
-      return;
+      return 0;
+    }
+    const alreadyDeductedVariantIds = new Set<string>();
+    if (alreadyProcessed) {
+      const rows = (await query(
+        `SELECT DISTINCT variant_id FROM stock_movements WHERE movement_type = 'VENTA_TIENDA_NUBE' AND reference = ?`,
+        [`Orden TN: ${orderId}`]
+      )) as any[];
+      for (const r of rows || []) if (r?.variant_id) alreadyDeductedVariantIds.add(String(r.variant_id));
     }
 
     const headers = {
@@ -2292,7 +2515,7 @@ const processTiendaNubeOrder = async (orderId: string) => {
     if (orderRes.status !== 200) {
       const errBody = orderRes.data && typeof orderRes.data === 'object' ? JSON.stringify(orderRes.data) : orderRes.data;
       console.error(`[TN Order] Error al obtener orden ${orderId}: HTTP ${orderRes.status}. Si es 403, reconectá Tienda Nube (falta scope read_orders). Respuesta:`, errBody);
-      return;
+      return 0;
     }
 
     const order = orderRes.data;
@@ -2302,7 +2525,11 @@ const processTiendaNubeOrder = async (orderId: string) => {
     // Solo descontar cuando la venta está pagada
     if (order.payment_status !== 'paid') {
       console.log(`[TN Order] Orden ${orderId} no está pagada (${order.payment_status}), ignorando`);
-      return;
+      return 0;
+    }
+    if (onlyNewLines && String(order.status || '').toLowerCase() === 'cancelled') {
+      console.log(`[TN Order] Orden ${orderId} cancelada, no se descuenta stock`);
+      return 0;
     }
 
     const { deductVariantStockForChannelSale } = await import('./stock.controller');
@@ -2317,7 +2544,8 @@ const processTiendaNubeOrder = async (orderId: string) => {
 
       if (quantity === 0) continue;
 
-      if (tnProductId || tnVariantId) {
+      // Los packs multicolor se descuentan en el primer procesamiento; no repetirlos.
+      if ((tnProductId || tnVariantId) && !alreadyProcessed) {
         const { findBundleByListing, deductStockForBundleListing } = await import(
           '../services/publicationStockBundle.service'
         );
@@ -2347,72 +2575,11 @@ const processTiendaNubeOrder = async (orderId: string) => {
         }
       }
 
-      let variant: { id: string; current_stock: number; tn_pack?: number } | null = null;
-      if (tnVariantId) {
-        const fromPub = await get(
-          `SELECT vp.variant_id AS id, COALESCE(vp.pack_size, 1) AS tn_pack FROM variant_publications vp WHERE vp.platform = 'tiendanube' AND vp.external_variant_id = ? LIMIT 1`,
-          [tnVariantId]
-        );
-        if (fromPub?.id) {
-          const row = await get(`SELECT stock AS current_stock FROM stocks WHERE variant_id = ?`, [fromPub.id]);
-          variant = { id: fromPub.id, current_stock: Number(row?.current_stock ?? 0), tn_pack: Math.max(1, Number(fromPub.tn_pack) || 1) };
-        }
-      }
-      if (!variant?.id && tnVariantId) {
-        variant = await get(
-          `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
-           FROM product_variants pv
-           JOIN product_colors pc ON pc.id = pv.product_color_id
-           JOIN products p ON p.id = pc.product_id
-           LEFT JOIN stocks s ON s.variant_id = pv.id
-           WHERE pv.tienda_nube_variant_id = ?`,
-          [tnVariantId]
-        );
-      }
-      if (!variant?.id && itemSku) {
-        variant = await get(
-          `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
-           FROM product_variants pv
-           JOIN product_colors pc ON pc.id = pv.product_color_id
-           JOIN products p ON p.id = pc.product_id
-           LEFT JOIN stocks s ON s.variant_id = pv.id
-           WHERE COALESCE(pv.external_sku, pv.sku) = ? OR pv.sku = ?`,
-          [itemSku, itemSku]
-        );
-      }
-      if (!variant?.id && itemSku) {
-        variant = await get(
-          `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
-           FROM product_variants pv
-           LEFT JOIN stocks s ON s.variant_id = pv.id
-           JOIN product_colors pc ON pc.id = pv.product_color_id
-           JOIN products p ON p.id = pc.product_id
-           WHERE p.sku = ? OR pv.sku LIKE ? OR pv.external_sku = ?`,
-          [itemSku, `${itemSku}%`, itemSku]
-        );
-      }
-      if (!variant?.id && itemSku) {
-        const skuNorm = normalizeSkuForMatch(itemSku);
-        const skuNormNoZero = skuNorm.replace(/^0+/, '');
-        if (skuNorm) {
-          variant = await get(
-            `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack
-             FROM product_variants pv
-             LEFT JOIN stocks s ON s.variant_id = pv.id
-             JOIN product_colors pc ON pc.id = pv.product_color_id
-             JOIN products p ON p.id = pc.product_id
-             WHERE (
-               REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '') = ?
-               OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '')) = ?
-               OR REPLACE(REPLACE(REPLACE(UPPER(TRIM(p.sku)), '-', ''), '/', ''), ' ', '') = ?
-               OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(UPPER(TRIM(p.sku)), '-', ''), '/', ''), ' ', '')) = ?
-             )
-             LIMIT 1`,
-            [skuNorm, skuNormNoZero, skuNorm, skuNormNoZero]
-          );
-        }
-      }
+      const variant = await resolveTnSaleLineVariant(tnVariantId, itemSku);
 
+      if (variant?.id && alreadyDeductedVariantIds.has(String(variant.id))) {
+        continue;
+      }
       if (variant?.id) {
         const tnPack = Math.max(1, Number(variant.tn_pack) || 1);
         const unitsToDeduct = quantity * tnPack;
@@ -2444,8 +2611,10 @@ const processTiendaNubeOrder = async (orderId: string) => {
     } else if (discountedCount > 0) {
       console.log(`[TN Order] Orden ${orderId}: descontado stock de ${discountedCount} ítem(s).`);
     }
+    return discountedCount;
   } catch (error: any) {
     console.error('[TN Order] Error procesando orden:', error.message);
+    return 0;
   }
 };
 
@@ -2872,134 +3041,7 @@ const processMercadoLibreOrder = async (orderId: string) => {
         }
       }
 
-      let variant: { id: string; current_stock: number; ml_pack?: number } | null = null;
-      if (mlItemId) {
-        const extVariantId = (mlVariationId && String(mlVariationId).trim()) || '';
-        const fromPub = await get(
-          `SELECT vp.variant_id AS id, COALESCE(vp.pack_size, 1) AS ml_pack FROM variant_publications vp WHERE vp.platform = 'mercadolibre' AND vp.external_product_id = ? AND vp.external_variant_id = ? LIMIT 1`,
-          [mlItemId, extVariantId]
-        );
-        if (fromPub?.id) {
-          const row = await get(`SELECT stock AS current_stock FROM stocks WHERE variant_id = ?`, [fromPub.id]);
-          variant = { id: fromPub.id, current_stock: Number(row?.current_stock ?? 0), ml_pack: Math.max(1, Number(fromPub.ml_pack) || 1) };
-        }
-      }
-      // Priorizar variation_id antes que item_id suelto (publicación con variaciones).
-      if (!variant?.id && mlVariationId) {
-        variant = await get(
-          `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
-           FROM product_variants pv
-           JOIN product_colors pc ON pc.id = pv.product_color_id
-           JOIN products p ON p.id = pc.product_id
-           LEFT JOIN stocks s ON s.variant_id = pv.id
-           WHERE pv.mercado_libre_variant_id = ?`,
-          [mlVariationId]
-        );
-      }
-      // Fallback legacy: publicación propia por variante (sin variation_id en ML).
-      if (!variant?.id && mlItemId && !mlVariationId) {
-        variant = await get(
-          `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
-           FROM product_variants pv
-           JOIN product_colors pc ON pc.id = pv.product_color_id
-           JOIN products p ON p.id = pc.product_id
-           LEFT JOIN stocks s ON s.variant_id = pv.id
-           WHERE pv.mercado_libre_item_id = ?
-           LIMIT 1`,
-          [mlItemId]
-        );
-      }
-      // Fallback por producto padre ML: cuando el vínculo está en products.mercado_libre_id
-      // y la venta viene sin variation_id.
-      if (!variant?.id && mlItemId) {
-        if (itemSku) {
-          const skuNorm = normalizeSkuForMatch(itemSku);
-          const skuNormNoZero = skuNorm.replace(/^0+/, '');
-          variant = await get(
-            `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
-             FROM products p
-             JOIN product_colors pc ON pc.product_id = p.id
-             JOIN product_variants pv ON pv.product_color_id = pc.id
-             LEFT JOIN stocks s ON s.variant_id = pv.id
-             WHERE p.mercado_libre_id = ?
-               AND (
-                 REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '') = ?
-                 OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '')) = ?
-               )
-             LIMIT 1`,
-            [mlItemId, skuNorm, skuNormNoZero]
-          );
-        }
-        // Si sigue sin match y el artículo local tiene una sola variante, usarla
-        if (!variant?.id) {
-          variant = await get(
-            `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
-             FROM products p
-             JOIN product_colors pc ON pc.product_id = p.id
-             JOIN product_variants pv ON pv.product_color_id = pc.id
-             LEFT JOIN stocks s ON s.variant_id = pv.id
-             WHERE p.mercado_libre_id = ?
-             GROUP BY pv.id, s.stock, p.mercado_libre_pack_size
-             ORDER BY pv.id
-             LIMIT 1`,
-            [mlItemId]
-          );
-          const countRow = await get(
-            `SELECT COUNT(*) AS n
-             FROM products p
-             JOIN product_colors pc ON pc.product_id = p.id
-             JOIN product_variants pv ON pv.product_color_id = pc.id
-             WHERE p.mercado_libre_id = ?`,
-            [mlItemId]
-          );
-          if (Number(countRow?.n || 0) !== 1) {
-            variant = null;
-          }
-        }
-      }
-      if (!variant?.id && itemSku) {
-        variant = await get(
-          `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
-           FROM product_variants pv
-           JOIN product_colors pc ON pc.id = pv.product_color_id
-           JOIN products p ON p.id = pc.product_id
-           LEFT JOIN stocks s ON s.variant_id = pv.id
-           WHERE COALESCE(pv.external_sku, pv.sku) = ? OR pv.sku = ?`,
-          [itemSku, itemSku]
-        );
-      }
-      if (!variant?.id && itemSku) {
-        variant = await get(
-          `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
-           FROM product_variants pv
-           LEFT JOIN stocks s ON s.variant_id = pv.id
-           JOIN product_colors pc ON pc.id = pv.product_color_id
-           JOIN products p ON p.id = pc.product_id
-           WHERE p.sku = ? OR pv.sku LIKE ? OR pv.external_sku = ?`,
-          [itemSku, `${itemSku}%`, itemSku]
-        );
-      }
-      if (!variant?.id && itemSku) {
-        const skuNorm = normalizeSkuForMatch(itemSku);
-        const skuNormNoZero = skuNorm.replace(/^0+/, '');
-        if (skuNorm) {
-          variant = await get(
-            `SELECT pv.id, s.stock AS current_stock, COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack
-             FROM product_variants pv
-             LEFT JOIN stocks s ON s.variant_id = pv.id
-             JOIN product_colors pc ON pc.id = pv.product_color_id
-             JOIN products p ON p.id = pc.product_id
-             WHERE (
-               REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '') = ?
-               OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(UPPER(TRIM(COALESCE(pv.external_sku, pv.sku))), '-', ''), '/', ''), ' ', '')) = ?
-               OR REPLACE(REPLACE(REPLACE(UPPER(TRIM(p.sku)), '-', ''), '/', ''), ' ', '') = ?
-               OR TRIM(LEADING '0' FROM REPLACE(REPLACE(REPLACE(UPPER(TRIM(p.sku)), '-', ''), '/', ''), ' ', '')) = ?
-             )
-             LIMIT 1`,
-            [skuNorm, skuNormNoZero, skuNorm, skuNormNoZero]
-          );
-        }
-      }
+      const variant = await resolveMlSaleLineVariant(mlItemId, mlVariationId, itemSku);
 
       if (variant?.id) {
         if (await isMlOrderLineAlreadyProcessed(orderId, lineRef, variant.id)) {
@@ -4835,6 +4877,155 @@ export const getTiendaNubeStockTotals = async (req: Request, res: Response) => {
   }
 };
 
+type SaleLineHubLink = {
+  hubLinkStatus: 'linked' | 'bundle' | 'unlinked';
+  hubVariant: { id: string; sku: string; label: string } | null;
+};
+
+/** Datos para mostrar la variante del hub asociada a una línea de venta (con caché por request). */
+async function describeHubVariant(
+  variantId: string,
+  cache: Map<string, { id: string; sku: string; label: string } | null>
+): Promise<{ id: string; sku: string; label: string } | null> {
+  if (cache.has(variantId)) return cache.get(variantId)!;
+  const row = await get(
+    `SELECT pv.id, COALESCE(pv.external_sku, pv.sku) AS sku, p.name AS product_name,
+            c.name AS color_name, COALESCE(sz.size_code, '') AS size_code
+     FROM product_variants pv
+     JOIN product_colors pc ON pc.id = pv.product_color_id
+     JOIN products p ON p.id = pc.product_id
+     LEFT JOIN colors c ON c.id = pc.color_id
+     LEFT JOIN sizes sz ON sz.id = pv.size_id
+     WHERE pv.id = ?`,
+    [variantId]
+  );
+  const out = row?.id
+    ? {
+        id: String(row.id),
+        sku: String(row.sku || ''),
+        label: [row.product_name, row.color_name, row.size_code].filter((x: any) => x != null && String(x).trim() !== '').join(' · '),
+      }
+    : null;
+  cache.set(variantId, out);
+  return out;
+}
+
+/** Indica si una línea de venta ML/TN se puede asociar a una variante del hub (misma lógica que el descuento de stock). */
+async function resolveSaleLineHubLink(
+  platform: 'mercadolibre' | 'tiendanube',
+  externalProductId: string,
+  externalVariantId: string,
+  sku: string,
+  cache: Map<string, any>
+): Promise<SaleLineHubLink> {
+  const key = `${platform}|${externalProductId}|${externalVariantId}|${sku}`;
+  if (cache.has(key)) return cache.get(key);
+  let result: SaleLineHubLink = { hubLinkStatus: 'unlinked', hubVariant: null };
+  try {
+    const { findBundleByListing } = await import('../services/publicationStockBundle.service');
+    const bundle = externalProductId || externalVariantId
+      ? await findBundleByListing(platform, externalProductId || externalVariantId, externalVariantId)
+      : null;
+    if (bundle?.items?.length) {
+      result = { hubLinkStatus: 'bundle', hubVariant: null };
+    } else {
+      const variant =
+        platform === 'mercadolibre'
+          ? await resolveMlSaleLineVariant(externalProductId || undefined, externalVariantId || undefined, sku)
+          : await resolveTnSaleLineVariant(externalVariantId || null, sku);
+      if (variant?.id) {
+        const variantCache: Map<string, any> = cache.get('__variants') || new Map();
+        cache.set('__variants', variantCache);
+        result = { hubLinkStatus: 'linked', hubVariant: await describeHubVariant(String(variant.id), variantCache) };
+      }
+    }
+  } catch (e: any) {
+    console.warn(`[Venta sin artículo] No se pudo resolver ${platform} ${externalProductId}/${externalVariantId}:`, e?.message || e);
+  }
+  cache.set(key, result);
+  return result;
+}
+
+/**
+ * Asocia una línea de venta ML/TN a una variante del hub y guarda el vínculo en variant_publications,
+ * así las próximas ventas de esa publicación se reconocen solas. Opcionalmente descuenta el stock
+ * de esta venta (reprocesa la orden; solo se descuentan las líneas que todavía no tenían movimiento).
+ */
+export const linkChannelSaleLine = async (req: Request, res: Response) => {
+  const { platform, orderId, externalProductId, externalVariantId, variantId, packSize, deductStock } = req.body || {};
+  if (platform !== 'mercadolibre' && platform !== 'tiendanube') {
+    return res.status(400).json({ message: 'platform debe ser mercadolibre o tiendanube' });
+  }
+  const extProd = externalProductId != null ? String(externalProductId).trim() : '';
+  const extVar = externalVariantId != null && String(externalVariantId).trim() !== '' ? String(externalVariantId).trim() : '';
+  if (!variantId || !extProd) {
+    return res.status(400).json({ message: 'variantId y externalProductId son requeridos' });
+  }
+  if (platform === 'tiendanube' && !extVar) {
+    return res.status(400).json({ message: 'Falta la variante de Tienda Nube (externalVariantId)' });
+  }
+  const pack = Math.max(1, Math.floor(Number(packSize) || 1));
+  try {
+    const exists = await get('SELECT id FROM product_variants WHERE id = ?', [variantId]);
+    if (!exists) return res.status(404).json({ message: 'Variante no encontrada' });
+
+    // Una publicación (o variante de TN) queda asociada a una sola variante del hub.
+    if (platform === 'tiendanube') {
+      await execute(
+        `DELETE FROM variant_publications WHERE platform = 'tiendanube' AND external_variant_id = ? AND variant_id <> ?`,
+        [extVar, variantId]
+      );
+    } else {
+      await execute(
+        `DELETE FROM variant_publications WHERE platform = 'mercadolibre' AND external_product_id = ? AND external_variant_id = ? AND variant_id <> ?`,
+        [extProd, extVar, variantId]
+      );
+    }
+    await execute(
+      `INSERT INTO variant_publications (id, variant_id, platform, external_product_id, external_variant_id, pack_size)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE pack_size = VALUES(pack_size)`,
+      [uuidv4(), variantId, platform, extProd, extVar, pack]
+    );
+    console.log(`[Venta sin artículo] Guardado vínculo ${platform} ${extProd}/${extVar || '-'} → variante ${variantId} (pack x${pack})`);
+
+    let deducted = false;
+    if (deductStock !== false && orderId != null && String(orderId).trim() !== '') {
+      const oid = String(orderId).trim();
+      if (platform === 'tiendanube') {
+        deducted = (await processTiendaNubeOrder(oid, { onlyNewLines: true })) > 0;
+      } else {
+        const countMovements = async () =>
+          Number(
+            (
+              await get(
+                `SELECT COUNT(*) AS n FROM stock_movements WHERE movement_type = 'VENTA_MERCADO_LIBRE' AND variant_id = ? AND reference LIKE ?`,
+                [variantId, `Orden ML: ${oid}%`]
+              )
+            )?.n || 0
+          );
+        const before = await countMovements();
+        await processMercadoLibreOrder(oid);
+        deducted = (await countMovements()) > before;
+      }
+    }
+    if (!deducted) {
+      // Publicación recién vinculada: enviarle el stock actual del hub.
+      const { syncStockToExternalPlatforms } = await import('./stock.controller');
+      const stockRow = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [variantId]);
+      void syncStockToExternalPlatforms(String(variantId), Number(stockRow?.stock ?? 0), { platforms: [platform] }).catch(
+        (err: any) => console.warn('[Venta sin artículo] Error enviando stock:', err?.message || err)
+      );
+    }
+
+    const hubVariant = await describeHubVariant(String(variantId), new Map());
+    res.json({ saved: true, deducted, hubVariant });
+  } catch (error: any) {
+    console.error('[Venta sin artículo] Error asociando línea:', error?.message || error);
+    res.status(500).json({ message: 'No se pudo asociar la venta', error: error?.message });
+  }
+};
+
 export const getTiendaNubeOrders = async (req: Request, res: Response) => {
   try {
     const integration = await get(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`);
@@ -4958,6 +5149,22 @@ export const getTiendaNubeOrders = async (req: Request, res: Response) => {
       createdAt: order.created_at,
       updatedAt: order.updated_at
     }});
+
+    const hubLinkCache = new Map<string, any>();
+    for (const o of orders as any[]) {
+      for (const p of o.products || []) {
+        Object.assign(
+          p,
+          await resolveSaleLineHubLink(
+            'tiendanube',
+            p.id != null ? String(p.id) : '',
+            p.variantId != null ? String(p.variantId) : '',
+            (p.sku || '').toString().trim(),
+            hubLinkCache
+          )
+        );
+      }
+    }
 
     if (only_paid_pending_shipment === '1' || only_paid_pending_shipment === 'true') {
       orders = orders.filter((o: any) =>
@@ -6074,7 +6281,8 @@ export const getMercadoLibreOrders = async (req: Request, res: Response) => {
           sku: item.item?.seller_sku || item.item?.seller_custom_field,
           quantity: item.quantity,
           unitPrice: item.unit_price,
-          variationId: item.item?.variation_id
+          variationId: item.item?.variation_id,
+          orderId: item._order_id ?? order.id
         })),
         shipping: order.shipping ? {
           id: order.shipping.id,
@@ -6103,7 +6311,9 @@ export const getMercadoLibreOrders = async (req: Request, res: Response) => {
       return Array.from(groups.values()).map((group) => {
         const first = group[0];
         const orderIds = group.map((o: any) => o.id);
-        const allItems = group.flatMap((o: any) => o.order_items || []);
+        const allItems = group.flatMap((o: any) =>
+          (o.order_items || []).map((it: any) => ({ ...it, _order_id: o.id }))
+        );
         const totalAmount = group.reduce((acc: number, o: any) => acc + (Number(o?.total_amount) || 0), 0);
         const merged = {
           ...first,
@@ -6262,6 +6472,22 @@ export const getMercadoLibreOrders = async (req: Request, res: Response) => {
           } : undefined
         };
       });
+    }
+
+    const hubLinkCache = new Map<string, any>();
+    for (const o of orders as any[]) {
+      for (const it of o.items || []) {
+        Object.assign(
+          it,
+          await resolveSaleLineHubLink(
+            'mercadolibre',
+            it.id != null ? String(it.id) : '',
+            it.variationId != null ? String(it.variationId) : '',
+            (it.sku || '').toString().trim(),
+            hubLinkCache
+          )
+        );
+      }
     }
 
     res.json({

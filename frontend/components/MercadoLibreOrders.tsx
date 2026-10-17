@@ -4,6 +4,14 @@ import { api } from '../services/api';
 import { openExternalInvoicePdf } from '../utils/externalInvoicePdf';
 import MercadoLibreQuestions from './MercadoLibreQuestions';
 import MercadoLibreReviews from './MercadoLibreReviews';
+import {
+  SaleLineHubLinkFields,
+  SaleLineHubVariant,
+  SaleLineLinkModal,
+  SaleLineLinkStatus,
+  SaleLineToLink,
+  saleLineListingKey,
+} from './SaleLineLink';
 
 interface MercadoLibreOrder {
   id: number;
@@ -18,14 +26,15 @@ interface MercadoLibreOrder {
     firstName: string;
     lastName: string;
   };
-  items: {
+  items: ({
     id: string;
     title: string;
     sku: string;
     quantity: number;
     unitPrice: number;
     variationId: number;
-  }[];
+    orderId?: number;
+  } & SaleLineHubLinkFields)[];
   shipping: {
     id: number;
     status: string;
@@ -53,6 +62,22 @@ interface MercadoLibreOrdersProps {
 
 const MercadoLibreOrders: React.FC<MercadoLibreOrdersProps> = ({ defaultSection = 'orders', onSectionChange }) => {
   const [orders, setOrders] = useState<MercadoLibreOrder[]>([]);
+  const [lineToLink, setLineToLink] = useState<SaleLineToLink | null>(null);
+
+  const handleSaleLineLinked = (line: SaleLineToLink, hubVariant: SaleLineHubVariant) => {
+    const key = saleLineListingKey('mercadolibre', line.externalProductId, line.externalVariantId);
+    setOrders((prev) =>
+      prev.map((o) => ({
+        ...o,
+        items: o.items.map((it) =>
+          saleLineListingKey('mercadolibre', String(it.id ?? ''), it.variationId != null ? String(it.variationId) : '') === key
+            ? { ...it, hubLinkStatus: 'linked' as const, hubVariant }
+            : it
+        ),
+      }))
+    );
+    setLineToLink(null);
+  };
   const [loading, setLoading] = useState(true);
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState(0);
@@ -794,7 +819,26 @@ const MercadoLibreOrders: React.FC<MercadoLibreOrdersProps> = ({ defaultSection 
                                   <p className="text-white text-sm">{item.title}</p>
                                   <p className="text-slate-500 text-[10px]">ID: {item.id}</p>
                                 </td>
-                                <td className="p-3 text-slate-400 text-xs font-mono">{item.sku || '-'}</td>
+                                <td className="p-3 text-slate-400 text-xs font-mono">
+                                  {item.sku || '-'}
+                                  <div className="mt-1 font-sans">
+                                    <SaleLineLinkStatus
+                                      line={item}
+                                      onLink={() =>
+                                        setLineToLink({
+                                          platform: 'mercadolibre',
+                                          orderId: String(item.orderId ?? order.id),
+                                          externalProductId: String(item.id ?? ''),
+                                          externalVariantId: item.variationId != null ? String(item.variationId) : '',
+                                          title: item.title,
+                                          sku: item.sku || '',
+                                          quantity: item.quantity,
+                                          canDeduct: order.status === 'paid',
+                                        })
+                                      }
+                                    />
+                                  </div>
+                                </td>
                                 <td className="p-3 text-center text-yellow-400 font-bold">{item.quantity}</td>
                               </tr>
                             ))}
@@ -908,6 +952,7 @@ const MercadoLibreOrders: React.FC<MercadoLibreOrdersProps> = ({ defaultSection 
       )}
       </>
       )}
+      <SaleLineLinkModal line={lineToLink} onClose={() => setLineToLink(null)} onLinked={handleSaleLineLinked} />
     </div>
   );
 };

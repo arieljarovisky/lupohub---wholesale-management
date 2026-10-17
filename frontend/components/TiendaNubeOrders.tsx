@@ -1,6 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { RefreshCw, Package, User, MapPin, Truck, ChevronLeft, ChevronRight, Loader2, ShoppingBag, Calendar, Search, X, Clock, CheckCircle, XCircle, ChevronDown, FileText, Download, Tag } from 'lucide-react';
 import { api } from '../services/api';
+import {
+  SaleLineHubLinkFields,
+  SaleLineHubVariant,
+  SaleLineLinkModal,
+  SaleLineLinkStatus,
+  SaleLineToLink,
+  saleLineListingKey,
+} from './SaleLineLink';
 import { getRemitente } from '../services/apiIntegration';
 import { openExternalInvoicePdf } from '../utils/externalInvoicePdf';
 import { buildTiendaNubeExpressLabelHtml, buildTiendaNubeExpressLabelInnerHtml, buildTiendaNubeExpressLabelsBulkHtml, EXPRESS_LABEL_CSS } from '../utils/tiendaNubeExpressLabelHtml';
@@ -42,14 +50,14 @@ interface TiendaNubeOrder {
     email: string;
     phone: string;
   };
-  products: {
+  products: ({
     id: number;
     variantId: number;
     name: string;
     sku: string;
     quantity: number;
     price: string;
-  }[];
+  } & SaleLineHubLinkFields)[];
   shippingAddress: {
     address: string;
     city: string;
@@ -82,6 +90,22 @@ const TiendaNubeOrders: React.FC = () => {
     return d.toISOString().split('T')[0];
   })();
   const [orders, setOrders] = useState<TiendaNubeOrder[]>([]);
+  const [lineToLink, setLineToLink] = useState<SaleLineToLink | null>(null);
+
+  const handleSaleLineLinked = (line: SaleLineToLink, hubVariant: SaleLineHubVariant) => {
+    const key = saleLineListingKey('tiendanube', line.externalProductId, line.externalVariantId);
+    setOrders((prev) =>
+      prev.map((o) => ({
+        ...o,
+        products: o.products.map((p) =>
+          saleLineListingKey('tiendanube', String(p.id ?? ''), p.variantId != null ? String(p.variantId) : '') === key
+            ? { ...p, hubLinkStatus: 'linked' as const, hubVariant }
+            : p
+        ),
+      }))
+    );
+    setLineToLink(null);
+  };
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -1249,7 +1273,27 @@ const TiendaNubeOrders: React.FC = () => {
                             {order.products.map((product, i) => (
                               <tr key={i} className="border-b border-slate-700/20 last:border-0">
                                 <td className="p-3 text-white text-sm">{product.name}</td>
-                                <td className="p-3 text-slate-400 text-xs font-mono">{product.sku || '-'}</td>
+                                <td className="p-3 text-slate-400 text-xs font-mono">
+                                  {product.sku || '-'}
+                                  <div className="mt-1 font-sans">
+                                    <SaleLineLinkStatus
+                                      line={product}
+                                      onLink={() =>
+                                        setLineToLink({
+                                          platform: 'tiendanube',
+                                          orderId: String(order.id),
+                                          externalProductId: String(product.id ?? ''),
+                                          externalVariantId: product.variantId != null ? String(product.variantId) : '',
+                                          title: product.name,
+                                          sku: product.sku || '',
+                                          quantity: product.quantity,
+                                          canDeduct:
+                                            (order.isPaid === true || order.paymentStatus === 'paid') && order.status !== 'cancelled',
+                                        })
+                                      }
+                                    />
+                                  </div>
+                                </td>
                                 <td className="p-3 text-center text-cyan-400 font-bold">{product.quantity}</td>
                               </tr>
                             ))}
@@ -1334,6 +1378,7 @@ const TiendaNubeOrders: React.FC = () => {
         </div>
         </div>
       )}
+      <SaleLineLinkModal line={lineToLink} onClose={() => setLineToLink(null)} onLinked={handleSaleLineLinked} />
     </div>
   );
 };

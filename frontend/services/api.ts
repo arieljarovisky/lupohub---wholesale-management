@@ -1106,6 +1106,19 @@ export const api = {
     return request<any>(`/products/variants/${encodeURIComponent(variantId)}/publications`, 'POST', data);
   },
 
+  /** Asocia una línea de venta ML/TN sin artículo a una variante del hub; el vínculo queda guardado. */
+  linkChannelSaleLine: async (data: {
+    platform: 'mercadolibre' | 'tiendanube';
+    orderId: string;
+    externalProductId: string;
+    externalVariantId?: string;
+    variantId: string;
+    packSize?: number;
+    deductStock?: boolean;
+  }): Promise<{ saved: boolean; deducted: boolean; hubVariant: { id: string; sku: string; label: string } | null }> => {
+    return request<any>('/integrations/channel-sales/link-line', 'POST', data);
+  },
+
   deleteVariantPublication: async (variantId: string, publicationId: string): Promise<void> => {
     await request<void>(`/products/variants/${encodeURIComponent(variantId)}/publications/${encodeURIComponent(publicationId)}`, 'DELETE');
   },

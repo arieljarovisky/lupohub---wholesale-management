@@ -24,6 +24,7 @@ import {
   syncSelectedStockToMercadoLibre,
   syncAllStockFromMercadoLibre,
   runAutoSyncMLtoTN,
+  linkChannelSaleLine,
   getMlTnSyncIssues,
   importStockFromMercadoLibre,
   getTiendaNubeOrders,
@@ -139,6 +140,7 @@ router.get('/mercadolibre/callback', handleMercadoLibreCallback);
 router.get('/mercadolibre/test', testMercadoLibreConnection);
 router.get('/mercadolibre/debug', debugMercadoLibreItem);
 router.get('/mercadolibre/orders', getMercadoLibreOrders);
+router.post('/channel-sales/link-line', authMiddleware, linkChannelSaleLine);
 router.get('/mercadolibre/questions', getMercadoLibreQuestions);
 router.get('/mercadolibre/reviews', authMiddleware, getMercadoLibreReviews);
 router.get('/mercadolibre/reviews-export', authMiddleware, exportMercadoLibreReviewsXlsx);
