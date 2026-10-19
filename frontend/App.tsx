@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, lazy, Suspense, useCallback, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
+import { channelLogoForView } from './components/ChannelLogos';
 import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Percent, Megaphone, Wallet, ChevronRight, MessageCircle, Star, RefreshCw } from 'lucide-react';
 import { isCompanyFinanceUser, COMPANY_FINANCE_VIEW } from './utils/companyFinanceAccess';
 import {
@@ -1496,7 +1497,7 @@ const App: React.FC = () => {
               onClick={() => handleChangeView(item.id)}
               className={`flex flex-col items-center justify-center gap-1 min-h-[56px] flex-1 py-2 transition-colors touch-manipulation ${isActive ? 'text-blue-500' : 'text-slate-500 active:bg-slate-800/50 rounded-xl'}`}
             >
-              <item.icon size={22} aria-hidden />
+              {channelLogoForView(item.id, 22) ?? <item.icon size={22} aria-hidden />}
               <span className="text-[10px] font-medium">{item.label}</span>
             </button>
           );
@@ -1603,7 +1604,7 @@ const App: React.FC = () => {
                             onClick={() => { handleChangeView(item.id); setMobileMenuOpen(false); }}
                             className={`w-full flex items-center gap-3 px-4 py-3.5 rounded-xl text-left touch-manipulation min-h-[48px] ${isActive ? 'bg-blue-600 text-white' : 'bg-slate-800/50 text-slate-200 hover:bg-slate-700/50'}`}
                           >
-                            <item.icon size={20} />
+                            {channelLogoForView(item.id, 20) ?? <item.icon size={20} />}
                             <span className="font-medium">{item.label}</span>
                           </button>
                         );

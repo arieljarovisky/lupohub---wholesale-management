@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Package, User, Truck, ChevronLeft, ChevronRight, Loader2, Zap, Calendar, Search, X, Clock, CheckCircle, XCircle, ChevronDown, ExternalLink, ShoppingCart, MessageCircle, Download, Star } from 'lucide-react';
+import { RefreshCw, Package, User, Truck, ChevronLeft, ChevronRight, Loader2, Calendar, Search, X, Clock, CheckCircle, XCircle, ChevronDown, ExternalLink, ShoppingCart, MessageCircle, Download, Star } from 'lucide-react';
+import { MercadoLibreLogo } from './ChannelLogos';
 import { api } from '../services/api';
 import { openExternalInvoicePdf } from '../utils/externalInvoicePdf';
 import MercadoLibreQuestions from './MercadoLibreQuestions';
@@ -392,9 +393,7 @@ const MercadoLibreOrders: React.FC<MercadoLibreOrdersProps> = ({ defaultSection 
       {/* Header */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
         <div className="flex items-center gap-4">
-          <div className="w-14 h-14 bg-gradient-to-br from-yellow-500 to-yellow-700 rounded-2xl flex items-center justify-center shadow-lg shadow-yellow-900/30">
-            <Zap className="text-white" size={28} />
-          </div>
+          <MercadoLibreLogo size={56} />
           <div>
             <h2 className="text-2xl font-black text-white">Ventas Mercado Libre</h2>
             <p className="text-slate-400 text-sm">Gestiona tus ventas del marketplace</p>

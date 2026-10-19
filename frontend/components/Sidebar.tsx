@@ -1,5 +1,6 @@
 import React from 'react';
 import { LayoutDashboard, Package, ShoppingCart, Users, MapPin, LogOut, Shirt, Settings, ShoppingBag, Zap, ChevronRight, ChevronLeft, Ship, BookOpen, DollarSign, FileText, Percent, Wallet, Megaphone, Award, Facebook, Chrome, UserPlus, MessageCircle, Star, RefreshCw } from 'lucide-react';
+import { channelLogoForView } from './ChannelLogos';
 import { Role } from '../types';
 import { isCompanyFinanceUser, COMPANY_FINANCE_VIEW } from '../utils/companyFinanceAccess';
 import {
@@ -160,7 +161,9 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({ currentView, onChangeView,
                     >
                       <div className="flex items-center space-x-3">
                         <div className={`p-1.5 rounded-lg ${isActive ? 'bg-white/20' : 'bg-slate-800/50 group-hover:bg-slate-700/50'}`}>
-                          <item.icon size={18} className={getIconColor(item, isActive)} />
+                          {channelLogoForView(item.id, 18) ?? (
+                            <item.icon size={18} className={getIconColor(item, isActive)} />
+                          )}
                         </div>
                         <span className="font-medium text-sm">{item.label}</span>
                       </div>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Package, User, MapPin, Truck, ChevronLeft, ChevronRight, Loader2, ShoppingBag, Calendar, Search, X, Clock, CheckCircle, XCircle, ChevronDown, FileText, Download, Tag } from 'lucide-react';
+import { RefreshCw, Package, User, MapPin, Truck, ChevronLeft, ChevronRight, Loader2, Calendar, Search, X, Clock, CheckCircle, XCircle, ChevronDown, FileText, Download, Tag } from 'lucide-react';
+import { TiendaNubeLogo } from './ChannelLogos';
 import { api } from '../services/api';
 import { getRemitente } from '../services/apiIntegration';
 import { openExternalInvoicePdf } from '../utils/externalInvoicePdf';
@@ -675,9 +676,7 @@ const TiendaNubeOrders: React.FC = () => {
       {/* Header */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
         <div className="flex items-center gap-4">
-          <div className="w-14 h-14 bg-gradient-to-br from-cyan-500 to-cyan-700 rounded-2xl flex items-center justify-center shadow-lg shadow-cyan-900/30">
-            <ShoppingBag className="text-white" size={28} />
-          </div>
+          <TiendaNubeLogo size={56} />
           <div>
             <h2 className="text-2xl font-black text-white">Ventas Tienda Nube</h2>
             <p className="text-slate-400 text-sm">Gestiona tus órdenes de e-commerce</p>

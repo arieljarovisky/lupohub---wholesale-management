@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { History, RefreshCw, Loader2, Search, X, Filter, TrendingUp, TrendingDown, Package, Calendar, ArrowUpCircle, ArrowDownCircle, RotateCcw, ShoppingCart, Store, Zap, Download, Camera, CheckCircle, Trash2 } from 'lucide-react';
+import { History, RefreshCw, Loader2, Search, X, Filter, TrendingUp, TrendingDown, Package, Calendar, RotateCcw, ShoppingCart, Download, Camera, CheckCircle, Trash2 } from 'lucide-react';
+import { MercadoLibreLogo, TiendaNubeLogo } from './ChannelLogos';
 import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
 
@@ -30,19 +31,19 @@ const movementTypeConfig: Record<string, { label: string; color: string; bgColor
     label: 'Venta Tienda Nube', 
     color: 'text-cyan-400', 
     bgColor: 'bg-cyan-500/10',
-    icon: <Store size={16} />
+    icon: <TiendaNubeLogo size={16} />
   },
   'CANCEL_VENTA_TIENDA_NUBE': { 
     label: 'Cancelación venta TN', 
     color: 'text-amber-400', 
     bgColor: 'bg-amber-500/10',
-    icon: <RotateCcw size={16} />
+    icon: <TiendaNubeLogo size={16} />
   },
   'VENTA_MERCADO_LIBRE': { 
     label: 'Venta Mercado Libre', 
     color: 'text-yellow-400', 
     bgColor: 'bg-yellow-500/10',
-    icon: <Zap size={16} />
+    icon: <MercadoLibreLogo size={16} />
   },
   'AJUSTE_MANUAL': { 
     label: 'Ajuste Manual', 
@@ -60,13 +61,13 @@ const movementTypeConfig: Record<string, { label: string; color: string; bgColor
     label: 'Importación TN', 
     color: 'text-slate-400', 
     bgColor: 'bg-slate-500/10',
-    icon: <ArrowDownCircle size={16} />
+    icon: <TiendaNubeLogo size={16} />
   },
   'IMPORTACION_ML': { 
     label: 'Importación ML', 
     color: 'text-amber-400', 
     bgColor: 'bg-amber-500/10',
-    icon: <ArrowDownCircle size={16} />
+    icon: <MercadoLibreLogo size={16} />
   },
   'SNAPSHOT_INICIAL': { 
     label: 'Stock Inicial', 
@@ -349,7 +350,7 @@ const StockHistory: React.FC = () => {
         </div>
         <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
           <div className="flex items-center gap-2">
-            <Store size={18} className="text-cyan-400" />
+            <TiendaNubeLogo size={18} />
             <div>
               <p className="text-xl font-black text-cyan-400">{stats.ventasTN}</p>
               <p className="text-[10px] text-slate-500 uppercase">Tienda Nube</p>
@@ -363,7 +364,7 @@ const StockHistory: React.FC = () => {
         </div>
         <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
           <div className="flex items-center gap-2">
-            <Zap size={18} className="text-yellow-400" />
+            <MercadoLibreLogo size={18} />
             <div>
               <p className="text-xl font-black text-yellow-400">{stats.ventasML}</p>
               <p className="text-[10px] text-slate-500 uppercase">Mercado Libre</p>

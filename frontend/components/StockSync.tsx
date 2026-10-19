@@ -15,6 +15,7 @@ import {
   Wrench,
   X,
 } from 'lucide-react';
+import { MercadoLibreLogo, TiendaNubeLogo } from './ChannelLogos';
 import { stockSyncApi, StockSyncOverview, SyncVariant, VariantLink } from '../services/stockSyncApi';
 import { useNotification } from '../context/NotificationContext';
 import { INVENTORY_STORAGE_KEY } from '../utils/inventoryUtils';
@@ -108,33 +109,11 @@ const ProductLink: React.FC<{ variant: SyncVariant | null | undefined; className
     <span className={className}>Producto</span>
   );
 
-/** Marca de Mercado Libre: cuadrado amarillo y la mano azul. */
-const MercadoLibreIcon: React.FC<{ size?: number }> = ({ size = 18 }) => (
-  <svg width={size} height={size} viewBox="0 0 32 32" aria-label="Mercado Libre" className="shrink-0">
-    <rect width="32" height="32" rx="8" fill="#FFF159" />
-    <path
-      fill="#2D3277"
-      d="M12.2 15.2V11a1.35 1.35 0 0 1 2.7 0v4.2h.3V9.6a1.35 1.35 0 0 1 2.7 0V15.2h.3v-3.4a1.35 1.35 0 0 1 2.7 0v6.2c0 .4.2.9.7 1.2 1 .6 1.5 1.6 1.2 2.7-.4 1.5-1.8 2.3-3.4 2.1l-1.2-.2c-.5 1.6-2 2.7-3.8 2.7h-1.6c-2.5 0-4.2-1.7-4.2-4.1v-5.2c0-1 .8-1.8 1.8-1.8h1.5z"
-    />
-  </svg>
-);
-
-/** Marca de Tienda Nube: nube blanca sobre el azul de la marca. */
-const TiendaNubeIcon: React.FC<{ size?: number }> = ({ size = 18 }) => (
-  <svg width={size} height={size} viewBox="0 0 32 32" aria-label="Tienda Nube" className="shrink-0">
-    <rect width="32" height="32" rx="8" fill="#2F3580" />
-    <path
-      fill="#fff"
-      d="M22.8 21.6H11.4a3.5 3.5 0 0 1-.6-6.9 5 5 0 0 1 9.5-1.3 3.2 3.2 0 0 1 2.5 8.2z"
-    />
-  </svg>
-);
-
 const PlatformIcon: React.FC<{ platform: string | null; size?: number }> = ({ platform, size = 18 }) =>
   platform === 'mercadolibre' ? (
-    <MercadoLibreIcon size={size} />
+    <MercadoLibreLogo size={size} />
   ) : platform === 'tiendanube' ? (
-    <TiendaNubeIcon size={size} />
+    <TiendaNubeLogo size={size} />
   ) : (
     <ShoppingCart size={size} className="text-blue-300 shrink-0" aria-label="Pedido mayorista" />
   );
