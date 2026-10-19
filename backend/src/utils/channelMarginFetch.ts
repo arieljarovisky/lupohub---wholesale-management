@@ -21,12 +21,25 @@ export async function runPool<T>(
   );
 }
 
-export function parseTnPrice(variant: { price?: unknown; promotional_price?: unknown } | null | undefined): number {
-  if (!variant) return 0;
-  const raw = variant.promotional_price ?? variant.price;
+function parseTnMoney(raw: unknown): number {
   if (raw == null || raw === '') return 0;
   const n = Number(String(raw).replace(',', '.'));
   return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+export function parseTnListAndPromo(
+  variant: { price?: unknown; promotional_price?: unknown } | null | undefined
+): { list: number; promo: number | null } {
+  if (!variant) return { list: 0, promo: null };
+  const list = parseTnMoney(variant.price);
+  const promo = parseTnMoney(variant.promotional_price);
+  return { list, promo: promo > 0 ? promo : null };
+}
+
+/** Precio que cobra la tienda: promocional si existe, si no el de lista. */
+export function parseTnPrice(variant: { price?: unknown; promotional_price?: unknown } | null | undefined): number {
+  const { list, promo } = parseTnListAndPromo(variant);
+  return promo != null && promo > 0 ? promo : list;
 }
 
 /** Precio representativo del producto TN (todas las variantes suelen tener el mismo). */
@@ -91,11 +104,17 @@ export async function fetchMlItemsMultiget(
 
 type TnVarRef = { variantId: string; tnVariantId: string };
 
+export type TnPriceSlot = {
+  priceTN?: number;
+  priceTNList?: number;
+  priceTNPromo?: number | null;
+};
+
 export async function fetchTnProductsBatched(
   storeId: string,
   accessToken: string,
   tnProductIds: Map<string, TnVarRef[]>,
-  prices: Record<string, { priceTN?: number }>
+  prices: Record<string, TnPriceSlot>
 ): Promise<void> {
   const ids = Array.from(tnProductIds.keys());
   if (ids.length === 0) return;
@@ -145,14 +164,27 @@ export async function fetchTnProductsBatched(
   for (const [tnProductId, entries] of tnProductIds) {
     const product = tnProductById.get(tnProductId);
     const tnVariants = (product?.variants as unknown[]) || [];
-    const fallbackPrice = pickTnProductPrice(tnVariants);
+    let fallback = { list: 0, promo: null as number | null };
+    for (const tv of tnVariants) {
+      const parsed = parseTnListAndPromo(tv as { price?: unknown; promotional_price?: unknown });
+      if (parsed.list > 0 || (parsed.promo != null && parsed.promo > 0)) {
+        fallback = parsed;
+        break;
+      }
+    }
 
     for (const { variantId, tnVariantId } of entries) {
       if (!prices[variantId]) continue;
       const tv = tnVariants.find((x: any) => String(x?.id) === String(tnVariantId));
-      let price = parseTnPrice(tv as { price?: unknown; promotional_price?: unknown });
-      if (price <= 0) price = fallbackPrice;
-      if (price > 0) prices[variantId].priceTN = price;
+      const parsed = tv
+        ? parseTnListAndPromo(tv as { price?: unknown; promotional_price?: unknown })
+        : { list: 0, promo: null as number | null };
+      const use = parsed.list > 0 || parsed.promo != null ? parsed : fallback;
+      const selling = use.promo != null && use.promo > 0 ? use.promo : use.list;
+      if (selling <= 0 && use.list <= 0) continue;
+      prices[variantId].priceTNList = use.list;
+      prices[variantId].priceTNPromo = use.promo;
+      prices[variantId].priceTN = selling > 0 ? selling : use.list;
     }
   }
 }

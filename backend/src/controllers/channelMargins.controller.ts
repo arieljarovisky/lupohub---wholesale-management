@@ -54,6 +54,10 @@ type ChannelMarginSlice = {
   feePayment?: number;
   feeRate?: number;
   feeCpt?: number;
+  /** Precio de lista en Tienda Nube (campo price). */
+  listPrice?: number | null;
+  /** Precio promocional en Tienda Nube. El margen usa este valor si existe. */
+  promoPrice?: number | null;
   margin: number | null;
   marginPercent: number | null;
 };
@@ -262,7 +266,13 @@ async function computeChannelMargins(opts: ComputeMarginsOpts = {}) {
 
   const prices: Record<
     string,
-    { priceML?: number; priceTN?: number; mlItem?: Record<string, unknown> }
+    {
+      priceML?: number;
+      priceTN?: number;
+      priceTNList?: number;
+      priceTNPromo?: number | null;
+      mlItem?: Record<string, unknown>;
+    }
   > = {};
 
   const mlItemIds = new Map<string, { variantId: string; variationId: string | null }[]>();
@@ -321,10 +331,18 @@ async function computeChannelMargins(opts: ComputeMarginsOpts = {}) {
     const repMl = vars.find((v) => resolveVariantLinks(v, pubLinks).hasMl);
     const hasTnLink = vars.some((v) => resolveVariantLinks(v, pubLinks).hasTn);
     let priceTN = 0;
+    let listPrice = 0;
+    let promoPrice: number | null = null;
     for (const v of vars) {
-      const pt = prices[v.variant_id]?.priceTN;
-      if (pt != null && pt > 0) {
-        priceTN = pt;
+      const slot = prices[v.variant_id];
+      if (!slot) continue;
+      const list = slot.priceTNList ?? 0;
+      const promo = slot.priceTNPromo != null && slot.priceTNPromo > 0 ? slot.priceTNPromo : null;
+      const selling = promo != null && promo > 0 ? promo : list > 0 ? list : slot.priceTN ?? 0;
+      if (selling > 0) {
+        listPrice = list;
+        promoPrice = promo;
+        priceTN = selling;
         break;
       }
     }
@@ -365,6 +383,8 @@ async function computeChannelMargins(opts: ComputeMarginsOpts = {}) {
           ...buildChannelSlice(priceTN, tnParts.total, fob),
           feeRate: tnParts.ratePart,
           feeCpt: tnParts.cptPart,
+          listPrice: listPrice > 0 ? listPrice : null,
+          promoPrice,
           linked: true,
         };
       } else {
@@ -457,11 +477,11 @@ export const exportChannelMarginsXlsx = async (req: Request, res: Response) => {
       views: [{ state: 'frozen', ySplit: 3 }],
     });
 
-    ws.mergeCells('A1:P1');
+    ws.mergeCells('A1:R1');
     ws.getCell('A1').value = 'Margenes por canal - LupoHub';
     ws.getCell('A1').font = { bold: true, size: 14 };
 
-    ws.mergeCells('A2:P2');
+    ws.mergeCells('A2:R2');
     ws.getCell('A2').value =
       `Lista de precios: ${result.config.fobListName || 'sin lista'} | TN: ${result.config.tnFeePresetLabel} | ML CPT: ${result.config.mlPaymentCptPercent}% | Generado: ${new Date().toLocaleString('es-AR')}`;
 
@@ -477,6 +497,8 @@ export const exportChannelMarginsXlsx = async (req: Request, res: Response) => {
       'ML Ganancia',
       'ML Margen %',
       'TN Precio',
+      'TN Promocional',
+      'TN Precio venta',
       'TN Comisión',
       'TN Tasas',
       'TN CPT',
@@ -506,6 +528,8 @@ export const exportChannelMarginsXlsx = async (req: Request, res: Response) => {
         r.ml?.feePayment != null ? r.ml.feePayment : '',
         numOrBlank(r.ml?.margin),
         numOrBlank(r.ml?.marginPercent),
+        r.tn?.listPrice != null && r.tn.listPrice > 0 ? r.tn.listPrice : '',
+        r.tn?.promoPrice != null && r.tn.promoPrice > 0 ? r.tn.promoPrice : '',
         r.tn?.linked && r.tn.price > 0 ? r.tn.price : '',
         r.tn?.linked && r.tn.price > 0 ? r.tn.fee : '',
         r.tn?.feeRate != null ? r.tn.feeRate : '',
@@ -526,7 +550,9 @@ export const exportChannelMarginsXlsx = async (req: Request, res: Response) => {
       { width: 12 },
       { width: 12 },
       { width: 11 },
-      { width: 12 },
+      { width: 14 },
+      { width: 14 },
+      { width: 14 },
       { width: 12 },
       { width: 12 },
       { width: 10 },
@@ -534,7 +560,7 @@ export const exportChannelMarginsXlsx = async (req: Request, res: Response) => {
       { width: 11 },
     ];
 
-    const moneyCols = [4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15];
+    const moneyCols = [4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17];
     for (let rowIdx = 4; rowIdx <= ws.rowCount; rowIdx++) {
       for (const col of moneyCols) {
         const cell = ws.getRow(rowIdx).getCell(col);
@@ -544,7 +570,7 @@ export const exportChannelMarginsXlsx = async (req: Request, res: Response) => {
       }
       const pctCell = ws.getRow(rowIdx).getCell(10);
       if (typeof pctCell.value === 'number') pctCell.numFmt = '0.0"%"';
-      const pctTnCell = ws.getRow(rowIdx).getCell(16);
+      const pctTnCell = ws.getRow(rowIdx).getCell(18);
       if (typeof pctTnCell.value === 'number') pctTnCell.numFmt = '0.0"%"';
     }
 
@@ -564,7 +590,7 @@ export const exportChannelMarginsXlsx = async (req: Request, res: Response) => {
 
 function buildConfigResponse(
   fobInfo: { id: string | null; name: string },
-  tnPreset: { id: string; label: string },
+  tnPreset: { id: string; label: string; ratePercent: number; cptPercent: number; appliesIva: boolean },
   priceLists: Array<{ id: string; name: string }> = []
 ) {
   const ivaPercent = Math.round((getIvaMultiplier() - 1) * 10000) / 100;
@@ -577,6 +603,9 @@ function buildConfigResponse(
     ivaPercent,
     tnFeePresetId: tnPreset.id,
     tnFeePresetLabel: tnPreset.label,
+    tnFeeRatePercent: tnPreset.ratePercent,
+    tnFeeCptPercent: tnPreset.cptPercent,
+    tnFeeAppliesIva: tnPreset.appliesIva,
     tnFeePresets: listTnFeePresets(),
     mlListingFeeSource: 'API Mercado Libre listing_prices (comisión por vender)',
     mlPaymentCptPercent: getMlPaymentCptPercent(),

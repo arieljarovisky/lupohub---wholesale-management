@@ -2992,14 +2992,30 @@ export const api = {
   ): Promise<{
     prices: Record<
       string,
-      { priceLocal?: number; priceML?: number; priceTN?: number; hasML?: boolean; hasTN?: boolean }
+      {
+        priceLocal?: number;
+        priceML?: number;
+        priceTN?: number;
+        priceTNList?: number;
+        priceTNPromo?: number | null;
+        hasML?: boolean;
+        hasTN?: boolean;
+      }
     >;
   }> => {
     return handleRequest(async () => {
       return await request<{
         prices: Record<
           string,
-          { priceLocal?: number; priceML?: number; priceTN?: number; hasML?: boolean; hasTN?: boolean }
+          {
+            priceLocal?: number;
+            priceML?: number;
+            priceTN?: number;
+            priceTNList?: number;
+            priceTNPromo?: number | null;
+            hasML?: boolean;
+            hasTN?: boolean;
+          }
         >;
       }>('/integrations/variant-channel-prices', 'POST', { variantIds }, undefined, 60000);
     }, { prices: {} }, 'getVariantChannelPrices');
@@ -3022,6 +3038,9 @@ export const api = {
       ivaPercent: number;
       tnFeePresetId: string;
       tnFeePresetLabel: string;
+      tnFeeRatePercent?: number;
+      tnFeeCptPercent?: number;
+      tnFeeAppliesIva?: boolean;
       tnFeePresets: Array<{ id: string; label: string; ratePercent: number; cptPercent: number; appliesIva: boolean }>;
       mlListingFeeSource: string;
       mlPaymentCptPercent: number;
@@ -3048,6 +3067,8 @@ export const api = {
       } | null;
       tn: {
         price: number;
+        listPrice?: number | null;
+        promoPrice?: number | null;
         fee: number;
         feeRate?: number;
         feeCpt?: number;
@@ -3083,6 +3104,9 @@ export const api = {
         ivaPercent: 21,
         tnFeePresetId: 'tn_mp_instant',
         tnFeePresetLabel: '',
+        tnFeeRatePercent: 6.29,
+        tnFeeCptPercent: 1,
+        tnFeeAppliesIva: true,
         tnFeePresets: [],
         mlListingFeeSource: '',
         mlPaymentCptPercent: 1,
@@ -3196,7 +3220,14 @@ export const api = {
   },
 
   bulkUpdateChannelPrices: async (body: {
-    updates: Array<{ variantId: string; priceLocal?: number; priceML?: number; priceTN?: number }>;
+    updates: Array<{
+      variantId: string;
+      priceLocal?: number;
+      priceML?: number;
+      priceTN?: number;
+      priceTNPromo?: number | null;
+      clearTNPromo?: boolean;
+    }>;
     applyLocal?: boolean;
     applyML?: boolean;
     applyTN?: boolean;
@@ -3210,6 +3241,27 @@ export const api = {
         errors: string[];
       }>('/integrations/variant-channel-prices/bulk', 'POST', body, undefined, 120000);
     }, { message: 'Offline', updatedLocal: 0, updatedML: 0, updatedTN: 0, errors: [] }, 'bulkUpdateChannelPrices');
+  },
+
+  /** Quita el precio promocional de una página del catálogo de Tienda Nube. Repetir hasta hasMore = false. */
+  clearTiendaNubePromotionalPrices: async (page: number): Promise<{
+    page: number;
+    perPage: number;
+    scanned: number;
+    total: number | null;
+    clearedProducts: number;
+    clearedVariants: number;
+    skippedProducts: number;
+    hasMore: boolean;
+    errors: string[];
+  }> => {
+    return await request(
+      '/integrations/tiendanube/clear-promotional-prices',
+      'POST',
+      { page },
+      undefined,
+      120000
+    );
   },
 
   /** Opcional: ML como fuente — importa stock desde ML a LupoHub y envía a TN. Para flujo normal usar syncAllStockToMercadoLibre (LupoHub → ML). */

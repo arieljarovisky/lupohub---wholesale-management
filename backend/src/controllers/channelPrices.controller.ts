@@ -28,12 +28,59 @@ type VariantLinkRow = {
 export type ChannelPriceEntry = {
   priceLocal?: number;
   priceML?: number;
+  /** Precio de venta efectivo (promocional si hay, si no el de lista). */
   priceTN?: number;
+  priceTNList?: number;
+  priceTNPromo?: number | null;
   hasML: boolean;
   hasTN: boolean;
   productId: string;
   sku?: string;
 };
+
+type PubLinks = { mlProductId?: string; mlVariantId?: string; tnProductId?: string; tnVariantId?: string };
+
+function trimId(v: string | null | undefined): string {
+  return v != null ? String(v).trim() : '';
+}
+
+async function loadPublicationLinks(variantIds: string[]): Promise<Map<string, PubLinks>> {
+  const map = new Map<string, PubLinks>();
+  if (variantIds.length === 0) return map;
+  const placeholders = variantIds.map(() => '?').join(',');
+  const rows = (await query(
+    `SELECT variant_id, platform, external_product_id, external_variant_id
+     FROM variant_publications
+     WHERE variant_id IN (${placeholders})`,
+    variantIds
+  )) as { variant_id: string; platform: string; external_product_id: string; external_variant_id: string }[];
+  for (const r of rows || []) {
+    if (!map.has(r.variant_id)) map.set(r.variant_id, {});
+    const entry = map.get(r.variant_id)!;
+    const prod = trimId(r.external_product_id);
+    const vari = trimId(r.external_variant_id);
+    if (r.platform === 'mercadolibre' && prod && !entry.mlProductId) {
+      entry.mlProductId = prod;
+      entry.mlVariantId = vari;
+    }
+    if (r.platform === 'tiendanube' && prod && vari && !entry.tnProductId) {
+      entry.tnProductId = prod;
+      entry.tnVariantId = vari;
+    }
+  }
+  return map;
+}
+
+function resolveTnIds(row: VariantLinkRow, pub?: PubLinks): { productId: string; variantId: string } | null {
+  const productId = trimId(row.tienda_nube_id) || trimId(pub?.tnProductId);
+  const variantId = trimId(row.tienda_nube_variant_id) || trimId(pub?.tnVariantId);
+  if (!productId || !variantId) return null;
+  return { productId, variantId };
+}
+
+function tnMoney(n: number): string {
+  return (Math.round(Math.max(0, n) * 100) / 100).toFixed(2);
+}
 
 async function fetchMlPricesForItem(
   accessToken: string,
@@ -105,25 +152,50 @@ async function updateMlPrice(
   }
 }
 
-async function updateTnPrice(
+type TnVariantPriceUpdate = {
+  tnVariantId: string;
+  price?: number;
+  promo?: number | null;
+  clearPromo: boolean;
+};
+
+/** Un PUT por producto: actualiza precio y promocional de todas sus variantes. */
+async function updateTnProductPrices(
   storeId: string,
   accessToken: string,
   tnProductId: string,
-  tnVariantId: string,
-  price: number
-): Promise<boolean> {
-  const p = Math.max(0, Number(price));
-  const url = `https://api.tiendanube.com/v1/${storeId}/products/${tnProductId}/variants/${tnVariantId}`;
+  variants: TnVariantPriceUpdate[]
+): Promise<{ ok: boolean; detail?: string }> {
+  const bodyVariants = variants.map((v) => {
+    const idNum = Number(v.tnVariantId);
+    const item: Record<string, unknown> = {
+      id: Number.isSafeInteger(idNum) ? idNum : v.tnVariantId,
+    };
+    if (v.price != null && Number.isFinite(v.price)) item.price = tnMoney(v.price);
+    if (v.clearPromo) item.promotional_price = '';
+    else if (v.promo != null && Number.isFinite(v.promo)) item.promotional_price = tnMoney(v.promo);
+    return item;
+  });
+  const url = `https://api.tiendanube.com/v1/${storeId}/products/${tnProductId}`;
   const headers = {
     Authentication: `bearer ${accessToken}`,
     'User-Agent': TN_USER_AGENT,
     'Content-Type': 'application/json',
   };
   try {
-    await tnPutWithRetry(axios, url, { price: String(p) }, { headers, validateStatus: () => true });
-    return true;
-  } catch {
-    return false;
+    await tnPutWithRetry(axios, url, { variants: bodyVariants }, { headers });
+    return { ok: true };
+  } catch (e: unknown) {
+    const err = e as { response?: { status?: number; data?: unknown }; message?: string };
+    const status = err?.response?.status;
+    const data = err?.response?.data;
+    const detail =
+      typeof data === 'string'
+        ? data.slice(0, 180)
+        : data != null
+          ? JSON.stringify(data).slice(0, 180)
+          : err?.message || 'error';
+    return { ok: false, detail: status ? `HTTP ${status} ${detail}` : detail };
   }
 }
 
@@ -148,6 +220,7 @@ export const getVariantChannelPrices = async (req: Request, res: Response) => {
       variantIds
     )) as VariantLinkRow[];
 
+    const pubs = await loadPublicationLinks(variantIds);
     const prices: Record<string, ChannelPriceEntry> = {};
     for (const id of variantIds) {
       prices[id] = { hasML: false, hasTN: false, productId: '' };
@@ -155,12 +228,15 @@ export const getVariantChannelPrices = async (req: Request, res: Response) => {
     for (const r of rows || []) {
       const vid = r.variant_id;
       if (!prices[vid]) continue;
+      const pub = pubs.get(vid);
+      const mlItemId = trimId(r.mercado_libre_item_id) || trimId(r.mercado_libre_id) || trimId(pub?.mlProductId);
+      const tn = resolveTnIds(r, pub);
       prices[vid] = {
         productId: r.product_id,
         sku: r.sku ?? undefined,
         priceLocal: Number(r.base_price ?? 0),
-        hasML: !!(r.mercado_libre_item_id || r.mercado_libre_id || r.mercado_libre_variant_id),
-        hasTN: !!(r.tienda_nube_id && r.tienda_nube_variant_id),
+        hasML: !!mlItemId,
+        hasTN: !!tn,
       };
     }
 
@@ -169,11 +245,13 @@ export const getVariantChannelPrices = async (req: Request, res: Response) => {
       const mlItemIds = new Map<string, { variantId: string; variationId: string | null }[]>();
       for (const r of rows || []) {
         const variantId = r.variant_id;
-        const mlItemId = r.mercado_libre_item_id || r.mercado_libre_id;
-        const variationId = r.mercado_libre_variant_id ? String(r.mercado_libre_variant_id) : null;
+        const pub = pubs.get(variantId);
+        const mlItemId = trimId(r.mercado_libre_item_id) || trimId(r.mercado_libre_id) || trimId(pub?.mlProductId);
+        const variationId =
+          trimId(r.mercado_libre_variant_id) || trimId(pub?.mlVariantId) || null;
         if (!mlItemId) continue;
         if (!mlItemIds.has(mlItemId)) mlItemIds.set(mlItemId, []);
-        mlItemIds.get(mlItemId)!.push({ variantId, variationId });
+        mlItemIds.get(mlItemId)!.push({ variantId, variationId: variationId || null });
       }
       for (const [itemId, vars] of mlItemIds) {
         await fetchMlPricesForItem(mlToken.access_token, itemId, vars, prices);
@@ -187,12 +265,12 @@ export const getVariantChannelPrices = async (req: Request, res: Response) => {
     if (tnIntegration?.access_token && tnStoreId) {
       const tnProductIds = new Map<string, { variantId: string; tnVariantId: string }[]>();
       for (const r of rows || []) {
-        if (!r.tienda_nube_id || !r.tienda_nube_variant_id) continue;
-        const pid = String(r.tienda_nube_id);
-        if (!tnProductIds.has(pid)) tnProductIds.set(pid, []);
-        tnProductIds.get(pid)!.push({
+        const tn = resolveTnIds(r, pubs.get(r.variant_id));
+        if (!tn) continue;
+        if (!tnProductIds.has(tn.productId)) tnProductIds.set(tn.productId, []);
+        tnProductIds.get(tn.productId)!.push({
           variantId: r.variant_id,
-          tnVariantId: String(r.tienda_nube_variant_id),
+          tnVariantId: tn.variantId,
         });
       }
       if (tnProductIds.size > 0) {
@@ -210,7 +288,7 @@ export const getVariantChannelPrices = async (req: Request, res: Response) => {
 /** POST { updates, applyLocal?, applyML?, applyTN? } */
 export const bulkUpdateChannelPrices = async (req: Request, res: Response) => {
   try {
-    const updates = Array.isArray(req.body?.updates) ? req.body.updates.slice(0, 50) : [];
+    const updates = Array.isArray(req.body?.updates) ? req.body.updates.slice(0, 200) : [];
     const applyLocal = req.body?.applyLocal !== false;
     const applyML = req.body?.applyML !== false;
     const applyTN = req.body?.applyTN !== false;
@@ -220,8 +298,13 @@ export const bulkUpdateChannelPrices = async (req: Request, res: Response) => {
 
     const mlToken = applyML ? await getValidMLToken() : null;
     const tnIntegration = applyTN
-      ? await get(`SELECT access_token, store_id FROM integrations WHERE platform = 'tiendanube'`)
+      ? await get(`SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`)
       : null;
+    const tnStoreId = resolveTnStoreId(tnIntegration);
+    const requestedIds = updates
+      .map((u: { variantId?: unknown }) => String(u?.variantId || '').trim())
+      .filter(Boolean);
+    const pubs = await loadPublicationLinks(requestedIds);
 
     let updatedLocal = 0;
     let updatedML = 0;
@@ -229,13 +312,14 @@ export const bulkUpdateChannelPrices = async (req: Request, res: Response) => {
     const errors: string[] = [];
 
     const productLocalUpdated = new Set<string>();
+    const tnByProduct = new Map<string, TnVariantPriceUpdate[]>();
 
     for (const u of updates) {
       const variantId = String(u?.variantId || '').trim();
       if (!variantId) continue;
 
       const row = (await get(
-        `SELECT pv.id, p.id AS product_id, p.base_price,
+        `SELECT pv.id AS variant_id, p.id AS product_id, p.base_price,
                 p.mercado_libre_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
                 p.tienda_nube_id, pv.tienda_nube_variant_id, pv.sku
          FROM product_variants pv
@@ -261,14 +345,16 @@ export const bulkUpdateChannelPrices = async (req: Request, res: Response) => {
       }
 
       if (applyML && u.priceML != null && Number.isFinite(Number(u.priceML)) && mlToken?.access_token) {
-        const mlItemId = row.mercado_libre_item_id || row.mercado_libre_id;
+        const pub = pubs.get(variantId);
+        const mlItemId = trimId(row.mercado_libre_item_id) || trimId(row.mercado_libre_id) || trimId(pub?.mlProductId);
+        const variationId = trimId(row.mercado_libre_variant_id) || trimId(pub?.mlVariantId) || null;
         if (!mlItemId) {
           errors.push(`${row.sku || variantId}: sin vínculo ML`);
         } else {
           const ok = await updateMlPrice(
             mlToken.access_token,
-            String(mlItemId),
-            row.mercado_libre_variant_id ? String(row.mercado_libre_variant_id) : null,
+            mlItemId,
+            variationId,
             Number(u.priceML)
           );
           if (ok) updatedML++;
@@ -277,21 +363,43 @@ export const bulkUpdateChannelPrices = async (req: Request, res: Response) => {
         if (TN_RATE_LIMIT_DELAY_MS > 0) await sleep(TN_RATE_LIMIT_DELAY_MS);
       }
 
-      if (applyTN && u.priceTN != null && Number.isFinite(Number(u.priceTN)) && tnIntegration?.access_token && tnIntegration?.store_id) {
-        if (!row.tienda_nube_id || !row.tienda_nube_variant_id) {
-          errors.push(`${row.sku || variantId}: sin vínculo TN`);
-        } else {
-          const ok = await updateTnPrice(
-            String(tnIntegration.store_id),
-            tnIntegration.access_token,
-            String(row.tienda_nube_id),
-            String(row.tienda_nube_variant_id),
-            Number(u.priceTN)
-          );
-          if (ok) updatedTN++;
-          else errors.push(`${row.sku || variantId}: TN no aceptó el precio`);
+      if (applyTN && tnIntegration?.access_token && tnStoreId) {
+        const wantsPrice = u.priceTN != null && Number.isFinite(Number(u.priceTN));
+        const clearPromo = u.clearTNPromo === true;
+        const wantsPromo = !clearPromo && u.priceTNPromo != null && Number.isFinite(Number(u.priceTNPromo));
+        if (wantsPrice || wantsPromo || clearPromo) {
+          const tn = resolveTnIds(row, pubs.get(variantId));
+          if (!tn) {
+            errors.push(`${row.sku || variantId}: sin vínculo TN`);
+          } else {
+            const price = wantsPrice ? Math.max(0, Number(u.priceTN)) : undefined;
+            const promo = wantsPromo ? Math.max(0, Number(u.priceTNPromo)) : null;
+            if (price != null && promo != null && promo >= price) {
+              errors.push(`${row.sku || variantId}: el promocional tiene que ser menor que el precio`);
+            } else {
+              if (!tnByProduct.has(tn.productId)) tnByProduct.set(tn.productId, []);
+              tnByProduct.get(tn.productId)!.push({
+                tnVariantId: tn.variantId,
+                price,
+                promo,
+                clearPromo,
+              });
+            }
+          }
         }
-        if (TN_RATE_LIMIT_DELAY_MS > 0) await sleep(TN_RATE_LIMIT_DELAY_MS);
+      }
+    }
+
+    if (tnIntegration?.access_token && tnStoreId) {
+      for (const [tnProductId, variants] of tnByProduct) {
+        const result = await updateTnProductPrices(
+          tnStoreId,
+          tnIntegration.access_token,
+          tnProductId,
+          variants
+        );
+        if (result.ok) updatedTN += variants.length;
+        else errors.push(`TN ${tnProductId}: ${result.detail || 'no aceptó el precio'}`);
       }
     }
 
@@ -305,5 +413,103 @@ export const bulkUpdateChannelPrices = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('[bulkUpdateChannelPrices]', error?.message || error);
     res.status(500).json({ message: 'Error actualizando precios', detail: error?.message });
+  }
+};
+
+function variantHasPromo(variant: { promotional_price?: unknown } | null | undefined): boolean {
+  const raw = variant?.promotional_price;
+  if (raw == null || String(raw).trim() === '') return false;
+  const n = Number(String(raw).replace(',', '.'));
+  return Number.isFinite(n) && n > 0;
+}
+
+function tnProductLabel(product: { id?: unknown; name?: unknown }): string {
+  const name = product?.name;
+  if (name && typeof name === 'object') {
+    const bag = name as Record<string, unknown>;
+    const text = bag.es || bag.pt || bag.en || Object.values(bag).find((v) => typeof v === 'string');
+    if (typeof text === 'string' && text.trim()) return text.trim();
+  }
+  if (typeof name === 'string' && name.trim()) return name.trim();
+  return String(product?.id || 'producto');
+}
+
+/**
+ * POST { page?: number }
+ * Recorre una página del catálogo de Tienda Nube y borra el promocional.
+ * El precio de lista no se modifica. El cliente repite hasta hasMore = false.
+ */
+export const clearTiendaNubePromotionalPrices = async (req: Request, res: Response) => {
+  try {
+    const page = Math.max(1, parseInt(String(req.body?.page ?? '1'), 10) || 1);
+    const perPage = 20;
+    const integration = await get(
+      `SELECT access_token, store_id, user_id FROM integrations WHERE platform = 'tiendanube'`
+    );
+    const storeId = resolveTnStoreId(integration);
+    if (!integration?.access_token || !storeId) {
+      return res.status(400).json({ message: 'No hay integración con Tienda Nube' });
+    }
+
+    const headers = {
+      Authentication: `bearer ${integration.access_token}`,
+      'User-Agent': TN_USER_AGENT,
+    };
+    const list = await axios.get(`https://api.tiendanube.com/v1/${storeId}/products`, {
+      headers,
+      params: { page, per_page: perPage },
+      validateStatus: () => true,
+    });
+    if (list.status !== 200 || !Array.isArray(list.data)) {
+      const data = list.data as { description?: string; message?: string } | undefined;
+      return res.status(502).json({
+        message: 'No se pudieron leer los productos de Tienda Nube',
+        detail: data?.description || data?.message || `HTTP ${list.status}`,
+      });
+    }
+
+    const products = list.data as Array<{ id?: unknown; name?: unknown; variants?: Array<{ id?: unknown; promotional_price?: unknown }> }>;
+    const totalHeader = Number(list.headers?.['x-total-count']);
+    const total = Number.isFinite(totalHeader) && totalHeader > 0 ? totalHeader : null;
+
+    let clearedProducts = 0;
+    let clearedVariants = 0;
+    let skippedProducts = 0;
+    const errors: string[] = [];
+
+    for (const product of products) {
+      const withPromo = (product.variants || []).filter((v) => variantHasPromo(v) && v?.id != null);
+      if (withPromo.length === 0) {
+        skippedProducts++;
+        continue;
+      }
+      const result = await updateTnProductPrices(
+        storeId,
+        integration.access_token,
+        String(product.id),
+        withPromo.map((v) => ({ tnVariantId: String(v.id), clearPromo: true }))
+      );
+      if (result.ok) {
+        clearedProducts++;
+        clearedVariants += withPromo.length;
+      } else {
+        errors.push(`${tnProductLabel(product)}: ${result.detail || 'no se pudo quitar el promocional'}`);
+      }
+    }
+
+    res.json({
+      page,
+      perPage,
+      scanned: products.length,
+      total,
+      clearedProducts,
+      clearedVariants,
+      skippedProducts,
+      hasMore: products.length === perPage,
+      errors: errors.slice(0, 20),
+    });
+  } catch (error: any) {
+    console.error('[clearTiendaNubePromotionalPrices]', error?.message || error);
+    res.status(500).json({ message: 'Error quitando precios promocionales', detail: error?.message });
   }
 };

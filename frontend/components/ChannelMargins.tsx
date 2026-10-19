@@ -5,18 +5,17 @@ import {
   Loader2,
   Zap,
   Cloud,
-  DollarSign,
   TrendingUp,
   TrendingDown,
   Info,
   Pencil,
   Download,
+  Trash2,
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
-import { ChannelPricesModal } from './ChannelPricesModal';
+import { ChannelPricesModal, type ChannelPriceArticle } from './ChannelPricesModal';
 import MlPeriodProfitCard from './MlPeriodProfitCard';
-import type { Product } from '../types';
 
 type ArticleRow = Awaited<ReturnType<typeof api.getChannelMargins>>['rows'][number];
 
@@ -38,7 +37,7 @@ const marginClass = (m: number | null | undefined) => {
 const PRICE_LIST_STORAGE_KEY = 'lupohub.margins.priceListId';
 
 const ChannelMargins: React.FC = () => {
-  const { showToast } = useNotification();
+  const { showToast, showConfirm } = useNotification();
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [searchDebounced, setSearchDebounced] = useState('');
@@ -56,6 +55,8 @@ const ChannelMargins: React.FC = () => {
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
   const [pricesModalOpen, setPricesModalOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [clearingPromos, setClearingPromos] = useState(false);
+  const [clearProgress, setClearProgress] = useState('');
 
   useEffect(() => {
     const t = setTimeout(() => setSearchDebounced(search.trim()), 350);
@@ -105,30 +106,32 @@ const ChannelMargins: React.FC = () => {
     return n;
   }, [selectedProductIds, rowsByProductId]);
 
-  const selectedVariants: Product[] = useMemo(() => {
-    const out: Product[] = [];
+  const selectedArticles: ChannelPriceArticle[] = useMemo(() => {
+    const out: ChannelPriceArticle[] = [];
     for (const pid of selectedProductIds) {
       const row = rowsByProductId.get(pid);
       if (!row) continue;
-      for (const variantId of row.variantIds) {
-        out.push({
-          id: variantId,
-          sku: row.baseSku,
-          name: row.productName,
-          category: '',
-          price: 0,
-          description: '',
-          stock: 0,
-          integrations: {
-            local: true,
-            mercadoLibre: !!row.ml?.linked,
-            tiendaNube: !!row.tn?.linked,
-          },
-        } as Product);
-      }
+      out.push({
+        productId: row.productId,
+        productName: row.productName,
+        baseSku: row.baseSku,
+        cost: row.fob,
+        variantIds: row.variantIds,
+        hasML: !!row.ml?.linked,
+        hasTN: !!row.tn?.linked,
+      });
     }
     return out;
   }, [selectedProductIds, rowsByProductId]);
+
+  const tnFee = useMemo(() => {
+    const preset = data?.config.tnFeePresets?.find((p) => p.id === tnFeePreset);
+    return {
+      ratePercent: data?.config.tnFeeRatePercent ?? preset?.ratePercent ?? 6.29,
+      cptPercent: data?.config.tnFeeCptPercent ?? preset?.cptPercent ?? 1,
+      appliesIva: data?.config.tnFeeAppliesIva ?? preset?.appliesIva ?? true,
+    };
+  }, [data?.config, tnFeePreset]);
 
   const isProductSelected = (productId: string) => selectedProductIds.includes(productId);
 
@@ -162,6 +165,61 @@ const ChannelMargins: React.FC = () => {
     }
   };
 
+  const handleClearAllPromos = () => {
+    showConfirm({
+      title: 'Quitar precios promocionales',
+      message:
+        'Se eliminan los precios promocionales de todos los productos de Tienda Nube. El precio de lista no se modifica.',
+      confirmLabel: 'Quitar todos',
+      onConfirm: () => {
+        void (async () => {
+          setClearingPromos(true);
+          setClearProgress('Leyendo el catálogo…');
+          let page = 1;
+          let products = 0;
+          let variants = 0;
+          let errorCount = 0;
+          try {
+            while (page < 500) {
+              const res = await api.clearTiendaNubePromotionalPrices(page);
+              products += res.clearedProducts || 0;
+              variants += res.clearedVariants || 0;
+              errorCount += res.errors?.length || 0;
+              const scanned = (page - 1) * (res.perPage || 20) + (res.scanned || 0);
+              setClearProgress(
+                res.total
+                  ? `${Math.min(scanned, res.total)} de ${res.total} productos · ${products} sin promocional`
+                  : `${scanned} productos revisados · ${products} sin promocional`
+              );
+              if (!res.hasMore || !res.scanned) break;
+              page += 1;
+            }
+            if (products === 0 && errorCount === 0) {
+              showToast('success', 'No había precios promocionales para quitar');
+            } else if (products === 0) {
+              showToast('error', 'Tienda Nube no dejó quitar los promocionales');
+            } else {
+              showToast(
+                errorCount ? 'warning' : 'success',
+                `Se quitó el promocional de ${products} producto${products !== 1 ? 's' : ''} (${variants} variantes)${errorCount ? ` · ${errorCount} aviso(s)` : ''}`
+              );
+            }
+            await load();
+          } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : 'No se pudieron quitar los promocionales';
+            showToast(
+              'error',
+              products > 0 ? `Se quitaron ${products} producto(s) y después falló: ${msg}` : msg
+            );
+          } finally {
+            setClearingPromos(false);
+            setClearProgress('');
+          }
+        })();
+      },
+    });
+  };
+
   const config = data?.config;
 
   return (
@@ -173,8 +231,7 @@ const ChannelMargins: React.FC = () => {
             Márgenes por canal
           </h2>
           <p className="text-slate-400 text-sm mt-1 max-w-2xl">
-            Una fila por artículo: todas las variantes comparten el mismo precio en ML y TN. Ganancia estimada:
-            precio de venta − comisiones − precio de la lista elegida.
+            Una fila por artículo. En Tienda Nube el margen usa el precio promocional si existe, y si no el precio de lista.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -189,8 +246,17 @@ const ChannelMargins: React.FC = () => {
           </button>
           <button
             type="button"
+            onClick={handleClearAllPromos}
+            disabled={clearingPromos || loading}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-rose-700 hover:bg-rose-600 text-white text-sm font-bold disabled:opacity-50"
+          >
+            {clearingPromos ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+            {clearingPromos ? clearProgress || 'Quitando promocionales…' : 'Quitar todos los promocionales'}
+          </button>
+          <button
+            type="button"
             onClick={() => load()}
-            disabled={loading}
+            disabled={loading || clearingPromos}
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-sm font-bold disabled:opacity-50"
           >
             {loading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
@@ -338,7 +404,7 @@ const ChannelMargins: React.FC = () => {
                 {config?.costListName || config?.fobListName || 'Costo'}
               </th>
               <th className="pb-2 px-1 font-normal">Precio · Comisión · Ganancia</th>
-              <th className="pb-2 px-1 font-normal">Precio · Comisión · Ganancia</th>
+              <th className="pb-2 px-1 font-normal">Precio · Promocional · Comisión · Ganancia</th>
             </tr>
           </thead>
           <tbody>
@@ -398,7 +464,9 @@ const ChannelMargins: React.FC = () => {
       <ChannelPricesModal
         open={pricesModalOpen}
         onClose={() => setPricesModalOpen(false)}
-        variants={selectedVariants}
+        articles={selectedArticles}
+        tnFee={tnFee}
+        ivaPercent={config?.ivaPercent ?? 21}
         showToast={showToast}
         onSaved={() => {
           setPricesModalOpen(false);
@@ -437,18 +505,26 @@ const MarginTableRow: React.FC<{
 );
 
 const ChannelCells: React.FC<{
-  slice: NonNullable<ArticleRow['ml']>;
+  slice: NonNullable<ArticleRow['ml']> & { listPrice?: number | null; promoPrice?: number | null };
   accent: 'amber' | 'cyan';
 }> = ({ slice, accent }) => {
   const border = accent === 'amber' ? 'border-amber-900/40' : 'border-cyan-900/40';
+  const listPrice = slice.listPrice != null && slice.listPrice > 0 ? slice.listPrice : null;
+  const promoPrice = slice.promoPrice != null && slice.promoPrice > 0 ? slice.promoPrice : null;
   if (!slice.linked) return <span className="text-slate-600 text-xs">Sin vínculo</span>;
-  if (slice.price <= 0) return <span className="text-slate-500 text-xs">Sin precio</span>;
+  if (slice.price <= 0 && !listPrice) return <span className="text-slate-500 text-xs">Sin precio</span>;
   return (
     <div className={`space-y-1 text-xs rounded-lg border ${border} p-2 bg-slate-900/50`}>
       <div className="flex justify-between gap-2">
         <span className="text-slate-500">Precio</span>
-        <span className="text-white">{fmt(slice.price)}</span>
+        <span className="text-white">{fmt(accent === 'cyan' && listPrice ? listPrice : slice.price)}</span>
       </div>
+      {accent === 'cyan' && (
+        <div className="flex justify-between gap-2">
+          <span className="text-slate-500">Promocional</span>
+          <span className={promoPrice ? 'text-cyan-200' : 'text-slate-600'}>{promoPrice ? fmt(promoPrice) : '—'}</span>
+        </div>
+      )}
       <div className="flex justify-between gap-2">
         <span className="text-slate-500">Comisión</span>
         <span className="text-slate-300">−{fmt(slice.fee)}</span>

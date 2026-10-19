@@ -70,7 +70,7 @@ import {
 } from '../controllers/integrations.controller';
 import { exportMercadolibrePublicationsXlsx } from '../controllers/mercadolibrePublicationsExport.controller';
 import { exportMercadoLibreToTiendaNube } from '../controllers/mlToTiendaNubeExport.controller';
-import { getVariantChannelPrices, bulkUpdateChannelPrices } from '../controllers/channelPrices.controller';
+import { getVariantChannelPrices, bulkUpdateChannelPrices, clearTiendaNubePromotionalPrices } from '../controllers/channelPrices.controller';
 import { getChannelMargins, exportChannelMarginsXlsx } from '../controllers/channelMargins.controller';
 import {
   exportMlPeriodProfitXlsx,
@@ -108,7 +108,7 @@ import {
   testLupoWebhookEndpoint,
   syncLupoShopMlStockToShopEndpoint,
 } from '../controllers/lupoWebhookSettings.controller';
-import { authMiddleware, marketingAdsAccessMiddleware } from '../middleware/auth';
+import { authMiddleware, adminOrDepositoMiddleware, marketingAdsAccessMiddleware } from '../middleware/auth';
 import {
   disconnectGoogleAdsEndpoint,
   disconnectMetaAdsEndpoint,
@@ -160,6 +160,7 @@ router.get('/mercadolibre/items/:itemId/variations', getMercadoLibreItemVariatio
 router.post('/variant-external-stocks', getVariantExternalStocks);
 router.post('/variant-channel-prices', authMiddleware, getVariantChannelPrices);
 router.post('/variant-channel-prices/bulk', authMiddleware, bulkUpdateChannelPrices);
+router.post('/tiendanube/clear-promotional-prices', authMiddleware, adminOrDepositoMiddleware, clearTiendaNubePromotionalPrices);
 router.get('/channel-margins', authMiddleware, getChannelMargins);
 router.get('/channel-margins/export', authMiddleware, exportChannelMarginsXlsx);
 router.get('/channel-margins/ml-invoice', authMiddleware, getMlPeriodInvoice);
