@@ -531,9 +531,9 @@ export const patchStock = async (req: any, res: any) => {
       if (!vId) return res.status(404).json({ message: 'Variante no encontrada' });
     }
     
-    // Usar el nuevo sistema de stock con historial y sincronizaci?n
-    const { updateVariantStock } = await import('./stock.controller');
-    const success = await updateVariantStock(vId, Number(stock), 'AJUSTE_MANUAL');
+    const { updateVariantStock, referenceForManualAdjust } = await import('./stock.controller');
+    const reference = await referenceForManualAdjust(req.user);
+    const success = await updateVariantStock(vId, Number(stock), 'AJUSTE_MANUAL', reference);
     
     if (!success) {
       return res.status(500).json({ message: 'Error actualizando stock' });

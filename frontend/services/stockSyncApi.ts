@@ -53,6 +53,8 @@ export type StockSyncOverview = {
     change: number;
     stockAfter: number;
     reference: string;
+    /** Quién hizo el ajuste, si el movimiento es manual. */
+    actor?: string;
     date: string;
     variant: SyncVariant | null;
   }>;

@@ -865,24 +865,27 @@ export const forceSyncStock = async (req: Request, res: Response) => {
   }
 };
 
+/** Texto que queda en el historial: "Ajuste por usuario: Nombre". */
+export async function referenceForManualAdjust(user: { id?: string; name?: string } | null | undefined): Promise<string> {
+  const userId = user?.id || 'sistema';
+  let userName: string | null = typeof user?.name === 'string' && user.name.trim() ? user.name.trim() : null;
+  if (!userName && userId !== 'sistema') {
+    const row = await get(`SELECT name FROM users WHERE id = ?`, [userId]);
+    userName = row?.name ? String(row.name).trim() : null;
+  }
+  return userName ? `Ajuste por usuario: ${userName}` : `Ajuste por usuario ${userId}`;
+}
+
 // Endpoint: Ajuste manual de stock (Admin o Depósito)
 export const updateVariantStockEndpoint = async (req: Request, res: Response) => {
   try {
     const { variantId } = req.params;
     const { stock } = req.body;
     const user = (req as any).user;
-    const userId = user?.id || 'sistema';
     if (typeof stock !== 'number' || stock < 0) {
       return res.status(400).json({ message: 'stock debe ser un número >= 0' });
     }
-    let userName: string | null = typeof user?.name === 'string' ? user.name : null;
-    if (!userName && userId !== 'sistema') {
-      const row = await get(`SELECT name FROM users WHERE id = ?`, [userId]);
-      userName = row?.name ? String(row.name) : null;
-    }
-    const reference = userName
-      ? `Ajuste por usuario: ${userName}`
-      : `Ajuste por usuario ${userId}`;
+    const reference = await referenceForManualAdjust(user);
     const result = await updateVariantStockDetailed(
       variantId,
       Math.floor(stock),

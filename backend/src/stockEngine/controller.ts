@@ -45,6 +45,16 @@ async function variantsById(ids: string[]): Promise<Map<string, ReturnType<typeo
 
 const PLATFORM_NAME: Record<string, string> = { tiendanube: 'Tienda Nube', mercadolibre: 'Mercado Libre' };
 
+/** Nombre de quien hizo un ajuste a mano, a partir de la referencia guardada. */
+function manualActor(reference: string): { name: string; userId: string } {
+  const ref = reference.trim();
+  const named = /^Ajuste por usuario:\s*(.+)$/i.exec(ref);
+  if (named?.[1]?.trim()) return { name: named[1].trim(), userId: '' };
+  const byId = /^Ajuste por usuario\s+(.+)$/i.exec(ref);
+  if (byId?.[1]?.trim()) return { name: '', userId: byId[1].trim() };
+  return { name: '', userId: '' };
+}
+
 function movementText(type: string): string {
   switch (type) {
     case 'VENTA_TIENDA_NUBE':
@@ -60,7 +70,7 @@ function movementText(type: string): string {
     case 'DEVOLUCION':
       return 'Devolución al stock';
     case 'AJUSTE_MANUAL':
-      return 'Cambio a mano';
+      return 'Ajuste manual';
     default:
       return 'Carga de stock';
   }
@@ -109,6 +119,22 @@ export const getOverview = async (_req: Request, res: Response) => {
       ...(recentRows as any[]).map((r) => String(r.variant_id)),
     ];
     const variants = await variantsById(ids);
+
+    const actorByMovement = new Map<string, { name: string; userId: string }>();
+    const actorIds = new Set<string>();
+    for (const r of recentRows as any[]) {
+      if (String(r.movement_type) !== 'AJUSTE_MANUAL') continue;
+      const actor = manualActor(r.reference ? String(r.reference) : '');
+      actorByMovement.set(String(r.id), actor);
+      if (actor.userId) actorIds.add(actor.userId);
+    }
+    const userNames = new Map<string, string>();
+    if (actorIds.size) {
+      const people = await query(`SELECT id, name FROM users WHERE id IN (?)`, [Array.from(actorIds)]);
+      for (const p of people as any[]) {
+        if (p?.name) userNames.set(String(p.id), String(p.name));
+      }
+    }
 
     const allTargets = (failingRows as any[]).length
       ? await query(
@@ -187,16 +213,22 @@ export const getOverview = async (_req: Request, res: Response) => {
         date: r.created_at,
         variant: r.variant_id ? variants.get(String(r.variant_id)) ?? null : null,
       })),
-      recent: (recentRows as any[]).map((r) => ({
-        id: String(r.id),
-        what: movementText(String(r.movement_type)),
-        type: String(r.movement_type),
-        change: Number(r.quantity_change) || 0,
-        stockAfter: Number(r.new_stock) || 0,
-        reference: r.reference ? String(r.reference) : '',
-        date: r.created_at,
-        variant: variants.get(String(r.variant_id)) ?? null,
-      })),
+      recent: (recentRows as any[]).map((r) => {
+        const id = String(r.id);
+        const actor = actorByMovement.get(id);
+        const actorName = actor ? actor.name || (actor.userId ? userNames.get(actor.userId) || '' : '') : '';
+        return {
+          id,
+          what: movementText(String(r.movement_type)),
+          type: String(r.movement_type),
+          change: Number(r.quantity_change) || 0,
+          stockAfter: Number(r.new_stock) || 0,
+          reference: r.reference ? String(r.reference) : '',
+          actor: actorName,
+          date: r.created_at,
+          variant: variants.get(String(r.variant_id)) ?? null,
+        };
+      }),
     });
   } catch (e: any) {
     console.error('[StockSync overview]', e);

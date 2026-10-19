@@ -9,12 +9,11 @@ import {
   RefreshCw,
   Search,
   Send,
-  ShoppingBag,
   ShoppingCart,
+  UserRound,
   WifiOff,
   Wrench,
   X,
-  Zap,
 } from 'lucide-react';
 import { stockSyncApi, StockSyncOverview, SyncVariant, VariantLink } from '../services/stockSyncApi';
 import { useNotification } from '../context/NotificationContext';
@@ -109,13 +108,35 @@ const ProductLink: React.FC<{ variant: SyncVariant | null | undefined; className
     <span className={className}>Producto</span>
   );
 
-const PlatformIcon: React.FC<{ platform: string | null; size?: number }> = ({ platform, size = 16 }) =>
+/** Marca de Mercado Libre: cuadrado amarillo y la mano azul. */
+const MercadoLibreIcon: React.FC<{ size?: number }> = ({ size = 18 }) => (
+  <svg width={size} height={size} viewBox="0 0 32 32" aria-label="Mercado Libre" className="shrink-0">
+    <rect width="32" height="32" rx="8" fill="#FFF159" />
+    <path
+      fill="#2D3277"
+      d="M12.2 15.2V11a1.35 1.35 0 0 1 2.7 0v4.2h.3V9.6a1.35 1.35 0 0 1 2.7 0V15.2h.3v-3.4a1.35 1.35 0 0 1 2.7 0v6.2c0 .4.2.9.7 1.2 1 .6 1.5 1.6 1.2 2.7-.4 1.5-1.8 2.3-3.4 2.1l-1.2-.2c-.5 1.6-2 2.7-3.8 2.7h-1.6c-2.5 0-4.2-1.7-4.2-4.1v-5.2c0-1 .8-1.8 1.8-1.8h1.5z"
+    />
+  </svg>
+);
+
+/** Marca de Tienda Nube: nube blanca sobre el azul de la marca. */
+const TiendaNubeIcon: React.FC<{ size?: number }> = ({ size = 18 }) => (
+  <svg width={size} height={size} viewBox="0 0 32 32" aria-label="Tienda Nube" className="shrink-0">
+    <rect width="32" height="32" rx="8" fill="#2F3580" />
+    <path
+      fill="#fff"
+      d="M22.8 21.6H11.4a3.5 3.5 0 0 1-.6-6.9 5 5 0 0 1 9.5-1.3 3.2 3.2 0 0 1 2.5 8.2z"
+    />
+  </svg>
+);
+
+const PlatformIcon: React.FC<{ platform: string | null; size?: number }> = ({ platform, size = 18 }) =>
   platform === 'mercadolibre' ? (
-    <Zap size={size} className="text-yellow-300 shrink-0" aria-label="Mercado Libre" />
+    <MercadoLibreIcon size={size} />
   ) : platform === 'tiendanube' ? (
-    <ShoppingBag size={size} className="text-cyan-300 shrink-0" aria-label="Tienda Nube" />
+    <TiendaNubeIcon size={size} />
   ) : (
-    <ShoppingCart size={size} className="text-blue-300 shrink-0" />
+    <ShoppingCart size={size} className="text-blue-300 shrink-0" aria-label="Pedido mayorista" />
   );
 
 const Btn: React.FC<{
@@ -861,12 +882,26 @@ const StockSync: React.FC = () => {
             <ul className="divide-y divide-slate-800">
               {data.recent.slice(0, shown).map((m) => {
                 const up = m.change > 0;
+                const manual = m.type === 'AJUSTE_MANUAL';
                 const platform = m.type.includes('MERCADO_LIBRE') ? 'mercadolibre' : m.type.includes('TIENDA_NUBE') ? 'tiendanube' : null;
                 const sku = (m.variant?.sku || m.variant?.productSku || '').trim();
+                const actor =
+                  (m.actor || '').trim() ||
+                  (/^Ajuste por usuario:\s*(.+)$/i.exec(m.reference || '')?.[1] || '').trim();
                 return (
-                  <li key={m.id} className="px-3 py-2 flex items-center gap-3">
-                    {m.type === 'PEDIDO_MAYORISTA' || platform ? (
-                      <PlatformIcon platform={platform} />
+                  <li
+                    key={m.id}
+                    className={`px-3 py-2 flex items-center gap-3 ${manual ? 'bg-amber-500/[0.08] border-l-2 border-amber-400' : ''}`}
+                  >
+                    {manual ? (
+                      <span
+                        className="shrink-0 w-7 h-7 rounded-lg bg-amber-500/20 text-amber-200 flex items-center justify-center"
+                        title="Ajuste manual"
+                      >
+                        <UserRound size={15} />
+                      </span>
+                    ) : m.type === 'PEDIDO_MAYORISTA' || platform ? (
+                      <PlatformIcon platform={platform} size={22} />
                     ) : (
                       <RefreshCw size={16} className="text-slate-400 shrink-0" />
                     )}
@@ -878,11 +913,17 @@ const StockSync: React.FC = () => {
                       ) : null}
                       <div className="min-w-0">
                         <div className="text-sm truncate">
-                          <span className="font-semibold">{m.what}</span>
+                          <span className={`font-semibold ${manual ? 'text-amber-200' : ''}`}>{m.what}</span>
                           <span className="text-slate-400"> · </span>
                           <ProductLink variant={m.variant} className="text-slate-400" />
                         </div>
-                        <div className="text-xs text-slate-500">{timeAgo(m.date)}</div>
+                        <div className="text-xs text-slate-500 truncate">
+                          {manual ? (
+                            <span className="text-amber-200/90">{actor ? `por ${actor}` : 'usuario no identificado'}</span>
+                          ) : null}
+                          {manual ? ' · ' : ''}
+                          {timeAgo(m.date)}
+                        </div>
                       </div>
                     </div>
                     <div className="text-right shrink-0 w-20">
