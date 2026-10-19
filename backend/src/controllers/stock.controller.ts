@@ -171,6 +171,49 @@ export type StockMovementType = MovementType;
  * Cambia el stock de una variante a `newStock` (vía el libro de stock: atómico + historial + cola ML/TN).
  * Se mantiene la firma vieja para no romper a quienes la usan.
  */
+export type ManualSyncResult = { ok: boolean; syncOk: boolean; syncMessage: string };
+
+/**
+ * Cambia el stock. Un ajuste a mano se envía en el momento a Tienda Nube y Mercado Libre
+ * (las dos con el mismo número) y se espera el resultado, para no tener que repetir el cambio.
+ */
+export const updateVariantStockDetailed = async (
+  variantId: string,
+  newStock: number,
+  movementType: StockMovementType,
+  reference?: string,
+  syncExternal: boolean = true
+): Promise<ManualSyncResult> => {
+  const manual = syncExternal && movementType === 'AJUSTE_MANUAL';
+  try {
+    await applyEntries(
+      [{ variantId, setTo: Math.floor(Number(newStock) || 0), type: movementType, reference: reference ?? null }],
+      // El ajuste a mano no entra a la cola antes: se manda ya, abajo. Si fallara, recién ahí se reintenta.
+      { syncExternal: manual ? false : syncExternal }
+    );
+    if (!manual) return { ok: true, syncOk: true, syncMessage: '' };
+
+    const outcome = await pushVariant(variantId);
+    const failed = outcome.results.filter((r) => !r.result.ok);
+    if (failed.length) {
+      await enqueueSync([variantId], 20000);
+      const names = Array.from(
+        new Set(failed.map((r) => (r.target.platform === 'tiendanube' ? 'Tienda Nube' : 'Mercado Libre')))
+      );
+      return {
+        ok: true,
+        syncOk: false,
+        syncMessage: `El stock quedó guardado. ${names.join(' y ')} no lo tomó todavía; se reintenta solo.`,
+      };
+    }
+    return { ok: true, syncOk: true, syncMessage: '' };
+  } catch (error) {
+    console.error('Error updating variant stock:', error);
+    if (manual) await enqueueSync([variantId], 20000).catch(() => undefined);
+    return { ok: false, syncOk: false, syncMessage: 'No se pudo actualizar el stock.' };
+  }
+};
+
 export const updateVariantStock = async (
   variantId: string,
   newStock: number,
@@ -178,18 +221,8 @@ export const updateVariantStock = async (
   reference?: string,
   syncExternal: boolean = true
 ): Promise<boolean> => {
-  try {
-    await applyEntries(
-      [{ variantId, setTo: Math.floor(Number(newStock) || 0), type: movementType, reference: reference ?? null }],
-      { syncExternal }
-    );
-    // Un ajuste a mano se manda aunque el número no haya cambiado (sirve para "volver a enviar").
-    if (syncExternal && movementType === 'AJUSTE_MANUAL') await enqueueSync([variantId], 0);
-    return true;
-  } catch (error) {
-    console.error('Error updating variant stock:', error);
-    return false;
-  }
+  const r = await updateVariantStockDetailed(variantId, newStock, movementType, reference, syncExternal);
+  return r.ok;
 };
 
 export type ChannelSaleDeductResult = {
@@ -850,15 +883,20 @@ export const updateVariantStockEndpoint = async (req: Request, res: Response) =>
     const reference = userName
       ? `Ajuste por usuario: ${userName}`
       : `Ajuste por usuario ${userId}`;
-    const ok = await updateVariantStock(
+    const result = await updateVariantStockDetailed(
       variantId,
       Math.floor(stock),
       'AJUSTE_MANUAL',
       reference,
       true
     );
-    if (!ok) return res.status(500).json({ message: 'Error actualizando stock' });
-    res.json({ variantId, stock: Math.floor(stock) });
+    if (!result.ok) return res.status(500).json({ message: 'Error actualizando stock' });
+    res.json({
+      variantId,
+      stock: Math.floor(stock),
+      syncOk: result.syncOk,
+      syncMessage: result.syncMessage,
+    });
   } catch (error: any) {
     console.error('Error updating variant stock:', error);
     res.status(500).json({ message: 'Error actualizando stock' });

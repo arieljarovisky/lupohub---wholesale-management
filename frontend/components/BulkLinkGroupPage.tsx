@@ -2284,7 +2284,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
           )}
           <button
             type="button"
-            onClick={() => onNavigate('stock_history')}
+            onClick={() => onNavigate('stock_sync')}
             className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-violet-600/80 border border-slate-700 text-slate-300 hover:text-white text-sm font-medium flex items-center gap-2 transition-colors"
           >
             <History size={16} />

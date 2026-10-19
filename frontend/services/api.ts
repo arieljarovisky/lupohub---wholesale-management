@@ -2554,9 +2554,18 @@ export const api = {
   deleteCustomer: async (id: string): Promise<void> => {
     await request<void>(`/customers/${id}`, 'DELETE');
   },
-  updateVariantStock: async (variantId: string, stock: number): Promise<void> => {
+  updateVariantStock: async (
+    variantId: string,
+    stock: number
+  ): Promise<{ syncOk?: boolean; syncMessage?: string } | undefined> => {
     return handleRequest(async () => {
-      await request<void>(`/stock/variant/${variantId}`, 'PUT', { stock });
+      return await request<{ syncOk?: boolean; syncMessage?: string }>(
+        `/stock/variant/${variantId}`,
+        'PUT',
+        { stock },
+        undefined,
+        45000
+      );
     }, undefined, 'updateVariantStock');
   },
 

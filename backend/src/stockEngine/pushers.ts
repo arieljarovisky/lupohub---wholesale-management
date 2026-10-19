@@ -83,6 +83,105 @@ export async function pushTiendaNube(productId: string, variantId: string, qty: 
 
 export type MlMatchHints = { sku?: string | null; color?: string | null; size?: string | null };
 
+function mlUserProductId(item: any, variation: any | null): string {
+  const fromVar = variation?.user_product_id;
+  if (fromVar != null && String(fromVar).trim()) return String(fromVar).trim();
+  const fromItem = item?.user_product_id;
+  if (fromItem != null && String(fromItem).trim()) return String(fromItem).trim();
+  return '';
+}
+
+/** Lo que muestra la publicación ahora (variación, si hay). Null si no se pudo leer. */
+async function readMlAvailableQty(itemId: string, variationId: string | null, token: string): Promise<number | null> {
+  const headers = { Authorization: `Bearer ${token}` };
+  try {
+    if (variationId) {
+      const one = await withMlRetry(() =>
+        axios.get(
+          `https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}/variations/${encodeURIComponent(variationId)}`,
+          { headers, validateStatus: (s) => s < 500 && s !== 429 }
+        )
+      );
+      if (one.status === 200 && one.data?.available_quantity != null && one.data.available_quantity !== '') {
+        return Number(one.data.available_quantity);
+      }
+    }
+    const item = await withMlRetry(() =>
+      axios.get(`https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}`, {
+        headers,
+        validateStatus: (s) => s < 500 && s !== 429,
+      })
+    );
+    if (item.status !== 200) return null;
+    if (!variationId) {
+      return item.data?.available_quantity != null ? Number(item.data.available_quantity) : null;
+    }
+    const found = (Array.isArray(item.data?.variations) ? item.data.variations : []).find(
+      (v: any) => String(v?.id) === String(variationId)
+    );
+    return found?.available_quantity != null && found.available_quantity !== '' ? Number(found.available_quantity) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Modelo nuevo de Mercado Libre: el stock se cambia en el user product, no en la publicación. */
+async function putMlUserProductStock(userProductId: string, units: number, token: string): Promise<boolean> {
+  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const url = `https://api.mercadolibre.com/user-products/${encodeURIComponent(userProductId)}/stock`;
+  try {
+    const got = await axios.get(url, { headers, validateStatus: () => true });
+    if (got.status !== 200) return false;
+    const version = got.headers?.['x-version'] ?? got.headers?.['X-Version'];
+    if (version == null || String(version).trim() === '') return false;
+    const put = await axios.put(
+      `${url}/type/selling_address`,
+      { quantity: units },
+      { headers: { ...headers, 'x-version': String(version) }, validateStatus: () => true }
+    );
+    return put.status >= 200 && put.status < 300;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * PUT del ítem con TODAS las variaciones. Si falta el stock de alguna, se lee antes:
+ * mandar 0 por no saberlo borraría el stock de los otros talles.
+ */
+async function putMlItemVariations(
+  itemId: string,
+  variationId: string,
+  units: number,
+  token: string,
+  known: any[]
+): Promise<boolean> {
+  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const payload: Array<{ id: string | number; available_quantity: number }> = [];
+  for (const v of known) {
+    if (v?.id == null) continue;
+    const isTarget = String(v.id) === String(variationId);
+    let qty = v.available_quantity;
+    if (!isTarget && (qty == null || qty === '')) {
+      const one = await axios.get(
+        `https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}/variations/${encodeURIComponent(String(v.id))}`,
+        { headers, validateStatus: () => true }
+      );
+      if (one.status !== 200 || one.data?.available_quantity == null || one.data.available_quantity === '') return false;
+      qty = one.data.available_quantity;
+    }
+    payload.push({
+      id: v.id,
+      available_quantity: isTarget ? units : Math.max(0, Math.floor(Number(qty) || 0)),
+    });
+  }
+  if (!payload.some((p) => String(p.id) === String(variationId))) return false;
+  await withMlRetry(() =>
+    axios.put(`https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}`, { variations: payload }, { headers })
+  );
+  return true;
+}
+
 export async function pushMercadoLibre(
   rawItemId: string,
   variationId: string | null,
@@ -122,6 +221,16 @@ export async function pushMercadoLibre(
       await withMlRetry(() =>
         axios.put(`https://api.mercadolibre.com/items/${itemId}`, { available_quantity: units }, { headers })
       );
+      const upId = mlUserProductId(item, null);
+      await new Promise((r) => setTimeout(r, 400));
+      let shown = await readMlAvailableQty(itemId, null, token.access_token);
+      if (shown !== units && upId) {
+        await putMlUserProductStock(upId, units, token.access_token);
+        shown = await readMlAvailableQty(itemId, null, token.access_token);
+      }
+      if (shown != null && shown !== units) {
+        return { ok: false, error: `Se envió ${units} pero Mercado Libre muestra ${shown}` };
+      }
       return { ok: true };
     }
 
@@ -155,6 +264,8 @@ export async function pushMercadoLibre(
     }
     if (Number(target.available_quantity) === units) return { ok: true, healedVariationId };
 
+    const upId = mlUserProductId(item, target);
+    let wroteVariation = false;
     try {
       await withMlRetry(() =>
         axios.put(
@@ -163,20 +274,34 @@ export async function pushMercadoLibre(
           { headers }
         )
       );
+      wroteVariation = true;
     } catch (subErr: any) {
       const status = subErr?.response?.status;
       if (!(status >= 400 && status < 500)) throw subErr;
-      // Algunas cuentas exigen el PUT del ítem con TODAS las variaciones (si no, borra las omitidas).
+      // Muchas cuentas ignoran el PUT de una sola variación y exigen el ítem completo.
       const fresh = await withMlRetry(() => axios.get(`https://api.mercadolibre.com/items/${itemId}`, { headers }));
-      const all: any[] = Array.isArray(fresh.data?.variations) ? fresh.data.variations : [];
+      const all: any[] = Array.isArray(fresh.data?.variations) ? fresh.data.variations : variations;
       if (!all.some((v) => String(v.id) === String(target.id))) throw subErr;
-      const payload = all.map((v) => ({
-        id: v.id,
-        available_quantity: String(v.id) === String(target.id) ? units : Math.max(0, Number(v.available_quantity) || 0),
-      }));
-      await withMlRetry(() =>
-        axios.put(`https://api.mercadolibre.com/items/${itemId}`, { variations: payload }, { headers })
-      );
+      wroteVariation = await putMlItemVariations(itemId, String(target.id), units, token.access_token, all);
+      if (!wroteVariation && !upId) throw subErr;
+    }
+
+    // Mercado Libre a veces responde OK y el número nuevo aparece un instante después.
+    await new Promise((r) => setTimeout(r, 400));
+    let shown = await readMlAvailableQty(itemId, String(target.id), token.access_token);
+    if (shown !== units) {
+      if (!wroteVariation || shown != null) {
+        const fresh = await withMlRetry(() => axios.get(`https://api.mercadolibre.com/items/${itemId}`, { headers })).catch(() => null);
+        const all: any[] = Array.isArray(fresh?.data?.variations) ? fresh.data.variations : variations;
+        if (all.some((v) => String(v.id) === String(target.id))) {
+          await putMlItemVariations(itemId, String(target.id), units, token.access_token, all).catch(() => false);
+        }
+      }
+      if (upId) await putMlUserProductStock(upId, units, token.access_token);
+      shown = await readMlAvailableQty(itemId, String(target.id), token.access_token);
+    }
+    if (shown != null && shown !== units) {
+      return { ok: false, error: `Se envió ${units} pero Mercado Libre muestra ${shown}` };
     }
     return { ok: true, healedVariationId };
   } catch (e: any) {

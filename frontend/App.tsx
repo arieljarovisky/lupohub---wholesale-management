@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, lazy, Suspense, useCallback, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
-import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, History, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Percent, Megaphone, Wallet, ChevronRight, MessageCircle, Star, RefreshCw } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Percent, Megaphone, Wallet, ChevronRight, MessageCircle, Star, RefreshCw } from 'lucide-react';
 import { isCompanyFinanceUser, COMPANY_FINANCE_VIEW } from './utils/companyFinanceAccess';
 import {
   MARKETING_HUB_VIEW,
@@ -60,7 +60,6 @@ const TiendaNubeOrders = lazyWithReload(() => import('./components/TiendaNubeOrd
 const MercadoLibreOrders = lazyWithReload(() => import('./components/MercadoLibreOrders'));
 const MercadoLibreProductAds = lazyWithReload(() => import('./components/MercadoLibreProductAds'));
 const BulkInvoicing = lazyWithReload(() => import('./components/BulkInvoicing'));
-const StockHistory = lazyWithReload(() => import('./components/StockHistory'));
 const StockSync = lazyWithReload(() => import('./components/StockSync'));
 const Despachos = lazyWithReload(() => import('./components/Despachos'));
 const SellersCommissions = lazyWithReload(() => import('./components/SellersCommissions'));
@@ -169,7 +168,6 @@ const App: React.FC = () => {
     marketing_top_products: [Role.ADMIN, Role.MARKETING],
     meta_ads: [Role.ADMIN, Role.MARKETING],
     google_ads: [Role.ADMIN, Role.MARKETING],
-    stock_history: [Role.ADMIN, Role.WAREHOUSE],
     despachos: [Role.ADMIN],
     customers: [Role.ADMIN, Role.SELLER],
     sellers: [Role.ADMIN, Role.SELLER],
@@ -204,6 +202,10 @@ const App: React.FC = () => {
 
   const handleChangeView = useCallback((nextView: string) => {
     const nextBase = String(nextView || '').split('?')[0];
+    if (nextBase === 'stock_history') {
+      setCurrentView('stock_sync');
+      return;
+    }
     if (currentUser && !isViewAccessible(nextView, currentUser)) {
       setCurrentView(defaultViewForRole(currentUser.role));
       return;
@@ -256,7 +258,8 @@ const App: React.FC = () => {
   // Restore view and load data when currentUser is set
   useEffect(() => {
     if (!currentUser) return;
-    const savedView = localStorage.getItem('lupo_current_view');
+    const savedViewRaw = localStorage.getItem('lupo_current_view');
+    const savedView = savedViewRaw?.split('?')[0] === 'stock_history' ? 'stock_sync' : savedViewRaw;
     if (savedView && currentUser) {
       const isSpecial = savedView === 'create_order' || savedView === 'order_picking';
       if (isSpecial || isViewAccessible(savedView, currentUser)) {
@@ -268,6 +271,10 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!currentUser) return;
+    if (baseView === 'stock_history') {
+      setCurrentView('stock_sync');
+      return;
+    }
     if (!isViewAccessible(baseView, currentUser)) {
       setCurrentView(defaultViewForRole(currentUser.role));
     }
@@ -492,7 +499,10 @@ const App: React.FC = () => {
     const previousProducts = [...products];
     setProducts(prev => prev.map(p => p.id === productId ? { ...p, stock: newStock } : p));
     try {
-      await api.updateVariantStock(productId, newStock);
+      const synced = await api.updateVariantStock(productId, newStock);
+      if (synced && synced.syncOk === false && synced.syncMessage) {
+        showToast('warning', synced.syncMessage);
+      }
     } catch (error) {
       setProducts(previousProducts);
       showToast('error', 'Error al actualizar stock. Revisá que tengas permiso (Admin o Depósito).');
@@ -1002,7 +1012,6 @@ const App: React.FC = () => {
       { id: 'dashboard', label: 'Inicio', icon: LayoutDashboard, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
       { id: 'inventory', label: 'Inventario', icon: Package, roles: [Role.ADMIN, Role.WAREHOUSE, Role.DEPOSITO] },
       { id: 'stock_sync', label: 'Stock y ventas', icon: RefreshCw, roles: [Role.ADMIN, Role.WAREHOUSE, Role.DEPOSITO] },
-      { id: 'stock_history', label: 'Historial Stock', icon: History, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'despachos', label: 'Despachos', icon: Ship, roles: [Role.ADMIN] },
     ]},
     { title: 'Pedidos y canales', items: [
@@ -1173,7 +1182,6 @@ const App: React.FC = () => {
                  {baseView === MARKETING_LEADS_VIEW && 'Leads y embudo de ventas'}
                  {baseView === META_ADS_VIEW && 'Meta Ads — campañas'}
                  {baseView === GOOGLE_ADS_VIEW && 'Google Ads — campañas'}
-                 {baseView === 'stock_history' && 'Historial de Stock'}
                  {baseView === 'stock_sync' && 'Stock y ventas'}
                  {baseView === 'despachos' && 'Despachos'}
                  {baseView === 'customers' && 'Clientes'}
@@ -1463,11 +1471,6 @@ const App: React.FC = () => {
           {baseView === 'catalogs' && (
             <Suspense fallback={<ViewFallback />}>
               <Catalogs role={currentUser.role} priceLists={priceLists} userId={currentUser.id} />
-            </Suspense>
-          )}
-          {baseView === 'stock_history' && (
-            <Suspense fallback={<ViewFallback />}>
-              <StockHistory />
             </Suspense>
           )}
           {baseView === 'stock_sync' && (

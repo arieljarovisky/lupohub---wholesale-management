@@ -1274,14 +1274,15 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     };
   }, [cardDotsOpenKey]);
 
-  // Refrescar stocks ML/TN en la UI después de que el backend sincronice (debounce ~2.8s)
+  // El guardado ya esperó a Tienda Nube y Mercado Libre. Se lee de nuevo al toque y otra vez por si ML tarda en mostrar el número.
   const refreshExternalStocksAfterSync = (variantId: string) => {
-    // Backend ya no debouncea 2,8s en ajuste manual; refrescar ML/TN un poco antes para alinear la UI.
-    setTimeout(() => {
+    const pull = () => {
       api.getVariantExternalStocks([variantId]).then(res => {
         if (res?.stocks) setVariantExternalStocks(prev => ({ ...prev, ...res.stocks }));
       }).catch(() => {});
-    }, 1800);
+    };
+    pull();
+    setTimeout(pull, 2500);
   };
 
   /** Actualiza stock en la lista del servidor (modo paginado) sin refetch completo → no resetea página ni dispara loadData global. */
