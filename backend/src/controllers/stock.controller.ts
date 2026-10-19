@@ -785,7 +785,7 @@ export const getStockMovements = async (req: Request, res: Response) => {
     const movements = await query(
       `SELECT
          sm.*,
-         pv.sku,
+         COALESCE(NULLIF(TRIM(pv.external_sku), ''), pv.sku) AS sku,
          p.name as product_name,
          o.id as order_id,
          c.business_name as customer_name,

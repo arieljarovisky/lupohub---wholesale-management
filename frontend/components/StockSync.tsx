@@ -500,7 +500,7 @@ const StockSync: React.FC = () => {
   const [busy, setBusy] = useState<string | null>(null);
   const [choosing, setChoosing] = useState<StockSyncOverview['unmatched'][number] | null>(null);
   const [fixing, setFixing] = useState<SyncVariant | null>(null);
-  const [tab, setTab] = useState<Tab>('review');
+  const [tab, setTab] = useState<Tab>('recent');
   const [filter, setFilter] = useState<ReviewFilter>('all');
   const [shown, setShown] = useState(PAGE);
   const [manualPlatform, setManualPlatform] = useState<'tiendanube' | 'mercadolibre'>('mercadolibre');
@@ -687,8 +687,8 @@ const StockSync: React.FC = () => {
 
       {/* Pestañas */}
       <div className="flex items-center gap-1 border-b border-slate-800 pb-2">
+        {tabBtn('recent', 'Historial')}
         {tabBtn('review', 'Para revisar', problems)}
-        {tabBtn('recent', 'Movimientos')}
         {tabBtn('tools', 'Herramientas')}
       </div>
 
@@ -862,6 +862,7 @@ const StockSync: React.FC = () => {
               {data.recent.slice(0, shown).map((m) => {
                 const up = m.change > 0;
                 const platform = m.type.includes('MERCADO_LIBRE') ? 'mercadolibre' : m.type.includes('TIENDA_NUBE') ? 'tiendanube' : null;
+                const sku = (m.variant?.sku || m.variant?.productSku || '').trim();
                 return (
                   <li key={m.id} className="px-3 py-2 flex items-center gap-3">
                     {m.type === 'PEDIDO_MAYORISTA' || platform ? (
@@ -869,13 +870,20 @@ const StockSync: React.FC = () => {
                     ) : (
                       <RefreshCw size={16} className="text-slate-400 shrink-0" />
                     )}
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm truncate">
-                        <span className="font-semibold">{m.what}</span>
-                        <span className="text-slate-400"> · </span>
-                        <ProductLink variant={m.variant} className="text-slate-400" />
+                    <div className="flex-1 min-w-0 flex items-center gap-2">
+                      {sku ? (
+                        <span className="shrink-0 font-mono text-xs font-semibold text-slate-100 bg-slate-800 border border-slate-700 px-1.5 py-0.5 rounded" title="SKU">
+                          {sku}
+                        </span>
+                      ) : null}
+                      <div className="min-w-0">
+                        <div className="text-sm truncate">
+                          <span className="font-semibold">{m.what}</span>
+                          <span className="text-slate-400"> · </span>
+                          <ProductLink variant={m.variant} className="text-slate-400" />
+                        </div>
+                        <div className="text-xs text-slate-500">{timeAgo(m.date)}</div>
                       </div>
-                      <div className="text-xs text-slate-500">{timeAgo(m.date)}</div>
                     </div>
                     <div className="text-right shrink-0 w-20">
                       <div className={`text-sm font-bold inline-flex items-center gap-0.5 ${up ? 'text-emerald-300' : 'text-red-300'}`}>
