@@ -55,7 +55,7 @@ function wholesaleDto(r: any) {
     date: r.order_date ? String(r.order_date).slice(0, 10) : null,
     status: r.order_status ? String(r.order_status) : null,
     notes: r.order_notes ? String(r.order_notes).trim() : null,
-    direction: change < 0 ? 'out' : 'back',
+    direction: change < 0 ? 'out' : change > 0 ? 'back' : 'none',
   };
 }
 

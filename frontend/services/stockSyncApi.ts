@@ -18,8 +18,8 @@ export type WholesaleOrderRef = {
   date: string | null;
   status: string | null;
   notes: string | null;
-  /** out = salió en el pedido; back = volvió (devolución, cancelación o nota de crédito). */
-  direction: 'out' | 'back';
+  /** out = salió en el pedido; back = volvió; none = el movimiento está ligado al pedido pero la cantidad es 0. */
+  direction: 'out' | 'back' | 'none';
 };
 
 export type ArticleHistory = {

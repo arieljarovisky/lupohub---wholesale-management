@@ -50,14 +50,14 @@ function formatOrderDate(value: string | null | undefined): string {
 function WholesaleLine({ w }: { w: WholesaleOrderRef | null | undefined }) {
   if (!w?.orderId) return null;
   const when = formatOrderDate(w.date);
-  const verb = w.direction === 'back' ? 'Volvió del pedido de' : 'Salió en el pedido de';
-  const shortId = w.orderId.length > 12 ? w.orderId.slice(-8) : w.orderId;
+  const verb =
+    w.direction === 'back' ? 'Volvió del pedido de' : w.direction === 'out' ? 'Salió en el pedido de' : 'Figura en el pedido de';
   return (
     <div className="text-xs text-blue-200 truncate" title={[`Pedido #${w.orderId}`, w.notes || ''].filter(Boolean).join(' · ')}>
       {verb} <span className="font-semibold text-white">{w.customer || 'cliente'}</span>
       {when ? ` · ${when}` : ''}
       {w.status ? ` · ${w.status}` : ''}
-      <span className="text-slate-400"> · #{shortId}</span>
+      {w.direction === 'none' ? <span className="text-slate-400"> · sin cambio de stock</span> : null}
     </div>
   );
 }
@@ -596,7 +596,6 @@ const ArticleHistoryPanel: React.FC<{
     variant: SyncVariant | null;
     wholesale?: WholesaleOrderRef | null;
   }) => {
-    const up = m.change > 0;
     const manual = m.type === 'AJUSTE_MANUAL';
     const platform = m.type.includes('MERCADO_LIBRE') ? 'mercadolibre' : m.type.includes('TIENDA_NUBE') ? 'tiendanube' : null;
     const sku = (m.variant?.sku || m.variant?.productSku || '').trim();
@@ -638,9 +637,9 @@ const ArticleHistoryPanel: React.FC<{
           </div>
         </div>
         <div className="text-right shrink-0">
-          <div className={`text-sm font-bold inline-flex items-center gap-0.5 ${up ? 'text-emerald-300' : 'text-red-300'}`}>
-            {up ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
-            {Math.abs(m.change)}
+          <div className={`text-sm font-bold inline-flex items-center gap-0.5 ${m.change > 0 ? 'text-emerald-300' : m.change < 0 ? 'text-red-300' : 'text-slate-400'}`}>
+            {m.change > 0 ? <ArrowUp size={14} /> : m.change < 0 ? <ArrowDown size={14} /> : null}
+            {m.change > 0 ? `+${m.change}` : m.change}
           </div>
           <div className={`text-xs ${m.stockAfter < 0 ? 'text-red-300 font-semibold' : 'text-slate-400'}`}>quedan {m.stockAfter}</div>
         </div>
@@ -728,21 +727,30 @@ const ArticleHistoryPanel: React.FC<{
               <p className="text-sm text-slate-300">No hay salidas en pedidos mayoristas.</p>
             ) : (
               <ul className="space-y-2">
-                {history.orders.map((o) => (
-                  <li key={o.orderId} className="text-sm">
-                    <div className="text-white">
-                      <span className="font-semibold">{o.customer || 'Cliente'}</span>
-                      {formatOrderDate(o.date) ? ` · ${formatOrderDate(o.date)}` : ''}
-                      {o.status ? ` · ${o.status}` : ''}
-                      <span className="text-blue-200"> · {o.unitsOut} u. salieron</span>
-                      {o.unitsBack > 0 ? <span className="text-emerald-300"> · {o.unitsBack} u. volvieron</span> : null}
-                    </div>
-                    {o.notes ? <div className="text-xs text-cyan-200/90 truncate">{o.notes}</div> : null}
-                    <div className="text-xs font-mono text-slate-400 truncate" title={o.orderId}>
-                      Pedido #{o.orderId}
-                    </div>
-                  </li>
-                ))}
+                {history.orders.map((o) => {
+                  const moved = o.unitsOut > 0 || o.unitsBack > 0;
+                  return (
+                    <li key={o.orderId} className="text-sm">
+                      <div className="text-white">
+                        <span className="font-semibold">{o.customer || 'Cliente'}</span>
+                        {formatOrderDate(o.date) ? ` · ${formatOrderDate(o.date)}` : ''}
+                        {o.status ? ` · ${o.status}` : ''}
+                        {moved ? (
+                          <>
+                            {o.unitsOut > 0 ? <span className="text-blue-200"> · {o.unitsOut} u. salieron</span> : null}
+                            {o.unitsBack > 0 ? <span className="text-emerald-300"> · {o.unitsBack} u. volvieron</span> : null}
+                          </>
+                        ) : (
+                          <span className="text-slate-400"> · figura en el pedido, sin unidades descontadas</span>
+                        )}
+                      </div>
+                      {o.notes ? <div className="text-xs text-cyan-200/90 truncate">{o.notes}</div> : null}
+                      <div className="text-xs font-mono text-slate-400 truncate" title={o.orderId}>
+                        Pedido #{o.orderId}
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>
