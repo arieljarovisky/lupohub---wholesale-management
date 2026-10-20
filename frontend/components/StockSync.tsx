@@ -16,7 +16,7 @@ import {
   X,
 } from 'lucide-react';
 import { MercadoLibreLogo, TiendaNubeLogo } from './ChannelLogos';
-import { stockSyncApi, StockSyncOverview, SyncVariant, VariantLink } from '../services/stockSyncApi';
+import { ArticleHistory, stockSyncApi, StockSyncOverview, SyncVariant, VariantLink, WholesaleOrderRef } from '../services/stockSyncApi';
 import { useNotification } from '../context/NotificationContext';
 import { INVENTORY_STORAGE_KEY } from '../utils/inventoryUtils';
 
@@ -38,6 +38,28 @@ function timeAgo(value: string | null | undefined): string {
   if (h < 24) return `hace ${h} h`;
   const days = Math.round(h / 24);
   return `hace ${days} ${days === 1 ? 'día' : 'días'}`;
+}
+
+function formatOrderDate(value: string | null | undefined): string {
+  if (!value) return '';
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value));
+  if (!m) return '';
+  return `${m[3]}/${m[2]}/${m[1].slice(2)}`;
+}
+
+function WholesaleLine({ w }: { w: WholesaleOrderRef | null | undefined }) {
+  if (!w?.orderId) return null;
+  const when = formatOrderDate(w.date);
+  const verb = w.direction === 'back' ? 'Volvió del pedido de' : 'Salió en el pedido de';
+  const shortId = w.orderId.length > 12 ? w.orderId.slice(-8) : w.orderId;
+  return (
+    <div className="text-xs text-blue-200 truncate" title={[`Pedido #${w.orderId}`, w.notes || ''].filter(Boolean).join(' · ')}>
+      {verb} <span className="font-semibold text-white">{w.customer || 'cliente'}</span>
+      {when ? ` · ${when}` : ''}
+      {w.status ? ` · ${w.status}` : ''}
+      <span className="text-slate-400"> · #{shortId}</span>
+    </div>
+  );
 }
 
 function clock(value: string | null | undefined): string {
@@ -493,6 +515,269 @@ const FixLinkModal: React.FC<{
   );
 };
 
+const ArticleHistoryPanel: React.FC<{
+  recent: StockSyncOverview['recent'];
+  shown: number;
+  onShowMore: () => void;
+}> = ({ recent, shown, onShowMore }) => {
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState<SyncVariant[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [picked, setPicked] = useState<SyncVariant | null>(null);
+  const [history, setHistory] = useState<ArticleHistory | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const searchReq = useRef(0);
+  const historyReq = useRef(0);
+
+  useEffect(() => {
+    const text = q.trim();
+    if (text.length < 2 || picked) {
+      setResults([]);
+      setSearching(false);
+      return;
+    }
+    const id = ++searchReq.current;
+    setSearching(true);
+    const t = setTimeout(() => {
+      stockSyncApi
+        .searchVariants(text)
+        .then((items) => {
+          if (id === searchReq.current) setResults(items);
+        })
+        .catch(() => {
+          if (id === searchReq.current) setResults([]);
+        })
+        .finally(() => {
+          if (id === searchReq.current) setSearching(false);
+        });
+    }, 300);
+    return () => clearTimeout(t);
+  }, [q, picked]);
+
+  const loadHistory = async (params: { variantId?: string; productId?: string }, variant: SyncVariant | null) => {
+    const id = ++historyReq.current;
+    setPicked(variant);
+    setQ('');
+    setResults([]);
+    setHistory(null);
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await stockSyncApi.history(params);
+      if (id !== historyReq.current) return;
+      setHistory(data);
+    } catch (e: any) {
+      if (id !== historyReq.current) return;
+      setHistory(null);
+      setError(e?.message || 'No pude cargar el historial de este artículo.');
+    } finally {
+      if (id === historyReq.current) setLoading(false);
+    }
+  };
+
+  const clearHistory = () => {
+    historyReq.current += 1;
+    setPicked(null);
+    setHistory(null);
+    setError(null);
+    setQ('');
+  };
+
+  const movementRow = (m: {
+    id: string;
+    what: string;
+    type: string;
+    change: number;
+    stockAfter: number;
+    date: string;
+    reference: string;
+    actor?: string;
+    variant: SyncVariant | null;
+    wholesale?: WholesaleOrderRef | null;
+  }) => {
+    const up = m.change > 0;
+    const manual = m.type === 'AJUSTE_MANUAL';
+    const platform = m.type.includes('MERCADO_LIBRE') ? 'mercadolibre' : m.type.includes('TIENDA_NUBE') ? 'tiendanube' : null;
+    const sku = (m.variant?.sku || m.variant?.productSku || '').trim();
+    const actor =
+      (m.actor || '').trim() ||
+      (/^Ajuste por usuario:\s*(.+)$/i.exec(m.reference || '')?.[1] || '').trim();
+    return (
+      <li
+        key={m.id}
+        className={`px-3 py-2 flex items-center gap-3 ${manual ? 'bg-amber-500/[0.08] border-l-2 border-amber-400' : ''}`}
+      >
+        {manual ? (
+          <span className="shrink-0 w-7 h-7 rounded-lg bg-amber-500/20 text-amber-200 flex items-center justify-center" title="Ajuste manual">
+            <UserRound size={15} />
+          </span>
+        ) : m.type === 'PEDIDO_MAYORISTA' || m.type === 'DEVOLUCION' || platform ? (
+          <PlatformIcon platform={platform} size={22} />
+        ) : (
+          <RefreshCw size={16} className="text-slate-400 shrink-0" />
+        )}
+        <div className="flex-1 min-w-0 flex items-center gap-2">
+          {sku ? (
+            <span className="shrink-0 font-mono text-xs font-semibold text-slate-100 bg-slate-800 border border-slate-700 px-1.5 py-0.5 rounded" title="SKU">
+              {sku}
+            </span>
+          ) : null}
+          <div className="min-w-0">
+            <div className="text-sm truncate">
+              <span className={`font-semibold ${manual ? 'text-amber-200' : ''}`}>{m.what}</span>
+              <span className="text-slate-400"> · </span>
+              <ProductLink variant={m.variant} className="text-slate-400" />
+            </div>
+            <WholesaleLine w={m.wholesale} />
+            <div className="text-xs text-slate-500 truncate">
+              {manual ? <span className="text-amber-200/90">{actor ? `por ${actor}` : 'usuario no identificado'}</span> : null}
+              {manual ? ' · ' : ''}
+              {timeAgo(m.date)}
+            </div>
+          </div>
+        </div>
+        <div className="text-right shrink-0">
+          <div className={`text-sm font-bold inline-flex items-center gap-0.5 ${up ? 'text-emerald-300' : 'text-red-300'}`}>
+            {up ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
+            {Math.abs(m.change)}
+          </div>
+          <div className={`text-xs ${m.stockAfter < 0 ? 'text-red-300 font-semibold' : 'text-slate-400'}`}>quedan {m.stockAfter}</div>
+        </div>
+        {m.variant && !picked ? (
+          <Btn tone="ghost" title="Ver historial de este artículo" onClick={() => loadHistory({ variantId: m.variant!.variantId }, m.variant)}>
+            Historial
+          </Btn>
+        ) : null}
+      </li>
+    );
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="relative">
+        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+        <input
+          value={q}
+          onChange={(e) => {
+            if (picked) clearHistory();
+            setQ(e.target.value);
+          }}
+          placeholder="Buscar un artículo para ver su historial…"
+          className="w-full h-10 pl-9 pr-3 rounded-lg bg-slate-900 border border-slate-700 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-blue-500"
+          aria-label="Buscar artículo"
+        />
+        {searching && <Loader2 size={16} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-slate-400" />}
+        {!picked && results.length > 0 && (
+          <ul className="absolute z-20 mt-1 w-full max-h-72 overflow-auto rounded-lg border border-slate-700 bg-slate-900 shadow-xl">
+            {results.map((v) => (
+              <li key={v.variantId}>
+                <button
+                  type="button"
+                  onClick={() => loadHistory({ variantId: v.variantId }, v)}
+                  className="w-full text-left px-3 py-2 hover:bg-slate-800 text-sm"
+                >
+                  <span className="font-mono text-xs text-slate-200">{v.sku || v.productSku}</span>
+                  <span className="text-slate-300"> · {variantName(v)}</span>
+                  <span className="text-slate-500"> · stock {v.stock}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {picked && (
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={clearHistory} className="text-sm font-semibold text-blue-300 hover:text-blue-200">
+            Volver al historial general
+          </button>
+          {picked.productId && history?.scope === 'variant' && (
+            <Btn tone="secondary" onClick={() => loadHistory({ productId: picked.productId }, picked)}>
+              Ver todo el artículo
+            </Btn>
+          )}
+          {picked.variantId && history?.scope === 'article' && (
+            <Btn tone="secondary" onClick={() => loadHistory({ variantId: picked.variantId }, picked)}>
+              Solo esta variante
+            </Btn>
+          )}
+        </div>
+      )}
+
+      {picked && loading && (
+        <div className="p-6 text-center text-sm text-slate-400 flex items-center justify-center gap-2">
+          <Loader2 size={16} className="animate-spin" />
+          Cargando historial…
+        </div>
+      )}
+      {error && <p className="text-sm text-red-300">{error}</p>}
+
+      {picked && !loading && history && (
+        <div className="space-y-3">
+          <div>
+            <h3 className="text-base font-bold text-white">{history.title}</h3>
+            <p className="text-xs text-slate-400">
+              {history.scope === 'article' ? 'Todas las variantes del artículo' : 'Esta variante'}
+              {history.truncated ? ' · se muestran los últimos 1000 movimientos' : ''}
+            </p>
+          </div>
+          <div className="rounded-lg border border-blue-500/40 bg-blue-500/10 p-3">
+            <p className="text-sm font-semibold text-blue-100 mb-2">Pedidos mayoristas en los que salió</p>
+            {history.orders.length === 0 ? (
+              <p className="text-sm text-slate-300">No hay salidas en pedidos mayoristas.</p>
+            ) : (
+              <ul className="space-y-2">
+                {history.orders.map((o) => (
+                  <li key={o.orderId} className="text-sm">
+                    <div className="text-white">
+                      <span className="font-semibold">{o.customer || 'Cliente'}</span>
+                      {formatOrderDate(o.date) ? ` · ${formatOrderDate(o.date)}` : ''}
+                      {o.status ? ` · ${o.status}` : ''}
+                      <span className="text-blue-200"> · {o.unitsOut} u. salieron</span>
+                      {o.unitsBack > 0 ? <span className="text-emerald-300"> · {o.unitsBack} u. volvieron</span> : null}
+                    </div>
+                    {o.notes ? <div className="text-xs text-cyan-200/90 truncate">{o.notes}</div> : null}
+                    <div className="text-xs font-mono text-slate-400 truncate" title={o.orderId}>
+                      Pedido #{o.orderId}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div className="rounded-lg border border-slate-800 overflow-hidden">
+            {history.movements.length === 0 ? (
+              <p className="p-6 text-center text-sm text-slate-400">Este artículo no tiene movimientos.</p>
+            ) : (
+              <ul className="divide-y divide-slate-800">{history.movements.map((m) => movementRow(m))}</ul>
+            )}
+          </div>
+        </div>
+      )}
+
+      {!picked && !loading && (
+        <div className="rounded-lg border border-slate-800 overflow-hidden">
+          {recent.length === 0 ? (
+            <p className="p-6 text-center text-sm text-slate-400">Todavía no hay movimientos.</p>
+          ) : (
+            <ul className="divide-y divide-slate-800">{recent.slice(0, shown).map((m) => movementRow(m))}</ul>
+          )}
+          {recent.length > shown && (
+            <button
+              type="button"
+              onClick={onShowMore}
+              className="w-full py-2 text-sm font-semibold text-blue-300 hover:bg-slate-900/60 border-t border-slate-800"
+            >
+              Ver más
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const StockSync: React.FC = () => {
   const { showToast, showConfirm } = useNotification();
   const [data, setData] = useState<StockSyncOverview | null>(null);
@@ -854,79 +1139,11 @@ const StockSync: React.FC = () => {
       )}
 
       {tab === 'recent' && (
-        <div className="rounded-lg border border-slate-800 overflow-hidden">
-          {data.recent.length === 0 ? (
-            <p className="p-6 text-center text-sm text-slate-400">Todavía no hay movimientos.</p>
-          ) : (
-            <ul className="divide-y divide-slate-800">
-              {data.recent.slice(0, shown).map((m) => {
-                const up = m.change > 0;
-                const manual = m.type === 'AJUSTE_MANUAL';
-                const platform = m.type.includes('MERCADO_LIBRE') ? 'mercadolibre' : m.type.includes('TIENDA_NUBE') ? 'tiendanube' : null;
-                const sku = (m.variant?.sku || m.variant?.productSku || '').trim();
-                const actor =
-                  (m.actor || '').trim() ||
-                  (/^Ajuste por usuario:\s*(.+)$/i.exec(m.reference || '')?.[1] || '').trim();
-                return (
-                  <li
-                    key={m.id}
-                    className={`px-3 py-2 flex items-center gap-3 ${manual ? 'bg-amber-500/[0.08] border-l-2 border-amber-400' : ''}`}
-                  >
-                    {manual ? (
-                      <span
-                        className="shrink-0 w-7 h-7 rounded-lg bg-amber-500/20 text-amber-200 flex items-center justify-center"
-                        title="Ajuste manual"
-                      >
-                        <UserRound size={15} />
-                      </span>
-                    ) : m.type === 'PEDIDO_MAYORISTA' || platform ? (
-                      <PlatformIcon platform={platform} size={22} />
-                    ) : (
-                      <RefreshCw size={16} className="text-slate-400 shrink-0" />
-                    )}
-                    <div className="flex-1 min-w-0 flex items-center gap-2">
-                      {sku ? (
-                        <span className="shrink-0 font-mono text-xs font-semibold text-slate-100 bg-slate-800 border border-slate-700 px-1.5 py-0.5 rounded" title="SKU">
-                          {sku}
-                        </span>
-                      ) : null}
-                      <div className="min-w-0">
-                        <div className="text-sm truncate">
-                          <span className={`font-semibold ${manual ? 'text-amber-200' : ''}`}>{m.what}</span>
-                          <span className="text-slate-400"> · </span>
-                          <ProductLink variant={m.variant} className="text-slate-400" />
-                        </div>
-                        <div className="text-xs text-slate-500 truncate">
-                          {manual ? (
-                            <span className="text-amber-200/90">{actor ? `por ${actor}` : 'usuario no identificado'}</span>
-                          ) : null}
-                          {manual ? ' · ' : ''}
-                          {timeAgo(m.date)}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="text-right shrink-0 w-20">
-                      <div className={`text-sm font-bold inline-flex items-center gap-0.5 ${up ? 'text-emerald-300' : 'text-red-300'}`}>
-                        {up ? <ArrowUp size={14} /> : <ArrowDown size={14} />}
-                        {Math.abs(m.change)}
-                      </div>
-                      <div className={`text-xs ${m.stockAfter < 0 ? 'text-red-300 font-semibold' : 'text-slate-400'}`}>quedan {m.stockAfter}</div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          {data.recent.length > shown && (
-            <button
-              type="button"
-              onClick={() => setShown((n) => n + PAGE)}
-              className="w-full py-2 text-sm font-semibold text-blue-300 hover:bg-slate-900/60 border-t border-slate-800"
-            >
-              Ver más
-            </button>
-          )}
-        </div>
+        <ArticleHistoryPanel
+          recent={data.recent}
+          shown={shown}
+          onShowMore={() => setShown((n) => n + PAGE)}
+        />
       )}
 
       {tab === 'tools' && (

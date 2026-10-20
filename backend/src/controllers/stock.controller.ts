@@ -812,24 +812,44 @@ export const getStockMovements = async (req: Request, res: Response) => {
       params.push(to);
     }
 
-    const limitNum = Math.min(500, Math.max(1, parseInt(limit as string, 10) || 50));
+    const scoped = Boolean(variantId || variantIds || productId);
+    const limitNum = Math.min(scoped ? 2000 : 500, Math.max(1, parseInt(limit as string, 10) || (scoped ? 500 : 50)));
     params.push(limitNum);
 
     const movements = await query(
       `SELECT
          sm.*,
          COALESCE(NULLIF(TRIM(pv.external_sku), ''), pv.sku) AS sku,
+         p.id as product_id,
          p.name as product_name,
-         o.id as order_id,
-         c.business_name as customer_name,
+         col.name as color_name,
+         COALESCE(sz.size_code, sz.name) as size_code,
+         CASE
+           WHEN sm.source = 'wholesale' AND NULLIF(TRIM(sm.source_id), '') IS NOT NULL THEN TRIM(sm.source_id)
+           WHEN sm.movement_type IN ('PEDIDO_MAYORISTA', 'DEVOLUCION')
+            AND sm.reference LIKE '%pedido:%'
+           THEN TRIM(SUBSTRING_INDEX(sm.reference, ':', -1))
+           ELSE NULL
+         END as order_id,
+         DATE_FORMAT(o.date, '%Y-%m-%d') as order_date,
+         o.status as order_status,
+         o.notes as order_notes,
+         COALESCE(NULLIF(TRIM(c.business_name), ''), c.name) as customer_name,
          ua.name as adjust_user_name
        FROM stock_movements sm
        JOIN product_variants pv ON pv.id = sm.variant_id
        JOIN product_colors pc ON pc.id = pv.product_color_id
        JOIN products p ON p.id = pc.product_id
+       LEFT JOIN colors col ON col.id = pc.color_id
+       LEFT JOIN sizes sz ON sz.id = pv.size_id
        LEFT JOIN orders o
-         ON sm.movement_type = 'PEDIDO_MAYORISTA'
-        AND o.id = TRIM(SUBSTRING_INDEX(sm.reference, ':', -1))
+         ON o.id = CASE
+           WHEN sm.source = 'wholesale' AND NULLIF(TRIM(sm.source_id), '') IS NOT NULL THEN TRIM(sm.source_id)
+           WHEN sm.movement_type IN ('PEDIDO_MAYORISTA', 'DEVOLUCION')
+            AND sm.reference LIKE '%pedido:%'
+           THEN TRIM(SUBSTRING_INDEX(sm.reference, ':', -1))
+           ELSE NULL
+         END
        LEFT JOIN customers c ON c.id = o.customer_id
        LEFT JOIN users ua
          ON sm.movement_type = 'AJUSTE_MANUAL'

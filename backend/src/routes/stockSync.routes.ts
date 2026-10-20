@@ -9,6 +9,7 @@ import {
   fixLink,
   getLinks,
   removeLink,
+  getHistory,
   getOverview,
   reprocessOrder,
   resolveLine,
@@ -31,6 +32,7 @@ const stockRoles = (req: Request, res: Response, next: NextFunction) => {
 router.use(authMiddleware, stockRoles);
 
 router.get('/overview', getOverview);
+router.get('/history', getHistory);
 router.get('/variants', searchVariants);
 router.post('/resync-all', resyncAll);
 router.post('/retry-all', retryAll);

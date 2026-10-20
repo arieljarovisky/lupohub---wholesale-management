@@ -65,6 +65,9 @@ interface ArticleStockMovement {
   sku: string;
   product_name: string;
   order_id?: string | null;
+  order_date?: string | null;
+  order_status?: string | null;
+  order_notes?: string | null;
   customer_name?: string | null;
   adjust_user_name?: string | null;
 }
@@ -496,7 +499,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       const rows = await api.getStockMovements({
         ...(opts.productId ? { productId: opts.productId } : {}),
         variantIds: opts.variantIds,
-        limit: 200
+        limit: 1000
       });
       setStockHistoryRows(Array.isArray(rows) ? rows : []);
     } catch (e: any) {
@@ -535,13 +538,26 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     return labels[type] || type || 'Movimiento';
   };
 
+  const wholesaleOrderLabel = (m: ArticleStockMovement) => {
+    if (!m.order_id) return '';
+    const date = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(m.order_date || ''));
+    const when = date ? `${date[3]}/${date[2]}/${date[1].slice(2)}` : '';
+    const back = Number(m.quantity_change) > 0;
+    const parts = [
+      back ? 'Volvió del pedido de' : 'Salió en el pedido de',
+      m.customer_name || 'cliente',
+      when,
+      m.order_status || '',
+      `#${m.order_id}`
+    ].filter(Boolean);
+    if (m.order_notes) parts.push(m.order_notes);
+    return parts.join(' · ');
+  };
+
   const movementReferenceLabel = (m: ArticleStockMovement) => {
     const baseRef = (m.reference || '').trim();
-    if (m.movement_type === 'PEDIDO_MAYORISTA') {
-      const parts: string[] = [];
-      if (m.order_id || baseRef) parts.push(m.order_id ? `Pedido: ${m.order_id}` : baseRef);
-      if (m.customer_name) parts.push(`Cliente: ${m.customer_name}`);
-      return parts.join(' | ') || 'Pedido mayorista';
+    if ((m.movement_type === 'PEDIDO_MAYORISTA' || m.movement_type === 'DEVOLUCION') && m.order_id) {
+      return '—';
     }
     if (m.movement_type === 'AJUSTE_MANUAL') {
       if (m.adjust_user_name) return `Ajuste por usuario: ${m.adjust_user_name}`;
@@ -3479,6 +3495,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                         <th className="text-right px-3 py-2">Anterior</th>
                         <th className="text-right px-3 py-2">Nuevo</th>
                         <th className="text-left px-3 py-2">Referencia</th>
+                        <th className="text-left px-3 py-2">Pedido mayorista</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800">
@@ -3492,7 +3509,23 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                           </td>
                           <td className="px-3 py-2 text-right tabular-nums">{m.previous_stock}</td>
                           <td className="px-3 py-2 text-right tabular-nums">{m.new_stock}</td>
-                          <td className="px-3 py-2 max-w-[360px] truncate" title={movementReferenceLabel(m)}>{movementReferenceLabel(m)}</td>
+                          <td className="px-3 py-2 max-w-[220px] truncate" title={movementReferenceLabel(m)}>{movementReferenceLabel(m)}</td>
+                          <td className="px-3 py-2 max-w-[280px]">
+                            {m.order_id ? (
+                              <div className="text-blue-200" title={wholesaleOrderLabel(m)}>
+                                <div className="font-semibold text-white truncate">{m.customer_name || 'Cliente'}</div>
+                                <div className="text-[11px] text-slate-300 truncate">
+                                  {Number(m.quantity_change) > 0 ? 'Volvió' : 'Salió'}
+                                  {m.order_date ? ` · ${String(m.order_date).slice(0, 10).split('-').reverse().join('/')}` : ''}
+                                  {m.order_status ? ` · ${m.order_status}` : ''}
+                                </div>
+                                <div className="font-mono text-[10px] text-slate-400 truncate">#{m.order_id}</div>
+                                {m.order_notes ? <div className="text-[11px] text-cyan-200/90 truncate">{m.order_notes}</div> : null}
+                              </div>
+                            ) : (
+                              <span className="text-slate-500">—</span>
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

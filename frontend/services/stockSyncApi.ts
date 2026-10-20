@@ -2,6 +2,7 @@ import { request } from './httpClient';
 
 export type SyncVariant = {
   variantId: string;
+  productId?: string;
   productName: string;
   /** Código del artículo (padre); se usa para abrirlo en Inventario. */
   productSku?: string;
@@ -9,6 +10,44 @@ export type SyncVariant = {
   color: string;
   size: string;
   stock: number;
+};
+
+export type WholesaleOrderRef = {
+  orderId: string;
+  customer: string | null;
+  date: string | null;
+  status: string | null;
+  notes: string | null;
+  /** out = salió en el pedido; back = volvió (devolución, cancelación o nota de crédito). */
+  direction: 'out' | 'back';
+};
+
+export type ArticleHistory = {
+  title: string;
+  scope: 'variant' | 'article';
+  truncated: boolean;
+  movements: Array<{
+    id: string;
+    what: string;
+    type: string;
+    change: number;
+    stockBefore: number;
+    stockAfter: number;
+    reference: string;
+    actor: string;
+    date: string;
+    variant: SyncVariant | null;
+    wholesale: WholesaleOrderRef | null;
+  }>;
+  orders: Array<{
+    orderId: string;
+    customer: string | null;
+    date: string | null;
+    status: string | null;
+    notes: string | null;
+    unitsOut: number;
+    unitsBack: number;
+  }>;
 };
 
 export type StockSyncOverview = {
@@ -57,6 +96,7 @@ export type StockSyncOverview = {
     actor?: string;
     date: string;
     variant: SyncVariant | null;
+    wholesale?: WholesaleOrderRef | null;
   }>;
 };
 
@@ -90,6 +130,12 @@ export const stockSyncApi = {
   overview: () => request<StockSyncOverview>('/stock-sync/overview'),
   searchVariants: (q: string) =>
     request<{ items: SyncVariant[] }>(`/stock-sync/variants?q=${encodeURIComponent(q)}`).then((r) => r.items),
+  history: (params: { variantId?: string; productId?: string }) => {
+    const q = new URLSearchParams();
+    if (params.variantId) q.set('variantId', params.variantId);
+    if (params.productId) q.set('productId', params.productId);
+    return request<ArticleHistory>(`/stock-sync/history?${q.toString()}`);
+  },
   resyncAll: () => request<Msg & { queued: number }>('/stock-sync/resync-all', 'POST', {}),
   retryAll: () => request<Msg>('/stock-sync/retry-all', 'POST', {}),
   retryOne: (variantId: string) => request<Msg>(`/stock-sync/retry/${encodeURIComponent(variantId)}`, 'POST', {}),

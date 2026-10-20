@@ -13,7 +13,7 @@ import { checkRecentOrders } from './index';
 import { isDeadLinkError } from './links';
 
 const VARIANT_LABEL_SQL = `
-  SELECT pv.id, p.name AS product_name, p.sku AS product_sku, COALESCE(pv.external_sku, pv.sku) AS sku,
+  SELECT pv.id, p.id AS product_id, p.name AS product_name, p.sku AS product_sku, COALESCE(pv.external_sku, pv.sku) AS sku,
          c.name AS color_name, COALESCE(sz.size_code, sz.name) AS size_code, COALESCE(s.stock, 0) AS stock
   FROM product_variants pv
   JOIN product_colors pc ON pc.id = pv.product_color_id
@@ -22,15 +22,40 @@ const VARIANT_LABEL_SQL = `
   LEFT JOIN sizes sz ON sz.id = pv.size_id
   LEFT JOIN stocks s ON s.variant_id = pv.id`;
 
+/** Id del pedido mayorista guardado en el movimiento (source_id nuevo o el texto "Pedido: …"). */
+const WHOLESALE_ORDER_ID_SQL = `
+  CASE
+    WHEN m.source = 'wholesale' AND NULLIF(TRIM(m.source_id), '') IS NOT NULL THEN TRIM(m.source_id)
+    WHEN m.movement_type IN ('PEDIDO_MAYORISTA', 'DEVOLUCION')
+     AND m.reference LIKE '%pedido:%'
+    THEN TRIM(SUBSTRING_INDEX(m.reference, ':', -1))
+    ELSE NULL
+  END`;
+
 function variantDto(r: any) {
   return {
     variantId: String(r.id),
+    productId: r.product_id ? String(r.product_id) : '',
     productName: r.product_name ?? '',
     productSku: r.product_sku ?? '',
     sku: r.sku ?? '',
     color: r.color_name ?? '',
     size: r.size_code ?? '',
     stock: Number(r.stock) || 0,
+  };
+}
+
+function wholesaleDto(r: any) {
+  const orderId = r.order_id ? String(r.order_id) : r.wholesale_order_id ? String(r.wholesale_order_id) : '';
+  if (!orderId) return null;
+  const change = Number(r.quantity_change) || 0;
+  return {
+    orderId,
+    customer: r.customer_name ? String(r.customer_name) : null,
+    date: r.order_date ? String(r.order_date).slice(0, 10) : null,
+    status: r.order_status ? String(r.order_status) : null,
+    notes: r.order_notes ? String(r.order_notes).trim() : null,
+    direction: change < 0 ? 'out' : 'back',
   };
 }
 
@@ -105,8 +130,13 @@ export const getOverview = async (_req: Request, res: Response) => {
          WHERE dismissed_at IS NULL ORDER BY created_at DESC LIMIT 100`
       ),
       query(
-        `SELECT m.id, m.variant_id, m.quantity_change, m.new_stock, m.movement_type, m.reference, m.created_at
+        `SELECT m.id, m.variant_id, m.quantity_change, m.new_stock, m.movement_type, m.reference, m.created_at,
+                ${WHOLESALE_ORDER_ID_SQL} AS wholesale_order_id,
+                o.id AS order_id, DATE_FORMAT(o.date, '%Y-%m-%d') AS order_date, o.status AS order_status, o.notes AS order_notes,
+                COALESCE(NULLIF(TRIM(cu.business_name), ''), cu.name) AS customer_name
          FROM stock_movements m
+         LEFT JOIN orders o ON o.id = ${WHOLESALE_ORDER_ID_SQL}
+         LEFT JOIN customers cu ON cu.id = o.customer_id
          WHERE m.movement_type IN ('VENTA_TIENDA_NUBE','VENTA_MERCADO_LIBRE','CANCEL_VENTA_TIENDA_NUBE','CANCEL_VENTA_MERCADO_LIBRE','PEDIDO_MAYORISTA','DEVOLUCION','AJUSTE_MANUAL')
          ORDER BY m.created_at DESC LIMIT 40`
       ),
@@ -227,6 +257,7 @@ export const getOverview = async (_req: Request, res: Response) => {
           actor: actorName,
           date: r.created_at,
           variant: variants.get(String(r.variant_id)) ?? null,
+          wholesale: wholesaleDto(r),
         };
       }),
     });
@@ -251,6 +282,113 @@ export const searchVariants = async (req: Request, res: Response) => {
     res.json({ items: (rows as any[]).map(variantDto) });
   } catch (e: any) {
     res.status(500).json({ message: 'No pude buscar productos' });
+  }
+};
+
+/** Historial de un artículo (todas sus variantes) o de una variante, con el pedido mayorista en el que salió. */
+export const getHistory = async (req: Request, res: Response) => {
+  try {
+    const variantId = String(req.query.variantId || '').trim();
+    const productId = String(req.query.productId || '').trim();
+    if (!variantId && !productId) return res.status(400).json({ message: 'Elegí un artículo.' });
+
+    const scopedToVariant = Boolean(variantId);
+    const rows = await query(
+      `SELECT m.id, m.variant_id, m.previous_stock, m.new_stock, m.quantity_change, m.movement_type, m.reference, m.created_at,
+              ${WHOLESALE_ORDER_ID_SQL} AS wholesale_order_id,
+              o.id AS order_id, DATE_FORMAT(o.date, '%Y-%m-%d') AS order_date, o.status AS order_status, o.notes AS order_notes,
+              COALESCE(NULLIF(TRIM(cu.business_name), ''), cu.name) AS customer_name
+       FROM stock_movements m
+       JOIN product_variants pv ON pv.id = m.variant_id
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       LEFT JOIN orders o ON o.id = ${WHOLESALE_ORDER_ID_SQL}
+       LEFT JOIN customers cu ON cu.id = o.customer_id
+       WHERE ${scopedToVariant ? 'm.variant_id = ?' : 'p.id = ?'}
+       ORDER BY m.created_at DESC
+       LIMIT 1000`,
+      [scopedToVariant ? variantId : productId]
+    );
+
+    const list = rows as any[];
+    const variants = await variantsById(list.map((r) => String(r.variant_id)));
+    const actorByMovement = new Map<string, { name: string; userId: string }>();
+    const actorIds = new Set<string>();
+    for (const r of list) {
+      if (String(r.movement_type) !== 'AJUSTE_MANUAL') continue;
+      const actor = manualActor(r.reference ? String(r.reference) : '');
+      actorByMovement.set(String(r.id), actor);
+      if (actor.userId) actorIds.add(actor.userId);
+    }
+    const userNames = new Map<string, string>();
+    if (actorIds.size) {
+      const people = await query(`SELECT id, name FROM users WHERE id IN (?)`, [Array.from(actorIds)]);
+      for (const p of people as any[]) {
+        if (p?.name) userNames.set(String(p.id), String(p.name));
+      }
+    }
+
+    const orders = new Map<string, {
+      orderId: string;
+      customer: string | null;
+      date: string | null;
+      status: string | null;
+      notes: string | null;
+      unitsOut: number;
+      unitsBack: number;
+    }>();
+
+    const movements = list.map((r) => {
+      const id = String(r.id);
+      const actor = actorByMovement.get(id);
+      const actorName = actor ? actor.name || (actor.userId ? userNames.get(actor.userId) || '' : '') : '';
+      const wholesale = wholesaleDto(r);
+      if (wholesale && (r.movement_type === 'PEDIDO_MAYORISTA' || r.movement_type === 'DEVOLUCION')) {
+        const prev = orders.get(wholesale.orderId) ?? {
+          orderId: wholesale.orderId,
+          customer: wholesale.customer,
+          date: wholesale.date,
+          status: wholesale.status,
+          notes: wholesale.notes,
+          unitsOut: 0,
+          unitsBack: 0,
+        };
+        const units = Math.abs(Number(r.quantity_change) || 0);
+        if (r.movement_type === 'PEDIDO_MAYORISTA') prev.unitsOut += units;
+        else prev.unitsBack += units;
+        if (!prev.customer && wholesale.customer) prev.customer = wholesale.customer;
+        orders.set(wholesale.orderId, prev);
+      }
+      return {
+        id,
+        what: movementText(String(r.movement_type)),
+        type: String(r.movement_type),
+        change: Number(r.quantity_change) || 0,
+        stockBefore: Number(r.previous_stock) || 0,
+        stockAfter: Number(r.new_stock) || 0,
+        reference: r.reference ? String(r.reference) : '',
+        actor: actorName,
+        date: r.created_at,
+        variant: variants.get(String(r.variant_id)) ?? null,
+        wholesale,
+      };
+    });
+
+    const first = movements.find((m) => m.variant)?.variant;
+    const title = scopedToVariant
+      ? [first?.productName, first?.color, first?.size ? `T. ${first.size}` : ''].filter(Boolean).join(' · ') || 'Artículo'
+      : first?.productName || 'Artículo';
+
+    res.json({
+      title,
+      scope: scopedToVariant ? 'variant' : 'article',
+      truncated: list.length >= 1000,
+      movements,
+      orders: Array.from(orders.values()).sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))),
+    });
+  } catch (e: any) {
+    console.error('[StockSync history]', e);
+    res.status(500).json({ message: 'No pude cargar el historial de este artículo.' });
   }
 };
 
