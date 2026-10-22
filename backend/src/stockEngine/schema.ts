@@ -192,6 +192,42 @@ export async function ensureStockEngineSchema(): Promise<void> {
   }
 
   await migrateLegacyWholesaleOrders();
+  await enforceNonNegativeStock();
+}
+
+/** El stock guardado no puede ser negativo: corrige lo que ya quedó abajo de 0 y lo impide en la base. */
+async function enforceNonNegativeStock(): Promise<void> {
+  try {
+    const rows = await query(`SELECT variant_id, stock FROM stocks WHERE stock < 0`);
+    let fixed = 0;
+    for (const r of rows as any[]) {
+      const prev = Math.round(Number(r.stock));
+      if (!Number.isFinite(prev) || prev >= 0) continue;
+      const updated = await execute(`UPDATE stocks SET stock = 0 WHERE variant_id = ? AND stock < 0`, [r.variant_id]);
+      if (!Number((updated as any)?.affectedRows)) continue;
+      await execute(
+        `INSERT INTO stock_movements (id, variant_id, previous_stock, new_stock, quantity_change, movement_type, reference, source, created_at)
+         VALUES (UUID(), ?, ?, 0, ?, 'AJUSTE_MANUAL', 'Corrección: el stock no puede quedar negativo', 'sistema', NOW())`,
+        [r.variant_id, prev, -prev]
+      );
+      fixed++;
+    }
+    if (fixed) console.log(`[StockEngine] Stock negativo corregido a 0 en ${fixed} artículo(s).`);
+  } catch (e: any) {
+    console.error('[StockEngine] No se pudo corregir stock negativo:', e?.message || e);
+  }
+
+  try {
+    const has = await get(
+      `SELECT 1 AS ok FROM information_schema.TABLE_CONSTRAINTS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'stocks' AND CONSTRAINT_NAME = 'chk_stocks_nonnegative'`
+    );
+    if (!has) {
+      await execute(`ALTER TABLE stocks ADD CONSTRAINT chk_stocks_nonnegative CHECK (stock >= 0)`);
+    }
+  } catch (e: any) {
+    console.error('[StockEngine] No se pudo crear la regla stock >= 0:', e?.message || e);
+  }
 }
 
 const PICKING_DONE = ['Falta controlar', 'Controlado', 'Despachado'];

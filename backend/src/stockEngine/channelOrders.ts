@@ -4,7 +4,8 @@
  * Reglas:
  *  - Cada venta se descuenta UNA sola vez (estado en channel_orders + clave de idempotencia por línea).
  *  - Si la venta se cancela, se devuelve exactamente lo que se había descontado.
- *  - Si no hay stock suficiente, se descuenta igual (queda negativo) y se deja un aviso.
+ *  - Si no hay stock suficiente, se descuenta solo lo que hay (el stock queda en 0) y se deja un aviso.
+ *    Al cancelar se devuelve exactamente lo que se había descontado, no lo que pedía la venta.
  *  - Si no se sabe qué producto es, la línea queda "sin identificar" para que alguien la elija.
  *    Nunca se adivina con búsquedas aproximadas.
  *  - Las ventas anteriores al arranque del motor nuevo no se tocan (ya las manejó el sistema viejo).
@@ -465,6 +466,7 @@ export async function ingestOrder(order: NormalizedOrder): Promise<IngestResult>
         return { state, applied: 0, reverted: 0, unmatched: 0, message: 'La venta ya estaba procesada' };
       }
       const entries: LedgerEntry[] = [];
+      const entryLines: string[] = [];
       let unmatched = 0;
       for (const p of prepared) {
         for (const r of p.rows) {
@@ -501,11 +503,21 @@ export async function ingestOrder(order: NormalizedOrder): Promise<IngestResult>
             source: platform,
             sourceId: externalOrderId,
             idempotencyKey: `${platform}:${externalOrderId}:${r.lineKey}`,
-            alertIfNegative: `Venta de ${PLATFORM_LABEL[platform]} sin stock suficiente: ${labels.get(r.variantId!) || r.variantId} (${r.units} u.). Revisá el stock real.`,
+            alertIfNegative: `Venta de ${PLATFORM_LABEL[platform]} sin stock suficiente: ${labels.get(r.variantId!) || r.variantId} (${r.units} u.).`,
           });
+          entryLines.push(r.lineKey);
         }
       }
       const results = await applyEntriesInTx(conn, entries);
+      for (let i = 0; i < results.length; i++) {
+        const res = results[i];
+        const lineKey = entryLines[i];
+        if (!res?.applied || !lineKey || res.shortfall <= 0) continue;
+        await conn.query(
+          `UPDATE channel_order_lines SET units = ? WHERE platform = ? AND external_order_id = ? AND line_key = ?`,
+          [res.deducted, platform, externalOrderId, lineKey]
+        );
+      }
       await touchMeta('applied', ', applied_at = NOW()');
       const applied = results.filter((x) => x.applied).length;
       return {
@@ -726,7 +738,7 @@ export async function resolveUnmatchedLine(
     }
     const platform = String(l.platform) as Platform;
     const units = Math.max(0, Number(l.quantity) || 0) * packSize;
-    await applyEntriesInTx(conn, [
+    const [res] = await applyEntriesInTx(conn, [
       {
         variantId,
         delta: -units,
@@ -735,12 +747,19 @@ export async function resolveUnmatchedLine(
         source: platform,
         sourceId: String(l.external_order_id),
         idempotencyKey: `${platform}:${l.external_order_id}:${l.line_key}`,
-        alertIfNegative: `Venta de ${PLATFORM_LABEL[platform]} sin stock suficiente: ${label} (${units} u.). Revisá el stock real.`,
+        alertIfNegative: `Venta de ${PLATFORM_LABEL[platform]} sin stock suficiente: ${label} (${units} u.).`,
       },
     ]);
+    let taken = res?.applied ? res.deducted : units;
+    if (res && !res.applied) {
+      const mov = await q1(conn, `SELECT quantity_change FROM stock_movements WHERE idempotency_key = ?`, [
+        `${platform}:${l.external_order_id}:${l.line_key}`,
+      ]);
+      if (mov) taken = Math.max(0, -Number(mov.quantity_change) || 0);
+    }
     await conn.query(
       `UPDATE channel_order_lines SET state = 'applied', variant_id = ?, pack_size = ?, units = ? WHERE id = ?`,
-      [variantId, packSize, units, lineId]
+      [variantId, packSize, taken, lineId]
     );
     if (remember && l.external_item_id) {
       const extVar = s(l.external_variant_id);
@@ -752,7 +771,13 @@ export async function resolveUnmatchedLine(
         );
       }
     }
-    return { ok: true, message: `Listo: se descontaron ${units} u. de ${label}` };
+    const faltaron = Math.max(0, units - taken);
+    return {
+      ok: true,
+      message: faltaron
+        ? `Se descontaron ${taken} de ${units} u. de ${label}. No había stock para el resto; el stock quedó en 0.`
+        : `Listo: se descontaron ${taken} u. de ${label}`,
+    };
   });
 }
 

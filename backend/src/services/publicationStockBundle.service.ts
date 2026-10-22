@@ -310,8 +310,9 @@ export async function deductStockForBundleListing(
       );
       continue;
     }
+    const taken = Math.max(0, Number(result.previousStock) - Number(result.newStock));
     lines.push(
-      `${it.sku || it.variantId}: -${units} (${qty} pack × ${it.unitsPerSale} ${it.colorName || ''}) ${result.previousStock}→${result.newStock}`
+      `${it.sku || it.variantId}: -${taken} (${qty} pack × ${it.unitsPerSale} ${it.colorName || ''}) ${result.previousStock}→${result.newStock}`
     );
   }
 

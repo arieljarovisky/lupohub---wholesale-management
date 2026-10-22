@@ -5873,7 +5873,7 @@ async function upsertLocalVariantFromMlEntries(
     );
     await execute(
       `INSERT INTO stocks (variant_id, stock) VALUES (?, ?) ON DUPLICATE KEY UPDATE stock = VALUES(stock)`,
-      [variantId, v.stock]
+      [variantId, Math.max(0, Math.round(Number(v.stock) || 0))]
     );
     created = true;
   }
@@ -7219,7 +7219,7 @@ export const importProductFromTiendaNube = async (req: Request, res: Response) =
         `INSERT INTO product_variants (id, product_color_id, size_id, sku, tienda_nube_variant_id) VALUES (?, ?, ?, ?, ?)`,
         [variantId, productColorId, sizeId, v.sku, String(v.variantId)]
       );
-      await execute(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?) ON DUPLICATE KEY UPDATE stock = VALUES(stock)`, [variantId, v.stock]);
+      await execute(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?) ON DUPLICATE KEY UPDATE stock = VALUES(stock)`, [variantId, Math.max(0, Math.round(Number(v.stock) || 0))]);
       variantsCreated++;
     }
 

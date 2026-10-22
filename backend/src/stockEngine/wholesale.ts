@@ -139,15 +139,20 @@ async function reconcileLocked(conn: Conn, order: OrderRow, reason: WholesaleSto
     reference: d.take > 0 ? `Pedido: ${order.id}` : RESTORE_REFERENCE[reason](order.id),
     source: 'wholesale',
     sourceId: order.id,
-    alertIfNegative: d.take > 0 ? `Pedido mayorista descontó más de lo que había en stock (${d.take} u.). Revisá el stock real.` : null,
+    alertIfNegative: d.take > 0 ? `Pedido mayorista sin stock suficiente (pedía ${d.take} u. más).` : null,
   }));
-  await applyEntriesInTx(conn, entries);
+  const applied = await applyEntriesInTx(conn, entries);
 
-  for (const d of deltas) {
+  for (let i = 0; i < deltas.length; i++) {
+    const d = deltas[i];
+    const had = current.get(d.variantId) ?? 0;
+    // Si no alcanzaba, queda registrado solo lo que sí se tomó. Al cancelar se devuelve eso, no de más.
+    // La próxima vez que se guarde el pedido se intenta tomar el resto, si ya hay stock.
+    const held = d.take > 0 ? had + (applied[i]?.deducted ?? 0) : d.desired;
     await conn.query(
       `INSERT INTO wholesale_order_stock (order_id, variant_id, units, returned_units) VALUES (?, ?, ?, 0)
        ON DUPLICATE KEY UPDATE units = VALUES(units)`,
-      [order.id, d.variantId, d.desired]
+      [order.id, d.variantId, held]
     );
   }
   return deltas.length;

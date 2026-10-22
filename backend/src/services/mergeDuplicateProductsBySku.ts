@@ -162,7 +162,7 @@ export async function mergeTwoVariants(
 
   const sFrom = await get(`SELECT COALESCE(stock,0) AS s FROM stocks WHERE variant_id = ?`, [fromVariantId]);
   const sTo = await get(`SELECT COALESCE(stock,0) AS s FROM stocks WHERE variant_id = ?`, [toVariantId]);
-  const sumStock = Number((sFrom as any)?.s || 0) + Number((sTo as any)?.s || 0);
+  const sumStock = Math.max(0, Number((sFrom as any)?.s || 0) + Number((sTo as any)?.s || 0));
   if (sTo) {
     await execute(`UPDATE stocks SET stock = ? WHERE variant_id = ?`, [sumStock, toVariantId]);
   } else {

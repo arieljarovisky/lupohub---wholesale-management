@@ -242,7 +242,7 @@ export const mergeFourDigitColorCodes = async (req: Request, res: Response) => {
 
             const sb = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [vb.id]);
             const sg = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [vGood.id]);
-            const sum = (Number((sb as any)?.stock) || 0) + (Number((sg as any)?.stock) || 0);
+            const sum = Math.max(0, (Number((sb as any)?.stock) || 0) + (Number((sg as any)?.stock) || 0));
             await execute(`UPDATE stocks SET stock = ? WHERE variant_id = ?`, [sum, vGood.id]);
             await execute(`DELETE FROM stocks WHERE variant_id = ?`, [vb.id]);
             await execute(`DELETE FROM product_variants WHERE id = ?`, [vb.id]);

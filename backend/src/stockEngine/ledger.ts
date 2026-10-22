@@ -37,7 +37,7 @@ export type LedgerEntry = {
   sourceId?: string | null;
   /** Si ya existe un movimiento con esta clave, el cambio se ignora. */
   idempotencyKey?: string | null;
-  /** Si el stock queda negativo, dejar un aviso para el usuario con este texto. */
+  /** Si no alcanza el stock, dejar un aviso para el usuario con este texto. El saldo queda en 0. */
   alertIfNegative?: string | null;
 };
 
@@ -46,7 +46,34 @@ export type LedgerResult = {
   previousStock: number;
   newStock: number;
   applied: boolean;
+  /** Unidades que realmente se restaron. */
+  deducted: number;
+  /** Unidades pedidas que no se pudieron restar porque no había stock. */
+  shortfall: number;
 };
+
+/**
+ * Stock que queda después de un movimiento. Nunca es negativo.
+ * Si el saldo anterior ya era negativo, se toma como 0.
+ * `deducted` es lo que sí se restó; `shortfall` es lo que faltó.
+ */
+export function computeNextStock(
+  prev: number,
+  change: { delta?: number; setTo?: number }
+): { next: number; deducted: number; shortfall: number } {
+  const base = Math.max(0, toInt(prev));
+  if (change.setTo != null) {
+    const want = toInt(change.setTo);
+    return { next: Math.max(0, want), deducted: 0, shortfall: Math.max(0, -want) };
+  }
+  const delta = toInt(change.delta);
+  if (delta < 0) {
+    const need = -delta;
+    const deducted = Math.min(need, base);
+    return { next: base - deducted, deducted, shortfall: need - deducted };
+  }
+  return { next: base + delta, deducted: 0, shortfall: 0 };
+}
 
 export type Conn = PoolConnection;
 
@@ -164,12 +191,13 @@ export async function applyEntriesInTx(
         [e.idempotencyKey]
       );
       if (dup) {
-        results.push({ variantId: e.variantId, previousStock: prev, newStock: prev, applied: false });
+        results.push({ variantId: e.variantId, previousStock: prev, newStock: prev, applied: false, deducted: 0, shortfall: 0 });
         continue;
       }
     }
 
-    const next = hasSet ? toInt(e.setTo) : prev + toInt(e.delta);
+    const computed = computeNextStock(prev, hasSet ? { setTo: e.setTo } : { delta: e.delta });
+    const next = computed.next;
     const change = next - prev;
 
     if (change !== 0 || e.type === 'SNAPSHOT_INICIAL' || e.idempotencyKey) {
@@ -193,16 +221,33 @@ export async function applyEntriesInTx(
       );
     }
 
-    if (next < 0 && change < 0 && e.alertIfNegative) {
-      await conn.query(
-        `INSERT INTO stock_alerts (id, kind, variant_id, message, reference) VALUES (?, 'oversold', ?, ?, ?)`,
-        [uuidv4(), e.variantId, e.alertIfNegative.slice(0, 500), e.reference ?? null]
+    if (computed.shortfall > 0 && e.alertIfNegative) {
+      const open = await q1(
+        conn,
+        `SELECT id FROM stock_alerts
+         WHERE kind = 'oversold' AND variant_id = ? AND dismissed_at IS NULL AND reference <=> ?
+         LIMIT 1`,
+        [e.variantId, e.reference ?? null]
       );
+      if (!open) {
+        const detail = ` Se descontaron ${computed.deducted} y faltaron ${computed.shortfall}. El stock quedó en 0.`;
+        await conn.query(
+          `INSERT INTO stock_alerts (id, kind, variant_id, message, reference) VALUES (?, 'oversold', ?, ?, ?)`,
+          [uuidv4(), e.variantId, `${e.alertIfNegative}${detail}`.slice(0, 500), e.reference ?? null]
+        );
+      }
     }
 
     current.set(e.variantId, next);
     touched.add(e.variantId);
-    results.push({ variantId: e.variantId, previousStock: prev, newStock: next, applied: true });
+    results.push({
+      variantId: e.variantId,
+      previousStock: prev,
+      newStock: next,
+      applied: true,
+      deducted: computed.deducted,
+      shortfall: computed.shortfall,
+    });
   }
 
   if (touched.size) {

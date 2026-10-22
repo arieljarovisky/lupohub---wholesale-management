@@ -1729,7 +1729,7 @@ export const importTangoArticles = async (req: Request, res: Response) => {
             `INSERT INTO product_variants (id, product_color_id, size_id, sku) VALUES (?, ?, ?, ?)`,
             [variantId, productColorId, sizeId, variantSku]
           );
-          const qty = r.initialStock ?? 0;
+          const qty = Math.max(0, Math.floor(Number(r.initialStock) || 0));
           await execute(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?)`, [variantId, qty]);
           variantsCreated++;
         } else {
@@ -1744,7 +1744,7 @@ export const importTangoArticles = async (req: Request, res: Response) => {
               // Vía el motor de stock: queda en el historial y se envía a ML/TN.
               const { applyEntries } = await import('../stockEngine/ledger');
               await applyEntries([
-                { variantId, setTo: Math.floor(Number(r.initialStock) || 0), type: 'IMPORTACION_EXCEL', reference: 'Importación de artículos' },
+                { variantId, setTo: Math.max(0, Math.floor(Number(r.initialStock) || 0)), type: 'IMPORTACION_EXCEL', reference: 'Importación de artículos' },
               ]);
             }
           }

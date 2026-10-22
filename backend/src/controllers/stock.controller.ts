@@ -233,7 +233,7 @@ export type ChannelSaleDeductResult = {
   unitsToDeduct?: number;
 };
 
-/** Descuenta stock por venta de canal. Nunca bloquea: si no alcanza, el stock queda negativo y se deja un aviso. */
+/** Descuenta stock por venta de canal. Si no alcanza, el stock queda en 0 y se deja un aviso. */
 export const deductVariantStockForChannelSale = async (
   variantId: string,
   unitsToDeduct: number,
@@ -251,7 +251,7 @@ export const deductVariantStockForChannelSale = async (
           delta: -units,
           type: movementType,
           reference: reference ?? null,
-          alertIfNegative: `Venta sin stock suficiente (${units} u.). Revisá el stock real.`,
+          alertIfNegative: `Venta sin stock suficiente (${units} u.).`,
         },
       ],
       { syncExternal }

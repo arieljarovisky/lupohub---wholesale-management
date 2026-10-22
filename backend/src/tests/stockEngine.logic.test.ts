@@ -5,6 +5,7 @@
 import assert from 'assert';
 import { isBeforeCutover, normalizeMercadoLibreOrder, normalizeTiendaNubeOrder } from '../stockEngine/channelOrders';
 import { computeWholesaleDeltas, isPickingDone, itemUnits } from '../stockEngine/wholesale';
+import { computeNextStock } from '../stockEngine/ledger';
 import { unitsForListing } from '../stockEngine/targets';
 import { backoffSeconds } from '../stockEngine/syncQueue';
 
@@ -142,6 +143,24 @@ test('diferencias: editar el pedido ajusta solo lo que cambió', () => {
 });
 test('diferencias: nunca se "desea" stock negativo', () => {
   assert.deepStrictEqual(computeWholesaleDeltas(new Map([['a', 1]]), new Map([['a', -4]])), [{ variantId: 'a', take: -1, desired: 0 }]);
+});
+
+console.log('El stock no baja de cero');
+test('descontar más de lo que hay deja el stock en 0 y anota lo que faltó', () => {
+  assert.deepStrictEqual(computeNextStock(2, { delta: -5 }), { next: 0, deducted: 2, shortfall: 3 });
+});
+test('sin stock no se descuenta nada', () => {
+  assert.deepStrictEqual(computeNextStock(0, { delta: -4 }), { next: 0, deducted: 0, shortfall: 4 });
+});
+test('un saldo que ya era negativo se trata como cero', () => {
+  assert.deepStrictEqual(computeNextStock(-3, { delta: -1 }), { next: 0, deducted: 0, shortfall: 1 });
+  assert.deepStrictEqual(computeNextStock(-3, { delta: 4 }), { next: 4, deducted: 0, shortfall: 0 });
+});
+test('fijar un valor negativo queda en cero', () => {
+  assert.deepStrictEqual(computeNextStock(8, { setTo: -2 }), { next: 0, deducted: 0, shortfall: 2 });
+});
+test('descontar menos de lo disponible no toca el piso', () => {
+  assert.deepStrictEqual(computeNextStock(10, { delta: -4 }), { next: 6, deducted: 4, shortfall: 0 });
 });
 
 console.log('Publicaciones y cola');
