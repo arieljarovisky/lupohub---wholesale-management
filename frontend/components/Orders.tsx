@@ -840,36 +840,40 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         })
         .join('');
 
-    // Filas que entran en una A4: la última hoja reserva pie (firma, CAI); las anteriores, no.
-    const ROWS_LAST = 26;
-    const ROWS_CONT = 30;
-    const pages: OrderItem[][] = [];
+    // Renglones reales de una A4 (medidos con el membrete y el pie). Una hoja no se corta
+    // mientras le quede lugar: se llena hasta el último renglón y recién ahí sigue.
+    const obsPenalty = descripcionTrim ? 1 : 0;
+    const rowsLastSingle = 30 - obsPenalty;
+    const rowsLastMulti = 29 - obsPenalty;
+    const rowsContMulti = 33 - obsPenalty;
+    const pages: { items: OrderItem[]; reserveFooter: boolean; cap: number }[] = [];
     if (isExpreso || items.length === 0) {
-      pages.push([]);
-    } else if (items.length <= ROWS_LAST) {
-      pages.push(items);
+      pages.push({ items: [], reserveFooter: true, cap: rowsLastSingle });
+    } else if (items.length <= rowsLastSingle) {
+      pages.push({ items, reserveFooter: true, cap: rowsLastSingle });
     } else {
-      let pageCount = 2;
-      while ((pageCount - 1) * ROWS_CONT + ROWS_LAST < items.length) pageCount++;
-      const even = Math.floor(items.length / pageCount);
-      let rem = items.length % pageCount;
-      const sizes = Array.from({ length: pageCount }, (_, i) => {
-        const cap = i === pageCount - 1 ? ROWS_LAST : ROWS_CONT;
-        const sz = even + (rem > 0 ? 1 : 0);
-        if (rem > 0) rem--;
-        return Math.min(sz, cap);
-      });
-      let leftover = items.length - sizes.reduce((a, b) => a + b, 0);
-      for (let i = 0; i < pageCount && leftover > 0; i++) {
-        const cap = i === pageCount - 1 ? ROWS_LAST : ROWS_CONT;
-        const add = Math.min(cap - sizes[i], leftover);
-        sizes[i] += add;
-        leftover -= add;
-      }
       let offset = 0;
-      for (const sz of sizes) {
-        pages.push(items.slice(offset, offset + sz));
-        offset += sz;
+      while (offset < items.length) {
+        const remaining = items.length - offset;
+        if (remaining <= rowsLastMulti) {
+          pages.push({ items: items.slice(offset), reserveFooter: true, cap: rowsLastMulti });
+          break;
+        }
+        if (remaining > rowsContMulti) {
+          pages.push({
+            items: items.slice(offset, offset + rowsContMulti),
+            reserveFooter: false,
+            cap: rowsContMulti,
+          });
+          offset += rowsContMulti;
+        } else {
+          pages.push({
+            items: items.slice(offset, offset + rowsLastMulti),
+            reserveFooter: true,
+            cap: rowsLastMulti,
+          });
+          offset += rowsLastMulti;
+        }
       }
     }
 
@@ -921,12 +925,15 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       ? `<img class="r-wm-img" src="${wmLogoSrc}" alt="" referrerpolicy="no-referrer" />`
       : `<div class="r-wm-text" aria-hidden="true">LUPO</div>`;
 
-    const pagesHtml = pages.map((pageItems, idx) => {
+    const pagesHtml = pages.map((page, idx) => {
+      const pageItems = page.items;
       const remitoNumber = pages.length > 1
         ? `${remitoBaseNumber}-${String(idx + 1).padStart(2, '0')}`
         : remitoBaseNumber;
-      const isLast = idx === pages.length - 1;
       const pageRows = rowsFor(pageItems);
+      const padRow = !isExpreso && pageItems.length < page.cap
+        ? `<tr class="r-pad">${Array.from({ length: 6 }, () => `<td><div class="r-pad-lines">${Array.from({ length: 40 }, () => '<div class="r-line"></div>').join('')}</div></td>`).join('')}</tr>`
+        : '';
       const nroRemitoEsc = esc(remitoNumber || '—');
       const fechaDMY = esc(formatDateDMY(order.date));
       const hojaLine =
@@ -936,7 +943,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       const transporteFirma = [transportNumber ? esc(transportNumber) : '', numBultos != null && !isNaN(numBultos) ? `Bultos: ${numBultos}` : '']
         .filter(Boolean)
         .join('<br/>');
-      const caiBlock = isLast ? (caiFooterHtml || `<div class="r-cai r-cai-muted">Comprobante no válido como factura — Documento no fiscal</div>`) : '';
+      const caiBlock = page.reserveFooter ? (caiFooterHtml || `<div class="r-cai r-cai-muted">Comprobante no válido como factura — Documento no fiscal</div>`) : '';
 
       return `<section class="sheet ${idx > 0 ? 'page-break' : ''}">
         <div class="side-talon">ORIGINAL Blanco - DUPLICADO Color</div>
@@ -1030,14 +1037,14 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         <th class="ri-r" style="width:88px;">IMPORTE</th>
                       </tr>
                     </thead>
-                    <tbody>${pageRows || ''}<tr class="r-pad">${Array.from({ length: 6 }, () => `<td><div class="r-pad-lines">${Array.from({ length: 40 }, () => '<div class="r-line"></div>').join('')}</div></td>`).join('')}</tr></tbody>
+                    <tbody>${pageRows}${padRow}</tbody>
                   </table>`
             }
             <div class="r-items-ley">La mercadería viaja por cuenta y cargo del cliente</div>
             </div>
           </div>
           ${
-            isLast
+            page.reserveFooter
               ? `<div class="r-firma-row">
               <div class="r-firma-cell"><div class="r-firma-t">TRANSPORTE:</div><div class="r-firma-b">${transporteFirma || '&nbsp;'}</div></div>
               <div class="r-firma-cell"><div class="r-firma-t">RECIBI CONFORME:</div><div class="r-firma-b r-firma-sign">&nbsp;</div></div>
