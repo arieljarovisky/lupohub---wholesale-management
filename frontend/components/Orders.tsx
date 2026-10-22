@@ -840,14 +840,37 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         })
         .join('');
 
-    const itemsPerPage = 16;
+    // Filas que entran en una A4: la última hoja reserva pie (firma, CAI); las anteriores, no.
+    const ROWS_LAST = 26;
+    const ROWS_CONT = 30;
     const pages: OrderItem[][] = [];
-    if (isExpreso) {
-      // En remito por expreso no se detallan los ítems, así que va una sola hoja.
+    if (isExpreso || items.length === 0) {
       pages.push([]);
+    } else if (items.length <= ROWS_LAST) {
+      pages.push(items);
     } else {
-      for (let i = 0; i < items.length; i += itemsPerPage) pages.push(items.slice(i, i + itemsPerPage));
-      if (pages.length === 0) pages.push([]);
+      let pageCount = 2;
+      while ((pageCount - 1) * ROWS_CONT + ROWS_LAST < items.length) pageCount++;
+      const even = Math.floor(items.length / pageCount);
+      let rem = items.length % pageCount;
+      const sizes = Array.from({ length: pageCount }, (_, i) => {
+        const cap = i === pageCount - 1 ? ROWS_LAST : ROWS_CONT;
+        const sz = even + (rem > 0 ? 1 : 0);
+        if (rem > 0) rem--;
+        return Math.min(sz, cap);
+      });
+      let leftover = items.length - sizes.reduce((a, b) => a + b, 0);
+      for (let i = 0; i < pageCount && leftover > 0; i++) {
+        const cap = i === pageCount - 1 ? ROWS_LAST : ROWS_CONT;
+        const add = Math.min(cap - sizes[i], leftover);
+        sizes[i] += add;
+        leftover -= add;
+      }
+      let offset = 0;
+      for (const sz of sizes) {
+        pages.push(items.slice(offset, offset + sz));
+        offset += sz;
+      }
     }
 
     const empresaDir = [remitente.address, remitente.city].filter(Boolean).join(', ') || '';
@@ -888,7 +911,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     const logoPlaceholder = (remitente.businessName || 'Empresa').replace(/</g, '&lt;');
     const logoBlockRemito = logoUrlRemito
       ? `<div style="display:flex;align-items:center;gap:8px;">
-           <img src="${logoUrlRemito}" alt="Logo" class="inv-logo" referrerpolicy="no-referrer" style="max-height:56px;max-width:220px;width:auto;height:auto;object-fit:contain;display:block;" />
+           <img src="${logoUrlRemito}" alt="Logo" class="inv-logo" referrerpolicy="no-referrer" style="max-height:44px;max-width:200px;width:auto;height:auto;object-fit:contain;display:block;" />
          </div>`
       : `<span class="inv-logo-placeholder">${logoPlaceholder}</span>`;
 
@@ -964,6 +987,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           </div>
           <div class="r-items-outer">
             ${watermarkBlock}
+            <div class="r-items-fill">
             ${
               isExpreso
                 ? (() => {
@@ -1006,10 +1030,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         <th class="ri-r" style="width:88px;">IMPORTE</th>
                       </tr>
                     </thead>
-                    <tbody>${pageRows || '<tr><td class="ri-c" colspan="6">&nbsp;</td></tr>'}</tbody>
+                    <tbody>${pageRows || ''}<tr class="r-pad">${Array.from({ length: 6 }, () => `<td><div class="r-pad-lines">${Array.from({ length: 40 }, () => '<div class="r-line"></div>').join('')}</div></td>`).join('')}</tr></tbody>
                   </table>`
             }
             <div class="r-items-ley">La mercadería viaja por cuenta y cargo del cliente</div>
+            </div>
           </div>
           ${
             isLast
@@ -1026,11 +1051,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     }).join('');
 
     return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Remito ${order.id}</title><style>
-      @page { size: A4; margin: 10mm 10mm 12mm 14mm; }
+      @page { size: A4; margin: 0; }
       * { box-sizing: border-box; }
       body { margin: 0; padding: 0; color: #000; background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
-      .sheet { position: relative; width: 210mm; padding: 8mm 8mm 10mm 11mm; margin: 0 auto; }
-      .page-break { page-break-before: always; }
+      .sheet { position: relative; width: 210mm; height: 297mm; padding: 5mm 5mm 5mm 8mm; margin: 0 auto; overflow: hidden; }
+      .page-break { page-break-before: always; break-before: page; }
       .side-talon {
         position: absolute;
         left: 1mm;
@@ -1048,14 +1073,14 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         letter-spacing: 0.06em;
         color: #222;
       }
-      .remito-doc { border: 2px solid #000; margin-left: 5mm; }
+      .remito-doc { border: 2px solid #000; margin-left: 4mm; height: 100%; display: flex; flex-direction: column; }
       .r-hoja { text-align: right; font-size: 9px; font-weight: 700; padding: 4px 8px; border-bottom: 1px solid #000; background: #fafafa; }
-      .r-head3 { display: grid; grid-template-columns: 1.35fr 92px 1fr; border-bottom: 2px solid #000; min-height: 118px; }
-      .r-h-izq { padding: 8px 10px 8px 8px; border-right: 2px solid #000; }
-      .r-h-mid { border-right: 2px solid #000; padding: 8px 6px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; }
-      .r-h-der { padding: 8px 10px; }
-      .r-logo { margin-bottom: 4px; }
-      .r-logo img { max-height: 52px; max-width: 200px; object-fit: contain; display: block; }
+      .r-head3 { display: grid; grid-template-columns: 1.35fr 92px 1fr; border-bottom: 2px solid #000; flex: 0 0 auto; }
+      .r-h-izq { padding: 6px 8px 6px 8px; border-right: 2px solid #000; }
+      .r-h-mid { border-right: 2px solid #000; padding: 6px 6px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; }
+      .r-h-der { padding: 6px 8px; }
+      .r-logo { margin-bottom: 2px; }
+      .r-logo img { max-height: 44px; max-width: 200px; object-fit: contain; display: block; }
       .inv-logo-placeholder { font-size: 22px; font-weight: 800; letter-spacing: 0.02em; }
       .r-razon { font-size: 12px; font-weight: 700; margin-bottom: 4px; line-height: 1.2; }
       .r-line-sm { font-size: 10px; line-height: 1.35; margin-bottom: 2px; }
@@ -1074,23 +1099,24 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       .r-cod91 { font-size: 8px; font-weight: 700; margin-top: 6px; text-align: center; letter-spacing: 0.02em; }
       .r-doc-title { font-size: 22px; font-weight: 800; letter-spacing: 0.04em; margin-bottom: 4px; }
       .r-doc-nro { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
-      .r-doc-fecha { font-size: 11px; font-weight: 700; margin-bottom: 8px; }
+      .r-doc-fecha { font-size: 11px; font-weight: 700; margin-bottom: 4px; }
       .r-doc-tax { font-size: 10px; line-height: 1.45; margin-bottom: 2px; }
       .r-dlbl { font-weight: 700; display: inline-block; min-width: 108px; }
-      .r-cli { border-bottom: 2px solid #000; }
+      .r-cli { border-bottom: 2px solid #000; flex: 0 0 auto; }
       .r-cli-up { display: grid; grid-template-columns: 1.2fr 0.85fr; border-bottom: 1px solid #000; }
-      .r-cli-left { padding: 8px 10px; border-right: 1px solid #000; }
-      .r-cli-right { padding: 8px 10px; }
-      .r-row { font-size: 10px; line-height: 1.45; margin-bottom: 4px; }
+      .r-cli-left { padding: 4px 8px; border-right: 1px solid #000; }
+      .r-cli-right { padding: 4px 8px; }
+      .r-row { font-size: 10px; line-height: 1.3; margin-bottom: 1px; }
       .r-row:last-child { margin-bottom: 0; }
       .r-k { font-weight: 700; display: inline-block; min-width: 112px; }
       .r-cli-obs { padding: 6px 10px; font-size: 10px; border-bottom: 1px solid #000; line-height: 1.4; }
       .r-cli-low { display: grid; grid-template-columns: 1fr 1fr 1fr; }
-      .r-c3 { border-right: 1px solid #000; padding: 6px 8px; min-height: 44px; }
+      .r-c3 { border-right: 1px solid #000; padding: 4px 8px; }
       .r-c3:last-child { border-right: none; }
       .r-c3t { font-size: 9px; font-weight: 700; margin-bottom: 4px; }
       .r-c3v { font-size: 10px; line-height: 1.35; word-break: break-word; }
-      .r-items-outer { position: relative; border-bottom: 2px solid #000; }
+      .r-items-outer { position: relative; border-bottom: 2px solid #000; flex: 1 1 auto; min-height: 0; }
+      .r-items-fill { position: absolute; inset: 0; display: flex; flex-direction: column; z-index: 1; }
       .r-wm-text {
         position: absolute;
         left: 50%;
@@ -1119,32 +1145,38 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         z-index: 0;
         filter: grayscale(100%);
       }
-      table.r-items { position: relative; z-index: 1; width: 100%; border-collapse: collapse; font-size: 10px; }
-      table.r-items thead th { border: 1px solid #000; padding: 6px 6px; font-weight: 700; text-align: left; background: #fff; }
-      table.r-items tbody td { border: 1px solid #000; padding: 5px 6px; vertical-align: top; }
+      table.r-items { width: 100%; border-collapse: collapse; font-size: 10px; background: transparent; flex: 1 1 0; min-height: 0; height: 0; }
+      table.r-items thead th { border: 1px solid #000; padding: 3px 4px; font-weight: 700; text-align: left; background: #fff; }
+      table.r-items tbody td { border: 1px solid #000; padding: 1px 4px; vertical-align: middle; background: transparent; height: 6.2mm; }
+      table.r-items tbody tr.r-pad { height: 100%; }
+      table.r-items tbody tr.r-pad td { height: auto; padding: 0; vertical-align: top; position: relative; }
+      .r-pad-lines { position: absolute; inset: 0; overflow: hidden; }
+      .r-line { height: 6.2mm; border-bottom: 1px solid #000; box-sizing: border-box; }
       .ri-c { text-align: center; }
       .ri-r { text-align: right; }
       .ri-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 9px; }
       .ri-desc { text-align: left; word-break: break-word; overflow-wrap: anywhere; font-weight: 600; }
-      .r-items-ley { position: relative; z-index: 1; text-align: center; font-size: 10px; font-weight: 700; padding: 8px 10px; border-top: 1px solid #000; }
-      /* Variante "expreso" de la tabla: una sola fila con cantidad de bultos + descripción multi-línea. */
-      .r-items-expreso tbody td { padding: 14px 12px; vertical-align: top; }
+      .r-items-ley { flex: 0 0 auto; text-align: center; font-size: 10px; font-weight: 700; padding: 4px 8px; border-top: 1px solid #000; background: #fff; }
+      /* Variante "expreso": la única fila ocupa el alto libre de la hoja. */
+      .r-items-expreso tbody td { padding: 10px 12px; vertical-align: top; height: auto; }
+      .r-items-expreso tbody tr { height: 100%; }
       .ri-exp-qty { font-size: 26px; font-weight: 800; vertical-align: middle; }
       .ri-exp-desc { font-size: 14px; font-weight: 700; line-height: 1.7; letter-spacing: 0.02em; }
       .ri-exp-line { margin-bottom: 4px; }
       .ri-exp-line:last-child { margin-bottom: 0; }
       .ri-exp-lbl { font-weight: 800; margin-right: 4px; }
-      .r-firma-row { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 2px solid #000; min-height: 72px; }
+      .r-firma-row { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 2px solid #000; min-height: 16mm; flex: 0 0 auto; }
       .r-firma-cell { border-right: 1px solid #000; padding: 6px 8px; vertical-align: top; }
       .r-firma-cell:last-child { border-right: none; }
       .r-firma-t { font-size: 10px; font-weight: 800; margin-bottom: 6px; }
       .r-firma-b { font-size: 10px; line-height: 1.35; min-height: 36px; }
       .r-firma-sign { border-bottom: 1px solid #000; margin-top: 8px; max-width: 85%; }
-      .r-cai { padding: 6px 10px 4px; font-size: 9px; line-height: 1.4; border-bottom: 1px solid #000; }
+      .r-cai { padding: 3px 8px 2px; font-size: 9px; line-height: 1.35; border-bottom: 1px solid #000; flex: 0 0 auto; }
       .r-cai-muted { color: #444; }
-      .r-micro { padding: 4px 8px 8px; font-size: 8px; color: #555; text-align: right; }
+      .r-micro { padding: 2px 8px 3px; font-size: 8px; color: #555; text-align: right; flex: 0 0 auto; }
       .no-print { margin: 14px auto 18px; width: 210mm; padding: 0 10mm; display: flex; gap: 10px; }
-      @media print { .no-print { display: none !important; } .sheet { margin: 0 auto; } }
+      @media screen { body { background: #e5e7eb; padding: 12px 0 24px; } .sheet { box-shadow: 0 1px 6px rgba(0,0,0,.25); } }
+      @media print { .no-print { display: none !important; } body { background: #fff; padding: 0; } .sheet { margin: 0; box-shadow: none; } }
     </style></head><body>
       ${pagesHtml}
       <div class="no-print">
