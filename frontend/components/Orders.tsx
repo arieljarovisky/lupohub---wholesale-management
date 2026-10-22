@@ -1029,7 +1029,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       @page { size: A4; margin: 10mm 10mm 12mm 14mm; }
       * { box-sizing: border-box; }
       body { margin: 0; padding: 0; color: #000; background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
-      .sheet { position: relative; width: 210mm; min-height: 297mm; padding: 8mm 8mm 10mm 11mm; margin: 0 auto; }
+      .sheet { position: relative; width: 210mm; padding: 8mm 8mm 10mm 11mm; margin: 0 auto; }
       .page-break { page-break-before: always; }
       .side-talon {
         position: absolute;
@@ -1048,7 +1048,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         letter-spacing: 0.06em;
         color: #222;
       }
-      .remito-doc { border: 2px solid #000; margin-left: 5mm; min-height: calc(297mm - 18mm); }
+      .remito-doc { border: 2px solid #000; margin-left: 5mm; }
       .r-hoja { text-align: right; font-size: 9px; font-weight: 700; padding: 4px 8px; border-bottom: 1px solid #000; background: #fafafa; }
       .r-head3 { display: grid; grid-template-columns: 1.35fr 92px 1fr; border-bottom: 2px solid #000; min-height: 118px; }
       .r-h-izq { padding: 8px 10px 8px 8px; border-right: 2px solid #000; }
@@ -1090,7 +1090,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       .r-c3:last-child { border-right: none; }
       .r-c3t { font-size: 9px; font-weight: 700; margin-bottom: 4px; }
       .r-c3v { font-size: 10px; line-height: 1.35; word-break: break-word; }
-      .r-items-outer { position: relative; border-bottom: 2px solid #000; min-height: 120mm; }
+      .r-items-outer { position: relative; border-bottom: 2px solid #000; }
       .r-wm-text {
         position: absolute;
         left: 50%;
@@ -1128,7 +1128,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       .ri-desc { text-align: left; word-break: break-word; overflow-wrap: anywhere; font-weight: 600; }
       .r-items-ley { position: relative; z-index: 1; text-align: center; font-size: 10px; font-weight: 700; padding: 8px 10px; border-top: 1px solid #000; }
       /* Variante "expreso" de la tabla: una sola fila con cantidad de bultos + descripción multi-línea. */
-      .r-items-expreso tbody td { padding: 18px 14px; vertical-align: top; min-height: 110mm; }
+      .r-items-expreso tbody td { padding: 14px 12px; vertical-align: top; }
       .ri-exp-qty { font-size: 26px; font-weight: 800; vertical-align: middle; }
       .ri-exp-desc { font-size: 14px; font-weight: 700; line-height: 1.7; letter-spacing: 0.02em; }
       .ri-exp-line { margin-bottom: 4px; }
