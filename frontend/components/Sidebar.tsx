@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Package, ShoppingCart, Users, MapPin, LogOut, Shirt, Settings, ShoppingBag, Zap, ChevronRight, ChevronLeft, Ship, BookOpen, DollarSign, FileText, Percent, Wallet, Megaphone, Award, Facebook, Chrome, UserPlus, MessageCircle, Star, RefreshCw } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, MapPin, LogOut, Shirt, Settings, ShoppingBag, Zap, ChevronRight, ChevronLeft, Ship, BookOpen, DollarSign, FileText, Percent, Wallet, Megaphone, Award, Facebook, Chrome, UserPlus, MessageCircle, Star, RefreshCw, PackagePlus } from 'lucide-react';
 import { channelLogoForView } from './ChannelLogos';
 import { Role } from '../types';
 import { isCompanyFinanceUser, COMPANY_FINANCE_VIEW } from '../utils/companyFinanceAccess';
@@ -28,6 +28,7 @@ const Sidebar: React.FC<SidebarProps> = React.memo(({ currentView, onChangeView,
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
         { id: 'inventory', label: 'Inventario', icon: Package, roles: [Role.ADMIN, Role.WAREHOUSE, Role.DEPOSITO] },
         { id: 'stock_sync', label: 'Stock y ventas', icon: RefreshCw, roles: [Role.ADMIN, Role.WAREHOUSE, Role.DEPOSITO], color: 'emerald' },
+        { id: 'brazil_order', label: 'Pedido Brasil', icon: PackagePlus, roles: [Role.ADMIN, Role.WAREHOUSE, Role.DEPOSITO], color: 'emerald' },
         { id: 'catalogs', label: 'Catálogos', icon: BookOpen, roles: [Role.ADMIN, Role.SELLER, Role.CUSTOMER], color: 'emerald' },
         { id: 'despachos', label: 'Despachos', icon: Ship, roles: [Role.ADMIN], color: 'indigo' },
       ]

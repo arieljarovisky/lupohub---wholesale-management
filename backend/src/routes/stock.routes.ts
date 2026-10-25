@@ -1,8 +1,12 @@
 import { Router } from 'express';
 import { getStockMovements, forceSyncStock, createStockSnapshot, deleteStockSnapshot, importSalesHistory, updateVariantStockEndpoint, importStockFromExcel, importStockGridToDespacho } from '../controllers/stock.controller';
-import { authMiddleware } from '../middleware/auth';
+import { getBrazilOrderSuggestion, exportBrazilOrderSuggestion } from '../controllers/brazilOrderSuggestion.controller';
+import { authMiddleware, adminOrDepositoMiddleware } from '../middleware/auth';
 
 const router = Router();
+
+router.get('/brazil-order-suggestion/export', authMiddleware, adminOrDepositoMiddleware, exportBrazilOrderSuggestion);
+router.get('/brazil-order-suggestion', authMiddleware, adminOrDepositoMiddleware, getBrazilOrderSuggestion);
 
 // Historial de movimientos de stock
 router.get('/movements', getStockMovements);

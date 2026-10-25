@@ -396,6 +396,65 @@ export type CompanyFinanceChannelEconomics = {
   contributionMarginPct: number | null;
 };
 
+export type BrazilSuggestionPriority = 'agotado' | 'critico' | 'pedir' | 'ok' | 'sin_venta';
+
+export type BrazilSuggestionVariant = {
+  variantId: string;
+  colorName: string;
+  colorCode: string;
+  sizeCode: string;
+  sizeLabel: string;
+  stock: number;
+  incoming: number;
+  available: number;
+  soldTn: number;
+  soldMl: number;
+  soldMay: number;
+  sold: number;
+  dailyRate: number;
+  daysOfCover: number | null;
+  suggestedQty: number;
+  priority: BrazilSuggestionPriority;
+};
+
+export type BrazilSuggestionArticle = {
+  productId: string;
+  sku: string;
+  name: string;
+  category: string;
+  packSize: number;
+  stock: number;
+  incoming: number;
+  available: number;
+  soldTn: number;
+  soldMl: number;
+  soldMay: number;
+  sold: number;
+  dailyRate: number;
+  daysOfCover: number | null;
+  suggestedQty: number;
+  priority: BrazilSuggestionPriority;
+  variants: BrazilSuggestionVariant[];
+};
+
+export type BrazilOrderSuggestionResult = {
+  periodDays: number;
+  leadTimeDays: number;
+  coverageDays: number;
+  from: string;
+  to: string;
+  summary: {
+    articles: number;
+    articlesToOrder: number;
+    unitsToOrder: number;
+    urgent: number;
+    soldInPeriod: number;
+    stockUnits: number;
+    incomingUnits: number;
+  };
+  articles: BrazilSuggestionArticle[];
+};
+
 export const api = {
   login: async (email: string, password: string): Promise<{ user: User; token: string | null }> => {
     return await request<{ user: User; token: string | null }>(`/auth/login`, 'POST', { email, password });
@@ -4284,6 +4343,40 @@ export const api = {
     recommendation: string;
   }> => {
     return await request('/integrations/mercadolibre/questions-ai/metrics', 'GET');
+  },
+
+  getBrazilOrderSuggestion: async (params?: {
+    periodDays?: number;
+    leadTimeDays?: number;
+    coverageDays?: number;
+  }): Promise<BrazilOrderSuggestionResult> => {
+    const q = new URLSearchParams();
+    if (params?.periodDays) q.set('periodDays', String(params.periodDays));
+    if (params?.leadTimeDays) q.set('leadTimeDays', String(params.leadTimeDays));
+    if (params?.coverageDays) q.set('coverageDays', String(params.coverageDays));
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return await request<BrazilOrderSuggestionResult>(`/stock/brazil-order-suggestion${qs}`, 'GET', undefined, undefined, 120000);
+  },
+
+  exportBrazilOrderSuggestion: async (params?: {
+    periodDays?: number;
+    leadTimeDays?: number;
+    coverageDays?: number;
+  }): Promise<void> => {
+    const q = new URLSearchParams();
+    if (params?.periodDays) q.set('periodDays', String(params.periodDays));
+    if (params?.leadTimeDays) q.set('leadTimeDays', String(params.leadTimeDays));
+    if (params?.coverageDays) q.set('coverageDays', String(params.coverageDays));
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    const blob = await getBlob(`/stock/brazil-order-suggestion/export${qs}`, 180000);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `pedido_brasil_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   },
 
   // Historial de movimientos de stock
