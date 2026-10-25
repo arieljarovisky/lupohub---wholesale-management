@@ -5,6 +5,7 @@ import {
   ChevronRight,
   Download,
   Loader2,
+  BookOpen,
   PackagePlus,
   RefreshCw,
   Search,
@@ -16,7 +17,7 @@ import { useNotification } from '../context/NotificationContext';
 import { INVENTORY_STORAGE_KEY } from '../utils/inventoryUtils';
 
 type PeriodOpt = 30 | 60 | 90;
-type FilterTab = 'pedir' | 'urgente' | 'todos';
+type FilterTab = 'pedir' | 'urgente' | 'discontinuados' | 'todos';
 
 const PRIORITY_LABEL: Record<BrazilSuggestionPriority, string> = {
   agotado: 'Agotado',
@@ -99,8 +100,10 @@ const BrazilOrder: React.FC = () => {
     const articles = data?.articles || [];
     const q = search.trim().toLowerCase();
     return articles.filter((a) => {
-      if (filter === 'pedir' && a.suggestedQty <= 0) return false;
-      if (filter === 'urgente' && a.priority !== 'agotado' && a.priority !== 'critico') return false;
+      if (filter === 'pedir' && (!a.inCatalog || a.suggestedQty <= 0)) return false;
+      if (filter === 'urgente' && (!a.inCatalog || (a.priority !== 'agotado' && a.priority !== 'critico'))) return false;
+      if (filter === 'discontinuados' && (a.inCatalog || a.sold <= 0)) return false;
+      if (filter === 'todos' && !a.inCatalog) return false;
       if (q && !a.name.toLowerCase().includes(q) && !a.sku.toLowerCase().includes(q) && !a.category.toLowerCase().includes(q)) {
         return false;
       }
@@ -136,9 +139,9 @@ const BrazilOrder: React.FC = () => {
       <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
         <div>
           <p className="text-slate-400 text-sm max-w-2xl">
-            Cruza lo que vendiste (Tienda Nube, Mercado Libre y mayorista) con el stock actual y lo que ya
-            viene en camino. Sugiere cuánto pedir a Brasil para no quedarte sin mercadería mientras llega
-            el contenedor.
+            Cruza ventas, stock y mercadería en camino, y solo sugiere lo que sigue en los catálogos
+            vigentes (hombre, lencería, medias y nuevos). Si el artículo no está ahí, está discontinuado
+            y no se pide a Brasil.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -210,7 +213,8 @@ const BrazilOrder: React.FC = () => {
 
       <p className="text-xs text-slate-500">
         Pedir = ventas por día × ({leadTimeDays} días de importación + {coverageDays} días de cobertura) − stock −
-        mercadería en camino. Si un talle se agota antes de que llegue el pedido, queda marcado como crítico.
+        mercadería en camino. Solo catálogo vigente. Si un talle se agota antes de que llegue el pedido, queda
+        crítico.
       </p>
 
       {loading && !data ? (
@@ -220,7 +224,7 @@ const BrazilOrder: React.FC = () => {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
             <SummaryCard
               icon={<PackagePlus size={18} className="text-emerald-400" />}
               label="Artículos a pedir"
@@ -241,6 +245,11 @@ const BrazilOrder: React.FC = () => {
               label="En camino"
               value={formatInt(summary?.incomingUnits || 0)}
             />
+            <SummaryCard
+              icon={<BookOpen size={18} className="text-slate-300" />}
+              label="Discontinuados con ventas"
+              value={formatInt(summary?.discontinuedWithDemand || 0)}
+            />
           </div>
 
           <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
@@ -249,7 +258,8 @@ const BrazilOrder: React.FC = () => {
                 [
                   ['pedir', 'Solo pedir'],
                   ['urgente', 'Urgentes'],
-                  ['todos', 'Todos']
+                  ['discontinuados', 'Discontinuados'],
+                  ['todos', 'Catálogo']
                 ] as Array<[FilterTab, string]>
               ).map(([id, label]) => (
                 <button
@@ -279,8 +289,10 @@ const BrazilOrder: React.FC = () => {
             {rows.length === 0 ? (
               <div className="px-4 py-12 text-center text-slate-400 text-sm">
                 {filter === 'pedir'
-                  ? 'Con estos parámetros no hace falta pedir nada: el stock cubre la importación y la cobertura.'
-                  : 'No hay artículos para este filtro.'}
+                  ? 'Con estos parámetros no hace falta pedir nada de catálogo: el stock cubre la importación y la cobertura.'
+                  : filter === 'discontinuados'
+                    ? 'No hay artículos fuera de catálogo con ventas en el período.'
+                    : 'No hay artículos para este filtro.'}
               </div>
             ) : (
               <ul className="divide-y divide-slate-700/60">
@@ -340,9 +352,18 @@ const ArticleRow: React.FC<{
             >
               {article.name}
             </button>
-            <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase border ${priorityClass(article.priority)}`}>
-              {PRIORITY_LABEL[article.priority]}
-            </span>
+            {article.inCatalog ? (
+              <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase border ${priorityClass(article.priority)}`}>
+                {PRIORITY_LABEL[article.priority]}
+              </span>
+            ) : (
+              <span className="px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase border bg-slate-700/50 text-slate-300 border-slate-500/40">
+                Discontinuado
+              </span>
+            )}
+            {article.inCatalog && article.catalogLabel ? (
+              <span className="text-[10px] uppercase tracking-wide text-slate-500">{article.catalogLabel}</span>
+            ) : null}
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
             {article.sku}
@@ -353,7 +374,11 @@ const ArticleRow: React.FC<{
             <Stat label="En camino" value={formatInt(article.incoming)} />
             <Stat label="Vendidas" value={formatInt(article.sold)} hint={`${formatInt(article.soldTn)} TN · ${formatInt(article.soldMl)} ML · ${formatInt(article.soldMay)} may.`} />
             <Stat label="Cobertura" value={formatCover(article.daysOfCover)} />
-            <Stat label="Pedir" value={formatInt(article.suggestedQty)} emphasize />
+            <Stat
+              label={article.inCatalog ? 'Pedir' : 'No pedir'}
+              value={article.inCatalog ? formatInt(article.suggestedQty) : '—'}
+              emphasize={article.inCatalog}
+            />
           </div>
         </div>
       </div>

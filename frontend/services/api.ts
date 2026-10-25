@@ -434,6 +434,9 @@ export type BrazilSuggestionArticle = {
   daysOfCover: number | null;
   suggestedQty: number;
   priority: BrazilSuggestionPriority;
+  inCatalog: boolean;
+  catalogLabel: string | null;
+  catalogCode: string | null;
   variants: BrazilSuggestionVariant[];
 };
 
@@ -443,6 +446,7 @@ export type BrazilOrderSuggestionResult = {
   coverageDays: number;
   from: string;
   to: string;
+  catalogSources: string[];
   summary: {
     articles: number;
     articlesToOrder: number;
@@ -451,6 +455,7 @@ export type BrazilOrderSuggestionResult = {
     soldInPeriod: number;
     stockUnits: number;
     incomingUnits: number;
+    discontinuedWithDemand: number;
   };
   articles: BrazilSuggestionArticle[];
 };

@@ -1,5 +1,6 @@
 import { query } from '../database/db';
 import { nombreTalleDesdeCodigo } from '../talles-tango';
+import { LUPO_CATALOG_SOURCES, matchCurrentCatalog } from '../data/lupoCurrentCatalog';
 
 export type BrazilSuggestionPriority = 'agotado' | 'critico' | 'pedir' | 'ok' | 'sin_venta';
 
@@ -45,6 +46,9 @@ export type BrazilSuggestionArticle = {
   daysOfCover: number | null;
   suggestedQty: number;
   priority: BrazilSuggestionPriority;
+  inCatalog: boolean;
+  catalogLabel: string | null;
+  catalogCode: string | null;
   variants: BrazilSuggestionVariant[];
 };
 
@@ -62,7 +66,9 @@ export type BrazilSuggestionResult = {
     soldInPeriod: number;
     stockUnits: number;
     incomingUnits: number;
+    discontinuedWithDemand: number;
   };
+  catalogSources: string[];
   articles: BrazilSuggestionArticle[];
 };
 
@@ -362,6 +368,7 @@ export async function buildBrazilOrderSuggestion(params: BrazilSuggestionParams)
     const sold = soldTnTotal + soldMlTotal + soldMayTotal;
     const dailyRate = sold / periodDays;
     const cover = daysOfCover(available, dailyRate);
+    const catalog = matchCurrentCatalog(p.sku);
     const suggestedQty = p.variants.reduce((s, v) => s + v.suggestedQty, 0);
     const soldVariants = p.variants.filter((v) => v.sold > 0);
     const priority = soldVariants.length
@@ -383,7 +390,10 @@ export async function buildBrazilOrderSuggestion(params: BrazilSuggestionParams)
       dailyRate: roundRate(dailyRate),
       daysOfCover: cover,
       suggestedQty,
-      priority: worstPriority([priority, ...p.variants.map((v) => v.priority)]),
+      priority,
+      inCatalog: !!catalog,
+      catalogLabel: catalog?.catalog ?? null,
+      catalogCode: catalog?.code ?? null,
       variants: p.variants
     };
   });
@@ -396,21 +406,24 @@ export async function buildBrazilOrderSuggestion(params: BrazilSuggestionParams)
     return a.name.localeCompare(b.name, 'es');
   });
 
-  const toOrder = articles.filter((a) => a.suggestedQty > 0);
+  const catalogArticles = articles.filter((a) => a.inCatalog);
+  const toOrder = catalogArticles.filter((a) => a.suggestedQty > 0);
   return {
     periodDays,
     leadTimeDays,
     coverageDays,
     from,
     to,
+    catalogSources: [...LUPO_CATALOG_SOURCES],
     summary: {
-      articles: articles.length,
+      articles: catalogArticles.length,
       articlesToOrder: toOrder.length,
       unitsToOrder: toOrder.reduce((s, a) => s + a.suggestedQty, 0),
-      urgent: articles.filter((a) => a.priority === 'agotado' || a.priority === 'critico').length,
-      soldInPeriod: articles.reduce((s, a) => s + a.sold, 0),
-      stockUnits: articles.reduce((s, a) => s + a.stock, 0),
-      incomingUnits: articles.reduce((s, a) => s + a.incoming, 0)
+      urgent: catalogArticles.filter((a) => a.priority === 'agotado' || a.priority === 'critico').length,
+      soldInPeriod: catalogArticles.reduce((s, a) => s + a.sold, 0),
+      stockUnits: catalogArticles.reduce((s, a) => s + a.stock, 0),
+      discontinuedWithDemand: articles.filter((a) => !a.inCatalog && a.sold > 0).length,
+      incomingUnits: catalogArticles.reduce((s, a) => s + a.incoming, 0)
     },
     articles
   };

@@ -37,7 +37,7 @@ function collectSizeLabels(articles: BrazilSuggestionArticle[]): string[] {
 export const exportBrazilOrderSuggestion = async (req: Request, res: Response) => {
   try {
     const data = await buildBrazilOrderSuggestion(paramsFromReq(req));
-    const toOrder = data.articles.filter((a) => a.suggestedQty > 0);
+    const toOrder = data.articles.filter((a) => a.inCatalog && a.suggestedQty > 0);
     const sizes = collectSizeLabels(toOrder.length ? toOrder : data.articles);
 
     const wb = new ExcelJS.Workbook();
@@ -60,9 +60,11 @@ export const exportBrazilOrderSuggestion = async (req: Request, res: Response) =
       ['Unidades vendidas en el período', data.summary.soldInPeriod],
       ['Stock actual', data.summary.stockUnits],
       ['En camino (despachos)', data.summary.incomingUnits],
+      ['Fuera de catálogo con ventas', data.summary.discontinuedWithDemand],
+      ['Catálogos vigentes', data.catalogSources.join(' | ')],
       [
         'Criterio',
-        'Sugerido = ventas/día × (importación + cobertura) − stock actual − mercadería en camino'
+        'Solo artículos de los catálogos vigentes. Sugerido = ventas/día × (importación + cobertura) − stock − mercadería en camino. Si no está en catálogo, está discontinuado.'
       ]
     ]);
     wsResumen.getRow(1).font = { bold: true };
