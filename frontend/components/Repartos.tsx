@@ -6,7 +6,7 @@ import { getRemitente } from '../services/apiIntegration';
 import { useNotification } from '../context/NotificationContext';
 import { formatOrderDate } from '../utils/formatDate';
 import { canonicalizeCityInput, isInteriorDeliveryPlace, stripAccents } from '../utils/cityNormalize';
-import { buildDeliveryRouteLinks, MAPS_MAX_WAYPOINTS } from '../utils/googleMapsRoute';
+import { buildDeliveryRouteLinks, deliveryChunkSize, MAPS_MAX_WAYPOINTS } from '../utils/googleMapsRoute';
 
 const PREFS_KEY = 'lupo_reparto_prefs';
 
@@ -32,12 +32,22 @@ type AddressOption = {
   stopTitle: string;
 };
 
+type StopOrder = {
+  id: string;
+  name: string;
+  remito?: number;
+  city: string;
+  status: string;
+  interior: boolean;
+};
+
 type StopItem = {
   key: string;
   title: string;
   detail: string;
   query: string;
   customers: string[];
+  orders: StopOrder[];
 };
 
 interface RepartosProps {
@@ -147,11 +157,19 @@ function dedupeStops(stops: StopItem[]): StopItem[] {
     if (!key) continue;
     const prev = map.get(key);
     if (!prev) {
-      map.set(key, { ...stop, key: `place:${key}`, customers: [...stop.customers] });
+      map.set(key, {
+        ...stop,
+        key: `place:${key}`,
+        customers: [...stop.customers],
+        orders: [...stop.orders],
+      });
       continue;
     }
     for (const name of stop.customers) {
       if (name && !prev.customers.includes(name)) prev.customers.push(name);
+    }
+    for (const order of stop.orders) {
+      if (!prev.orders.some((item) => item.id === order.id)) prev.orders.push(order);
     }
   }
   return [...map.values()].map((stop) => ({
@@ -261,6 +279,14 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers, transportes = []
         detail: option?.stopTitle && option.stopTitle !== row.name ? row.name : option?.label || query,
         query,
         customers: [row.name],
+        orders: [{
+          id: row.order.id,
+          name: row.name,
+          remito: row.order.remitoNumber,
+          city: row.city,
+          status: row.order.status,
+          interior: row.interior,
+        }],
       });
     }
     const manual = manualText
@@ -273,6 +299,7 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers, transportes = []
         detail: 'Dirección extra',
         query: toMapsQuery(line),
         customers: [],
+        orders: [],
       }));
     return dedupeStops([...fromOrders, ...manual]);
   }, [pool, selected, addressChoice, manualText]);
@@ -290,10 +317,17 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers, transportes = []
   }, [stops, returnToDepot, finalStopKey]);
 
   const originQuery = toMapsQuery(depot);
+  const routeChunks = useMemo(() => {
+    const size = deliveryChunkSize(returnToDepot);
+    const chunks: StopItem[][] = [];
+    for (let i = 0; i < orderedStops.length; i += size) chunks.push(orderedStops.slice(i, i + size));
+    return chunks;
+  }, [orderedStops, returnToDepot]);
   const links = useMemo(
     () => buildDeliveryRouteLinks(originQuery, orderedStops.map((stop) => stop.query), returnToDepot),
     [originQuery, orderedStops, returnToDepot]
   );
+  const selectedOrderCount = orderedStops.reduce((sum, stop) => sum + stop.orders.length, 0);
 
   const visibleWithAddress = rows.filter((row) => row.options.length > 0);
   const selectedVisible = visibleWithAddress.filter((row) => selected[row.order.id]).length;
@@ -397,7 +431,7 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers, transportes = []
               <p className="text-sm text-slate-400">
                 {orderedStops.length === 0
                   ? 'Sin paradas elegidas'
-                  : `${orderedStops.length} ${orderedStops.length === 1 ? 'parada' : 'paradas'}`}
+                  : `${selectedOrderCount} ${selectedOrderCount === 1 ? 'pedido' : 'pedidos'} en ${orderedStops.length} ${orderedStops.length === 1 ? 'parada' : 'paradas'}`}
               </p>
             </div>
             <Route size={22} className="text-emerald-400" />
@@ -463,6 +497,67 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers, transportes = []
           </div>
         </section>
       </div>
+
+      {orderedStops.length > 0 && (
+        <section className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4">
+          <div>
+            <h3 className="text-white font-semibold">Qué sale en cada reparto</h3>
+            <p className="text-xs text-slate-500 mt-1">
+              Cada parada lista los pedidos que se dejan ahí. Google Maps define el orden de las calles al abrir el recorrido.
+            </p>
+          </div>
+          <div className="space-y-4">
+            {routeChunks.map((chunk, chunkIndex) => (
+              <div key={chunk.map((stop) => stop.key).join('|')} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 sm:p-4 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-bold text-white">
+                    {routeChunks.length > 1 ? `Reparto ${chunkIndex + 1}` : 'Reparto'}
+                    <span className="ml-2 font-medium text-slate-400">
+                      {chunk.reduce((sum, stop) => sum + stop.orders.length, 0)} pedidos · {chunk.length} {chunk.length === 1 ? 'parada' : 'paradas'}
+                    </span>
+                  </p>
+                  {links[chunkIndex] && (
+                    <a
+                      href={links[chunkIndex].url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-300 hover:text-emerald-200"
+                    >
+                      <MapPin size={14} />
+                      Abrir este tramo
+                    </a>
+                  )}
+                </div>
+                <ol className="space-y-2">
+                  {chunk.map((stop) => (
+                    <li key={stop.key} className="rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2.5">
+                      <p className="text-sm font-semibold text-white">{stop.title}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">{stop.query.replace(/, Argentina$/i, '')}</p>
+                      {stop.orders.length > 0 ? (
+                        <ul className="mt-2 space-y-1">
+                          {stop.orders.map((item) => (
+                            <li key={item.id} className="text-sm text-slate-200 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                              <span>{item.name}</span>
+                              {item.remito != null && <span className="text-xs text-slate-400">Remito {item.remito}</span>}
+                              {item.city && <span className="text-xs text-slate-500">{item.city}</span>}
+                              <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{item.status}</span>
+                              {item.interior && (
+                                <span className="text-[10px] font-bold uppercase tracking-wide text-amber-200">Interior</span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-xs text-slate-500 mt-1">{stop.detail}</p>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4">
         <div>
