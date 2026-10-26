@@ -25,6 +25,132 @@ export function isCabaCity(city: string): boolean {
   return normalizeCityKey(city) === 'caba';
 }
 
+/**
+ * CABA, GBA y partidos del AMBA: el reparto llega al domicilio.
+ * El resto del país se despacha en la dirección del transporte.
+ */
+const LOCAL_DELIVERY_KEYS = new Set([
+  'caba',
+  'gba',
+  'amba',
+  'conurbano',
+  'gran buenos aires',
+  'buenos aires',
+  'capital',
+  'capital federal',
+  'zona norte',
+  'zona sur',
+  'zona oeste',
+  'almirante brown',
+  'avellaneda',
+  'berazategui',
+  'berisso',
+  'campana',
+  'canuelas',
+  'caseros',
+  'castelar',
+  'ciudadel',
+  'ciudadela',
+  'dock sud',
+  'don torcuato',
+  'ensenada',
+  'escobar',
+  'esteban echeverria',
+  'ezeiza',
+  'florencio varela',
+  'florida',
+  'general rodriguez',
+  'general san martin',
+  'haedo',
+  'hurlingham',
+  'ituzaingo',
+  'jose c paz',
+  'jose c. paz',
+  'la matanza',
+  'la plata',
+  'lanus',
+  'lomas de zamora',
+  'lujan',
+  'malvinas argentinas',
+  'marcos paz',
+  'martinez',
+  'merlo',
+  'moreno',
+  'moron',
+  'munro',
+  'olivos',
+  'pilar',
+  'presidente peron',
+  'quilmes',
+  'ramos mejia',
+  'san fernando',
+  'san isidro',
+  'san justo',
+  'san martin',
+  'san miguel',
+  'san vicente',
+  'temperley',
+  'tigre',
+  'tres de febrero',
+  'vicente lopez',
+  'wilde',
+  'zarate',
+  'adrogue',
+  'banfield',
+  'beccar',
+  'bernal',
+  'boulogne',
+  'burzaco',
+  'canning',
+  'claypole',
+  'gerli',
+  'glew',
+  'gonzalez catan',
+  'grand bourg',
+  'guernica',
+  'isidro casanova',
+  'laferrere',
+  'lanus este',
+  'lanus oeste',
+  'llavallol',
+  'lomas del mirador',
+  'longchamps',
+  'los polvorines',
+  'luis guillon',
+  'monte grande',
+  'nordelta',
+  'paso del rey',
+  'pineyro',
+  'pontevedra',
+  'rafael castillo',
+  'ranelagh',
+  'remedios de escalada',
+  'san francisco solano',
+  'sarandi',
+  'tapiales',
+  'tristan suarez',
+  'valentin alsina',
+  'villa adelina',
+  'villa ballester',
+  'virreyes',
+]);
+
+export function isLocalDeliveryCity(place: string): boolean {
+  const key = normalizeCityKey(place);
+  if (!key) return false;
+  if (key === 'caba' || LOCAL_DELIVERY_KEYS.has(key)) return true;
+  return /\bcaba\b|\bcapital federal\b|\bcap\.?\s*fed\b|\bgba\b|\bamba\b|\bconurbano\b|\bgran buenos aires\b|\bbs\.?\s*as\.?\b|\bbsas\b/.test(key);
+}
+
+/** Ciudad o zona fuera de CABA/GBA. Sin dato, no se asume interior. */
+export function isInteriorDeliveryPlace(city?: string, accountZone?: string): boolean {
+  const cityTrim = String(city || '').trim();
+  if (cityTrim) return !isLocalDeliveryCity(cityTrim);
+  const zoneTrim = String(accountZone || '').trim();
+  if (zoneTrim) return !isLocalDeliveryCity(zoneTrim);
+  return false;
+}
+
 /** Valor canónico al guardar (CABA para Capital Federal y variantes). */
 export function canonicalizeCityInput(city: string): string {
   const trimmed = String(city || '').trim();

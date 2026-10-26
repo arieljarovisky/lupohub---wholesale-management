@@ -1499,7 +1499,7 @@ const App: React.FC = () => {
           )}
           {baseView === 'repartos' && (
             <Suspense fallback={<ViewFallback />}>
-              <Repartos orders={orders} customers={getVisibleCustomers} />
+              <Repartos orders={orders} customers={getVisibleCustomers} transportes={transportes} />
             </Suspense>
           )}
         </div>

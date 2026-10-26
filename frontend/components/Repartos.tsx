@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Copy, MapPin, Route, Search, Warehouse } from 'lucide-react';
-import { Customer, Order, OrderStatus } from '../types';
+import { Check, Copy, MapPin, Route, Search, Truck, Warehouse } from 'lucide-react';
+import { Customer, Order, OrderStatus, Transporte } from '../types';
 import { api } from '../services/api';
 import { getRemitente } from '../services/apiIntegration';
 import { useNotification } from '../context/NotificationContext';
 import { formatOrderDate } from '../utils/formatDate';
-import { canonicalizeCityInput, stripAccents } from '../utils/cityNormalize';
+import { canonicalizeCityInput, isInteriorDeliveryPlace, stripAccents } from '../utils/cityNormalize';
 import { buildDeliveryRouteLinks, MAPS_MAX_WAYPOINTS } from '../utils/googleMapsRoute';
 
 const PREFS_KEY = 'lupo_reparto_prefs';
@@ -24,13 +24,26 @@ type Prefs = {
   returnToDepot?: boolean;
 };
 
-type AddressOption = { id: string; label: string; query: string };
+type AddressOption = {
+  id: string;
+  label: string;
+  query: string;
+  /** Nombre de la parada (transporte o cliente). */
+  stopTitle: string;
+};
 
-type StopItem = { key: string; title: string; detail: string; query: string };
+type StopItem = {
+  key: string;
+  title: string;
+  detail: string;
+  query: string;
+  customers: string[];
+};
 
 interface RepartosProps {
   orders: Order[];
   customers: Customer[];
+  transportes?: Transporte[];
 }
 
 function loadPrefs(): Prefs {
@@ -64,12 +77,16 @@ function toMapsQuery(raw: string): string {
   return `${cleaned}, Argentina`;
 }
 
-function addressOptionsFor(customer: Customer | undefined): AddressOption[] {
-  if (!customer) return [];
+function customerAddresses(customer: Customer, stopTitle: string): AddressOption[] {
   const options: AddressOption[] = [];
   const principal = joinAddress(customer.address, customer.city);
   if (principal) {
-    options.push({ id: 'principal', label: 'Domicilio principal', query: toMapsQuery(principal) });
+    options.push({
+      id: 'principal',
+      label: 'Domicilio del cliente',
+      query: toMapsQuery(principal),
+      stopTitle,
+    });
   }
   for (const branch of customer.deliveryAddresses || []) {
     const query = joinAddress(branch.address, branch.city);
@@ -78,24 +95,72 @@ function addressOptionsFor(customer: Customer | undefined): AddressOption[] {
       id: branch.id,
       label: branch.label?.trim() || 'Sucursal',
       query: toMapsQuery(query),
+      stopTitle,
     });
   }
   return options;
 }
 
-function dedupeStops(stops: StopItem[]): StopItem[] {
-  const seen = new Set<string>();
-  const out: StopItem[] = [];
-  for (const stop of stops) {
-    const key = stripAccents(stop.query).toLowerCase();
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push(stop);
-  }
-  return out;
+function transportesForCustomer(customer: Customer | undefined, catalog: Transporte[]): Transporte[] {
+  const assigned = customer?.transportes ?? [];
+  return assigned.map((item) => {
+    const full = catalog.find((t) => t.id === item.id);
+    const name = (full?.name || item.name || '').trim() || 'Transporte';
+    const address = (full?.address || item.address || '').trim();
+    return { id: item.id, name, address: address || undefined };
+  });
 }
 
-const Repartos: React.FC<RepartosProps> = ({ orders, customers }) => {
+function addressOptionsFor(
+  customer: Customer | undefined,
+  catalog: Transporte[]
+): { options: AddressOption[]; interior: boolean; transporteHint: string } {
+  if (!customer) return { options: [], interior: false, transporteHint: '' };
+  const name = customer.businessName || customer.name || 'Cliente';
+  const interior = isInteriorDeliveryPlace(customer.city, customer.accountZone);
+  const domicilios = customerAddresses(customer, name);
+  if (!interior) return { options: domicilios, interior: false, transporteHint: '' };
+
+  const carriers = transportesForCustomer(customer, catalog);
+  const withAddress = carriers.filter((t) => t.address);
+  const transporteOptions: AddressOption[] = withAddress.map((t) => ({
+    id: `transporte:${t.id}`,
+    label: `Transporte ${t.name}`,
+    query: toMapsQuery(t.address || ''),
+    stopTitle: t.name,
+  }));
+  if (transporteOptions.length > 0) {
+    return { options: [...transporteOptions, ...domicilios], interior: true, transporteHint: '' };
+  }
+  const names = carriers.map((t) => t.name).filter(Boolean);
+  const place = customer.city?.trim() || 'el interior';
+  const transporteHint = names.length
+    ? `Cliente de ${place}. El transporte ${names.join(', ')} no tiene dirección: cargala en Configuración para incluirlo en el recorrido.`
+    : `Cliente de ${place} sin transporte asignado. El reparto deja el paquete en el transporte, no en el domicilio.`;
+  return { options: [], interior: true, transporteHint };
+}
+
+function dedupeStops(stops: StopItem[]): StopItem[] {
+  const map = new Map<string, StopItem>();
+  for (const stop of stops) {
+    const key = stripAccents(stop.query).toLowerCase();
+    if (!key) continue;
+    const prev = map.get(key);
+    if (!prev) {
+      map.set(key, { ...stop, key: `place:${key}`, customers: [...stop.customers] });
+      continue;
+    }
+    for (const name of stop.customers) {
+      if (name && !prev.customers.includes(name)) prev.customers.push(name);
+    }
+  }
+  return [...map.values()].map((stop) => ({
+    ...stop,
+    detail: stop.customers.length > 1 ? stop.customers.join(' · ') : stop.detail,
+  }));
+}
+
+const Repartos: React.FC<RepartosProps> = ({ orders, customers, transportes = [] }) => {
   const { showToast } = useNotification();
   const depotTouched = useRef(false);
   const [depot, setDepot] = useState('');
@@ -143,18 +208,18 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers }) => {
       .map((order) => {
         const customer = customersById.get(order.customerId);
         const name = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
-        const options = addressOptionsFor(customer);
-        return { order, name, options };
+        const resolved = addressOptionsFor(customer, transportes);
+        return { order, name, city: customer?.city?.trim() || '', ...resolved };
       })
       .sort((a, b) => String(b.order.date || '').localeCompare(String(a.order.date || '')));
-  }, [orders, customersById, statuses, includeShowroom]);
+  }, [orders, customersById, statuses, includeShowroom, transportes]);
 
   const rows = useMemo(() => {
     const q = stripAccents(search).toLowerCase().trim();
     if (!q) return eligible;
     return eligible.filter((row) => {
       const blob = stripAccents(
-        [row.name, row.order.notes || '', row.order.remitoNumber ? String(row.order.remitoNumber) : '', ...row.options.map((o) => `${o.label} ${o.query}`)].join(' ')
+        [row.name, row.city, row.transporteHint, row.order.notes || '', row.order.remitoNumber ? String(row.order.remitoNumber) : '', ...row.options.map((o) => `${o.label} ${o.query}`)].join(' ')
       ).toLowerCase();
       return blob.includes(q);
     });
@@ -169,14 +234,16 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers }) => {
     const fromOrders: StopItem[] = [];
     for (const row of eligible) {
       if (!selected[row.order.id]) continue;
-      const query = chosenQuery(row.order.id, row.options);
+      const picked = addressChoice[row.order.id];
+      const option = row.options.find((o) => o.id === picked) || row.options[0];
+      const query = option?.query || '';
       if (!query) continue;
-      const option = row.options.find((o) => o.query === query);
       fromOrders.push({
         key: `order:${row.order.id}`,
-        title: row.name,
-        detail: option?.label || query,
+        title: option?.stopTitle || row.name,
+        detail: option?.stopTitle && option.stopTitle !== row.name ? row.name : option?.label || query,
         query,
+        customers: [row.name],
       });
     }
     const manual = manualText
@@ -188,6 +255,7 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers }) => {
         title: line,
         detail: 'Dirección extra',
         query: toMapsQuery(line),
+        customers: [],
       }));
     return dedupeStops([...fromOrders, ...manual]);
   }, [eligible, selected, addressChoice, manualText]);
@@ -259,7 +327,7 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers }) => {
   return (
     <div className="space-y-5">
       <p className="text-sm text-slate-400 max-w-3xl">
-        Elegí los pedidos que salen del depósito. Google Maps abre el recorrido y ordena las paradas para acortar el viaje.
+        Elegí los pedidos que salen del depósito. En CABA y GBA la parada es el domicilio del cliente. En el interior, el recorrido va a la dirección del transporte. Google Maps ordena las paradas para acortar el viaje.
       </p>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.8fr)]">
@@ -333,7 +401,7 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers }) => {
               >
                 {stops.map((stop) => (
                   <option key={stop.key} value={stop.key}>
-                    {stop.title}
+                    {stop.customers.length > 1 ? `${stop.title} (${stop.customers.length})` : stop.title}
                   </option>
                 ))}
               </select>
@@ -444,6 +512,8 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers }) => {
               const hasAddress = row.options.length > 0;
               const checked = !!selected[row.order.id] && hasAddress;
               const query = chosenQuery(row.order.id, row.options);
+              const selectedOption = row.options.find((o) => o.id === (addressChoice[row.order.id] || row.options[0]?.id));
+              const usingTransporte = !!selectedOption?.id.startsWith('transporte:');
               return (
                 <li
                   key={row.order.id}
@@ -467,6 +537,11 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers }) => {
                         <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400 border border-slate-700 rounded-full px-2 py-0.5">
                           {row.order.status}
                         </span>
+                        {row.interior && (
+                          <span className="text-[10px] font-bold uppercase tracking-wide text-amber-200 border border-amber-500/40 rounded-full px-2 py-0.5 inline-flex items-center gap-1">
+                            <Truck size={10} /> Interior
+                          </span>
+                        )}
                         {row.order.remitoNumber != null && (
                           <span className="text-xs text-slate-400">Remito {row.order.remitoNumber}</span>
                         )}
@@ -474,6 +549,9 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers }) => {
                       </div>
                       {row.order.notes?.trim() && (
                         <p className="text-xs text-slate-500 mt-1 truncate">{row.order.notes.trim()}</p>
+                      )}
+                      {row.interior && row.city && usingTransporte && (
+                        <p className="text-xs text-slate-500 mt-1">Cliente en {row.city}. La parada del recorrido es el transporte.</p>
                       )}
                       {hasAddress ? (
                         row.options.length > 1 ? (
@@ -491,11 +569,18 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers }) => {
                         ) : (
                           <p className="text-sm text-slate-300 mt-1 flex items-start gap-1.5">
                             <MapPin size={14} className="mt-0.5 shrink-0 text-slate-500" />
-                            <span>{query.replace(/, Argentina$/i, '')}</span>
+                            <span>
+                              {row.options[0]?.stopTitle && row.options[0].stopTitle !== row.name
+                                ? `${row.options[0].label} — `
+                                : ''}
+                              {query.replace(/, Argentina$/i, '')}
+                            </span>
                           </p>
                         )
                       ) : (
-                        <p className="text-sm text-amber-300/90 mt-1">Este cliente no tiene dirección cargada.</p>
+                        <p className="text-sm text-amber-300/90 mt-1">
+                          {row.transporteHint || 'Este cliente no tiene dirección cargada.'}
+                        </p>
                       )}
                     </div>
                     {checked && <Check size={16} className="text-emerald-400 shrink-0 mt-1" />}
