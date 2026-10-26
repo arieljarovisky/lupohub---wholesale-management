@@ -4,7 +4,7 @@ import { Order, OrderStatus, Product, Customer, Role } from '../types';
 import type { PriceList } from '../types';
 import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
-import { labelTalle, codigoTalleParaSku, ORDER_FORM_SIZE_CODES, sortOrderFormSizeCodes } from '../utils/tallesTango';
+import { labelTalle, codigoTalleParaSku, ORDER_FORM_SIZE_CODES, isNumericOrderSizeCode, sortOrderFormSizeCodes } from '../utils/tallesTango';
 import { parseOrderMatrixExcel } from '../utils/orderImportMatrix';
 import { articleCodesMatch, articleCodeForOrderRow, resolveDisplayArticleCode, skuLookupCandidates, variantColorKey } from '../utils/articleCodeUtils';
 
@@ -498,26 +498,33 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
 
   const sizeColumns = useMemo(() => {
     const map = new Map<string, { code: string; name: string }>();
+    // Los numéricos (4, 6, 8…) solo entran si algún artículo del pedido tiene esa variante.
+    // No usar quantitiesBySize: se precarga en 0 con todo el catálogo.
+    const usedByArticles = new Set<string>();
+    for (const r of rows) {
+      for (const [code, variantId] of Object.entries(r.variantBySize || {})) {
+        const c = String(code || '').trim();
+        if (c && variantId) usedByArticles.add(c);
+      }
+    }
+    const includeCode = (code: string) => !isNumericOrderSizeCode(code) || usedByArticles.has(code);
+    const labelFor = (code: string, fromApi?: { name?: string }) =>
+      fromApi?.name || labelTalle(code) || code;
+
     for (const code of ORDER_FORM_SIZE_CODES) {
+      if (!includeCode(code)) continue;
       const fromApi = sizes.find((s) => String(s.code).trim() === code);
-      map.set(code, { code, name: fromApi?.name || labelTalle(code) || code });
+      map.set(code, { code, name: labelFor(code, fromApi) });
     }
     for (const s of sizes) {
       const code = String(s.code || '').trim();
-      if (!code || !/^\d{1,3}$/.test(code)) continue;
-      if (!map.has(code)) map.set(code, { code, name: s.name || labelTalle(code) || code });
+      if (!code || !/^\d{1,3}$/.test(code) || !includeCode(code)) continue;
+      if (!map.has(code)) map.set(code, { code, name: labelFor(code, s) });
     }
-    for (const r of rows) {
-      for (const code of Object.keys(r.variantBySize || {})) {
-        const c = String(code || '').trim();
-        if (!c || map.has(c)) continue;
-        map.set(c, { code: c, name: labelTalle(c) || c });
-      }
-      for (const code of Object.keys(r.quantitiesBySize || {})) {
-        const c = String(code || '').trim();
-        if (!c || map.has(c)) continue;
-        map.set(c, { code: c, name: labelTalle(c) || c });
-      }
+    for (const c of usedByArticles) {
+      if (!c || map.has(c)) continue;
+      const fromApi = sizes.find((s) => String(s.code).trim() === c);
+      map.set(c, { code: c, name: labelFor(c, fromApi) });
     }
     return Array.from(map.values()).sort((a, b) => sortOrderFormSizeCodes(a.code, b.code));
   }, [sizes, rows]);
