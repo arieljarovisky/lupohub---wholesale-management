@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Copy, MapPin, Route, Search, Truck, Warehouse } from 'lucide-react';
+import { Check, Copy, MapPin, Route, Search, Truck, Warehouse, X } from 'lucide-react';
 import { Customer, Order, OrderStatus, Transporte } from '../types';
 import { api } from '../services/api';
 import { getRemitente } from '../services/apiIntegration';
@@ -200,30 +200,47 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers, transportes = []
     return map;
   }, [customers]);
 
-  const eligible = useMemo(() => {
+  const pool = useMemo(() => {
     return orders
       .filter((order) => !order.archived)
-      .filter((order) => statuses.includes(order.status))
+      .filter((order) => order.status !== OrderStatus.CANCELLED && order.status !== OrderStatus.DRAFT)
       .filter((order) => includeShowroom || !order.showroomSale)
       .map((order) => {
         const customer = customersById.get(order.customerId);
         const name = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
         const resolved = addressOptionsFor(customer, transportes);
-        return { order, name, city: customer?.city?.trim() || '', ...resolved };
+        const searchText = stripAccents(
+          [
+            name,
+            customer?.name,
+            customer?.businessName,
+            customer?.city,
+            customer?.address,
+            customer?.legacyCode,
+            order.sellerName,
+            order.notes,
+            order.status,
+            order.remitoNumber != null ? String(order.remitoNumber) : '',
+            order.id,
+            resolved.interior ? 'interior' : 'caba gba',
+            resolved.transporteHint,
+            ...resolved.options.flatMap((option) => [option.label, option.stopTitle, option.query]),
+            ...(customer?.transportes ?? []).map((t) => t.name),
+          ]
+            .filter(Boolean)
+            .join(' ')
+        ).toLowerCase();
+        return { order, name, city: customer?.city?.trim() || '', searchText, ...resolved };
       })
       .sort((a, b) => String(b.order.date || '').localeCompare(String(a.order.date || '')));
-  }, [orders, customersById, statuses, includeShowroom, transportes]);
+  }, [orders, customersById, includeShowroom, transportes]);
 
   const rows = useMemo(() => {
-    const q = stripAccents(search).toLowerCase().trim();
-    if (!q) return eligible;
-    return eligible.filter((row) => {
-      const blob = stripAccents(
-        [row.name, row.city, row.transporteHint, row.order.notes || '', row.order.remitoNumber ? String(row.order.remitoNumber) : '', ...row.options.map((o) => `${o.label} ${o.query}`)].join(' ')
-      ).toLowerCase();
-      return blob.includes(q);
-    });
-  }, [eligible, search]);
+    const words = stripAccents(search).toLowerCase().trim().split(/\s+/).filter(Boolean);
+    const byStatus = words.length > 0 ? pool : pool.filter((row) => statuses.includes(row.order.status));
+    if (words.length === 0) return byStatus;
+    return byStatus.filter((row) => words.every((word) => row.searchText.includes(word)));
+  }, [pool, statuses, search]);
 
   const chosenQuery = (orderId: string, options: AddressOption[]) => {
     const picked = addressChoice[orderId];
@@ -232,7 +249,7 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers, transportes = []
 
   const stops = useMemo(() => {
     const fromOrders: StopItem[] = [];
-    for (const row of eligible) {
+    for (const row of pool) {
       if (!selected[row.order.id]) continue;
       const picked = addressChoice[row.order.id];
       const option = row.options.find((o) => o.id === picked) || row.options[0];
@@ -258,7 +275,7 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers, transportes = []
         customers: [],
       }));
     return dedupeStops([...fromOrders, ...manual]);
-  }, [eligible, selected, addressChoice, manualText]);
+  }, [pool, selected, addressChoice, manualText]);
 
   useEffect(() => {
     if (!stops.some((stop) => stop.key === finalStopKey)) {
@@ -448,23 +465,34 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers, transportes = []
       </div>
 
       <section className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <h3 className="text-white font-semibold">Pedidos para el reparto</h3>
-            <p className="text-xs text-slate-500 mt-1">
-              {selectedVisible} de {visibleWithAddress.length} visibles con dirección
-            </p>
-          </div>
-          <div className="relative w-full lg:max-w-xs">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Cliente, remito o dirección"
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-9 pr-3 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:ring-2 focus:ring-emerald-500"
-            />
-          </div>
+        <div>
+          <h3 className="text-white font-semibold">Pedidos para el reparto</h3>
+          <p className="text-xs text-slate-500 mt-1">
+            {search.trim()
+              ? `${rows.length} coincidencia${rows.length === 1 ? '' : 's'}`
+              : `${selectedVisible} de ${visibleWithAddress.length} visibles con dirección`}
+          </p>
         </div>
+        <label className="relative block">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Filtrar por cliente, ciudad, transporte o remito"
+            className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-9 pr-10 py-3 text-sm text-white placeholder-slate-500 outline-none focus:ring-2 focus:ring-emerald-500"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-white"
+              aria-label="Borrar filtro"
+            >
+              <X size={16} />
+            </button>
+          )}
+        </label>
 
         <div className="flex flex-wrap gap-2">
           {STATUS_FILTERS.map((item) => {
@@ -494,6 +522,9 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers, transportes = []
             Incluir showroom
           </label>
         </div>
+        {search.trim() && (
+          <p className="text-xs text-slate-500">La búsqueda recorre todos los estados, menos cancelados y borradores.</p>
+        )}
 
         <div className="flex gap-3 text-sm">
           <button type="button" onClick={() => selectVisible(true)} className="text-emerald-300 hover:text-emerald-200 font-medium">
@@ -505,7 +536,9 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers, transportes = []
         </div>
 
         {rows.length === 0 ? (
-          <p className="text-sm text-slate-500 py-8 text-center">No hay pedidos en estos estados.</p>
+          <p className="text-sm text-slate-500 py-8 text-center">
+            {search.trim() ? `Ningún pedido coincide con “${search.trim()}”.` : 'No hay pedidos en estos estados.'}
+          </p>
         ) : (
           <ul className="space-y-2">
             {rows.map((row) => {
