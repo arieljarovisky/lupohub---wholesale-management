@@ -1164,10 +1164,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       .ri-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 9px; }
       .ri-desc { text-align: left; word-break: break-word; overflow-wrap: anywhere; font-weight: 600; }
       .r-items-ley { flex: 0 0 auto; text-align: center; font-size: 10px; font-weight: 700; padding: 4px 8px; border-top: 1px solid #000; background: #fff; }
-      /* Variante "expreso": la única fila ocupa el alto libre de la hoja. */
-      .r-items-expreso tbody td { padding: 10px 12px; vertical-align: top; height: auto; }
-      .r-items-expreso tbody tr { height: 100%; }
-      .ri-exp-qty { font-size: 26px; font-weight: 800; vertical-align: middle; }
+      /* Variante "expreso": la fila llena la hoja, pero el texto arranca arriba (como antes). */
+      table.r-items.r-items-expreso tbody tr { height: 100%; }
+      table.r-items.r-items-expreso tbody td { padding: 10px 12px; vertical-align: top; height: auto; }
+      table.r-items.r-items-expreso .ri-exp-qty { font-size: 26px; font-weight: 800; vertical-align: top; }
       .ri-exp-desc { font-size: 14px; font-weight: 700; line-height: 1.7; letter-spacing: 0.02em; }
       .ri-exp-line { margin-bottom: 4px; }
       .ri-exp-line:last-child { margin-bottom: 0; }
