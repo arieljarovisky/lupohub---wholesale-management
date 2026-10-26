@@ -6,12 +6,19 @@ const GRAPH_VERSION = 'v21.0';
 const INSIGHTS_METRIC_FIELDS =
   'impressions,clicks,spend,cpc,ctr,reach,frequency,actions,action_values,purchase_roas,cost_per_action_type';
 
-const PURCHASE_ACTION_TYPES = new Set([
-  'purchase',
-  'omni_purchase',
+// Meta repite la misma compra en varios action_type (purchase, omni_purchase,
+// pixel, onsite). Ads Manager muestra una sola columna "Compras".
+// Los agregados ya incluyen todos los canales; los de canal solo se usan
+// si no vino ningún agregado, y ahí sí se suman porque no se solapan.
+const PURCHASE_AGGREGATE_TYPES = ['omni_purchase', 'purchase'];
+const PURCHASE_CHANNEL_TYPES = [
   'offsite_conversion.fb_pixel_purchase',
-  'onsite_conversion.purchase'
-]);
+  'onsite_conversion.purchase',
+  'onsite_web_purchase',
+  'onsite_web_app_purchase',
+  'web_in_store_purchase',
+  'offline_conversion.purchase'
+];
 
 export type MetaMetricsRow = {
   id: string;
@@ -37,50 +44,47 @@ function toNum(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function pickActionValue(actions: unknown, types: Set<string>): number {
-  if (!Array.isArray(actions)) return 0;
-  let total = 0;
-  for (const a of actions) {
+function actionValueByType(list: unknown): Map<string, number> {
+  const byType = new Map<string, number>();
+  if (!Array.isArray(list)) return byType;
+  for (const a of list) {
     const t = String(a?.action_type || '');
-    if (types.has(t)) total += toNum(a?.value);
+    if (!t) continue;
+    byType.set(t, (byType.get(t) || 0) + toNum(a?.value));
   }
+  return byType;
+}
+
+/** Cantidad o importe de Compras, sin contar dos veces el mismo evento. */
+function pickPurchaseMetric(list: unknown): number {
+  const byType = actionValueByType(list);
+  for (const type of PURCHASE_AGGREGATE_TYPES) {
+    const value = byType.get(type) || 0;
+    if (value > 0) return value;
+  }
+  let total = 0;
+  for (const type of PURCHASE_CHANNEL_TYPES) total += byType.get(type) || 0;
   return total;
 }
 
-function pickActionValues(actionValues: unknown, types: Set<string>): number {
-  if (!Array.isArray(actionValues)) return 0;
-  let total = 0;
-  for (const a of actionValues) {
-    const t = String(a?.action_type || '');
-    if (types.has(t)) total += toNum(a?.value);
+/** ROAS o CPA: un solo tipo, el mismo criterio que Compras. No se suman. */
+function pickPurchaseRate(list: unknown): number {
+  const byType = actionValueByType(list);
+  for (const type of [...PURCHASE_AGGREGATE_TYPES, ...PURCHASE_CHANNEL_TYPES]) {
+    const value = byType.get(type) || 0;
+    if (value > 0) return value;
   }
-  return total;
-}
-
-function pickPurchaseRoas(purchaseRoas: unknown): number {
-  if (!Array.isArray(purchaseRoas)) return 0;
-  const row = purchaseRoas.find((a: any) =>
-    PURCHASE_ACTION_TYPES.has(String(a?.action_type || ''))
-  );
-  return toNum(row?.value);
-}
-
-function pickCpa(costPerAction: unknown): number {
-  if (!Array.isArray(costPerAction)) return 0;
-  const row = costPerAction.find((a: any) =>
-    PURCHASE_ACTION_TYPES.has(String(a?.action_type || ''))
-  );
-  return toNum(row?.value);
+  return 0;
 }
 
 function mapInsightsRow(ins: any, fallbackName = '—'): Omit<MetaMetricsRow, 'status' | 'objective' | 'dailyBudget'> {
   const spend = toNum(ins.spend);
   const clicks = toNum(ins.clicks);
   const impressions = toNum(ins.impressions);
-  const conversions = pickActionValue(ins.actions, PURCHASE_ACTION_TYPES);
-  const purchaseValue = pickActionValues(ins.action_values, PURCHASE_ACTION_TYPES);
-  const roasApi = pickPurchaseRoas(ins.purchase_roas);
-  const cpaApi = pickCpa(ins.cost_per_action_type);
+  const conversions = pickPurchaseMetric(ins.actions);
+  const purchaseValue = pickPurchaseMetric(ins.action_values);
+  const roasApi = pickPurchaseRate(ins.purchase_roas);
+  const cpaApi = pickPurchaseRate(ins.cost_per_action_type);
   const roas = roasApi > 0 ? roasApi : spend > 0 && purchaseValue > 0 ? purchaseValue / spend : 0;
   const cpa = cpaApi > 0 ? cpaApi : conversions > 0 ? spend / conversions : 0;
 
