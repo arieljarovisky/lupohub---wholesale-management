@@ -758,7 +758,7 @@ function mlChartRowMatchesSizeLabel(row: any, sizeLabel: string): boolean {
   return false;
 }
 
-async function mlFetchSizeGridRowForSize(
+export async function mlFetchSizeGridRowForSize(
   accessToken: string,
   chartId: string | number,
   sizeLabel: string

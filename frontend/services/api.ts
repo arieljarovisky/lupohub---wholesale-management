@@ -3950,6 +3950,16 @@ export const api = {
     }, { totalProducts: 0, totalStock: 0, lowStockCount: 0, noStockCount: 0 }, 'getMercadoLibreStockTotals');
   },
 
+  previewMercadoLibreVariants: async (productId: string, anchorItemId?: string) => {
+    const q = new URLSearchParams({ productId });
+    if (anchorItemId?.trim()) q.set('anchorItemId', anchorItemId.trim());
+    return request<any>(`/integrations/mercadolibre/variant-create-preview?${q.toString()}`, 'GET', undefined, undefined, 120000);
+  },
+
+  createMercadoLibreVariants: async (body: { productId: string; anchorItemId?: string; variantIds: string[] }) => {
+    return request<any>('/integrations/mercadolibre/variants', 'POST', body, undefined, 180000);
+  },
+
   getMercadoLibreItemVariations: async (itemId: string): Promise<{ variations: { variationId: number | string; itemId?: string; sku: string; color: string; size: string; stock: number }[]; singleProduct?: boolean; itemId: string; resolvedItemId?: string }> => {
     return request<{ variations: { variationId: number | string; itemId?: string; sku: string; color: string; size: string; stock: number }[]; singleProduct?: boolean; itemId: string; resolvedItemId?: string }>(
       `/integrations/mercadolibre/items/${encodeURIComponent(itemId)}/variations?_=${Date.now()}`,

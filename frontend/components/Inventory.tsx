@@ -22,6 +22,7 @@ import * as XLSX from 'xlsx';
 import MercadoLibreStock from './MercadoLibreStock';
 import TiendaNubeStock from './TiendaNubeStock';
 import PublicationStockBundles from './PublicationStockBundles';
+import CreateMlVariantsModal from './CreateMlVariantsModal';
 import {
   normalizeMercadoLibreItemId,
   extractMercadoLibreVariationIdFromUrl,
@@ -231,6 +232,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [savingEditProduct, setSavingEditProduct] = useState(false);
 
   const [editingVariantId, setEditingVariantId] = useState<string | null>(null);
+  const [mlVariantsTarget, setMlVariantsTarget] = useState<{ productId: string; productName: string; anchorItemId: string } | null>(null);
   const [editVariantForm, setEditVariantForm] = useState<{ sku: string; externalSku: string }>({ sku: '', externalSku: '' });
   const [editVariantLinkIds, setEditVariantLinkIds] = useState<{ mlItemId: string | null; mlVariantId: string | null; tnProductId: string | null; tnVariantId: string | null }>({ mlItemId: null, mlVariantId: null, tnProductId: null, tnVariantId: null });
   const [loadingEditVariant, setLoadingEditVariant] = useState(false);
@@ -3059,10 +3061,33 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                           <Link size={16} />
                           Vincular y sincronizar con ML / TN
                         </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const productId = articleProductId || (groupVariants[0] as any)?.product_id;
+                            if (!productId) return;
+                            const anchor =
+                              groupVariants.map((v) => (v as any).externalIds?.mercadoLibreItemId).find(Boolean) ||
+                              groupVariants.map((v) => (v as any).externalIds?.mercadoLibre).find(Boolean) ||
+                              '';
+                            setMlVariantsTarget({
+                              productId: String(productId),
+                              productName: displayName,
+                              anchorItemId: anchor ? String(anchor) : ''
+                            });
+                          }}
+                          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold transition-colors min-h-[44px] touch-manipulation"
+                          title="Crear en Mercado Libre los talles y colores de este artículo que todavía no están publicados"
+                        >
+                          <Zap size={16} />
+                          Crear variantes en ML
+                        </button>
                       </div>
                       <p className="text-xs text-slate-500 text-right mt-2">
                         <strong className="text-slate-400">Enviar stock ML + TN</strong> actualiza todas las variantes del artículo (incluido 0).
                         {' '}Vincular es un flujo aparte para emparejar publicaciones ML/TN por talle/color.
+                        {' '}<strong className="text-slate-400">Crear variantes en ML</strong> publica talles y colores que todavía no existen en la publicación.
                       </p>
                       </>
                     )}
@@ -4405,6 +4430,15 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         onClose={() => setShowPublicationBundles(false)}
         products={products}
         role={role}
+        showToast={showToast}
+      />
+      <CreateMlVariantsModal
+        open={!!mlVariantsTarget}
+        productId={mlVariantsTarget?.productId || ''}
+        productName={mlVariantsTarget?.productName || ''}
+        initialAnchorItemId={mlVariantsTarget?.anchorItemId || ''}
+        onClose={() => setMlVariantsTarget(null)}
+        onCreated={() => onImportComplete?.()}
         showToast={showToast}
       />
     </div>

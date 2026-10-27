@@ -68,6 +68,7 @@ import {
   getMercadoLibreDisplayAdsAdvertisers,
   getMercadoLibreDisplayAdsCampaigns
 } from '../controllers/integrations.controller';
+import { createMercadoLibreVariants, previewMercadoLibreVariants } from '../controllers/mlVariantCreate.controller';
 import { exportMercadolibrePublicationsXlsx } from '../controllers/mercadolibrePublicationsExport.controller';
 import { exportMercadoLibreToTiendaNube } from '../controllers/mlToTiendaNubeExport.controller';
 import { getVariantChannelPrices, bulkUpdateChannelPrices, clearTiendaNubePromotionalPrices } from '../controllers/channelPrices.controller';
@@ -157,6 +158,8 @@ router.get('/mercadolibre/display-ads/campaigns', getMercadoLibreDisplayAdsCampa
 router.get('/mercadolibre/publications-export', authMiddleware, exportMercadolibrePublicationsXlsx);
 router.get('/mercadolibre/sales-report-export', authMiddleware, exportMercadoLibreSalesReportXlsx);
 router.get('/mercadolibre/items/:itemId/variations', getMercadoLibreItemVariations);
+router.get('/mercadolibre/variant-create-preview', authMiddleware, previewMercadoLibreVariants);
+router.post('/mercadolibre/variants', authMiddleware, adminOrDepositoMiddleware, createMercadoLibreVariants);
 router.post('/variant-external-stocks', getVariantExternalStocks);
 router.post('/variant-channel-prices', authMiddleware, getVariantChannelPrices);
 router.post('/variant-channel-prices/bulk', authMiddleware, bulkUpdateChannelPrices);
