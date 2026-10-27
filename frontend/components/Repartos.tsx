@@ -378,7 +378,7 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers, transportes = []
   return (
     <div className="space-y-5">
       <p className="text-sm text-slate-400 max-w-3xl">
-        Elegí los pedidos que salen del depósito. En CABA y GBA la parada es el domicilio del cliente. En el interior, el recorrido va a la dirección del transporte. Google Maps ordena las paradas para acortar el viaje.
+        Elegí los pedidos que salen del depósito. En CABA y GBA la parada es el domicilio del cliente. En el interior, el recorrido va a la dirección del transporte. Google Maps abre las paradas en el orden de la lista.
       </p>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.8fr)]">
@@ -456,7 +456,7 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers, transportes = []
                   </option>
                 ))}
               </select>
-              <p className="text-xs text-slate-500 mt-1">Google Maps ordena el resto. Esta queda como destino final.</p>
+              <p className="text-xs text-slate-500 mt-1">Esta queda como destino final. Las demás siguen el orden de la lista.</p>
             </label>
           )}
           {links.length > 1 && (
@@ -503,7 +503,7 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers, transportes = []
           <div>
             <h3 className="text-white font-semibold">Qué sale en cada reparto</h3>
             <p className="text-xs text-slate-500 mt-1">
-              Cada parada lista los pedidos que se dejan ahí. Google Maps define el orden de las calles al abrir el recorrido.
+              Cada parada lista los pedidos que se dejan ahí. El enlace abre esas paradas en el orden de la lista.
             </p>
           </div>
           <div className="space-y-4">

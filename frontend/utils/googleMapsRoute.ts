@@ -7,9 +7,10 @@ export type MapsRouteLink = {
 };
 
 /**
- * Arma el enlace de Google Maps.
- * Con regreso al depósito, todas las paradas son intermedias y Maps las reordena.
- * Sin regreso, la última parada queda fija como destino y Maps reordena el resto.
+ * Arma el enlace de Google Maps en el orden recibido.
+ * Maps ya no acepta optimize:true en la URL: lo busca como si fuera una parada.
+ * Con regreso al depósito, el destino es el origen y todas las paradas son intermedias.
+ * Sin regreso, la última parada queda fija como destino.
  */
 export function buildGoogleMapsDirectionsUrl(
   origin: string,
@@ -31,8 +32,7 @@ export function buildGoogleMapsDirectionsUrl(
     'dir_action=navigate',
   ];
   if (waypoints.length > 0) {
-    const encoded = ['optimize:true', ...waypoints].map((part) => encodeURIComponent(part)).join('|');
-    params.push(`waypoints=${encoded}`);
+    params.push(`waypoints=${encodeURIComponent(waypoints.join('|'))}`);
   }
   return `https://www.google.com/maps/dir/?${params.join('&')}`;
 }
