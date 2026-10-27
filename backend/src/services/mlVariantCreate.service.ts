@@ -56,6 +56,7 @@ type RemoteCombo = {
   sizeName: string;
   rowId: string;
   pictureIds: string[];
+  rawCombinations: Array<Record<string, unknown>>;
 };
 
 type Axes = { color: boolean; size: boolean; gridRow: boolean };
@@ -167,25 +168,32 @@ function upAttr(up: any, id: string): { valueId: string | null; name: string } {
   return { valueId, name };
 }
 
-function variationColorSize(v: any): { color: string; size: string; colorValueId: string | null; sizeValueId: string | null } {
+function variationColorSize(v: any): { color: string; size: string; colorValueId: string | null; sizeValueId: string | null; rowId: string } {
   let color = '';
   let size = '';
   let colorValueId: string | null = null;
   let sizeValueId: string | null = null;
-  for (const a of Array.isArray(v?.attribute_combinations) ? v.attribute_combinations : []) {
+  let rowId = '';
+  const absorb = (a: any) => {
     const id = attrId(a?.id);
-    const name = String(a?.value_name ?? a?.name ?? '').trim();
+    const label = String(a?.name || '');
+    const name = String(a?.value_name ?? '').trim();
     const vid = a?.value_id != null && String(a.value_id).trim() !== '' ? String(a.value_id).trim() : null;
-    if (isColorAttr(id)) {
+    const colorLike = isColorAttr(id) || /color|colour|cor/i.test(label);
+    const sizeLike = isSizeAttr(id) || /talle|talla|\bsize\b/i.test(label);
+    if (colorLike) {
       color = color || name;
       colorValueId = colorValueId || vid;
     }
-    if (isSizeAttr(id)) {
+    if (sizeLike) {
       size = size || name;
       sizeValueId = sizeValueId || vid;
     }
-  }
-  return { color, size, colorValueId, sizeValueId };
+    if (isGridRowAttr(id)) rowId = rowId || vid || name;
+  };
+  for (const a of Array.isArray(v?.attribute_combinations) ? v.attribute_combinations : []) absorb(a);
+  for (const a of Array.isArray(v?.attributes) ? v.attributes : []) absorb(a);
+  return { color, size, colorValueId, sizeValueId, rowId };
 }
 
 async function mapPool<T, R>(items: T[], size: number, fn: (item: T) => Promise<R>): Promise<R[]> {
@@ -378,7 +386,8 @@ async function loadUserProductContext(anchor: any, accessToken: string): Promise
       sizeValueId: size.valueId,
       sizeName: size.name,
       rowId: row.valueId || row.name,
-      pictureIds: pics
+      pictureIds: pics,
+      rawCombinations: []
     });
   }
 
@@ -398,17 +407,22 @@ function loadClassicContext(anchor: any): { childAttributeIds: string[]; combos:
     );
   }
   const templateIds: string[] = [];
-  for (const a of Array.isArray(variations[0]?.attribute_combinations) ? variations[0].attribute_combinations : []) {
-    const id = attrId(a?.id);
-    if (id && !templateIds.includes(id)) templateIds.push(id);
-  }
-  if (!templateIds.some((id) => isColorAttr(id) || isSizeAttr(id))) {
-    throw new MlVariantCreateError('La publicación modelo no varía por color ni por talle');
+  for (const variation of variations) {
+    for (const a of Array.isArray(variation?.attribute_combinations) ? variation.attribute_combinations : []) {
+      const id = attrId(a?.id);
+      if (id && !templateIds.includes(id)) templateIds.push(id);
+    }
   }
   const combos: RemoteCombo[] = variations.map((v: any) => {
     const cs = variationColorSize(v);
-    const row = (Array.isArray(v?.attributes) ? v.attributes : []).find((a: any) => isGridRowAttr(a?.id));
-    const rowId = row?.value_id != null ? String(row.value_id).trim() : String(row?.value_name || '').trim();
+    const rawCombinations = (Array.isArray(v?.attribute_combinations) ? v.attribute_combinations : []).map((a: any) => {
+      const row: Record<string, unknown> = { id: String(a?.id || '') };
+      if (a?.name) row.name = a.name;
+      if (a?.value_id != null && String(a.value_id).trim() !== '') row.value_id = String(a.value_id);
+      const valueName = String(a?.value_name ?? '').trim();
+      if (valueName) row.value_name = valueName;
+      return row;
+    });
     const pics = (Array.isArray(v?.picture_ids) ? v.picture_ids : []).map((id: unknown) => String(id || '').trim()).filter(Boolean);
     return {
       userProductId: String(v?.user_product_id || ''),
@@ -419,10 +433,17 @@ function loadClassicContext(anchor: any): { childAttributeIds: string[]; combos:
       colorValueId: cs.colorValueId,
       sizeValueId: cs.sizeValueId,
       sizeName: cs.size,
-      rowId,
-      pictureIds: pics
+      rowId: cs.rowId,
+      pictureIds: pics,
+      rawCombinations
     };
   });
+  if (combos.some((c) => c.size) && !templateIds.some(isSizeAttr)) templateIds.push('SIZE');
+  if (combos.some((c) => c.color) && !templateIds.some(isColorAttr)) templateIds.push('COLOR');
+  if (combos.some((c) => c.rowId) && !templateIds.some(isGridRowAttr)) templateIds.push('SIZE_GRID_ROW_ID');
+  if (!combos.some((c) => c.color || c.size) && !templateIds.some((id) => isColorAttr(id) || isSizeAttr(id))) {
+    throw new MlVariantCreateError('La publicación modelo no varía por color ni por talle');
+  }
   return { childAttributeIds: templateIds, combos };
 }
 
@@ -454,6 +475,42 @@ async function resolveAnchorId(productId: string, explicit?: string): Promise<st
   return id;
 }
 
+function chartIdFromRows(item: any): string {
+  for (const v of Array.isArray(item?.variations) ? item.variations : []) {
+    const rowId = variationColorSize(v).rowId;
+    const sep = rowId.indexOf(':');
+    if (sep > 0 && /^\d+$/.test(rowId.slice(0, sep))) return rowId.slice(0, sep);
+  }
+  return '';
+}
+
+async function enrichAnchorVariations(item: any, accessToken: string): Promise<any> {
+  const variations = Array.isArray(item?.variations) ? item.variations : [];
+  const itemId = String(item?.id || '').trim();
+  if (!itemId || !variations.length) return item;
+  const enriched = await mapPool(variations, 6, async (v: any) => {
+    const parsed = variationColorSize(v);
+    const ac = v?.attribute_combinations;
+    if (Array.isArray(ac) && ac.length > 0 && (parsed.color || parsed.size)) return v;
+    if (v?.id == null) return v;
+    const r = await axios.get(
+      `https://api.mercadolibre.com/items/${encodeURIComponent(itemId)}/variations/${encodeURIComponent(String(v.id))}`,
+      { headers: { Authorization: `Bearer ${accessToken}` }, validateStatus: () => true }
+    );
+    if (r.status !== 200 || !r.data) return v;
+    return {
+      ...v,
+      ...r.data,
+      id: v.id,
+      available_quantity: v.available_quantity ?? r.data.available_quantity,
+      attribute_combinations: r.data.attribute_combinations ?? v.attribute_combinations,
+      attributes: r.data.attributes ?? v.attributes,
+      picture_ids: r.data.picture_ids ?? v.picture_ids
+    };
+  });
+  return { ...item, variations: enriched };
+}
+
 async function buildContext(productId: string, anchorRaw: string | undefined): Promise<{
   ctx: ListingContext;
   locals: LocalVariant[];
@@ -468,8 +525,16 @@ async function buildContext(productId: string, anchorRaw: string | undefined): P
 
   const userProductId = String(anchor.user_product_id || '').trim();
   const classic = !userProductId;
+  const sourceItem = classic ? await enrichAnchorVariations(anchor, token.access_token) : anchor;
   const loaded = classic
-    ? { ...loadClassicContext(anchor), familyId: '', chartId: itemAttr(anchor, 'SIZE_GRID_ID').valueId || '' }
+    ? {
+        ...loadClassicContext(sourceItem),
+        familyId: '',
+        chartId:
+          itemAttr(sourceItem, 'SIZE_GRID_ID').valueId ||
+          chartIdFromRows(sourceItem) ||
+          ''
+      }
     : await loadUserProductContext(anchor, token.access_token);
 
   const price =
@@ -488,6 +553,9 @@ async function buildContext(productId: string, anchorRaw: string | undefined): P
   if (shippingSrc.free_shipping != null) shipping.free_shipping = shippingSrc.free_shipping;
 
   const colorValueByName = await loadColorValueIds(String(anchor.category_id || ''), token.access_token);
+  fillMissingColorNames(loaded.combos, colorValueByName);
+  const axes = axesFrom(loaded.childAttributeIds);
+  if (!axes.size && (loaded.chartId || loaded.combos.some((c) => c.size || c.rowId))) axes.size = true;
 
   const ctx: ListingContext = {
     anchorItemId: String(anchor.id),
@@ -496,7 +564,7 @@ async function buildContext(productId: string, anchorRaw: string | undefined): P
     familyId: loaded.familyId,
     userProductId,
     childAttributeIds: loaded.childAttributeIds,
-    axes: axesFrom(loaded.childAttributeIds),
+    axes,
     combos: loaded.combos,
     pictureIds: pictureIdsFromItem(anchor),
     price,
@@ -513,15 +581,20 @@ async function buildContext(productId: string, anchorRaw: string | undefined): P
   return { ctx, locals: variants, productName };
 }
 
-function findCombo(ctx: ListingContext, local: { color: string; size: string }): RemoteCombo | undefined {
-  return ctx.combos.find((c) => sameCombo(local, c, ctx.axes));
+function fillMissingColorNames(combos: RemoteCombo[], byName: Map<string, string>) {
+  const byId = new Map<string, string>();
+  for (const [name, id] of byName) {
+    if (id && !byId.has(id)) byId.set(id, name);
+  }
+  for (const combo of combos) {
+    if (!combo.color && combo.colorValueId && byId.has(combo.colorValueId)) {
+      combo.color = byId.get(combo.colorValueId) || combo.color;
+    }
+  }
 }
 
-function sizeNameFor(ctx: ListingContext, size: string): { name: string; valueId: string | null } {
-  const sibling = ctx.combos.find((c) => c.size && sizesCompatible(c.size, size) && c.sizeName);
-  if (sibling?.sizeName) return { name: sibling.sizeName, valueId: sibling.sizeValueId };
-  const letter = nombreTalleDesdeCodigo(size);
-  return { name: letter && letter !== size ? letter : size, valueId: null };
+function findCombo(ctx: ListingContext, local: { color: string; size: string }): RemoteCombo | undefined {
+  return ctx.combos.find((c) => sameCombo(local, c, ctx.axes));
 }
 
 function colorNameFor(ctx: ListingContext, color: string): { name: string; valueId: string | null } {
@@ -534,23 +607,6 @@ function picturesFor(ctx: ListingContext, color: string): string[] {
   const sibling = ctx.combos.find((c) => c.pictureIds.length && colorsAreEquivalent(c.color, color));
   const ids = sibling?.pictureIds?.length ? sibling.pictureIds : ctx.pictureIds;
   return ids.slice(0, 10);
-}
-
-async function rowIdFor(ctx: ListingContext, size: string): Promise<string> {
-  const sibling = ctx.combos.find((c) => c.rowId && sizesCompatible(c.size, size));
-  if (sibling?.rowId) return sibling.rowId;
-  if (!ctx.chartId) {
-    throw new MlVariantCreateError(
-      `La guía de talles de la publicación no tiene fila para el talle ${size}. Revisá la guía en Mercado Libre.`
-    );
-  }
-  const found = await mlFetchSizeGridRowForSize(ctx.accessToken, ctx.chartId, size);
-  if (!found?.rowId) {
-    throw new MlVariantCreateError(
-      `La guía ${ctx.chartId} no tiene una fila para el talle ${size} (${nombreTalleDesdeCodigo(size)}).`
-    );
-  }
-  return found.rowId;
 }
 
 async function itemIdForUserProduct(ctx: ListingContext, userProductId: string): Promise<string> {
@@ -640,7 +696,7 @@ async function createUserProductVariant(ctx: ListingContext, local: LocalVariant
     throw new MlVariantCreateError('La publicación modelo no tiene fotos para copiar a la variante nueva');
   }
   const color = colorNameFor(ctx, local.color);
-  const size = sizeNameFor(ctx, local.size);
+  const size = await resolveSizeSpec(ctx, local.size);
   const attributes: Array<{ id: string; values: Array<{ id: string | null; name: string }> }> = [];
   for (const id of ctx.childAttributeIds) {
     if (isColorAttr(id)) {
@@ -652,8 +708,12 @@ async function createUserProductVariant(ctx: ListingContext, local: LocalVariant
       continue;
     }
     if (isGridRowAttr(id)) {
-      const rowId = await rowIdFor(ctx, local.size);
-      attributes.push({ id, values: [{ id: rowId, name: rowId }] });
+      if (!size.rowId) {
+        throw new MlVariantCreateError(
+          `La guía de talles de la publicación no tiene fila para el talle ${local.size}. Sin esa fila, Mercado Libre lo publica como un color nuevo.`
+        );
+      }
+      attributes.push({ id, values: [{ id: size.rowId, name: size.rowId }] });
       continue;
     }
     throw new MlVariantCreateError(
@@ -701,47 +761,208 @@ async function createUserProductVariant(ctx: ListingContext, local: LocalVariant
     colorValueId: color.valueId,
     sizeValueId: size.valueId,
     sizeName: size.name,
-    rowId: '',
-    pictureIds: pics
+    rowId: size.rowId,
+    pictureIds: pics,
+    rawCombinations: []
   });
   return { itemId, userProductId };
+}
+
+function mlBodyLooksLikeError(data: unknown): boolean {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+  const body = data as { error?: unknown; cause?: unknown; status?: unknown; message?: unknown };
+  if (body.error) return true;
+  if (Array.isArray(body.cause) && body.cause.length > 0) return true;
+  const status = Number(body.status);
+  return Number.isFinite(status) && status >= 400 && Boolean(body.message);
+}
+
+function variationIdFromMlPayload(data: unknown, knownIds: Set<string>): string {
+  const pool: any[] = [];
+  const visit = (node: any) => {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      node.forEach(visit);
+      return;
+    }
+    pool.push(node);
+    if (Array.isArray(node.variations)) node.variations.forEach(visit);
+    if (node.body && typeof node.body === 'object') visit(node.body);
+  };
+  visit(data);
+  const fresh: string[] = [];
+  for (const row of pool) {
+    const raw = row?.id ?? row?.variation_id;
+    if (raw == null || String(raw).trim() === '') continue;
+    const id = String(raw).trim();
+    if (!/^\d+$/.test(id) || knownIds.has(id)) continue;
+    fresh.push(id);
+  }
+  return fresh.length === 1 ? fresh[0] : '';
+}
+
+function variationIdFromLocation(headers: any): string {
+  const loc = String(headers?.location ?? headers?.Location ?? '');
+  const match = loc.match(/variations\/(\d+)/i);
+  return match?.[1] || '';
+}
+
+async function findNewVariationOnItem(
+  ctx: ListingContext,
+  knownIds: Set<string>,
+  color: string,
+  size: string
+): Promise<string> {
+  const res = await axios.get(
+    `https://api.mercadolibre.com/items/${encodeURIComponent(ctx.anchorItemId)}?include_attributes=all`,
+    { headers: { Authorization: `Bearer ${ctx.accessToken}` }, validateStatus: () => true }
+  );
+  if (res.status !== 200) return '';
+  const variations = Array.isArray(res.data?.variations) ? res.data.variations : [];
+  const fresh = variations.filter((v: any) => v?.id != null && !knownIds.has(String(v.id)));
+  const matched = fresh.filter((v: any) => {
+    const cs = variationColorSize(v);
+    const colorOk = !ctx.axes.color || colorsAreEquivalent(cs.color, color);
+    const sizeOk = !ctx.axes.size || sizesCompatible(cs.size, size);
+    return colorOk && sizeOk;
+  });
+  const pick = matched[0] || (fresh.length === 1 ? fresh[0] : null);
+  return pick?.id != null ? String(pick.id) : '';
+}
+
+async function putClassicVariation(
+  ctx: ListingContext,
+  local: LocalVariant,
+  combinations: Array<Record<string, unknown>>,
+  attributes: Array<Record<string, unknown>>,
+  pictureIds: string[],
+  knownIds: Set<string>,
+  color: string,
+  size: string
+): Promise<string> {
+  const headers = { Authorization: `Bearer ${ctx.accessToken}`, 'Content-Type': 'application/json' };
+  const current = await axios.get(`https://api.mercadolibre.com/items/${encodeURIComponent(ctx.anchorItemId)}`, {
+    headers,
+    validateStatus: () => true
+  });
+  if (current.status !== 200) {
+    throw new MlVariantCreateError(mlMessage(current.data, 'No se pudo leer la publicación para agregar la variación'));
+  }
+  const existing = (Array.isArray(current.data?.variations) ? current.data.variations : []).map((v: any) => ({
+    id: v.id,
+    price: v.price,
+    available_quantity: v.available_quantity ?? 0
+  }));
+  const putRes = await axios.put(
+    `https://api.mercadolibre.com/items/${encodeURIComponent(ctx.anchorItemId)}`,
+    {
+      variations: [
+        ...existing,
+        {
+          attribute_combinations: combinations,
+          price: ctx.price,
+          available_quantity: local.listingStock,
+          picture_ids: pictureIds,
+          attributes
+        }
+      ]
+    },
+    { headers, validateStatus: () => true }
+  );
+  if (putRes.status < 200 || putRes.status >= 300 || mlBodyLooksLikeError(putRes.data)) {
+    throw new MlVariantCreateError(mlMessage(putRes.data, 'Mercado Libre rechazó la variación'));
+  }
+  return (
+    variationIdFromMlPayload(putRes.data, knownIds) ||
+    (await findNewVariationOnItem(ctx, knownIds, color, size))
+  );
+}
+
+function sizeFromChartRow(row: any, fallback: string): { name: string; valueId: string | null } {
+  const attrs = Array.isArray(row?.attributes) ? row.attributes : [];
+  for (const att of attrs) {
+    const id = attrId(att?.id ?? att?.name);
+    if (id !== 'SIZE' && !isSizeAttr(id)) continue;
+    const vals = Array.isArray(att?.values) ? att.values : [];
+    for (const v of vals) {
+      const name = String(v?.name ?? v?.value_name ?? '').trim();
+      const valueId = v?.id != null && String(v.id).trim() !== '' ? String(v.id).trim() : null;
+      if (name || valueId) return { name: name || fallback, valueId };
+    }
+  }
+  return { name: fallback, valueId: null };
+}
+
+async function resolveSizeSpec(
+  ctx: ListingContext,
+  sizeCode: string
+): Promise<{ name: string; valueId: string | null; rowId: string }> {
+  const sibling = ctx.combos.find((c) => c.size && sizesCompatible(c.size, sizeCode));
+  if (sibling?.sizeName && (sibling.rowId || !ctx.chartId)) {
+    return { name: sibling.sizeName, valueId: sibling.sizeValueId, rowId: sibling.rowId };
+  }
+  let name = sibling?.sizeName || '';
+  let valueId = sibling?.sizeValueId ?? null;
+  let rowId = sibling?.rowId || '';
+  if (ctx.chartId && !rowId) {
+    const found = await mlFetchSizeGridRowForSize(ctx.accessToken, ctx.chartId, sizeCode);
+    if (!found?.rowId) {
+      const letter = nombreTalleDesdeCodigo(sizeCode);
+      throw new MlVariantCreateError(
+        `La guía de talles no tiene el talle ${sizeCode}${letter && letter !== sizeCode ? ` (${letter})` : ''}. Sin esa fila, Mercado Libre lo publica como un color nuevo.`
+      );
+    }
+    rowId = found.rowId;
+    const fromRow = sizeFromChartRow(found.row, nombreTalleDesdeCodigo(sizeCode) || sizeCode);
+    if (!name) name = fromRow.name;
+    if (!valueId) valueId = fromRow.valueId;
+  }
+  if (!name) name = nombreTalleDesdeCodigo(sizeCode) || sizeCode;
+  return { name, valueId, rowId };
+}
+
+function upsertCombination(
+  combinations: Array<Record<string, unknown>>,
+  match: (id: string) => boolean,
+  fallbackId: string,
+  spec: { name: string; valueId: string | null }
+) {
+  const idx = combinations.findIndex((a) => match(attrId(a.id)));
+  const row: Record<string, unknown> = { id: idx >= 0 ? combinations[idx].id : fallbackId, value_name: spec.name };
+  if (spec.valueId) row.value_id = spec.valueId;
+  if (idx >= 0) combinations[idx] = row;
+  else combinations.push(row);
 }
 
 async function createClassicVariation(ctx: ListingContext, local: LocalVariant): Promise<{ itemId: string; variationId: string }> {
   const pics = picturesFor(ctx, local.color);
   if (!pics.length) throw new MlVariantCreateError('La publicación modelo no tiene fotos para la variante nueva');
-  const color = colorNameFor(ctx, local.color);
-  const size = sizeNameFor(ctx, local.size);
-  const combinations: Array<Record<string, unknown>> = [];
+  const wantedColorId = lookupColorValueId(ctx.colorValueByName, local.color);
+  const sameColor = ctx.combos.find(
+    (c) =>
+      (c.color && colorsAreEquivalent(c.color, local.color)) ||
+      (!!wantedColorId && c.colorValueId === wantedColorId)
+  );
+  const base = sameColor?.rawCombinations?.length
+    ? sameColor.rawCombinations
+    : ctx.combos.find((c) => c.rawCombinations.length)?.rawCombinations || [];
+  const combinations = base
+    .filter((a) => !isGridRowAttr(attrId(a.id)))
+    .map((a) => ({ ...a }));
+  const color = sameColor
+    ? { name: sameColor.color || local.color, valueId: sameColor.colorValueId }
+    : colorNameFor(ctx, local.color);
+  const size = await resolveSizeSpec(ctx, local.size);
+  if (ctx.axes.color) {
+    const hasColor = combinations.some((a) => isColorAttr(attrId(a.id)));
+    if (!sameColor || !hasColor) upsertCombination(combinations, isColorAttr, 'COLOR', color);
+  }
+  upsertCombination(combinations, isSizeAttr, 'SIZE', { name: size.name, valueId: size.valueId });
   const attributes: Array<Record<string, unknown>> = [];
   if (local.sku) attributes.push({ id: 'SELLER_SKU', value_name: local.sku });
+  if (size.rowId) attributes.push({ id: 'SIZE_GRID_ROW_ID', value_id: size.rowId });
 
-  for (const id of ctx.childAttributeIds) {
-    if (isColorAttr(id)) {
-      const row: Record<string, unknown> = { id, value_name: color.name };
-      if (color.valueId) row.value_id = color.valueId;
-      combinations.push(row);
-      continue;
-    }
-    if (isSizeAttr(id)) {
-      const row: Record<string, unknown> = { id, value_name: size.name };
-      if (size.valueId) row.value_id = size.valueId;
-      combinations.push(row);
-      continue;
-    }
-    if (isGridRowAttr(id)) {
-      attributes.push({ id, value_id: await rowIdFor(ctx, local.size) });
-      continue;
-    }
-  }
-  if (!ctx.axes.gridRow && ctx.combos.some((c) => c.rowId)) {
-    try {
-      attributes.push({ id: 'SIZE_GRID_ROW_ID', value_id: await rowIdFor(ctx, local.size) });
-    } catch {
-      /* la guía es opcional si la publicación no la exige en la variación */
-    }
-  }
-
+  const knownIds = new Set(ctx.combos.map((c) => c.variationId).filter(Boolean));
   const res = await axios.post(
     `https://api.mercadolibre.com/items/${encodeURIComponent(ctx.anchorItemId)}/variations`,
     {
@@ -756,11 +977,42 @@ async function createClassicVariation(ctx: ListingContext, local: LocalVariant):
       validateStatus: () => true
     }
   );
-  if (res.status !== 201 && res.status !== 200) {
-    throw new MlVariantCreateError(mlMessage(res.data, 'Mercado Libre rechazó la variación'));
+
+  const postedOk = (res.status === 200 || res.status === 201) && !mlBodyLooksLikeError(res.data);
+  let variationId = postedOk
+    ? variationIdFromLocation(res.headers) || variationIdFromMlPayload(res.data, knownIds)
+    : '';
+  if (postedOk && !variationId) {
+    variationId = await findNewVariationOnItem(ctx, knownIds, color.name, size.name);
   }
-  const variationId = String(res.data?.id || '').trim();
-  if (!variationId) throw new MlVariantCreateError('Mercado Libre no devolvió el id de la variación');
+  if (!variationId) {
+    try {
+      variationId = await putClassicVariation(
+        ctx,
+        local,
+        combinations,
+        attributes,
+        pics.slice(0, 10),
+        knownIds,
+        color.name,
+        size.name
+      );
+    } catch (putError: any) {
+      if (!postedOk) {
+        const postDetail = mlMessage(res.data, '');
+        throw new MlVariantCreateError(putError?.message || postDetail || 'Mercado Libre rechazó la variación');
+      }
+    }
+  }
+  if (!variationId) {
+    const snippet = JSON.stringify(res.data ?? '').slice(0, 240);
+    console.warn('[ML variant create] sin id', res.status, snippet);
+    throw new MlVariantCreateError(
+      snippet && snippet !== '{}' && snippet !== 'null'
+        ? `Mercado Libre no confirmó la variación: ${snippet}`
+        : 'Mercado Libre no confirmó la variación'
+    );
+  }
   ctx.combos.push({
     userProductId: '',
     itemId: ctx.anchorItemId,
@@ -770,8 +1022,9 @@ async function createClassicVariation(ctx: ListingContext, local: LocalVariant):
     colorValueId: color.valueId,
     sizeValueId: size.valueId,
     sizeName: size.name,
-    rowId: '',
-    pictureIds: pics
+    rowId: size.rowId,
+    pictureIds: pics,
+    rawCombinations: combinations
   });
   return { itemId: ctx.anchorItemId, variationId };
 }
