@@ -6,7 +6,6 @@ import { getRemitente } from '../services/apiIntegration';
 import { useNotification } from '../context/NotificationContext';
 import { formatOrderDate } from '../utils/formatDate';
 import { canonicalizeCityInput, isInteriorDeliveryPlace, stripAccents } from '../utils/cityNormalize';
-import { buildDeliveryRouteLinks, deliveryChunkSize, MAPS_MAX_WAYPOINTS } from '../utils/googleMapsRoute';
 
 const PREFS_KEY = 'lupo_reparto_prefs';
 
@@ -85,6 +84,10 @@ function toMapsQuery(raw: string): string {
   if (!cleaned) return '';
   if (/argentina/i.test(cleaned)) return cleaned;
   return `${cleaned}, Argentina`;
+}
+
+function displayAddress(query: string): string {
+  return query.replace(/, Argentina$/i, '').trim();
 }
 
 function customerAddresses(customer: Customer, stopTitle: string): AddressOption[] {
@@ -317,16 +320,17 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers, transportes = []
   }, [stops, returnToDepot, finalStopKey]);
 
   const originQuery = toMapsQuery(depot);
-  const routeChunks = useMemo(() => {
-    const size = deliveryChunkSize(returnToDepot);
-    const chunks: StopItem[][] = [];
-    for (let i = 0; i < orderedStops.length; i += size) chunks.push(orderedStops.slice(i, i + size));
-    return chunks;
-  }, [orderedStops, returnToDepot]);
-  const links = useMemo(
-    () => buildDeliveryRouteLinks(originQuery, orderedStops.map((stop) => stop.query), returnToDepot),
-    [originQuery, orderedStops, returnToDepot]
-  );
+  const addressLines = useMemo(() => {
+    const lines: string[] = [];
+    const origin = displayAddress(originQuery);
+    if (origin) lines.push(origin);
+    for (const stop of orderedStops) {
+      const address = displayAddress(stop.query);
+      if (address) lines.push(address);
+    }
+    if (returnToDepot && origin) lines.push(origin);
+    return lines;
+  }, [originQuery, orderedStops, returnToDepot]);
   const selectedOrderCount = orderedStops.reduce((sum, stop) => sum + stop.orders.length, 0);
 
   const visibleWithAddress = rows.filter((row) => row.options.length > 0);
@@ -363,22 +367,22 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers, transportes = []
     savePrefs({ depot: next, depotCustom: false });
   };
 
-  const copyLink = async (url: string) => {
+  const copyAddresses = async () => {
+    if (addressLines.length === 0) return;
     try {
-      await navigator.clipboard.writeText(url);
-      showToast('success', 'Enlace copiado.');
+      await navigator.clipboard.writeText(addressLines.join('\n'));
+      showToast('success', 'Direcciones copiadas.');
     } catch {
-      showToast('error', 'No se pudo copiar el enlace.');
+      showToast('error', 'No se pudieron copiar las direcciones.');
     }
   };
 
-  const missingDepot = !originQuery;
   const missingStops = orderedStops.length === 0;
 
   return (
     <div className="space-y-5">
       <p className="text-sm text-slate-400 max-w-3xl">
-        Elegí los pedidos que salen del depósito. En CABA y GBA la parada es el domicilio del cliente. En el interior, el recorrido va a la dirección del transporte. Google Maps abre las paradas en el orden de la lista.
+        Elegí los pedidos que salen del depósito. En CABA y GBA la parada es el domicilio del cliente. En el interior, el recorrido va a la dirección del transporte. Podés copiar todas las direcciones en el orden de la lista.
       </p>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.8fr)]">
@@ -436,10 +440,7 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers, transportes = []
             </div>
             <Route size={22} className="text-emerald-400" />
           </div>
-          {missingDepot && (
-            <p className="text-sm text-amber-300">Escribí la dirección del depósito para armar el recorrido.</p>
-          )}
-          {missingStops && !missingDepot && (
+          {missingStops && (
             <p className="text-sm text-slate-400">Elegí pedidos con dirección o agregá una dirección extra.</p>
           )}
           {!returnToDepot && orderedStops.length > 1 && (
@@ -456,43 +457,26 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers, transportes = []
                   </option>
                 ))}
               </select>
-              <p className="text-xs text-slate-500 mt-1">Esta queda como destino final. Las demás siguen el orden de la lista.</p>
+              <p className="text-xs text-slate-500 mt-1">Esta queda al final. Las demás siguen el orden de la lista.</p>
             </label>
           )}
-          {links.length > 1 && (
-            <p className="text-xs text-amber-200/90">
-              Google Maps acepta hasta {MAPS_MAX_WAYPOINTS} paradas intermedias por recorrido. Hay {links.length} tramos y cada uno sale del depósito.
-            </p>
-          )}
           <div className="mt-auto space-y-2">
-            {links.length === 0 ? (
-              <span className="flex items-center justify-center gap-2 w-full rounded-xl bg-slate-800 text-slate-500 font-bold px-4 py-3 cursor-not-allowed">
-                <MapPin size={18} />
-                Abrir en Google Maps
-              </span>
-            ) : (
-              links.map((link, index) => (
-                <div key={link.url} className="flex gap-2">
-                  <a
-                    href={link.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex-1 inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-3 transition"
-                  >
-                    <MapPin size={18} />
-                    {links.length === 1 ? 'Abrir en Google Maps' : `Abrir tramo ${index + 1} (${link.stopCount})`}
-                  </a>
-                  <button
-                    type="button"
-                    onClick={() => copyLink(link.url)}
-                    className="shrink-0 rounded-xl border border-slate-700 px-3 text-slate-300 hover:text-white hover:bg-slate-800"
-                    title="Copiar enlace"
-                    aria-label="Copiar enlace"
-                  >
-                    <Copy size={16} />
-                  </button>
-                </div>
-              ))
+            <button
+              type="button"
+              onClick={copyAddresses}
+              disabled={missingStops}
+              className="flex items-center justify-center gap-2 w-full rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-bold px-4 py-3 transition"
+            >
+              <Copy size={18} />
+              {missingStops
+                ? 'Copiar direcciones'
+                : `Copiar ${addressLines.length} ${addressLines.length === 1 ? 'dirección' : 'direcciones'}`}
+            </button>
+            {!missingStops && (
+              <p className="text-xs text-slate-500">
+                Una por línea, en el orden del recorrido.
+                {returnToDepot && originQuery ? ' El depósito queda al principio y al final.' : ''}
+              </p>
             )}
           </div>
         </section>
@@ -503,58 +487,42 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers, transportes = []
           <div>
             <h3 className="text-white font-semibold">Qué sale en cada reparto</h3>
             <p className="text-xs text-slate-500 mt-1">
-              Cada parada lista los pedidos que se dejan ahí. El enlace abre esas paradas en el orden de la lista.
+              Cada parada lista los pedidos que se dejan ahí, en el orden del recorrido.
             </p>
           </div>
-          <div className="space-y-4">
-            {routeChunks.map((chunk, chunkIndex) => (
-              <div key={chunk.map((stop) => stop.key).join('|')} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 sm:p-4 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-bold text-white">
-                    {routeChunks.length > 1 ? `Reparto ${chunkIndex + 1}` : 'Reparto'}
-                    <span className="ml-2 font-medium text-slate-400">
-                      {chunk.reduce((sum, stop) => sum + stop.orders.length, 0)} pedidos · {chunk.length} {chunk.length === 1 ? 'parada' : 'paradas'}
-                    </span>
-                  </p>
-                  {links[chunkIndex] && (
-                    <a
-                      href={links[chunkIndex].url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-300 hover:text-emerald-200"
-                    >
-                      <MapPin size={14} />
-                      Abrir este tramo
-                    </a>
+          <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3 sm:p-4 space-y-3">
+            <p className="text-sm font-bold text-white">
+              Reparto
+              <span className="ml-2 font-medium text-slate-400">
+                {selectedOrderCount} {selectedOrderCount === 1 ? 'pedido' : 'pedidos'} · {orderedStops.length}{' '}
+                {orderedStops.length === 1 ? 'parada' : 'paradas'}
+              </span>
+            </p>
+            <ol className="space-y-2">
+              {orderedStops.map((stop) => (
+                <li key={stop.key} className="rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2.5">
+                  <p className="text-sm font-semibold text-white">{stop.title}</p>
+                  <p className="text-xs text-slate-400 mt-0.5">{displayAddress(stop.query)}</p>
+                  {stop.orders.length > 0 ? (
+                    <ul className="mt-2 space-y-1">
+                      {stop.orders.map((item) => (
+                        <li key={item.id} className="text-sm text-slate-200 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                          <span>{item.name}</span>
+                          {item.remito != null && <span className="text-xs text-slate-400">Remito {item.remito}</span>}
+                          {item.city && <span className="text-xs text-slate-500">{item.city}</span>}
+                          <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{item.status}</span>
+                          {item.interior && (
+                            <span className="text-[10px] font-bold uppercase tracking-wide text-amber-200">Interior</span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-xs text-slate-500 mt-1">{stop.detail}</p>
                   )}
-                </div>
-                <ol className="space-y-2">
-                  {chunk.map((stop) => (
-                    <li key={stop.key} className="rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2.5">
-                      <p className="text-sm font-semibold text-white">{stop.title}</p>
-                      <p className="text-xs text-slate-400 mt-0.5">{stop.query.replace(/, Argentina$/i, '')}</p>
-                      {stop.orders.length > 0 ? (
-                        <ul className="mt-2 space-y-1">
-                          {stop.orders.map((item) => (
-                            <li key={item.id} className="text-sm text-slate-200 flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                              <span>{item.name}</span>
-                              {item.remito != null && <span className="text-xs text-slate-400">Remito {item.remito}</span>}
-                              {item.city && <span className="text-xs text-slate-500">{item.city}</span>}
-                              <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{item.status}</span>
-                              {item.interior && (
-                                <span className="text-[10px] font-bold uppercase tracking-wide text-amber-200">Interior</span>
-                              )}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="text-xs text-slate-500 mt-1">{stop.detail}</p>
-                      )}
-                    </li>
-                  ))}
-                </ol>
-              </div>
-            ))}
+                </li>
+              ))}
+            </ol>
           </div>
         </section>
       )}
@@ -690,7 +658,7 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers, transportes = []
                           >
                             {row.options.map((option) => (
                               <option key={option.id} value={option.id}>
-                                {option.label} — {option.query.replace(/, Argentina$/i, '')}
+                                {option.label} — {displayAddress(option.query)}
                               </option>
                             ))}
                           </select>
@@ -701,7 +669,7 @@ const Repartos: React.FC<RepartosProps> = ({ orders, customers, transportes = []
                               {row.options[0]?.stopTitle && row.options[0].stopTitle !== row.name
                                 ? `${row.options[0].label} — `
                                 : ''}
-                              {query.replace(/, Argentina$/i, '')}
+                              {displayAddress(query)}
                             </span>
                           </p>
                         )
