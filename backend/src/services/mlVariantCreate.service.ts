@@ -317,11 +317,12 @@ async function loadUserProductContext(anchor: any, accessToken: string): Promise
       accessToken
     );
   }
-  const childAttributeIds = (
-    Array.isArray(family.data?.child_attributes_ids) ? family.data.child_attributes_ids : ['COLOR', 'SIZE']
-  )
-    .map((id: unknown) => attrId(id))
-    .filter(Boolean);
+  const childSource = Array.isArray(family.data?.child_attributes_ids)
+    ? family.data.child_attributes_ids
+    : ['COLOR', 'SIZE'];
+  const childAttributeIds = (childSource as unknown[])
+    .map((id) => attrId(id))
+    .filter((id) => id.length > 0);
 
   const list = await fetchJson(
     `https://api.mercadolibre.com/user-products-families/${encodeURIComponent(familyId)}/user-products`,
@@ -363,9 +364,9 @@ async function loadUserProductContext(anchor: any, accessToken: string): Promise
   const combos: RemoteCombo[] = [];
   for (const up of ups) {
     if (!up) continue;
-    const color = childAttributeIds.filter(isColorAttr).map((id) => upAttr(up, id))[0] || upAttr(up, 'COLOR');
-    const size = childAttributeIds.filter(isSizeAttr).map((id) => upAttr(up, id))[0] || upAttr(up, 'SIZE');
-    const row = childAttributeIds.filter(isGridRowAttr).map((id) => upAttr(up, id))[0] || upAttr(up, 'SIZE_GRID_ROW_ID');
+    const color = childAttributeIds.filter(isColorAttr).map((id: string) => upAttr(up, id))[0] || upAttr(up, 'COLOR');
+    const size = childAttributeIds.filter(isSizeAttr).map((id: string) => upAttr(up, id))[0] || upAttr(up, 'SIZE');
+    const row = childAttributeIds.filter(isGridRowAttr).map((id: string) => upAttr(up, id))[0] || upAttr(up, 'SIZE_GRID_ROW_ID');
     const pics = (Array.isArray(up.pictures) ? up.pictures : []).map((p: any) => String(p?.id || '').trim()).filter(Boolean);
     combos.push({
       userProductId: String(up.id || ''),
