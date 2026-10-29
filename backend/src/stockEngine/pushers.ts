@@ -12,7 +12,7 @@ import {
   mlVariationSkuFromApi,
   skusCompatible,
 } from '../utils/mlVariationMatch';
-import { fetchMlItem, getMlAccessToken, mlErrorMessage, withMlRetry } from './mlClient';
+import { fetchMlItem, getMlAccessToken, mlErrorMessage, mlNormalizeItemId, withMlRetry } from './mlClient';
 
 export type PushResult =
   | {
@@ -182,11 +182,38 @@ async function putMlItemVariations(
   return true;
 }
 
-export async function pushMercadoLibre(
+/**
+ * Un envío a la vez por publicación de ML. Si no, dos talles del mismo ítem se mandaban en paralelo y el
+ * PUT del ítem completo (con todas las variaciones) volvía a poner el número viejo del otro talle.
+ */
+const mlItemLocks = new Map<string, Promise<unknown>>();
+
+function withMlItemLock<T>(itemId: string, fn: () => Promise<T>): Promise<T> {
+  const key = mlNormalizeItemId(itemId) || String(itemId || '').trim().toUpperCase();
+  const prev = mlItemLocks.get(key) ?? Promise.resolve();
+  const run = prev.catch(() => undefined).then(fn);
+  const tail = run.catch(() => undefined);
+  mlItemLocks.set(key, tail);
+  void tail.then(() => {
+    if (mlItemLocks.get(key) === tail) mlItemLocks.delete(key);
+  });
+  return run;
+}
+
+export function pushMercadoLibre(
   rawItemId: string,
   variationId: string | null,
   qty: number,
   hints: MlMatchHints = {}
+): Promise<PushResult> {
+  return withMlItemLock(rawItemId, () => pushMercadoLibreUnlocked(rawItemId, variationId, qty, hints));
+}
+
+async function pushMercadoLibreUnlocked(
+  rawItemId: string,
+  variationId: string | null,
+  qty: number,
+  hints: MlMatchHints
 ): Promise<PushResult> {
   const token = await getMlAccessToken();
   if (!token) return { ok: false, error: 'Mercado Libre no está conectado o venció el acceso. Conectalo en Configuración.' };
