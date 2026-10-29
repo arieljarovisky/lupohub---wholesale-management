@@ -561,7 +561,13 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
 
     setSelectedCustomerId(hydrateSourceOrder.customerId);
     if (!priceListUserOverrideRef.current) {
-      applyCustomerPriceList(hydrateSourceOrder.customerId);
+      if (hydrateSourceOrder.priceListId) {
+        onPriceListChange?.(hydrateSourceOrder.priceListId);
+      } else if (hydrateSourceOrder.priceListId === null) {
+        onPriceListChange?.(null);
+      } else {
+        applyCustomerPriceList(hydrateSourceOrder.customerId);
+      }
     }
     setOrderNotes(isDuplicating ? '' : String(hydrateSourceOrder.notes ?? '').trim());
     setOrderDate(isDuplicating ? new Date().toISOString().slice(0, 10) : hydrateSourceOrder.date);
@@ -1185,6 +1191,9 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
           : OrderStatus.PENDING_ADMIN_CONFIRMATION,
       date: orderDate,
       notes: orderNotes.trim() || undefined,
+      priceListId: showPriceListSelector
+        ? (selectedPriceListId ?? null)
+        : (selectedPriceListId || selectedCustomer?.priceListId || null),
       ...(showroomSale
         ? { showroomSale: true as const, paymentStatus: 'pagado' as const }
         : {}),
@@ -1369,7 +1378,9 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
           <h1 className="text-lg md:text-xl font-bold text-white tracking-tight truncate">
             {readOnly ? 'Ver pedido' : (isEditing ? 'Editar pedido' : isDuplicating ? 'Duplicar pedido' : 'Nuevo pedido')}
           </h1>
-          <p className="text-xs text-slate-500 truncate hidden sm:block">
+          <p className="text-xs text-slate-500 truncate">
+            <span className="font-medium text-violet-200/90">Lista: {selectedPriceListLabel}</span>
+            {' · '}
             {orderNotes.trim()
               ? orderNotes.trim()
               : isDuplicating && duplicateFromOrder

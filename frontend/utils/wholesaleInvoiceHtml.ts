@@ -1181,6 +1181,10 @@ export function buildWholesaleCreditNoteHtml(params: {
     const price = Number(i.priceAtMoment ?? 0);
     const qtyNc = price > 0 ? Math.round((totalNota / price) * 1000) / 1000 : i.quantity;
     rows = wholesalePrintLineRowHtml(i, qtyNc, products, factorNc, netoNc);
+  } else if (scope === 'monto') {
+    const desc = escapeHtmlText(nc.description?.trim() || 'Crédito por monto');
+    const unitPrint = Math.round(netoNc * factorNc * 100) / 100;
+    rows = `<tr><td class="col-c">1</td><td class="col-c col-code">—</td><td class="col-desc">${desc}</td><td class="col-c col-despacho">—</td><td class="col-r">$${formatMoneyAr(unitPrint)}</td><td class="col-r">$${formatMoneyAr(unitPrint)}</td></tr>`;
   } else {
     const itemsForNc = getGroupedItemsForWholesalePrint(order, products);
     rows = itemsForNc
@@ -1206,7 +1210,7 @@ export function buildWholesaleCreditNoteHtml(params: {
          </div>`
     : `<span class="inv-logo-placeholder">${logoPlaceholderNc}</span>`;
 
-  const scopeLabel = scope === 'item' ? 'Crédito por ítem' : 'Crédito total del pedido';
+  const scopeLabel = scope === 'item' ? 'Crédito por ítem' : scope === 'monto' ? 'Crédito por monto' : 'Crédito total del pedido';
   const cuitEmpresa = (remitente.cuit || '').toString();
   const ingresosBrutosEmpresa = (remitente.ingresosBrutos || '901-2113373').toString();
   const inicioActividadEmpresa = (remitente.inicioActividad || '13/06/2005').toString();

@@ -342,12 +342,13 @@ function ncComprobanteTotalesAfip(
 function syntheticCreditNotePreview(
   order: Order,
   netAmount: number,
-  tipo: 'total' | 'item' | 'items',
+  tipo: 'total' | 'item' | 'items' | 'monto',
   extra?: {
     itemIndex?: number;
     itemIndexes?: number[];
     amountByItemIndex?: Record<number, number>;
     quantityByItemIndex?: Record<number, number>;
+    description?: string;
   }
 ): CreditNote {
   const inv = order.invoice!;
@@ -369,6 +370,7 @@ function syntheticCreditNotePreview(
     itemIndexes: extra?.itemIndexes,
     amountByItemIndex: extra?.amountByItemIndex,
     quantityByItemIndex: extra?.quantityByItemIndex,
+    description: extra?.description,
     createdAt: new Date().toISOString(),
   };
 }
@@ -434,7 +436,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   );
   const [ncOrder, setNcOrder] = useState<Order | null>(null);
   const [orderCreditNotes, setOrderCreditNotes] = useState<CreditNote[]>([]);
-  const [ncTipo, setNcTipo] = useState<'total' | 'item' | 'items'>('total');
+  const [ncTipo, setNcTipo] = useState<'total' | 'item' | 'items' | 'monto'>('total');
+  const [ncMontoModo, setNcMontoModo] = useState<'monto' | 'porcentaje'>('monto');
+  const [ncMontoValor, setNcMontoValor] = useState('');
+  const [ncMontoDescripcion, setNcMontoDescripcion] = useState('');
   const [ncItemIndex, setNcItemIndex] = useState(0);
   const [ncQuantity, setNcQuantity] = useState<number>(1);
   const [ncItemsQuantities, setNcItemsQuantities] = useState<Record<number, number>>({});
@@ -580,6 +585,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         (c?.businessName || '').trim(),
         (c?.name || '').trim(),
         String(o.notes || '').trim(),
+        String(o.priceListName || '').trim(),
         String(o.id || '').toLowerCase(),
       ]
         .filter(Boolean)
@@ -2035,6 +2041,12 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                     )}
                   </div>
                   <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px]">
+                    <span
+                      className="inline-flex items-center rounded-full border border-violet-700/45 bg-violet-950/55 px-2.5 py-0.5 text-[10px] font-bold tracking-wide text-violet-100 max-w-[240px] truncate"
+                      title="Lista de precios con la que se armó y facturó este pedido"
+                    >
+                      Lista: {order.priceListName?.trim() || 'Precio base'}
+                    </span>
                     {ncTotalAnnulled ? (
                       <span
                         className="inline-flex items-center gap-1 rounded-full border border-orange-700/60 bg-orange-950/70 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wide text-orange-100"
@@ -2619,12 +2631,15 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         e.stopPropagation();
                         setNcOrder(order);
                         setNcTipo('total');
+                        setNcMontoModo('monto');
+                        setNcMontoValor('');
+                        setNcMontoDescripcion('');
                         setNcItemIndex(0);
                         setNcQuantity(order.items[0]?.quantity ?? 1);
                         setNcItemsQuantities({});
                         setNcRestoreStock(true);
                       }}
-                      title="Emitir nota de crédito AFIP (total o por artículo)"
+                      title="Emitir nota de crédito AFIP (total, artículos, monto o porcentaje)"
                       icon={<FileMinus size={16} />}
                       label="Emitir NC"
                     />
@@ -3548,10 +3563,11 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         );
       })()}
 
-      {/* Modal: emitir nota de crédito (todo el pedido o un artículo) */}
+      {/* Modal: emitir nota de crédito (todo el pedido, artículos, monto o porcentaje) */}
       {ncOrder && (() => {
-        const hasNCTotal = orderCreditNotes.some((nc) => (nc.scope || 'total') === 'total');
-        const creditedByItemIndex = sumCreditedByItemIndex(orderCreditNotes);
+        const activeCreditNotes = orderCreditNotes.filter((nc) => !nc.supersededByReinvoice);
+        const hasNCTotal = activeCreditNotes.some((nc) => (nc.scope || 'total') === 'total');
+        const creditedByItemIndex = sumCreditedByItemIndex(activeCreditNotes);
         const currentItem = ncOrder.items[ncItemIndex];
         const itemPrice = Number(currentItem?.priceAtMoment ?? 0);
         const itemQty = currentItem?.quantity ?? 0;
@@ -3559,7 +3575,24 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         const creditedItem = creditedByItemIndex[ncItemIndex] ?? 0;
         const remainingCredit = Math.round((itemLineTotal - creditedItem) * 100) / 100;
         const maxQtyRemaining = remainingCredit <= 0 ? 0 : Math.min(itemQty, Math.floor(remainingCredit / itemPrice + 0.001));
-        const canEmitTotal = !hasNCTotal;
+        const netoPedidoTotalNc = orderNetoForNotaCreditoTotal(ncOrder);
+        const alreadyCreditedOrder = Math.round(
+          activeCreditNotes.reduce((sum, nc) => sum + Number(nc.amountCredited || 0), 0) * 100
+        ) / 100;
+        const remainingOrderNet = Math.max(0, Math.round((netoPedidoTotalNc - alreadyCreditedOrder) * 100) / 100);
+        const ncMontoParsed = Math.round((parseFloat(String(ncMontoValor).replace(',', '.')) || 0) * 100) / 100;
+        const ncMontoNet =
+          ncMontoModo === 'porcentaje'
+            ? Math.round((netoPedidoTotalNc * ncMontoParsed) / 100 * 100) / 100
+            : ncMontoParsed;
+        const ncMontoExcede = ncMontoNet > remainingOrderNet + 0.01;
+        const ncMontoDesc =
+          ncMontoDescripcion.trim() ||
+          (ncMontoModo === 'porcentaje' && ncMontoParsed > 0
+            ? `Crédito del ${Number.isInteger(ncMontoParsed) ? String(ncMontoParsed) : ncMontoParsed}%`
+            : 'Crédito por monto');
+        const canEmitTotal = !hasNCTotal && alreadyCreditedOrder <= 0.009;
+        const canEmitMonto = remainingOrderNet > 0.009 && ncMontoNet > 0.005 && !ncMontoExcede;
         const canEmitItem = maxQtyRemaining > 0;
         const multiCandidates = ncOrder.items.map((item, i) => {
           const price = Number(item?.priceAtMoment ?? 0);
@@ -3574,24 +3607,34 @@ const Orders: React.FC<OrdersProps> = React.memo(({
           .map((c) => ({ ...c, selectedQty: Math.max(0, Math.min(c.maxQty, Number(ncItemsQuantities[c.index] || 0))) }))
           .filter((c) => c.selectedQty > 0);
         const canEmitItems = selectedMulti.length > 0;
-        const netoPedidoTotalNc = orderNetoForNotaCreditoTotal(ncOrder);
+        const itemsNetPreview = Math.round(selectedMulti.reduce((sum, c) => sum + c.selectedQty * c.price, 0) * 100) / 100;
+        const itemNetPreview = Math.round(ncQuantity * Number(ncOrder.items[ncItemIndex]?.priceAtMoment ?? 0) * 100) / 100;
         const netCredPreview =
           ncTipo === 'total'
             ? netoPedidoTotalNc
-            : ncTipo === 'item'
-              ? Math.round(ncQuantity * Number(ncOrder.items[ncItemIndex]?.priceAtMoment ?? 0) * 100) / 100
-              : Math.round(selectedMulti.reduce((sum, c) => sum + c.selectedQty * c.price, 0) * 100) / 100;
+            : ncTipo === 'monto'
+              ? ncMontoNet
+              : ncTipo === 'item'
+                ? itemNetPreview
+                : itemsNetPreview;
+        const netExceedsOrder =
+          ncTipo === 'monto'
+            ? ncMontoExcede
+            : ncTipo !== 'total' && netCredPreview > remainingOrderNet + 0.01;
         const totalesNcPreview = ncComprobanteTotalesAfip(netCredPreview, ncOrder.invoice, netoPedidoTotalNc);
         const ncPreviewDisabled =
           emitiendoNC ||
+          netExceedsOrder ||
           (ncTipo === 'total'
             ? !canEmitTotal
-            : ncTipo === 'item'
-              ? !canEmitItem || ncQuantity < 1 || ncQuantity > maxQtyRemaining
-              : !canEmitItems);
+            : ncTipo === 'monto'
+              ? !canEmitMonto
+              : ncTipo === 'item'
+                ? !canEmitItem || ncQuantity < 1 || ncQuantity > maxQtyRemaining
+                : !canEmitItems);
         return (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => !emitiendoNC && setNcOrder(null)}>
-          <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+          <div className="bg-slate-800 rounded-2xl border border-slate-700 shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <h3 className="text-lg font-bold text-white mb-1">Emitir nota de crédito</h3>
             <p className="text-sm text-slate-400 mb-4">
               Pedido #{ncOrder.id} — {ncOrder.customerBusinessName || getCustomerName(ncOrder)}
@@ -3620,7 +3663,14 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   <input type="radio" name="ncTipo" checked={ncTipo === 'items'} onChange={() => setNcTipo('items')} className="rounded border-slate-500 text-amber-500" />
                   <span className="text-white">Varios artículos</span>
                 </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="radio" name="ncTipo" checked={ncTipo === 'monto'} onChange={() => setNcTipo('monto')} className="rounded border-slate-500 text-amber-500" />
+                  <span className="text-white">Monto o %</span>
+                </label>
               </div>
+              {remainingOrderNet <= 0.009 && (
+                <p className="text-sm text-amber-400 bg-amber-900/20 rounded-lg p-3">Ya se creditó el neto completo de este pedido.</p>
+              )}
               {ncTipo === 'item' && ncOrder.items.length > 0 && (
                 <div className="space-y-3 pl-1">
                   <label className="block text-xs font-semibold text-slate-400 uppercase">Artículo</label>
@@ -3687,8 +3737,102 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   </p>
                 </div>
               )}
+              {ncTipo === 'monto' && (
+                <div className="space-y-3 pl-1">
+                  <div className="flex gap-4 flex-wrap">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="ncMontoModo"
+                        checked={ncMontoModo === 'monto'}
+                        onChange={() => {
+                          setNcMontoModo('monto');
+                          setNcMontoValor('');
+                        }}
+                        className="rounded border-slate-500 text-amber-500"
+                      />
+                      <span className="text-white text-sm">Monto fijo</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="ncMontoModo"
+                        checked={ncMontoModo === 'porcentaje'}
+                        onChange={() => {
+                          setNcMontoModo('porcentaje');
+                          setNcMontoValor('');
+                        }}
+                        className="rounded border-slate-500 text-amber-500"
+                      />
+                      <span className="text-white text-sm">Porcentaje</span>
+                    </label>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Neto del pedido ${formatMoneyAr(netoPedidoTotalNc)}
+                    {alreadyCreditedOrder > 0.009 ? (
+                      <> · ya creditado ${formatMoneyAr(alreadyCreditedOrder)}</>
+                    ) : null}
+                    {' '}· disponible ${formatMoneyAr(remainingOrderNet)}
+                  </p>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase">
+                    {ncMontoModo === 'porcentaje' ? 'Porcentaje del neto del pedido' : 'Monto neto (sin IVA)'}
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={ncMontoModo === 'porcentaje' ? 100 : remainingOrderNet}
+                    step="0.01"
+                    value={ncMontoValor}
+                    onChange={(e) => setNcMontoValor(e.target.value)}
+                    placeholder={ncMontoModo === 'porcentaje' ? 'Ej. 10' : 'Ej. 15000'}
+                    className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-amber-500 outline-none"
+                  />
+                  {ncMontoModo === 'porcentaje' && ncMontoParsed > 0 && (
+                    <p className="text-xs text-slate-400">
+                      {ncMontoParsed}% de ${formatMoneyAr(netoPedidoTotalNc)} = neto ${formatMoneyAr(ncMontoNet)}
+                    </p>
+                  )}
+                  {ncMontoExcede && ncMontoNet > 0 && (
+                    <p className="text-xs text-amber-400">
+                      Supera el disponible (${formatMoneyAr(remainingOrderNet)}).
+                    </p>
+                  )}
+                  <label className="block text-xs font-semibold text-slate-400 uppercase">Descripción (opcional)</label>
+                  <input
+                    type="text"
+                    value={ncMontoDescripcion}
+                    onChange={(e) => setNcMontoDescripcion(e.target.value)}
+                    placeholder="Ej. Bonificación, descuento comercial"
+                    maxLength={255}
+                    className="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:ring-2 focus:ring-amber-500 outline-none"
+                  />
+                  <p className="text-xs text-slate-500">
+                    No devuelve unidades al depósito. Para anular el pedido y devolver stock, usá «Todo el pedido».
+                    {ncMontoNet > 0.005 && !ncMontoExcede && (
+                      <span className="block mt-1 text-slate-400">
+                        {totalesNcPreview.discriminaIva ? (
+                          <>
+                            AFIP: IVA 21% ${formatMoneyAr(totalesNcPreview.iva)}
+                            {totalesNcPreview.iibb > 0.005 ? (
+                              <> · Percep. IIBB ${formatMoneyAr(totalesNcPreview.iibb)}</>
+                            ) : null}{' '}
+                            → total comprobante ${formatMoneyAr(totalesNcPreview.total)}
+                          </>
+                        ) : (
+                          <>AFIP: total comprobante ${formatMoneyAr(totalesNcPreview.total)} (IVA incluido, sin discriminar en clase B)</>
+                        )}
+                      </span>
+                    )}
+                  </p>
+                </div>
+              )}
               {ncTipo === 'total' && (
                 <div className="text-sm text-slate-500 space-y-2">
+                  {alreadyCreditedOrder > 0.009 && (
+                    <p className="text-amber-400">
+                      Ya hay créditos por ${formatMoneyAr(alreadyCreditedOrder)}. «Todo el pedido» solo aplica si no hay notas previas. Usá «Monto o %» por el disponible (${formatMoneyAr(remainingOrderNet)}).
+                    </p>
+                  )}
                   <p>
                     La NC se emite sobre el <strong className="text-white">monto neto</strong> del pedido (sin IVA), igual que la factura:{' '}
                     <strong className="text-white">${formatMoneyAr(totalesNcPreview.neto)}</strong>
@@ -3797,6 +3941,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   </p>
                 </div>
               )}
+              {ncTipo !== 'monto' && (
               <label className="flex items-start gap-3 cursor-pointer rounded-xl border border-slate-700 bg-slate-900/50 p-3">
                 <input
                   type="checkbox"
@@ -3814,6 +3959,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   </span>
                 </span>
               </label>
+              )}
                 </>
               )}
             </div>
@@ -3829,6 +3975,9 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                   if (ncTipo === 'total') {
                     netCred = netoPed;
                     nc = syntheticCreditNotePreview(ncOrder, netCred, 'total');
+                  } else if (ncTipo === 'monto') {
+                    netCred = ncMontoNet;
+                    nc = syntheticCreditNotePreview(ncOrder, netCred, 'monto', { description: ncMontoDesc });
                   } else if (ncTipo === 'item') {
                     netCred = Math.round(ncQuantity * Number(ncOrder.items[ncItemIndex]?.priceAtMoment ?? 0) * 100) / 100;
                     nc = syntheticCreditNotePreview(ncOrder, netCred, 'item', { itemIndex: ncItemIndex });
@@ -3863,23 +4012,26 @@ const Orders: React.FC<OrdersProps> = React.memo(({
               {!hasNCTotal && (
               <button
                 type="button"
-                disabled={emitiendoNC || (ncTipo === 'total'
-                  ? !canEmitTotal
-                  : ncTipo === 'item'
-                    ? (!canEmitItem || ncQuantity < 1 || ncQuantity > maxQtyRemaining)
-                    : !canEmitItems)}
+                disabled={ncPreviewDisabled}
                 onClick={async () => {
                   if (!ncOrder) return;
                   setEmitiendoNC(true);
                   try {
                     const payload: {
-                      tipo: 'total' | 'item' | 'items';
+                      tipo: 'total' | 'item' | 'items' | 'monto';
                       itemIndex?: number;
                       quantity?: number;
                       items?: Array<{ itemIndex: number; quantity: number }>;
+                      netAmount?: number;
+                      percent?: number;
+                      description?: string;
                       restoreStock: boolean;
-                    } = { tipo: ncTipo, restoreStock: ncRestoreStock };
-                    if (ncTipo === 'item') {
+                    } = { tipo: ncTipo, restoreStock: ncTipo === 'monto' ? false : ncRestoreStock };
+                    if (ncTipo === 'monto') {
+                      if (ncMontoModo === 'porcentaje') payload.percent = ncMontoParsed;
+                      else payload.netAmount = ncMontoNet;
+                      if (ncMontoDescripcion.trim()) payload.description = ncMontoDescripcion.trim();
+                    } else if (ncTipo === 'item') {
                       payload.itemIndex = ncItemIndex;
                       payload.quantity = ncQuantity;
                     } else if (ncTipo === 'items') {

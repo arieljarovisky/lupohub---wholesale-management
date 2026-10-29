@@ -341,7 +341,10 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
           : OrderStatus.PENDING_ADMIN_CONFIRMATION),
       date: orderDate,
       paymentStatus: initialOrder?.paymentStatus ?? 'pendiente',
-      noStockImpact: initialOrder?.noStockImpact
+      noStockImpact: initialOrder?.noStockImpact,
+      priceListId: showPriceListSelector
+        ? (selectedPriceListId ?? null)
+        : (selectedPriceListId || customers.find((c) => c.id === selectedCustomerId)?.priceListId || null)
     });
   };
 

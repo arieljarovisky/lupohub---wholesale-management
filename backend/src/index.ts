@@ -64,6 +64,7 @@ import { addCustomerManualComprobantesPdfColumns } from './database/add_customer
 import { addOrderCreatedBy } from './database/add_order_created_by';
 import { addOrderMatrixImportLabel } from './database/add_order_matrix_import_label';
 import { addOrderNotes } from './database/add_order_notes';
+import { addOrderPriceList } from './database/add_order_price_list';
 import { addUserTasksTable } from './database/add_user_tasks_table';
 import { addCompanyFinanceTable } from './database/add_company_finance_table';
 import { addCompanyFinanceFixedExpensesTable } from './database/add_company_finance_fixed_expenses_table';
@@ -270,6 +271,7 @@ async function initDatabase() {
       await addOrderCreatedBy();
       await addOrderMatrixImportLabel();
       await addOrderNotes();
+      await addOrderPriceList();
       await addUserTasksTable();
       await addCompanyFinanceTable();
       await addCompanyFinanceFixedExpensesTable();

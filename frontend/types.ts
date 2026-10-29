@@ -275,6 +275,10 @@ export interface Order {
   matrixImportLabel?: string;
   /** Nota interna (sucursal, referencia) para distinguir pedidos del mismo cliente. */
   notes?: string;
+  /** Lista de precios usada para armar y facturar el pedido. null = precio base. */
+  priceListId?: string | null;
+  /** Nombre de esa lista en el momento del pedido. */
+  priceListName?: string | null;
 }
 
 /** Nota de crédito AFIP asociada a un pedido (lista desde API). */
@@ -289,8 +293,8 @@ export interface CreditNote {
   cbteDesde: number;
   cbteHasta: number;
   amountCredited: number;
-  /** 'total' = NC por todo el pedido; 'item' = NC por un ítem (o varios) */
-  scope?: 'total' | 'item';
+  /** 'total' = NC por todo el pedido; 'item' = NC por un ítem (o varios); 'monto' = importe o porcentaje */
+  scope?: 'total' | 'item' | 'monto';
   /** Índice del ítem cuando scope === 'item' (primer ítem creditado, compat) */
   itemIndex?: number;
   /** Lista de índices de ítems cuando la NC se emitió sobre varios artículos. */
@@ -299,6 +303,8 @@ export interface CreditNote {
   amountByItemIndex?: Record<number, number>;
   /** Cantidad creditada por índice de ítem (calculada por backend). */
   quantityByItemIndex?: Record<number, number>;
+  /** Texto del renglón cuando la NC es por monto o porcentaje. */
+  description?: string;
   createdAt?: string;
   /** Comprobante de factura que esta NC anuló (snapshot al emitir). */
   voidedInvoice?: { cae: string; puntoVta?: number; cbteTipo?: number; cbteDesde: number };

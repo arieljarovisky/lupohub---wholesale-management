@@ -1921,7 +1921,8 @@ export const api = {
         cbteDesde: r.cbteDesde,
         cbteHasta: r.cbteHasta,
         amountCredited: Number(r.amountCredited),
-        scope: r.scope === 'item' ? 'item' : 'total',
+        scope: r.scope === 'item' ? 'item' : r.scope === 'monto' ? 'monto' : 'total',
+        description: r.description ? String(r.description) : undefined,
         itemIndex: r.itemIndex,
         itemIndexes,
         amountByItemIndex: sanitizeNumMap(r.amountByItemIndex),
@@ -1942,15 +1943,20 @@ export const api = {
     });
   },
 
-  /** Emite una Nota de Crédito AFIP: todo el pedido (tipo: 'total') o un ítem (tipo: 'item', itemIndex, quantity opcional). */
+  /** Emite una Nota de Crédito AFIP: todo el pedido, ítems, o un neto fijo / porcentaje del pedido. */
   emitirNotaCredito: async (
     orderId: string,
     data: {
-      tipo: 'total' | 'item' | 'items';
+      tipo: 'total' | 'item' | 'items' | 'monto';
       itemIndex?: number;
       quantity?: number;
       items?: Array<{ itemIndex: number; quantity: number }>;
-      /** Si es false, no devuelve unidades al inventario (solo anulación fiscal). Por defecto true. */
+      /** Neto sin IVA. Alternativa a `percent` cuando tipo es 'monto'. */
+      netAmount?: number;
+      /** Porcentaje del neto del pedido (0–100). Alternativa a `netAmount` cuando tipo es 'monto'. */
+      percent?: number;
+      description?: string;
+      /** Si es false, no devuelve unidades al inventario (solo anulación fiscal). Por defecto true. En tipo 'monto' no se devuelve stock. */
       restoreStock?: boolean;
     }
   ): Promise<{ id: string; orderId: string; cae: string; caeFchVto?: string; puntoVta: number; cbteTipo: number; cbteDesde: number; cbteHasta: number; amountCredited: number; stockRestored?: boolean }> => {

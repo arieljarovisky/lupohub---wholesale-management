@@ -609,10 +609,15 @@ const App: React.FC = () => {
     return c?.priceListId ?? null;
   };
 
+  const priceListIdForExistingOrder = (order: Order): string | null => {
+    if (Object.prototype.hasOwnProperty.call(order, 'priceListId')) return order.priceListId || null;
+    return resolveCustomerPriceListId(order.customerId);
+  };
+
   const handleEditOrder = (order: Order) => {
     setDuplicateSourceOrder(null);
     editingOrderIdRef.current = order.id;
-    setCreateOrderPriceListId(resolveCustomerPriceListId(order.customerId));
+    setCreateOrderPriceListId(priceListIdForExistingOrder(order));
     setEditingOrder(order);
     setCurrentView('create_order');
   };
@@ -620,7 +625,7 @@ const App: React.FC = () => {
   const handleDuplicateOrder = (order: Order) => {
     setEditingOrder(null);
     editingOrderIdRef.current = null;
-    setCreateOrderPriceListId(resolveCustomerPriceListId(order.customerId));
+    setCreateOrderPriceListId(priceListIdForExistingOrder(order));
     setDuplicateSourceOrder(order);
     setCurrentView('create_order');
   };
