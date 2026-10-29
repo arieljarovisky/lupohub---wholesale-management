@@ -950,7 +950,7 @@ export function buildWholesaleFacturaHtml(params: {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Factura ${nroComprobante}</title><style>
       @page { size: A4; margin: 12mm 12mm 14mm 12mm; }
       * { box-sizing: border-box; }
-      body { margin: 0; padding: 0; color: #111; background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
+      body { margin: 0; padding: 0; color: #111; background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 14px; }
       .sheet { width: 210mm; min-height: 297mm; padding: 10mm; margin: 0 auto; }
       .topbar { display: grid; grid-template-columns: 1fr 1.25fr; gap: 0; align-items: stretch; margin-bottom: 0; border: 1px solid #111; border-top: 0; }
       .logo { min-height: 42px; display: flex; align-items: center; }
@@ -959,13 +959,13 @@ export function buildWholesaleFacturaHtml(params: {
       .head-left { border-right: 1px solid #111; padding: 10px 10px 8px; }
       .head-right { padding: 8px 10px; }
       .issuer-title { font-size: inherit; font-weight: inherit; margin: 2px 0 0; letter-spacing: 0; }
-      .mini { font-size: 10px; }
+      .mini { font-size: 12px; }
       .fact-row { display: grid; grid-template-columns: 72px 1fr; align-items: stretch; gap: 10px; margin-bottom: 8px; }
       .letter-box { border: 1px solid #111; text-align: center; display: flex; flex-direction: column; justify-content: center; min-height: 74px; }
       .letter-box .l { font-size: 44px; line-height: 1; font-weight: 700; }
       .letter-box .c { font-size: 20px; font-weight: 700; margin-top: -4px; }
       .fact-title { font-size: 40px; font-weight: 700; letter-spacing: 0.02em; line-height: 1; margin-top: 4px; }
-      .fact-meta { margin-top: 10px; font-size: 13px; }
+      .fact-meta { margin-top: 10px; font-size: 15px; }
       .fact-meta div { margin-bottom: 4px; }
       .hr { border-top: 1px solid #111; margin: 0 0 0; }
       .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -987,15 +987,15 @@ export function buildWholesaleFacturaHtml(params: {
       .col-code, .col-despacho { white-space: nowrap; }
       .col-r { text-align: right; }
       .col-desc { white-space: normal; word-break: break-word; overflow-wrap: anywhere; }
-      .summary { display: grid; grid-template-columns: 96px 220px; justify-content: end; align-items: start; gap: 10px; margin-top: 10px; }
+      .summary { display: grid; grid-template-columns: 96px 280px; justify-content: end; align-items: start; gap: 10px; margin-top: 10px; }
       .totals { border: 1px solid #111; }
       .totals .r { display: flex; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid #ddd; }
       .totals .r:last-child { border-bottom: none; font-weight: 700; }
-      .footer { margin-top: 12px; font-size: 10px; }
+      .footer { margin-top: 12px; font-size: 12px; }
       .bottom-block { margin-top: auto; }
       .qr-wrap { border: 1px solid #111; padding: 3px; text-align: center; }
       .qr-wrap img { width: 84px; height: 84px; display: block; margin: 0 auto; }
-      .qr-label { margin-top: 3px; font-size: 8px; line-height: 1.1; }
+      .qr-label { margin-top: 3px; font-size: 11px; line-height: 1.2; }
       .no-print { margin-top: 14px; display: flex; gap: 10px; }
       ${WHOLESALE_PRINT_PAGINATION_CSS}
     </style></head><body>
@@ -1018,7 +1018,8 @@ export function buildWholesaleFacturaHtml(params: {
               <div>
                 <div class="fact-title">FACTURA</div>
                 <div class="fact-meta">
-                  <div><strong>Punto de Venta:</strong> ${ptoVta} &nbsp;&nbsp; <strong>Comp. Nro:</strong> ${compNro}</div>
+                  <div><strong>Punto de Venta:</strong> ${ptoVta}</div>
+                  <div><strong>Comp. Nro:</strong> ${compNro}</div>
                   <div><strong>Fecha de Emisión:</strong> ${fechaComprobante}</div>
                 </div>
               </div>
@@ -1053,12 +1054,12 @@ export function buildWholesaleFacturaHtml(params: {
         <table>
           <thead>
             <tr>
-              <th class="col-c" style="width: 52px;">CANT.</th>
+              <th class="col-c" style="width: 64px;">CANT.</th>
               <th class="col-c" style="width: 110px;">CÓDIGO</th>
               <th>DESCRIPCIÓN</th>
               <th class="col-c" style="width: 125px;">Nº DESPACHO</th>
-              <th class="col-r" style="width: 88px;">P. UNITARIO</th>
-              <th class="col-r" style="width: 92px;">IMPORTE</th>
+              <th class="col-r" style="width: 108px;">P. UNITARIO</th>
+              <th class="col-r" style="width: 108px;">IMPORTE</th>
             </tr>
           </thead>
           <tbody>
@@ -1082,7 +1083,7 @@ export function buildWholesaleFacturaHtml(params: {
                   : esExport
                     ? `<div class="r"><span>Subtotal</span><span>$${formatMoneyAr(subtotalBruto)}</span></div>`
                     : `<div class="r"><span>Subtotal</span><span>$${formatMoneyAr(subtotalBruto)}</span></div>
-              <div class="r" style="font-size:9px;border-bottom:none;padding-top:2px;"><span class="muted">IVA incluido en el precio</span><span></span></div>`
+              <div class="r" style="font-size:12px;border-bottom:none;padding-top:2px;"><span class="muted">IVA incluido en el precio</span><span></span></div>`
               }
               ${(agipRetPer > 0 || agipAlicuota > 0) ? `<div class="r"><span>Percepciones IIBB (${agipAlicuota.toFixed(2)}%)</span><span>$${formatMoneyAr(agipRetPer)}</span></div>` : ''}
               <div class="r"><span>Total</span><span>$${formatMoneyAr(total)}</span></div>
@@ -1246,7 +1247,7 @@ export function buildWholesaleCreditNoteHtml(params: {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Nota de Crédito ${nroNota}</title><!-- lupohub-print-nc-v4 --><style>
       @page { size: A4; margin: 12mm 12mm 14mm 12mm; }
       * { box-sizing: border-box; }
-      body { margin: 0; padding: 0; color: #111; background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
+      body { margin: 0; padding: 0; color: #111; background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 14px; }
       .sheet { width: 210mm; min-height: 297mm; padding: 10mm; margin: 0 auto; }
       .topbar { display: grid; grid-template-columns: 1fr 1.25fr; gap: 0; align-items: stretch; margin-bottom: 0; border: 1px solid #111; border-top: 0; }
       .logo { min-height: 42px; display: flex; align-items: center; }
@@ -1255,13 +1256,13 @@ export function buildWholesaleCreditNoteHtml(params: {
       .head-left { border-right: 1px solid #111; padding: 10px 10px 8px; }
       .head-right { padding: 8px 10px; }
       .issuer-title { font-size: inherit; font-weight: inherit; margin: 2px 0 0; letter-spacing: 0; }
-      .mini { font-size: 10px; }
+      .mini { font-size: 12px; }
       .fact-row { display: grid; grid-template-columns: 72px 1fr; align-items: stretch; gap: 10px; margin-bottom: 8px; }
       .letter-box { border: 1px solid #111; text-align: center; display: flex; flex-direction: column; justify-content: center; min-height: 74px; }
       .letter-box .l { font-size: 44px; line-height: 1; font-weight: 700; }
       .letter-box .c { font-size: 20px; font-weight: 700; margin-top: -4px; }
       .fact-title { font-size: 30px; font-weight: 700; letter-spacing: 0.02em; line-height: 1; margin-top: 6px; }
-      .fact-meta { margin-top: 10px; font-size: 13px; }
+      .fact-meta { margin-top: 10px; font-size: 15px; }
       .fact-meta div { margin-bottom: 4px; }
       .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
       .block { padding: 8px 10px; border: 1px solid #111; min-height: 58px; }
@@ -1277,11 +1278,11 @@ export function buildWholesaleCreditNoteHtml(params: {
       .col-code, .col-despacho { white-space: nowrap; }
       .col-desc { white-space: normal; word-break: break-word; overflow-wrap: anywhere; }
       .col-r { text-align: right; }
-      .summary { display: grid; grid-template-columns: 1fr 220px; justify-content: end; align-items: start; gap: 10px; margin-top: 10px; }
+      .summary { display: grid; grid-template-columns: 1fr 280px; justify-content: end; align-items: start; gap: 10px; margin-top: 10px; }
       .totals { border: 1px solid #111; }
       .totals .r { display: flex; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid #ddd; }
       .totals .r:last-child { border-bottom: none; font-weight: 700; }
-      .footer { margin-top: 12px; font-size: 10px; }
+      .footer { margin-top: 12px; font-size: 12px; }
       .bottom-block { margin-top: auto; }
       .no-print { margin-top: 14px; display: flex; gap: 10px; }
       ${WHOLESALE_PRINT_PAGINATION_CSS}
@@ -1304,7 +1305,8 @@ export function buildWholesaleCreditNoteHtml(params: {
               <div>
                 <div class="fact-title">NOTA DE CRÉDITO</div>
                 <div class="fact-meta">
-                  <div><strong>Punto de Venta:</strong> ${ptoVtaNc} &nbsp;&nbsp; <strong>Comp. Nro:</strong> ${compNroNc}</div>
+                  <div><strong>Punto de Venta:</strong> ${ptoVtaNc}</div>
+                  <div><strong>Comp. Nro:</strong> ${compNroNc}</div>
                   <div><strong>Fecha de Emisión:</strong> ${fechaNota}</div>
                   <div><strong>Alcance:</strong> ${scopeLabel}</div>
                 </div>
@@ -1339,12 +1341,12 @@ export function buildWholesaleCreditNoteHtml(params: {
         <table>
           <thead>
             <tr>
-              <th class="col-c" style="width: 52px;">CANT.</th>
+              <th class="col-c" style="width: 64px;">CANT.</th>
               <th class="col-c" style="width: 110px;">CÓDIGO</th>
               <th>DESCRIPCIÓN</th>
               <th class="col-c" style="width: 125px;">Nº DESPACHO</th>
-              <th class="col-r" style="width: 88px;">P. UNITARIO</th>
-              <th class="col-r" style="width: 92px;">IMPORTE</th>
+              <th class="col-r" style="width: 108px;">P. UNITARIO</th>
+              <th class="col-r" style="width: 108px;">IMPORTE</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
@@ -1359,7 +1361,7 @@ export function buildWholesaleCreditNoteHtml(params: {
                   ? `<div class="r"><span>Base imponible</span><span>$${formatMoneyAr(netoNc)}</span></div>
               <div class="r"><span>IVA 21%</span><span>$${formatMoneyAr(ivaNc)}</span></div>`
                   : `<div class="r"><span>Subtotal</span><span>$${formatMoneyAr(Math.round((netoNc + ivaNc) * 100) / 100)}</span></div>
-              <div class="r" style="font-size:9px;border-bottom:none;padding-top:2px;"><span class="muted">IVA incluido en el precio</span><span></span></div>`
+              <div class="r" style="font-size:12px;border-bottom:none;padding-top:2px;"><span class="muted">IVA incluido en el precio</span><span></span></div>`
               }
               ${iibbRowHtml}
               <div class="r"><span>Total NC</span><span>$${formatMoneyAr(totalComprobanteNc)}</span></div>
@@ -1510,7 +1512,7 @@ export function buildWholesaleDebitNoteHtml(params: {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Nota de Débito ${nroNota}</title><!-- lupohub-print-nd-v1 --><style>
       @page { size: A4; margin: 12mm 12mm 14mm 12mm; }
       * { box-sizing: border-box; }
-      body { margin: 0; padding: 0; color: #111; background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
+      body { margin: 0; padding: 0; color: #111; background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 14px; }
       .sheet { width: 210mm; min-height: 297mm; padding: 10mm; margin: 0 auto; }
       .topbar { display: grid; grid-template-columns: 1fr 1.25fr; gap: 0; align-items: stretch; margin-bottom: 0; border: 1px solid #111; border-top: 0; }
       .logo { min-height: 42px; display: flex; align-items: center; }
@@ -1519,13 +1521,13 @@ export function buildWholesaleDebitNoteHtml(params: {
       .head-left { border-right: 1px solid #111; padding: 10px 10px 8px; }
       .head-right { padding: 8px 10px; }
       .issuer-title { font-size: inherit; font-weight: inherit; margin: 2px 0 0; letter-spacing: 0; }
-      .mini { font-size: 10px; }
+      .mini { font-size: 12px; }
       .fact-row { display: grid; grid-template-columns: 72px 1fr; align-items: stretch; gap: 10px; margin-bottom: 8px; }
       .letter-box { border: 1px solid #111; text-align: center; display: flex; flex-direction: column; justify-content: center; min-height: 74px; }
       .letter-box .l { font-size: 44px; line-height: 1; font-weight: 700; }
       .letter-box .c { font-size: 20px; font-weight: 700; margin-top: -4px; }
       .fact-title { font-size: 30px; font-weight: 700; letter-spacing: 0.02em; line-height: 1; margin-top: 6px; }
-      .fact-meta { margin-top: 10px; font-size: 13px; }
+      .fact-meta { margin-top: 10px; font-size: 15px; }
       .fact-meta div { margin-bottom: 4px; }
       .boxrow { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 0; margin-top: 0; }
       .boxrow .block { min-height: 46px; border-top: 0; }
@@ -1539,11 +1541,11 @@ export function buildWholesaleDebitNoteHtml(params: {
       .col-code, .col-despacho { white-space: nowrap; }
       .col-desc { white-space: normal; word-break: break-word; overflow-wrap: anywhere; }
       .col-r { text-align: right; }
-      .summary { display: grid; grid-template-columns: 1fr 220px; justify-content: end; align-items: start; gap: 10px; margin-top: 10px; }
+      .summary { display: grid; grid-template-columns: 1fr 280px; justify-content: end; align-items: start; gap: 10px; margin-top: 10px; }
       .totals { border: 1px solid #111; }
       .totals .r { display: flex; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid #ddd; }
       .totals .r:last-child { border-bottom: none; font-weight: 700; }
-      .footer { margin-top: 12px; font-size: 10px; }
+      .footer { margin-top: 12px; font-size: 12px; }
       .bottom-block { margin-top: auto; }
       .no-print { margin-top: 14px; display: flex; gap: 10px; }
       ${WHOLESALE_PRINT_PAGINATION_CSS}
@@ -1566,7 +1568,8 @@ export function buildWholesaleDebitNoteHtml(params: {
               <div>
                 <div class="fact-title">NOTA DE DÉBITO</div>
                 <div class="fact-meta">
-                  <div><strong>Punto de Venta:</strong> ${ptoVtaNd} &nbsp;&nbsp; <strong>Comp. Nro:</strong> ${compNroNd}</div>
+                  <div><strong>Punto de Venta:</strong> ${ptoVtaNd}</div>
+                  <div><strong>Comp. Nro:</strong> ${compNroNd}</div>
                   <div><strong>Fecha de Emisión:</strong> ${fechaNota}</div>
                   <div><strong>Alcance:</strong> ${scopeLabel}</div>
                 </div>
@@ -1595,12 +1598,12 @@ export function buildWholesaleDebitNoteHtml(params: {
         <table>
           <thead>
             <tr>
-              <th class="col-c" style="width: 52px;">CANT.</th>
+              <th class="col-c" style="width: 64px;">CANT.</th>
               <th class="col-c" style="width: 110px;">CÓDIGO</th>
               <th>DESCRIPCIÓN</th>
               <th class="col-c" style="width: 125px;">Nº DESPACHO</th>
-              <th class="col-r" style="width: 88px;">P. UNITARIO</th>
-              <th class="col-r" style="width: 92px;">IMPORTE</th>
+              <th class="col-r" style="width: 108px;">P. UNITARIO</th>
+              <th class="col-r" style="width: 108px;">IMPORTE</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
@@ -1797,7 +1800,7 @@ export function buildExternalChannelFacturaHtml(params: {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Factura ${ptoVta}-${compNro}</title><style>
       @page { size: A4; margin: 12mm 12mm 14mm 12mm; }
       * { box-sizing: border-box; }
-      body { margin: 0; padding: 0; color: #111; background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 11px; }
+      body { margin: 0; padding: 0; color: #111; background: #fff; font-family: Arial, Helvetica, sans-serif; font-size: 14px; }
       .sheet { width: 210mm; min-height: 297mm; padding: 10mm; margin: 0 auto; }
       .topbar { display: grid; grid-template-columns: 1fr 1.25fr; gap: 0; align-items: stretch; margin-bottom: 0; border: 1px solid #111; border-top: 0; }
       .logo { min-height: 42px; display: flex; align-items: center; }
@@ -1807,9 +1810,9 @@ export function buildExternalChannelFacturaHtml(params: {
       .fact-row { display: grid; grid-template-columns: 72px 1fr; align-items: stretch; gap: 10px; margin-bottom: 8px; }
       .letter-box { border: 1px solid #111; text-align: center; display: flex; flex-direction: column; justify-content: center; min-height: 74px; }
       .letter-box .l { font-size: 44px; line-height: 1; font-weight: 700; }
-      .letter-box .mini { font-size: 10px; font-weight: 700; margin-top: -4px; }
+      .letter-box .mini { font-size: 12px; font-weight: 700; margin-top: -4px; }
       .fact-title { font-size: 40px; font-weight: 700; letter-spacing: 0.02em; line-height: 1; margin-top: 4px; }
-      .fact-meta { margin-top: 10px; font-size: 13px; }
+      .fact-meta { margin-top: 10px; font-size: 15px; }
       .boxrow { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 0; margin-top: 0; }
       .block { padding: 8px 10px; border: 1px solid #111; min-height: 58px; }
       .period-row { border: 1px solid #111; border-top: 0; padding: 6px 10px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; font-weight: 700; }
@@ -1821,15 +1824,15 @@ export function buildExternalChannelFacturaHtml(params: {
       .col-code { white-space: nowrap; }
       .col-r { text-align: right; }
       .col-desc { white-space: normal; word-break: break-word; }
-      .summary { display: grid; grid-template-columns: 96px 220px; justify-content: end; align-items: start; gap: 10px; margin-top: 10px; }
+      .summary { display: grid; grid-template-columns: 96px 280px; justify-content: end; align-items: start; gap: 10px; margin-top: 10px; }
       .totals { border: 1px solid #111; }
       .totals .r { display: flex; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid #ddd; }
       .totals .r:last-child { border-bottom: none; font-weight: 700; }
-      .footer { margin-top: 12px; font-size: 10px; }
+      .footer { margin-top: 12px; font-size: 12px; }
       .qr-wrap { border: 1px solid #111; padding: 3px; text-align: center; }
       .qr-wrap img { width: 84px; height: 84px; display: block; margin: 0 auto; }
-      .qr-label { margin-top: 3px; font-size: 8px; line-height: 1.1; }
-      .channel-ref { margin-top: 8px; font-size: 10px; color: #444; }
+      .qr-label { margin-top: 3px; font-size: 11px; line-height: 1.2; }
+      .channel-ref { margin-top: 8px; font-size: 12px; color: #444; }
       .no-print { margin-top: 14px; display: flex; gap: 10px; }
       ${WHOLESALE_PRINT_PAGINATION_CSS}
     </style></head><body>
@@ -1852,7 +1855,8 @@ export function buildExternalChannelFacturaHtml(params: {
               <div>
                 <div class="fact-title">FACTURA</div>
                 <div class="fact-meta">
-                  <div><strong>Punto de Venta:</strong> ${ptoVta} &nbsp;&nbsp; <strong>Comp. Nro:</strong> ${compNro}</div>
+                  <div><strong>Punto de Venta:</strong> ${ptoVta}</div>
+                  <div><strong>Comp. Nro:</strong> ${compNro}</div>
                   <div><strong>Fecha de Emisión:</strong> ${fechaComprobante}</div>
                 </div>
               </div>
@@ -1882,12 +1886,12 @@ export function buildExternalChannelFacturaHtml(params: {
         <table>
           <thead>
             <tr>
-              <th class="col-c" style="width: 52px;">CANT.</th>
+              <th class="col-c" style="width: 64px;">CANT.</th>
               <th class="col-code" style="width: 110px;">CÓDIGO</th>
               <th>DESCRIPCIÓN</th>
               <th class="col-c" style="width: 125px;">Nº DESPACHO</th>
-              <th class="col-r" style="width: 88px;">P. UNITARIO</th>
-              <th class="col-r" style="width: 92px;">IMPORTE</th>
+              <th class="col-r" style="width: 108px;">P. UNITARIO</th>
+              <th class="col-r" style="width: 108px;">IMPORTE</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
