@@ -1577,30 +1577,24 @@ export const updateOrder = async (req: any, res: any) => {
     };
     const sqlDate = toSqlDate(updated.date);
     const sellerId = updated.sellerId ?? null;
-    const paymentStatus =
-      (updated as any).paymentStatus === 'pagado' || (updated as any).paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
-    const noStockImpact = (updated as any).noStockImpact === true || (updated as any).no_stock_impact === 1 ? 1 : 0;
+    const before = await get('SELECT status, payment_status, no_stock_impact FROM orders WHERE id = ?', [id]);
+    if (!before) return res.status(404).json({ message: 'Pedido no encontrado' });
+    const has = (k: string) => Object.prototype.hasOwnProperty.call(updated, k);
+    // El editor de pedidos no siempre manda estos campos: si faltan se conservan los del pedido
+    // (antes se pisaban: el pedido volvía a "Confirmado", a "pendiente" de pago y perdía "sin impacto en stock").
+    if (!updated.status) (updated as any).status = before.status;
+    const paymentStatus = has('paymentStatus')
+      ? ((updated as any).paymentStatus === 'pagado' || (updated as any).paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente')
+      : (before.payment_status === 'pagado' ? 'pagado' : 'pendiente');
+    const noStockImpact =
+      has('noStockImpact') || has('no_stock_impact')
+        ? ((updated as any).noStockImpact === true || (updated as any).no_stock_impact === 1 ? 1 : 0)
+        : (Number(before.no_stock_impact) ? 1 : 0);
     const notesForSql = normalizeOrderNotes((updated as any).notes);
-    const invoiced = await get('SELECT id FROM invoices WHERE order_id = ? LIMIT 1', [id]);
-    const plBody = priceListFromBody(updated);
-    const priceListSnapshot = invoiced
-      ? null
-      : await resolveOrderPriceListSnapshot(plBody.raw, plBody.provided, String(updated.customerId || ''));
-    const before = await get('SELECT status FROM orders WHERE id = ?', [id]);
-    const previousStatusForStock: string | undefined =
-      before && String(before.status || '') !== String(updated.status || '') ? String(before.status || '') : undefined;
-    if (priceListSnapshot) {
-      await execute(
-        'UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ?, payment_status = ?, no_stock_impact = ?, notes = ?, price_list_id = ?, price_list_name = ? WHERE id = ?',
-        [updated.customerId, sellerId, sqlDate, updated.status, updated.total, paymentStatus, noStockImpact, notesForSql, priceListSnapshot.id, priceListSnapshot.name, id]
-      );
-    } else {
-      await execute(
-        'UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ?, payment_status = ?, no_stock_impact = ?, notes = ? WHERE id = ?',
-        [updated.customerId, sellerId, sqlDate, updated.status, updated.total, paymentStatus, noStockImpact, notesForSql, id]
-      );
-    }
-    await execute("DELETE FROM order_items WHERE order_id = ?", [id]);
+
+    // Resolver variantes ANTES de tocar los ítems: si alguna falla no se borra nada
+    // (antes se borraban los ítems y el pedido quedaba incompleto, y el stock se recalculaba con lo que quedó).
+    const resolvedVariantIds: string[] = [];
     for (const item of updated.items as any[]) {
       let variantId = item.variantId;
       if (!variantId && item.sku && item.colorCode && item.sizeCode) {
@@ -1618,6 +1612,46 @@ export const updateOrder = async (req: any, res: any) => {
       }
       if (!variantId) {
         return res.status(400).json({ message: "Falta variantId o sku+colorCode+sizeCode en item" });
+      }
+      resolvedVariantIds.push(String(variantId));
+    }
+    // Armado previo por variante: si el ítem llega sin `picked` (editor de pedidos), se conserva.
+    // Si se perdía, un pedido ya armado recalculaba el stock como si no se hubiera armado nada.
+    const prevPickedRows = (await query(
+      `SELECT variant_id, SUM(COALESCE(picked, 0)) AS picked FROM order_items WHERE order_id = ? GROUP BY variant_id`,
+      [id]
+    )) as any[];
+    const prevPicked = new Map<string, number>(
+      prevPickedRows.map((r) => [String(r.variant_id), Math.max(0, Math.floor(Number(r.picked) || 0))])
+    );
+
+    const invoiced = await get('SELECT id FROM invoices WHERE order_id = ? LIMIT 1', [id]);
+    const plBody = priceListFromBody(updated);
+    const priceListSnapshot = invoiced
+      ? null
+      : await resolveOrderPriceListSnapshot(plBody.raw, plBody.provided, String(updated.customerId || ''));
+    const previousStatusForStock: string | undefined =
+      before && String(before.status || '') !== String(updated.status || '') ? String(before.status || '') : undefined;
+    if (priceListSnapshot) {
+      await execute(
+        'UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ?, payment_status = ?, no_stock_impact = ?, notes = ?, price_list_id = ?, price_list_name = ? WHERE id = ?',
+        [updated.customerId, sellerId, sqlDate, updated.status, updated.total, paymentStatus, noStockImpact, notesForSql, priceListSnapshot.id, priceListSnapshot.name, id]
+      );
+    } else {
+      await execute(
+        'UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ?, payment_status = ?, no_stock_impact = ?, notes = ? WHERE id = ?',
+        [updated.customerId, sellerId, sqlDate, updated.status, updated.total, paymentStatus, noStockImpact, notesForSql, id]
+      );
+    }
+    await execute("DELETE FROM order_items WHERE order_id = ?", [id]);
+    for (let itemIdx = 0; itemIdx < (updated.items as any[]).length; itemIdx++) {
+      const item = (updated.items as any[])[itemIdx];
+      const variantId = resolvedVariantIds[itemIdx];
+      if (item.picked === undefined || item.picked === null) {
+        const left = prevPicked.get(variantId) ?? 0;
+        const take = Math.min(left, Math.max(0, Math.floor(Number(item.quantity) || 0)));
+        prevPicked.set(variantId, left - take);
+        item.picked = take;
       }
       const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
       const explicitDespachoId = await resolveDespachoIdForItem(item, variantId);

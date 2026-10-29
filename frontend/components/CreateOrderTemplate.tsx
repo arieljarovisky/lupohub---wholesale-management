@@ -1184,11 +1184,17 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       sellerId: initialOrder?.sellerId ?? duplicateFromOrder?.sellerId ?? sellerId ?? null,
       items: items.map(i => ({ ...i, productId: undefined })),
       total,
+      // Al editar se conserva el estado: volver a "Confirmado" a un pedido ya armado le cambiaba el stock.
       status: showroomSale
         ? OrderStatus.CONTROLLED
-        : (role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO)
-          ? OrderStatus.CONFIRMED
-          : OrderStatus.PENDING_ADMIN_CONFIRMATION,
+        : initialOrder?.status
+          ? initialOrder.status
+          : (role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO)
+            ? OrderStatus.CONFIRMED
+            : OrderStatus.PENDING_ADMIN_CONFIRMATION,
+      ...(initialOrder
+        ? { paymentStatus: initialOrder.paymentStatus, noStockImpact: initialOrder.noStockImpact }
+        : {}),
       date: orderDate,
       notes: orderNotes.trim() || undefined,
       priceListId: showPriceListSelector

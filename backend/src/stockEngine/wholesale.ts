@@ -233,11 +233,24 @@ export async function returnWholesaleUnits(
     const taken = Math.max(0, Number(row?.units) || 0);
     const give = Math.min(want, taken);
     if (!give) return { returned: 0 };
+    const alive = await q1(conn, `SELECT id FROM product_variants WHERE id = ?`, [variantId]);
+    if (!alive) return { returned: 0 };
+    // Se devuelve directo, sin recalcular el pedido: si el pedido había quedado corto de stock,
+    // recalcular acá intentaba tomar lo que faltaba y la nota de crédito terminaba DESCONTANDO stock.
+    await applyEntriesInTx(conn, [
+      {
+        variantId,
+        delta: give,
+        type: 'DEVOLUCION',
+        reference: RESTORE_REFERENCE.credit_note(orderId),
+        source: 'wholesale',
+        sourceId: orderId,
+      },
+    ]);
     await conn.query(
-      `UPDATE wholesale_order_stock SET returned_units = returned_units + ? WHERE order_id = ? AND variant_id = ?`,
-      [give, orderId, variantId]
+      `UPDATE wholesale_order_stock SET units = units - ?, returned_units = returned_units + ? WHERE order_id = ? AND variant_id = ?`,
+      [give, give, orderId, variantId]
     );
-    await reconcileLocked(conn, order, 'credit_note');
     return { returned: give };
   });
 }
