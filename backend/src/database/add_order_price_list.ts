@@ -47,7 +47,7 @@ export async function repairOrderPriceListsFromInvoicedPrices(): Promise<void> {
             pl.id AS list_id,
             pl.name AS list_name,
             pl.created_at AS list_created,
-            COUNT(*) AS lines,
+            COUNT(*) AS line_count,
             SUM(CASE
               WHEN pli.price IS NOT NULL AND ABS(oi.price_at_moment - pli.price) < 0.02 THEN 1
               ELSE 0
@@ -66,13 +66,13 @@ export async function repairOrderPriceListsFromInvoicedPrices(): Promise<void> {
     list_id: string;
     list_name: string;
     list_created: Date | string | null;
-    lines: number | string;
+    line_count: number | string;
     hits: number | string;
   }>;
 
   const baseRows = (await query(
     `SELECT o.id AS order_id,
-            COUNT(*) AS lines,
+            COUNT(*) AS line_count,
             SUM(CASE WHEN ABS(oi.price_at_moment - p.base_price) < 0.02 THEN 1 ELSE 0 END) AS hits
      FROM orders o
      INNER JOIN order_items oi ON oi.order_id = o.id AND oi.price_at_moment > 0
@@ -80,7 +80,7 @@ export async function repairOrderPriceListsFromInvoicedPrices(): Promise<void> {
      INNER JOIN product_colors pc ON pc.id = pv.product_color_id
      INNER JOIN products p ON p.id = pc.product_id
      GROUP BY o.id`
-  )) as Array<{ order_id: string; lines: number | string; hits: number | string }>;
+  )) as Array<{ order_id: string; line_count: number | string; hits: number | string }>;
   const baseByOrder = new Map(baseRows.map((r) => [String(r.order_id), r]));
 
   type Best = { id: string; name: string; hits: number; created: number };
@@ -88,7 +88,7 @@ export async function repairOrderPriceListsFromInvoicedPrices(): Promise<void> {
   const byOrder = new Map<string, Acc>();
 
   for (const row of scored) {
-    const lines = Number(row.lines) || 0;
+    const lines = Number(row.line_count) || 0;
     const hits = Number(row.hits) || 0;
     if (lines <= 0) continue;
     const orderId = String(row.order_id);
@@ -133,7 +133,7 @@ export async function repairOrderPriceListsFromInvoicedPrices(): Promise<void> {
     }
 
     const base = baseByOrder.get(orderId);
-    const baseLines = Number(base?.lines) || 0;
+    const baseLines = Number(base?.line_count) || 0;
     const baseRatio = baseLines > 0 ? Number(base?.hits || 0) / baseLines : 0;
     if (acc.storedId && !acc.best && baseRatio >= INVOICED_LIST_MATCH_RATIO) {
       await execute(`UPDATE orders SET price_list_id = NULL, price_list_name = NULL WHERE id = ?`, [orderId]);
