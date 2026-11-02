@@ -270,28 +270,46 @@ async function getItemLabelForWarning(item: any, variantId: string): Promise<str
 /** Estados en los que el pedido ya pasó por picking: neto AFIP y stock usan cantidad pickeada por línea. */
 const PICKING_DONE_STATUSES_AFIP = new Set(['Falta controlar', 'Controlado', 'Despachado']);
 
+/**
+ * Cantidad a facturar por línea.
+ * Tras picking se usa lo pickeado. Si ninguna línea tiene picking cargado, se factura lo pedido
+ * (pedidos que pasaron a control sin `picked`, o el armado se guardó en 0).
+ */
+function lineQtyForInvoice(
+  quantity: unknown,
+  picked: unknown,
+  usePicked: boolean,
+  pickedWasRecorded: boolean
+): number {
+  const q = Math.max(0, Number(quantity) || 0);
+  if (!usePicked || !pickedWasRecorded) return q;
+  const p = Math.max(0, Number(picked) || 0);
+  return Math.min(q, p);
+}
+
 /** Neto gravado según líneas; tras picking (control/despacho) alinea con lo pickeado para factura AFIP. */
 async function getOrderNetFromLineItems(orderId: string): Promise<number> {
   const meta = await get(
-    `SELECT COALESCE(o.no_stock_impact, 0) AS no_stock_impact, o.status
+    `SELECT COALESCE(o.no_stock_impact, 0) AS no_stock_impact, o.status, o.total
      FROM orders o WHERE o.id = ? LIMIT 1`,
     [orderId]
-  ) as { no_stock_impact?: number; status?: string } | undefined;
+  ) as { no_stock_impact?: number; status?: string; total?: string | number } | undefined;
   const usePicked =
     !Number(meta?.no_stock_impact) && PICKING_DONE_STATUSES_AFIP.has(String(meta?.status || ''));
   const rows = await query(
     `SELECT quantity, picked, price_at_moment FROM order_items WHERE order_id = ? ORDER BY id`,
     [orderId]
   ) as { quantity: number; picked: number | null; price_at_moment: string | number }[];
+  const pickedWasRecorded = rows.some((r) => (Number(r.picked) || 0) > 0);
   let sum = 0;
   for (const r of rows) {
-    const q = Number(r.quantity) || 0;
-    const p = Number(r.picked) || 0;
-    const lineQty = usePicked ? Math.min(q, Math.max(0, p)) : q;
+    const lineQty = lineQtyForInvoice(r.quantity, r.picked, usePicked, pickedWasRecorded);
     const price = Number(r.price_at_moment) || 0;
     sum += Math.round(lineQty * price * 100) / 100;
   }
-  return Math.round(sum * 100) / 100;
+  sum = Math.round(sum * 100) / 100;
+  if (sum > 0.005) return sum;
+  return Math.round((Number(meta?.total) || 0) * 100) / 100;
 }
 
 /** Líneas del pedido para Factura E (descripción + neto unitario en ARS). */
@@ -329,11 +347,10 @@ async function getOrderItemsForExport(orderId: string): Promise<
     color_name: string;
     size_code: string;
   }[];
+  const pickedWasRecorded = rows.some((r) => (Number(r.picked) || 0) > 0);
   const out: { description: string; quantity: number; unitPriceArs: number }[] = [];
   for (const r of rows) {
-    const q = Number(r.quantity) || 0;
-    const p = Number(r.picked) || 0;
-    const lineQty = usePicked ? Math.min(q, Math.max(0, p)) : q;
+    const lineQty = lineQtyForInvoice(r.quantity, r.picked, usePicked, pickedWasRecorded);
     if (lineQty <= 0) continue;
     const price = Math.round((Number(r.price_at_moment) || 0) * 100) / 100;
     const parts = [r.product_name, r.color_name, r.size_code, r.sku].filter(Boolean);

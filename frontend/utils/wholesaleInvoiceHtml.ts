@@ -378,7 +378,9 @@ export function orderNetoFromItemsForAfip(order: Order): number {
   for (const i of order.items) {
     s += lineNetoForCreditNoteItem(i, order, postPicking);
   }
-  return Math.round(s * 100) / 100;
+  const rounded = Math.round(s * 100) / 100;
+  if (rounded > 0.005) return rounded;
+  return Math.round((Number(order.total) || 0) * 100) / 100;
 }
 
 /** Cantidad y neto por línea para NC / AFIP: usa pickeado si hay; si no, cantidad pedida (pedidos ya facturados). */
