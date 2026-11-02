@@ -814,6 +814,22 @@ function facturaEmissionParts(createdAt?: string | null): { y: number; m: number
   return argentinaCalendarParts(createdAt) ?? argentinaCalendarParts(new Date().toISOString())!;
 }
 
+function formatDateShort(d: string): string {
+  const s = String(d).trim();
+  const compact = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (compact) {
+    const y = Number(compact[1]);
+    const m = Number(compact[2]);
+    const day = Number(compact[3]);
+    if (m >= 1 && m <= 12 && day >= 1 && day <= 31) {
+      return `${String(day).padStart(2, '0')} ${MESES_FACTURA[m - 1]} ${y}`;
+    }
+  }
+  const p = argentinaCalendarParts(s);
+  if (!p) return s;
+  return `${String(p.d).padStart(2, '0')} ${MESES_FACTURA[p.m - 1]} ${p.y}`;
+}
+
 function formatFacturaEmissionDate(createdAt?: string | null): string {
   const p = facturaEmissionParts(createdAt);
   return `${String(p.d).padStart(2, '0')} ${MESES_FACTURA[p.m - 1]} ${p.y}`;
