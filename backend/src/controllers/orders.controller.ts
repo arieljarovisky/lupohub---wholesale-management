@@ -26,6 +26,7 @@ import {
   syncOrderPaymentStatus,
 } from '../services/orderPaymentBalance.service';
 import { calcFobYield, lookupFobPrice, resolveFobPriceList } from '../utils/channelMarginUtils';
+import { nowMysqlArgentina, todayYmdArgentina } from '../utils/argentinaDate';
 
 /** Evita dos POST simultáneos al mismo pedido; el segundo espera el mismo resultado AFIP. */
 const emitFacturaInFlight = new Map<string, Promise<Record<string, unknown>>>();
@@ -2112,13 +2113,14 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
       return res.status(400).json({ message: 'El neto del pedido debe ser mayor a 0 para reemitir.' });
     }
 
+    const emissionYmd = todayYmdArgentina();
     const agip = await getAgipRetentionForOrder({
-      orderDate: orderRow.date,
+      orderDate: emissionYmd,
       customerCuit: customerRow.cuit,
       netAmount: totalForAfip
     });
     if (!agip || !(agip.amount > 0.005)) {
-      const orderPeriod = agipPeriodYyyymmFromOrderDate(orderRow.date);
+      const orderPeriod = agipPeriodYyyymmFromOrderDate(emissionYmd);
       return res.status(400).json({
         message:
           `No hay percepción IIBB calculable para reemitir (CUIT incompleto o sin alícuota en padrón AGIP${orderPeriod ? ` para ${orderPeriod}` : ''}). Cargá el padrón del mes o usá “Guardar IIBB” si solo querés actualizar el PDF sin nuevo CAE.`
@@ -2200,7 +2202,7 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
         forceCbteTipo
       );
 
-      const { nowMysqlArgentina } = await import('../utils/argentinaDate');
+      const emittedAt = nowMysqlArgentina();
       await execute(
         `UPDATE invoices SET cae = ?, cae_fch_vto = ?, punto_venta = ?, cbte_tipo = ?, cbte_desde = ?, cbte_hasta = ?, agip_alicuota = ?, agip_ret_per = ?, created_at = ?
          WHERE order_id = ?`,
@@ -2213,7 +2215,7 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
           faResult.cbteHasta,
           agip.alicuota,
           agip.amount,
-          nowMysqlArgentina(),
+          emittedAt,
           id
         ]
       );
@@ -2224,7 +2226,7 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
       await syncAllOrderPaymentStatusForCustomer(String(orderRow.customer_id));
 
       const padronHint =
-        agip.periodUsed && agipPeriodYyyymmFromOrderDate(orderRow.date) !== agip.periodUsed
+        agip.periodUsed && agipPeriodYyyymmFromOrderDate(emissionYmd) !== agip.periodUsed
           ? ` (padrón AGIP ${agip.periodUsed})`
           : '';
       res.status(201).json({
@@ -2251,7 +2253,8 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
           cbteDesde: faResult.cbteDesde,
           cbteHasta: faResult.cbteHasta,
           agipAlicuota: agip.alicuota,
-          agipRetPer: agip.amount
+          agipRetPer: agip.amount,
+          createdAt: emittedAt
         }
       });
     } catch (faErr: any) {
@@ -2411,11 +2414,12 @@ export const emitirFactura = async (req: any, res: any) => {
       }
     }
 
+    const emissionYmd = todayYmdArgentina();
     const agip =
       isFacturaE
         ? null
         : await getAgipRetentionForOrder({
-            orderDate: orderRow.date,
+            orderDate: emissionYmd,
             customerCuit: customerRow.cuit,
             netAmount: totalForAfip
           });
@@ -2505,10 +2509,11 @@ export const emitirFactura = async (req: any, res: any) => {
           throw Object.assign(new Error('Este pedido ya tiene una factura emitida'), { status: 409 });
         }
         const invoiceId = uuidv4();
+        const emittedAt = nowMysqlArgentina();
         await execute(
           `INSERT INTO invoices (id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta,
-                                 agip_alicuota, agip_ret_per, moneda_id, moneda_ctz, export_dst_cmp, export_incoterms, export_tipo_expo)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                 agip_alicuota, agip_ret_per, moneda_id, moneda_ctz, export_dst_cmp, export_incoterms, export_tipo_expo, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             invoiceId,
             id,
@@ -2524,7 +2529,8 @@ export const emitirFactura = async (req: any, res: any) => {
             result.monedaCtz ?? null,
             result.exportDstCmp ?? null,
             result.exportIncoterms ?? null,
-            result.exportTipoExpo ?? null
+            result.exportTipoExpo ?? null,
+            emittedAt
           ]
         );
         await execute('UPDATE orders SET total = ? WHERE id = ?', [
@@ -2544,6 +2550,7 @@ export const emitirFactura = async (req: any, res: any) => {
           cbteHasta: result.cbteHasta,
           agipAlicuota: isFacturaE ? 0 : agip?.alicuota ?? 0,
           agipRetPer: isFacturaE ? 0 : agip?.amount ?? 0,
+          createdAt: emittedAt,
           monedaId: result.monedaId,
           monedaCtz: result.monedaCtz,
           exportDstCmp: result.exportDstCmp,

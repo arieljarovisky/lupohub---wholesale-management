@@ -1421,7 +1421,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         cbteTipo,
         cbteDesde: 0,
         cbteHasta: 0,
-        createdAt: order.date,
+        createdAt: new Date().toISOString(),
         agipAlicuota: agipAlicuotaPreview,
         agipRetPer: agipRetPerPreview,
       } as any,
@@ -1444,6 +1444,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
             cbteHasta: Number(inv.cbteHasta),
             cbteTipo: Number(inv.cbteTipo),
             puntoVta: inv.puntoVta != null ? Number(inv.puntoVta) : undefined,
+            createdAt: (inv.createdAt as string | undefined) || new Date().toISOString(),
             agipAlicuota: Number(inv.agipAlicuota ?? 0),
             agipRetPer: Number(inv.agipRetPer ?? 0),
           });
@@ -1508,7 +1509,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
         cbteTipo,
         cbteDesde: 0,
         cbteHasta: 0,
-        createdAt: orderToEmitFactura.date,
+        createdAt: new Date().toISOString(),
         agipAlicuota: agipAlicuotaPreview,
         agipRetPer: agipRetPerPreview,
       } as any
@@ -3048,6 +3049,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                         cbteHasta: res.cbteHasta,
                         cbteTipo: res.cbteTipo,
                         puntoVta: res.puntoVta,
+                        createdAt: (res as any).createdAt || new Date().toISOString(),
                         agipAlicuota: Number((res as any).agipAlicuota || 0),
                         agipRetPer: Number((res as any).agipRetPer || 0)
                       } as any);

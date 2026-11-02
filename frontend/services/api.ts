@@ -1817,6 +1817,7 @@ export const api = {
     puntoVta?: number;
     agipAlicuota?: number;
     agipRetPer?: number;
+    createdAt?: string;
     monedaId?: string;
     monedaCtz?: number;
     exportDstCmp?: number;
