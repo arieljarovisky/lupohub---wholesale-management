@@ -536,9 +536,20 @@ const App: React.FC = () => {
 
   const handleUpdateOrderStatus = async (orderId: string, status: OrderStatus, pickedBy?: string) => {
      const previousOrders = [...orders];
+     const previous = previousOrders.find((o) => o.id === orderId);
      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status, ...(pickedBy ? { pickedBy } : {}), ...(status === OrderStatus.DISPATCHED ? { dispatchedAt: new Date().toISOString() } : {}) } : o));
      try {
        await api.updateOrderStatus(orderId, status, pickedBy);
+       if (
+         status === OrderStatus.CONFIRMED &&
+         (previous?.status === OrderStatus.PENDING_ADMIN_CONFIRMATION ||
+           previous?.status === OrderStatus.DRAFT)
+       ) {
+         showToast(
+           'success',
+           'Pedido confirmado. Para facturar AFIP: hacé picking o usá «Showroom» / «Emitir AFIP» en la tarjeta.'
+         );
+       }
      } catch (error) {
        setOrders(previousOrders);
        showToast('error', 'Error actualizando estado del pedido');

@@ -1184,14 +1184,24 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       sellerId: initialOrder?.sellerId ?? duplicateFromOrder?.sellerId ?? sellerId ?? null,
       items: items.map(i => ({ ...i, productId: undefined })),
       total,
-      // Al editar se conserva el estado: volver a "Confirmado" a un pedido ya armado le cambiaba el stock.
-      status: showroomSale
-        ? OrderStatus.CONTROLLED
-        : initialOrder?.status
-          ? initialOrder.status
-          : (role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO)
-            ? OrderStatus.CONFIRMED
-            : OrderStatus.PENDING_ADMIN_CONFIRMATION,
+      // Al editar se conserva el estado (salvo borrador / pendiente de admin: al confirmar pasan a Confirmado).
+      // Volver a "Confirmado" un pedido ya armado le cambiaba el stock.
+      status: (() => {
+        const canConfirmDirectly =
+          role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO;
+        if (showroomSale) return OrderStatus.CONTROLLED;
+        if (!initialOrder?.status) {
+          return canConfirmDirectly ? OrderStatus.CONFIRMED : OrderStatus.PENDING_ADMIN_CONFIRMATION;
+        }
+        if (
+          canConfirmDirectly &&
+          (initialOrder.status === OrderStatus.PENDING_ADMIN_CONFIRMATION ||
+            initialOrder.status === OrderStatus.DRAFT)
+        ) {
+          return OrderStatus.CONFIRMED;
+        }
+        return initialOrder.status;
+      })(),
       ...(initialOrder
         ? { paymentStatus: initialOrder.paymentStatus, noStockImpact: initialOrder.noStockImpact }
         : {}),

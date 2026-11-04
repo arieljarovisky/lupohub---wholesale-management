@@ -1539,20 +1539,29 @@ export const updateOrderStatus = async (req: any, res: any) => {
     const noStockImpact = !!currentOrder?.no_stock_impact;
     if (!previousStatus) return res.status(404).json({ message: 'Pedido no encontrado' });
 
-    const isAdmin = user?.role === 'ADMIN';
+    const canConfirmPending = ['ADMIN', 'WAREHOUSE', 'DEPOSITO'].includes(String(user?.role || ''));
     const requestedStatus = String(status || previousStatus);
     const nextStatus =
-      requestedStatus === 'Confirmado' && !isAdmin
+      requestedStatus === 'Confirmado' && !canConfirmPending
         ? 'Pendiente confirmación admin'
         : requestedStatus;
 
-    // Mientras esté pendiente de admin, solo puede cancelarse o confirmarse por ADMIN.
+    // Mientras esté pendiente de admin, solo puede cancelarse o confirmarse (admin/depósito).
     if (
       previousStatus === 'Pendiente confirmación admin' &&
       !['Pendiente confirmación admin', 'Confirmado', 'Cancelado'].includes(nextStatus)
     ) {
       return res.status(400).json({
         message: 'El pedido está pendiente de confirmación de admin.'
+      });
+    }
+    if (
+      previousStatus === 'Pendiente confirmación admin' &&
+      nextStatus === 'Confirmado' &&
+      !canConfirmPending
+    ) {
+      return res.status(403).json({
+        message: 'Solo admin o depósito pueden confirmar pedidos pendientes.'
       });
     }
 
@@ -1598,12 +1607,18 @@ export const updateOrder = async (req: any, res: any) => {
     const before = await get('SELECT status, payment_status, no_stock_impact FROM orders WHERE id = ?', [id]);
     if (!before) return res.status(404).json({ message: 'Pedido no encontrado' });
     const has = (k: string) => Object.prototype.hasOwnProperty.call(updated, k);
+    const isShowroomSale =
+      (updated as any).showroomSale === true || (updated as any).showroom_sale === true;
     // El editor de pedidos no siempre manda estos campos: si faltan se conservan los del pedido
     // (antes se pisaban: el pedido volvía a "Confirmado", a "pendiente" de pago y perdía "sin impacto en stock").
     if (!updated.status) (updated as any).status = before.status;
-    const paymentStatus = has('paymentStatus')
+    if (isShowroomSale) {
+      (updated as any).status = 'Controlado';
+    }
+    let paymentStatus = has('paymentStatus')
       ? ((updated as any).paymentStatus === 'pagado' || (updated as any).paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente')
       : (before.payment_status === 'pagado' ? 'pagado' : 'pendiente');
+    if (isShowroomSale) paymentStatus = 'pagado';
     const noStockImpact =
       has('noStockImpact') || has('no_stock_impact')
         ? ((updated as any).noStockImpact === true || (updated as any).no_stock_impact === 1 ? 1 : 0)
@@ -1665,7 +1680,9 @@ export const updateOrder = async (req: any, res: any) => {
     for (let itemIdx = 0; itemIdx < (updated.items as any[]).length; itemIdx++) {
       const item = (updated.items as any[])[itemIdx];
       const variantId = resolvedVariantIds[itemIdx];
-      if (item.picked === undefined || item.picked === null) {
+      if (isShowroomSale) {
+        item.picked = Math.max(0, Math.floor(Number(item.quantity) || 0));
+      } else if (item.picked === undefined || item.picked === null) {
         const left = prevPicked.get(variantId) ?? 0;
         const take = Math.min(left, Math.max(0, Math.floor(Number(item.quantity) || 0)));
         prevPicked.set(variantId, left - take);

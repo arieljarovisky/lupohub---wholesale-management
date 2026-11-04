@@ -601,9 +601,17 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     (statusesCancelables.includes(order.status) || order.status === 'Preparación') &&
     (role === Role.ADMIN || role === Role.SELLER || role === Role.CUSTOMER || role === Role.WAREHOUSE || role === Role.DEPOSITO);
 
-  /** Siguiente estado posible para el flujo Depósito (Preparando → Falta controlar → Controlado → Despachado). */
+  /** Siguiente estado posible: confirmar pendiente/borrador, luego flujo depósito. */
   const getNextStatusForOrder = (order: Order): OrderStatus | null => {
     const s = order.status;
+    const canConfirmPending =
+      role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO;
+    if (
+      canConfirmPending &&
+      (s === OrderStatus.PENDING_ADMIN_CONFIRMATION || s === OrderStatus.DRAFT)
+    ) {
+      return OrderStatus.CONFIRMED;
+    }
     if (s === OrderStatus.CONFIRMED) return OrderStatus.PREPARING;
     if (s === OrderStatus.PREPARING || s === 'Preparación') return OrderStatus.PENDING_CONTROL;
     if (s === OrderStatus.PENDING_CONTROL) return OrderStatus.CONTROLLED;
@@ -2396,10 +2404,10 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                           setEmitirFacturaTransporteId(pickInitialTransporteId(manualFacturaDataByOrder[order.id], optsEmit));
                           setShowEmitirFacturaModal(true);
                         }}
-                        disabled={!!emitiendoFacturaId || !listoAfip}
+                        disabled={!!emitiendoFacturaId}
                         title={
                           !listoAfip
-                            ? 'Completá picking o usá «Showroom» para venta de mostrador'
+                            ? 'Abrí el modal: completá picking o usá «Showroom» para dejar listo y emitir AFIP'
                             : `Emitir factura AFIP (Factura ${tipoFactura} según el cliente)`
                         }
                         icon={emitiendoFacturaId === order.id ? <Clock size={16} className="animate-pulse" /> : <Receipt size={16} />}
@@ -2782,9 +2790,17 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                           if (next) onUpdateStatus(order.id, next);
                         }}
                         className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-emerald-500 transition"
-                        title={`Pasar a ${getNextStatusForOrder(order)}`}
+                        title={
+                          order.status === OrderStatus.PENDING_ADMIN_CONFIRMATION ||
+                          order.status === OrderStatus.DRAFT
+                            ? 'Confirmar pedido del vendedor (pasa a Confirmado)'
+                            : `Pasar a ${getNextStatusForOrder(order)}`
+                        }
                      >
-                        → {getNextStatusForOrder(order)}
+                        {order.status === OrderStatus.PENDING_ADMIN_CONFIRMATION ||
+                        order.status === OrderStatus.DRAFT
+                          ? 'Confirmar'
+                          : `→ ${getNextStatusForOrder(order)}`}
                      </button>
                    )}
                    <OrderCardFiscalAmounts order={order} dimmed={ncTotalAnnulled} />
