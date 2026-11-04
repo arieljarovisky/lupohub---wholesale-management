@@ -4930,6 +4930,7 @@ export const api = {
     date: string;
     amount: number;
     notes?: string;
+    paymentMethod?: 'transferencia' | 'echeq' | 'efectivo' | 'deposito' | string | null;
   }): Promise<
     import('../types').Payment & {
       allocationNote?: string;
@@ -5057,6 +5058,14 @@ export const api = {
   },
   updatePaymentDate: async (paymentId: string, date: string): Promise<import('../types').Payment> => {
     return await request<any>(`/payments/${encodeURIComponent(paymentId)}/date`, 'PATCH', { date }) as any;
+  },
+  updatePaymentMethod: async (
+    paymentId: string,
+    paymentMethod: 'transferencia' | 'echeq' | 'efectivo' | 'deposito' | string
+  ): Promise<import('../types').Payment> => {
+    return await request<any>(`/payments/${encodeURIComponent(paymentId)}/payment-method`, 'PATCH', {
+      paymentMethod,
+    }) as any;
   },
   updateImportedPaymentDate: async (payload: { customerId: string; importedLineOrder: number; date: string }): Promise<{ ok: boolean; customerId: string; importedLineOrder: number; date: string }> => {
     return await request<any>(`/payments/imported/date`, 'PATCH', payload) as any;

@@ -4,6 +4,11 @@
  */
 import type { Customer, Payment } from '../types';
 import { formatMoneyAr } from './moneyFormat';
+import {
+  normalizePaymentMethod,
+  paymentMethodCargoBanco,
+  type PaymentMethodValue,
+} from './paymentMethods';
 import type { FacturaRemitente } from './wholesaleInvoiceHtml';
 
 function escapeHtmlText(s: string): string {
@@ -310,27 +315,36 @@ export function buildPaymentReceiptHtml(params: {
     })
     .join('');
 
-  // Detalle de cobro: sin medios de pago estructurados → una línea con el total (y notes si aporta).
-  const notesUpper = notes.toUpperCase();
+  // Detalle de cobro: cargo banco = transferencia | echeq | efectivo | deposito.
+  const methodFromPayment = normalizePaymentMethod(
+    (payment as Payment & { paymentMethod?: string }).paymentMethod
+  );
+  const methodFromNotes = normalizePaymentMethod(notes);
+  const method: PaymentMethodValue | undefined = methodFromPayment || methodFromNotes;
+
   let cobroCheque = '';
   let cobroFecha = fecha ? formatFechaDmy(String(payment.date || '')) : '';
   let cobroBanco = '';
   let cobroEfectivo = '';
   let cobroImporteLinea = amount;
 
-  if (/\bEFECTIVO\b/.test(notesUpper)) {
+  if (method === 'efectivo') {
     cobroEfectivo = formatMoneyAr(amount);
+    cobroBanco = paymentMethodCargoBanco(method);
     cobroImporteLinea = 0;
     cobroFecha = '';
-  } else if (/\bCHEQUE\b/.test(notesUpper)) {
-    cobroCheque = 'CHEQUE';
-    const bancoMatch = notes.match(/banco\s*[:\-]?\s*([^\n,;]+)/i);
-    if (bancoMatch) cobroBanco = bancoMatch[1].trim();
-  } else if (/\bTRANSF/.test(notesUpper) || /\bDEPOSITO\b|\bDEPÓSITO\b/.test(notesUpper)) {
-    cobroCheque = notesUpper.includes('DEP') ? 'DEPOSITO' : 'TRANSF.';
-    cobroBanco = notes.replace(/^.*?[:\-]\s*/i, '').slice(0, 28);
+  } else if (method === 'echeq') {
+    cobroCheque = 'ECHEQ';
+    cobroBanco = paymentMethodCargoBanco(method);
+  } else if (method === 'transferencia' || method === 'deposito') {
+    cobroBanco = paymentMethodCargoBanco(method);
   } else if (notes) {
-    cobroCheque = notes.slice(0, 18).toUpperCase();
+    // Fallback legacy: texto libre en observaciones
+    const notesUpper = notes.toUpperCase();
+    if (/\bCHEQUE\b/.test(notesUpper) && !/\bECHEQ\b/.test(notesUpper)) {
+      cobroCheque = 'CHEQUE';
+    }
+    cobroBanco = notes.slice(0, 28).toUpperCase();
   }
 
   const COBRO_ROWS = 7;
@@ -494,7 +508,7 @@ export function buildPaymentReceiptHtml(params: {
       <div class="line"><span>Dirección de Pago:</span><span class="uline">${clienteDir}</span></div>
       <div class="line"><span>Recibimos de:</span><span class="uline">${clienteNombre}</span></div>
     </div>
-    <div class="concept">En concepto de pago de la liquidación que se detalla.${notesEsc && !/\b(CHEQUE|EFECTIVO|TRANSF|DEPOSITO|DEPÓSITO)\b/i.test(notes) ? ` <span class="muted">(${notesEsc})</span>` : ''}</div>
+    <div class="concept">En concepto de pago de la liquidación que se detalla.${notesEsc && !normalizePaymentMethod(notes) ? ` <span class="muted">(${notesEsc})</span>` : ''}</div>
 
     <div class="cols">
       <div class="panel">

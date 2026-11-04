@@ -6,6 +6,7 @@ import {
   createPayment,
   importPaymentsFromExcel,
   updatePaymentDate,
+  updatePaymentMethod,
   updateImportedPaymentDate,
   getInvoicesOutstandingHandler,
   getOrdersOutstandingHandler,
@@ -28,6 +29,7 @@ router.post('/', createPayment as any);
 router.patch('/imported/date', updateImportedPaymentDate as any);
 router.patch('/:id/invoices', patchPaymentInvoices as any);
 router.patch('/:id/date', updatePaymentDate as any);
+router.patch('/:id/payment-method', updatePaymentMethod as any);
 router.delete('/:id', deletePayment as any);
 router.post('/import-excel', upload.array('files', 10), importPaymentsFromExcel as any);
 

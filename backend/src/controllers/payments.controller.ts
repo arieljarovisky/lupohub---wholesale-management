@@ -21,6 +21,23 @@ import {
   getPaymentAllocationIds,
 } from '../services/importedReceiptPayment.service';
 
+const PAYMENT_METHODS = ['transferencia', 'echeq', 'efectivo', 'deposito'] as const;
+type PaymentMethodValue = (typeof PAYMENT_METHODS)[number];
+
+function normalizePaymentMethod(v: unknown): PaymentMethodValue | null {
+  const raw = String(v ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  if (!raw) return null;
+  if (raw === 'transferencia' || raw === 'transfer' || raw === 'transf') return 'transferencia';
+  if (raw === 'echeq' || raw === 'e-cheq' || raw === 'e cheq' || raw === 'cheque electronico') return 'echeq';
+  if (raw === 'efectivo' || raw === 'cash') return 'efectivo';
+  if (raw === 'deposito' || raw === 'dep') return 'deposito';
+  return null;
+}
+
 function formatAllocationNote(
   alloc: PaymentAllocationResult,
   paymentAmount: number
@@ -221,7 +238,7 @@ export const listPayments = async (req: any, res: Response) => {
         ? `
       SELECT
         p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id,
-        p.receipt_number, p.date, p.amount, p.notes, p.created_at,
+        p.receipt_number, p.date, p.amount, p.notes, p.payment_method, p.created_at,
         c.business_name AS customer_business_name, c.name AS customer_name,
         u.name AS seller_name,
         i.punto_venta AS invoice_punto_venta, i.cbte_tipo AS invoice_cbte_tipo, i.cbte_desde AS invoice_cbte_desde,
@@ -237,7 +254,7 @@ export const listPayments = async (req: any, res: Response) => {
       ${paymentInvoiceRefsEnabled ? `LEFT JOIN payment_invoice_refs pir ON pir.payment_id = p.id` : ``}
       ${whereSql}
       GROUP BY p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id,
-               p.receipt_number, p.date, p.amount, p.notes, p.created_at,
+               p.receipt_number, p.date, p.amount, p.notes, p.payment_method, p.created_at,
                c.business_name, c.name, u.name,
                i.punto_venta, i.cbte_tipo, i.cbte_desde
       ORDER BY p.created_at DESC, p.date DESC
@@ -245,7 +262,7 @@ export const listPayments = async (req: any, res: Response) => {
         : `
       SELECT
         p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id,
-        p.receipt_number, p.date, p.amount, p.notes, p.created_at,
+        p.receipt_number, p.date, p.amount, p.notes, p.payment_method, p.created_at,
         c.business_name AS customer_business_name, c.name AS customer_name,
         u.name AS seller_name,
         i.punto_venta AS invoice_punto_venta, i.cbte_tipo AS invoice_cbte_tipo, i.cbte_desde AS invoice_cbte_desde,
@@ -285,6 +302,7 @@ export const listPayments = async (req: any, res: Response) => {
       date: r.date,
       amount: Number(r.amount) || 0,
       notes: r.notes ?? undefined,
+      paymentMethod: r.payment_method ?? undefined,
       createdAt: r.created_at,
       customerBusinessName: r.customer_business_name ?? r.customer_name ?? '',
       invoice: r.invoice_id ? {
@@ -658,17 +676,24 @@ export const createPayment = async (req: any, res: Response) => {
       date?: string;
       amount?: number;
       notes?: string;
+      paymentMethod?: string | null;
     };
 
     const customerId = (body.customerId || '').toString().trim();
     const receiptNumber = (body.receiptNumber || '').toString().trim();
     const date = (body.date || '').toString().trim();
     const amount = body.amount != null ? Number(body.amount) : 0;
+    const paymentMethod = normalizePaymentMethod(body.paymentMethod);
 
     if (!customerId) return res.status(400).json({ message: 'Falta customerId' });
     if (!receiptNumber) return res.status(400).json({ message: 'Falta número de recibo' });
     if (!date) return res.status(400).json({ message: 'Falta fecha' });
     if (!Number.isFinite(amount) || amount < 0) return res.status(400).json({ message: 'Monto inválido' });
+    if (body.paymentMethod != null && String(body.paymentMethod).trim() && !paymentMethod) {
+      return res.status(400).json({
+        message: 'Medio de cobro inválido. Usá: transferencia, echeq, efectivo o deposito',
+      });
+    }
 
     const cust = await get('SELECT id, seller_id FROM customers WHERE id = ?', [customerId]);
     if (!cust) return res.status(404).json({ message: 'Cliente no encontrado' });
@@ -734,7 +759,7 @@ export const createPayment = async (req: any, res: Response) => {
 
     const receiptStrict = normalizeReceiptNumberStrict(receiptNumber);
     const existing = await get(
-      `SELECT id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes, created_at
+      `SELECT id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes, payment_method, created_at
        FROM payments
        WHERE customer_id = ?
          AND ABS(amount - ?) < 0.01
@@ -763,6 +788,7 @@ export const createPayment = async (req: any, res: Response) => {
         date: row.date,
         amount: Number(row.amount) || 0,
         notes: row.notes ?? undefined,
+        paymentMethod: row.payment_method ?? undefined,
         createdAt: row.created_at
       });
     }
@@ -771,9 +797,9 @@ export const createPayment = async (req: any, res: Response) => {
     let allocationResult: PaymentAllocationResult | null = null;
     try {
       await execute(
-        `INSERT INTO payments (id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [id, customerId, sellerId, primaryOrderId, primaryInvoiceId, receiptNumber, date, amount, notes]
+        `INSERT INTO payments (id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes, payment_method)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, customerId, sellerId, primaryOrderId, primaryInvoiceId, receiptNumber, date, amount, notes, paymentMethod]
       );
       let resolvedOrderId = primaryOrderId;
       if (systemInvoiceIds.length > 0) {
@@ -808,7 +834,7 @@ export const createPayment = async (req: any, res: Response) => {
         e?.code === 'ER_DUP_ENTRY' || String(e?.message || '').includes('Duplicate entry');
       if (dup) {
         const rowDup = await get(
-          `SELECT id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes, created_at
+          `SELECT id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes, payment_method, created_at
            FROM payments
            WHERE customer_id = ?
              AND ABS(amount - ?) < 0.01
@@ -836,6 +862,7 @@ export const createPayment = async (req: any, res: Response) => {
             date: rowDup.date,
             amount: Number(rowDup.amount) || 0,
             notes: rowDup.notes ?? undefined,
+            paymentMethod: rowDup.payment_method ?? undefined,
             createdAt: rowDup.created_at
           });
         }
@@ -846,7 +873,7 @@ export const createPayment = async (req: any, res: Response) => {
     const row = await get(
       paymentInvoicesEnabled
         ? `SELECT
-         p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id, p.receipt_number, p.date, p.amount, p.notes, p.created_at,
+         p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id, p.receipt_number, p.date, p.amount, p.notes, p.payment_method, p.created_at,
          GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids,
          ${paymentOrdersEnabled ? `GROUP_CONCAT(DISTINCT po.order_id) AS order_ids` : `NULL AS order_ids`},
          ${paymentInvoiceRefsEnabled ? `GROUP_CONCAT(DISTINCT pir.invoice_ref) AS invoice_refs` : `NULL AS invoice_refs`}
@@ -855,9 +882,9 @@ export const createPayment = async (req: any, res: Response) => {
        ${paymentOrdersEnabled ? `LEFT JOIN payment_orders po ON po.payment_id = p.id` : ``}
        ${paymentInvoiceRefsEnabled ? `LEFT JOIN payment_invoice_refs pir ON pir.payment_id = p.id` : ``}
        WHERE p.id = ?
-       GROUP BY p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id, p.receipt_number, p.date, p.amount, p.notes, p.created_at`
+       GROUP BY p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id, p.receipt_number, p.date, p.amount, p.notes, p.payment_method, p.created_at`
         : `SELECT
-         p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id, p.receipt_number, p.date, p.amount, p.notes, p.created_at,
+         p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id, p.receipt_number, p.date, p.amount, p.notes, p.payment_method, p.created_at,
          NULL AS invoice_ids,
          ${paymentInvoiceRefsEnabled ? `(SELECT GROUP_CONCAT(DISTINCT pir.invoice_ref) FROM payment_invoice_refs pir WHERE pir.payment_id = p.id) AS invoice_refs` : `NULL AS invoice_refs`}
        FROM payments p
@@ -892,6 +919,7 @@ export const createPayment = async (req: any, res: Response) => {
       date: row.date,
       amount: Number(row.amount) || 0,
       notes: row.notes ?? undefined,
+      paymentMethod: row.payment_method ?? undefined,
       createdAt: row.created_at,
       allocationNote,
       invoiceAllocations: allocationResult?.invoiceAllocations ?? [],
@@ -1085,7 +1113,7 @@ export const patchPaymentInvoices = async (req: any, res: Response) => {
     const row = (await get(
       `SELECT
          p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id,
-         p.receipt_number, p.date, p.amount, p.notes, p.created_at,
+         p.receipt_number, p.date, p.amount, p.notes, p.payment_method, p.created_at,
          GROUP_CONCAT(DISTINCT pi.invoice_id) AS invoice_ids,
          ${paymentOrdersEnabled ? `GROUP_CONCAT(DISTINCT po.order_id) AS order_ids` : `NULL AS order_ids`},
          ${paymentInvoiceRefsEnabled ? `GROUP_CONCAT(DISTINCT pir.invoice_ref) AS invoice_refs` : `NULL AS invoice_refs`}
@@ -1095,7 +1123,7 @@ export const patchPaymentInvoices = async (req: any, res: Response) => {
        ${paymentInvoiceRefsEnabled ? `LEFT JOIN payment_invoice_refs pir ON pir.payment_id = p.id` : ``}
        WHERE p.id = ?
        GROUP BY p.id, p.customer_id, p.seller_id, p.order_id, p.invoice_id,
-         p.receipt_number, p.date, p.amount, p.notes, p.created_at`,
+         p.receipt_number, p.date, p.amount, p.notes, p.payment_method, p.created_at`,
       [paymentId]
     )) as any;
 
@@ -1124,6 +1152,7 @@ export const patchPaymentInvoices = async (req: any, res: Response) => {
       date: row.date,
       amount: Number(row.amount) || 0,
       notes: row.notes ?? undefined,
+      paymentMethod: row.payment_method ?? undefined,
       allocationNote,
       invoiceAllocations: result.invoiceAllocations,
       orderAllocations: result.orderAllocations
@@ -1211,7 +1240,7 @@ export const updatePaymentDate = async (req: any, res: Response) => {
     }
 
     const updated = await get(
-      `SELECT id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes, created_at
+      `SELECT id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes, payment_method, created_at
        FROM payments
        WHERE id = ?`,
       [paymentId]
@@ -1228,11 +1257,66 @@ export const updatePaymentDate = async (req: any, res: Response) => {
       date: updated.date,
       amount: Number(updated.amount) || 0,
       notes: updated.notes ?? undefined,
+      paymentMethod: updated.payment_method ?? undefined,
       createdAt: updated.created_at
     });
   } catch (e: any) {
     console.error('updatePaymentDate:', e);
     return res.status(500).json({ message: 'Error actualizando fecha del recibo', detail: e?.message });
+  }
+};
+
+/** Actualiza el medio de cobro (cargo banco) de un recibo del sistema. */
+export const updatePaymentMethod = async (req: any, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user || !canManagePayments(user.role)) {
+      return res.status(403).json({ message: 'No autorizado' });
+    }
+    if (user.role === 'SELLER') {
+      return res.status(403).json({ message: 'Solo administración puede editar el medio de cobro' });
+    }
+
+    const paymentId = String(req.params.id || '').trim();
+    const paymentMethod = normalizePaymentMethod(req.body?.paymentMethod);
+    if (!paymentId) return res.status(400).json({ message: 'Falta id de recibo' });
+    if (!paymentMethod) {
+      return res.status(400).json({
+        message: 'Medio de cobro inválido. Usá: transferencia, echeq, efectivo o deposito',
+      });
+    }
+
+    const row = await get(
+      `SELECT id, customer_id FROM payments WHERE id = ? LIMIT 1`,
+      [paymentId]
+    );
+    if (!row) return res.status(404).json({ message: 'Recibo no encontrado' });
+
+    await execute(`UPDATE payments SET payment_method = ? WHERE id = ?`, [paymentMethod, paymentId]);
+
+    const updated = await get(
+      `SELECT id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes, payment_method, created_at
+       FROM payments WHERE id = ?`,
+      [paymentId]
+    );
+
+    return res.json({
+      id: updated.id,
+      customerId: updated.customer_id,
+      sellerId: updated.seller_id ?? undefined,
+      orderId: updated.order_id ?? undefined,
+      invoiceId: updated.invoice_id ?? undefined,
+      invoiceIds: updated.invoice_id ? [updated.invoice_id] : [],
+      receiptNumber: updated.receipt_number,
+      date: updated.date,
+      amount: Number(updated.amount) || 0,
+      notes: updated.notes ?? undefined,
+      paymentMethod: updated.payment_method ?? undefined,
+      createdAt: updated.created_at
+    });
+  } catch (e: any) {
+    console.error('updatePaymentMethod:', e);
+    return res.status(500).json({ message: 'Error actualizando medio de cobro', detail: e?.message });
   }
 };
 

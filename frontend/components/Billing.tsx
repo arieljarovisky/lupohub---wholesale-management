@@ -9,6 +9,13 @@ import {
   type ManualFacturaFields,
 } from '../utils/wholesaleInvoiceHtml';
 import { buildPaymentReceiptHtml } from '../utils/paymentReceiptHtml';
+import {
+  PAYMENT_METHODS,
+  isPaymentMethod,
+  normalizePaymentMethod,
+  paymentMethodLabel,
+  type PaymentMethodValue,
+} from '../utils/paymentMethods';
 import { Customer, Order, Payment, Product, Role, User } from '../types';
 import EmitDebitNoteModal from './EmitDebitNoteModal';
 import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2, Percent, RefreshCcw, FileMinus, ExternalLink, Printer, MoreHorizontal, ChevronDown, Download, Upload, Wallet, FilePlus, FileText, Pencil, Trash2 } from 'lucide-react';
@@ -94,6 +101,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [paySellerId, setPaySellerId] = useState<string>('');
   const [payAmount, setPayAmount] = useState<string>('');
   const [payNotes, setPayNotes] = useState<string>('');
+  const [payMethod, setPayMethod] = useState<PaymentMethodValue | ''>('');
   const [paySubmitting, setPaySubmitting] = useState(false);
   const [invoiceOutstanding, setInvoiceOutstanding] = useState<Record<string, number>>({});
   const [payAllocPreview, setPayAllocPreview] = useState<Awaited<
@@ -571,6 +579,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     setPaySellerId('');
     setPayAmount('');
     setPayNotes('');
+    setPayMethod('');
     setCreatePedidoOptions([]);
     setShowPaymentModal(true);
   };
@@ -840,7 +849,35 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     });
   };
 
-  const handlePrintPayment = (p: Payment) => {
+  const handlePrintPayment = async (p: Payment) => {
+    let method = normalizePaymentMethod(p.paymentMethod);
+    if (!method) {
+      const raw = window.prompt(
+        'Medio de cobro (cargo banco):\ntransferencia | echeq | efectivo | deposito',
+        'transferencia'
+      );
+      if (raw == null) return;
+      method = normalizePaymentMethod(raw);
+      if (!method) {
+        showToast('error', 'Medio inválido. Usá: transferencia, echeq, efectivo o deposito');
+        return;
+      }
+      const canPersist =
+        !isSeller &&
+        p.source !== 'imported' &&
+        !String(p.id || '').startsWith('mm-');
+      if (canPersist) {
+        try {
+          await api.updatePaymentMethod(p.id, method);
+          setPayments((prev) =>
+            prev.map((row) => (row.id === p.id ? { ...row, paymentMethod: method } : row))
+          );
+        } catch {
+          /* igual imprimimos con el medio elegido */
+        }
+      }
+    }
+
     const customer = customers.find((c) => c.id === p.customerId);
     const invoiceLinks =
       Array.isArray(p.invoiceLinks) && p.invoiceLinks.length > 0
@@ -866,7 +903,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
             amountApplied: 0,
             orderOutstanding: NaN,
           }));
-    const paymentForPrint: Payment = { ...p, invoiceLinks, orderLinks };
+    const paymentForPrint: Payment = { ...p, invoiceLinks, orderLinks, paymentMethod: method };
     const html = buildPaymentReceiptHtml({
       payment: paymentForPrint,
       customer,
@@ -2086,6 +2123,12 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                         Recibo <span className="font-mono text-slate-300">{p.receiptNumber}</span>
                         <span className="text-slate-600"> · </span>
                         {formatDate(p.date)}
+                        {paymentMethodLabel(p.paymentMethod) ? (
+                          <>
+                            <span className="text-slate-600"> · </span>
+                            <span className="text-sky-300/90">{paymentMethodLabel(p.paymentMethod)}</span>
+                          </>
+                        ) : null}
                         {p.sellerName ? (
                           <>
                             <span className="text-slate-600"> · </span>
@@ -2548,6 +2591,22 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                     </div>
                   </div>
                   <div>
+                    <label className="block text-xs font-black text-slate-500 uppercase mb-1">Cargo banco / medio de cobro</label>
+                    <select
+                      value={payMethod}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setPayMethod(isPaymentMethod(v) ? v : '');
+                      }}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none"
+                    >
+                      <option value="">Seleccionar…</option>
+                      {PAYMENT_METHODS.map((m) => (
+                        <option key={m.value} value={m.value}>{m.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
                     <label className="block text-xs font-black text-slate-500 uppercase mb-1">Observaciones</label>
                     <textarea value={payNotes} onChange={(e) => setPayNotes(e.target.value)} rows={3} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none resize-y" />
                   </div>
@@ -2596,12 +2655,14 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                     if (!payDate) { showToast('error', 'Falta fecha'); return; }
                     if (!payCustomerId || payCustomerId === 'ALL') { showToast('error', 'Seleccioná un cliente'); return; }
                     if (Number.isNaN(amount) || amount <= 0) { showToast('error', 'Importe inválido (debe ser mayor a 0)'); return; }
+                    if (!payMethod) { showToast('error', 'Seleccioná el medio de cobro (cargo banco)'); return; }
                     const created = await api.createPayment({
                       customerId: payCustomerId,
                       receiptNumber: payReceipt.trim(),
                       date: payDate,
                       amount,
                       notes: payNotes?.trim() || undefined,
+                      paymentMethod: payMethod,
                       sellerId: paySellerId || null,
                       invoiceId: payInvoiceIds[0] || null,
                       invoiceIds: payInvoiceIds,

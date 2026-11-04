@@ -401,6 +401,8 @@ export interface Payment {
   receiptNumber: string;
   date: string; // YYYY-MM-DD
   amount: number;
+  /** Cargo banco: transferencia | echeq | efectivo | deposito */
+  paymentMethod?: 'transferencia' | 'echeq' | 'efectivo' | 'deposito' | string;
   notes?: string;
   createdAt?: string;
   invoice?: { puntoVta?: number; cbteTipo?: number; cbteDesde?: number };
