@@ -365,10 +365,10 @@ const LinkVariantModal: React.FC<LinkVariantModalProps> = ({ variant, onClose, o
       showToast(
         'success',
         platform === 'both'
-          ? 'Variante desvinculada de TN y ML'
+          ? 'Variante desvinculada de TN y ML. Stock externo en 0.'
           : platform === 'tiendanube'
-            ? 'Variante desvinculada de TN'
-            : 'Variante desvinculada de ML'
+            ? 'Variante desvinculada de TN. Stock TN en 0.'
+            : 'Variante desvinculada de ML. Stock ML en 0.'
       );
       onSaved?.({ variantId: variant.id });
       onClose();

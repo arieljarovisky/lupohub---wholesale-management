@@ -1556,7 +1556,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
         });
         return next;
       });
-      showToast('success', `Artículo desvinculado de ${label}.`);
+      showToast('success', `Artículo desvinculado de ${label}. Stock externo puesto en 0.`);
       onImportComplete?.();
       void loadArticle();
     } catch (e: any) {
@@ -1624,7 +1624,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       } catch {
         /* el conteo se refresca al abrir "Más" */
       }
-      showToast('success', `Variante desvinculada de ${label}.`);
+      showToast('success', `Variante desvinculada de ${label}. Stock externo puesto en 0.`);
       onImportComplete?.();
     } catch (e: any) {
       showToast('error', e?.message || 'Error al desvincular la variante');

@@ -32,8 +32,17 @@ export type VariantPushOutcome = {
   results: Array<{ target: SyncTarget; qty: number; result: PushResult }>;
 };
 
-async function pushTarget(target: SyncTarget, stock: number): Promise<{ qty: number; result: PushResult }> {
-  const qty = target.bundleId ? await bundleAvailableUnits(target.bundleId) : unitsForListing(stock, target.pack);
+async function pushTarget(
+  target: SyncTarget,
+  stock: number,
+  opts?: { forceStock?: number }
+): Promise<{ qty: number; result: PushResult }> {
+  const qty =
+    opts?.forceStock != null
+      ? unitsForListing(Math.max(0, Math.floor(Number(opts.forceStock) || 0)), target.pack)
+      : target.bundleId
+        ? await bundleAvailableUnits(target.bundleId)
+        : unitsForListing(stock, target.pack);
   const result =
     target.platform === 'tiendanube'
       ? await pushTiendaNube(target.productId, target.externalVariantId, qty)
@@ -79,16 +88,20 @@ async function healMlLink(variantId: string, target: SyncTarget, newVar: string)
 /** Manda el stock actual de una variante a todas sus publicaciones (o solo a las plataformas pedidas). */
 export async function pushVariant(
   variantId: string,
-  platforms?: Array<'tiendanube' | 'mercadolibre'>
+  platforms?: Array<'tiendanube' | 'mercadolibre'>,
+  opts?: { forceStock?: number }
 ): Promise<VariantPushOutcome> {
   const row = await get(`SELECT COALESCE(stock, 0) AS stock FROM stocks WHERE variant_id = ?`, [variantId]);
-  const stock = Number(row?.stock) || 0;
+  const stock =
+    opts?.forceStock != null
+      ? Math.max(0, Math.floor(Number(opts.forceStock) || 0))
+      : Number(row?.stock) || 0;
   let targets = await resolveTargets(variantId);
   if (platforms?.length) targets = targets.filter((t) => platforms.includes(t.platform));
 
   const results: VariantPushOutcome['results'] = [];
   for (const target of targets) {
-    const { qty, result } = await pushTarget(target, stock);
+    const { qty, result } = await pushTarget(target, stock, opts);
     results.push({ target, qty, result });
     if (result.ok && result.healedVariationId) {
       await healMlLink(variantId, target, result.healedVariationId).catch((e) =>

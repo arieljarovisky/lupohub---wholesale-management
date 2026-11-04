@@ -358,16 +358,20 @@ export type SyncStockExternalResult = {
 
 /**
  * Envía YA el stock actual (de la base) de una variante a sus publicaciones.
- * `_newStock` se ignora a propósito: siempre se manda lo que dice el Hub en este momento.
+ * `_newStock` se ignora salvo que opts.forceStock esté definido (p. ej. poner 0 al desvincular).
  */
 export const syncStockToExternalPlatforms = async (
   variantId: string,
   _newStock?: number,
-  opts?: { platforms?: SyncExternalPlatform[] }
+  opts?: { platforms?: SyncExternalPlatform[]; forceStock?: number }
 ): Promise<SyncStockExternalResult> => {
   const result: SyncStockExternalResult = { mlAttempted: 0, mlOk: 0, tnAttempted: 0, tnOk: 0, logs: [] };
   try {
-    const outcome = await pushVariant(variantId, opts?.platforms);
+    const outcome = await pushVariant(
+      variantId,
+      opts?.platforms,
+      opts?.forceStock != null ? { forceStock: opts.forceStock } : undefined
+    );
     for (const r of outcome.results) {
       const ok = r.result.ok;
       if (r.target.platform === 'tiendanube') {
