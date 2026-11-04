@@ -733,9 +733,22 @@ export const updateVariantExternalIds = async (req: any, res: any) => {
     try {
       const stockRow = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [variantId]);
       const currentStock = Number(stockRow?.stock ?? 0);
-      await syncStockToExternalPlatforms(variantId, currentStock);
+      const syncRes = await syncStockToExternalPlatforms(variantId, currentStock);
+      const incomplete =
+        (syncRes.mlAttempted > 0 && syncRes.mlOk < syncRes.mlAttempted) ||
+        (syncRes.tnAttempted > 0 && syncRes.tnOk < syncRes.tnAttempted);
+      if (incomplete) {
+        const { enqueueSync } = await import('../stockEngine/ledger');
+        await enqueueSync([variantId], 0, 1).catch(() => undefined);
+      }
     } catch (syncErr: any) {
       console.error('[updateVariantExternalIds] Error enviando stock local a plataformas externas:', syncErr?.message || syncErr);
+      try {
+        const { enqueueSync } = await import('../stockEngine/ledger');
+        await enqueueSync([variantId], 0, 1);
+      } catch {
+        /* ignore */
+      }
     }
 
     res.json({
@@ -1113,10 +1126,23 @@ export const bulkLinkVariants = async (req: Request, res: Response) => {
           try {
             const stockRow = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [link.variantId]);
             const currentStock = Number(stockRow?.stock ?? 0);
-            await syncStockToExternalPlatforms(link.variantId!, currentStock);
-            return 1;
+            const syncRes = await syncStockToExternalPlatforms(link.variantId!, currentStock);
+            const incomplete =
+              (syncRes.mlAttempted > 0 && syncRes.mlOk < syncRes.mlAttempted) ||
+              (syncRes.tnAttempted > 0 && syncRes.tnOk < syncRes.tnAttempted);
+            if (incomplete) {
+              const { enqueueSync } = await import('../stockEngine/ledger');
+              await enqueueSync([String(link.variantId)], 0, 1).catch(() => undefined);
+            }
+            return syncRes.mlOk + syncRes.tnOk > 0 ? 1 : 0;
           } catch (err: any) {
             console.warn('[bulkLinkVariants] Error enviando stock local a plataformas externas para variante', link.variantId, ':', err?.message || err);
+            try {
+              const { enqueueSync } = await import('../stockEngine/ledger');
+              await enqueueSync([String(link.variantId)], 0, 1);
+            } catch {
+              /* ignore */
+            }
             return 0;
           }
         })
