@@ -8,6 +8,7 @@ import {
   mergeServerInvoiceIntoOrder,
   type ManualFacturaFields,
 } from '../utils/wholesaleInvoiceHtml';
+import { buildPaymentReceiptHtml } from '../utils/paymentReceiptHtml';
 import { Customer, Order, Payment, Product, Role, User } from '../types';
 import EmitDebitNoteModal from './EmitDebitNoteModal';
 import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2, Percent, RefreshCcw, FileMinus, ExternalLink, Printer, MoreHorizontal, ChevronDown, Download, Upload, Wallet, FilePlus, FileText, Pencil, Trash2 } from 'lucide-react';
@@ -837,6 +838,51 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
         }
       },
     });
+  };
+
+  const handlePrintPayment = (p: Payment) => {
+    const customer = customers.find((c) => c.id === p.customerId);
+    const invoiceLinks =
+      Array.isArray(p.invoiceLinks) && p.invoiceLinks.length > 0
+        ? p.invoiceLinks.map((link) => ({
+            ...link,
+            label: facturaOptionById.get(link.invoiceId) || link.label || link.invoiceId,
+          }))
+        : (Array.isArray(p.invoiceIds) ? p.invoiceIds : []).map((id) => ({
+            invoiceId: id,
+            label: facturaOptionById.get(id) || id,
+            amountApplied: 0,
+            invoiceOutstanding: NaN,
+          }));
+    const orderLinks =
+      Array.isArray(p.orderLinks) && p.orderLinks.length > 0
+        ? p.orderLinks.map((link) => ({
+            ...link,
+            label: pedidoOptionById.get(link.orderId) || link.label || link.orderId,
+          }))
+        : (Array.isArray(p.orderIds) ? p.orderIds : []).map((id) => ({
+            orderId: id,
+            label: pedidoOptionById.get(id) || id,
+            amountApplied: 0,
+            orderOutstanding: NaN,
+          }));
+    const paymentForPrint: Payment = { ...p, invoiceLinks, orderLinks };
+    const html = buildPaymentReceiptHtml({
+      payment: paymentForPrint,
+      customer,
+      remitente: mergedRemitenteForFactura() as any,
+    });
+    if (!html) {
+      showToast('error', 'No se pudo generar el comprobante de pago');
+      return;
+    }
+    const w = window.open('', '_blank');
+    if (w) {
+      w.document.write(html);
+      w.document.close();
+    } else {
+      showToast('error', 'No se pudo abrir la ventana de impresión (bloqueador de popups?)');
+    }
   };
 
   const handleVer = async (item: any) => {
@@ -2148,6 +2194,15 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                 </div>
 
                 <div className="flex items-center gap-2 flex-wrap justify-end lg:justify-start">
+                  <button
+                    type="button"
+                    className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-[11px] font-bold text-slate-200 hover:bg-slate-800 touch-manipulation inline-flex items-center gap-1 whitespace-nowrap"
+                    onClick={() => handlePrintPayment(p)}
+                    title="Imprimir comprobante de pago"
+                  >
+                    <Printer size={12} />
+                    Imprimir
+                  </button>
                   <button
                     type="button"
                     className="px-2.5 py-1.5 rounded-lg bg-emerald-900/40 border border-emerald-700/50 text-[11px] font-bold text-emerald-200 hover:bg-emerald-900/60 touch-manipulation whitespace-nowrap"
