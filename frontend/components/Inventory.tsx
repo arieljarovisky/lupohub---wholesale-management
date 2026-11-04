@@ -23,6 +23,7 @@ import MercadoLibreStock from './MercadoLibreStock';
 import TiendaNubeStock from './TiendaNubeStock';
 import PublicationStockBundles from './PublicationStockBundles';
 import CreateMlVariantsModal from './CreateMlVariantsModal';
+import LinkVariantModal from './LinkVariantModal';
 import {
   normalizeMercadoLibreItemId,
   extractMercadoLibreVariationIdFromUrl,
@@ -233,6 +234,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
 
   const [editingVariantId, setEditingVariantId] = useState<string | null>(null);
   const [mlVariantsTarget, setMlVariantsTarget] = useState<{ productId: string; productName: string; anchorItemId: string } | null>(null);
+  const [linkingVariant, setLinkingVariant] = useState<Product | null>(null);
   const [editVariantForm, setEditVariantForm] = useState<{ sku: string; externalSku: string }>({ sku: '', externalSku: '' });
   const [editVariantLinkIds, setEditVariantLinkIds] = useState<{ mlItemId: string | null; mlVariantId: string | null; tnProductId: string | null; tnVariantId: string | null }>({ mlItemId: null, mlVariantId: null, tnProductId: null, tnVariantId: null });
   const [loadingEditVariant, setLoadingEditVariant] = useState(false);
@@ -3327,6 +3329,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                       </button>
                                       <button
                                        type="button"
+                                       onClick={() => setLinkingVariant(product)}
+                                       className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-indigo-950/40 hover:bg-indigo-900/50 rounded-lg text-indigo-300 hover:text-indigo-200 border border-indigo-700/50 transition-colors touch-manipulation"
+                                       title="Vincular esta variante con Mercado Libre y Tienda Nube"
+                                      >
+                                       <Link size={16} />
+                                      </button>
+                                      <button
+                                       type="button"
                                        onClick={() => openVariantUnifyModal(product, groupKey, groupVariants, variantsToShow)}
                                        className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-slate-750 hover:bg-slate-700 rounded-lg text-slate-400 hover:text-violet-300 border border-slate-700 transition-colors touch-manipulation"
                                        title="Unificar con otra variante del mismo talle y mismo color (nombre)"
@@ -4441,6 +4451,50 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         onCreated={() => onImportComplete?.()}
         showToast={showToast}
       />
+      {linkingVariant && (
+        <LinkVariantModal
+          variant={linkingVariant}
+          onClose={() => setLinkingVariant(null)}
+          showToast={showToast}
+          onSaved={({ groupKey, variantId }) => {
+            setLinkingVariant(null);
+            onImportComplete?.();
+            const key = (groupKey || linkingVariant.base_sku || '').toString().trim();
+            if (key) {
+              setLoadedVariants((prev) => {
+                const next = { ...prev };
+                delete next[key];
+                return next;
+              });
+              if (expandedGroups.includes(key)) {
+                setLoadingVariantsByGroup((prev) => ({ ...prev, [key]: true }));
+                api
+                  .getVariantsBySku(key, INVENTORY_PRODUCT_FETCH_OPTS)
+                  .then((variants) => {
+                    const mapped = mapInventoryVariantsFromApi(key, variants, {
+                      name: groupedProducts[key]?.[0]?.name || linkingVariant.name || '',
+                      category: groupedProducts[key]?.[0]?.category || 'General',
+                      price: groupedProducts[key]?.[0]?.price || 0,
+                    });
+                    setLoadedVariants((prev) => ({ ...prev, [key]: mapped }));
+                    const ids = mapped.map((p) => p.id);
+                    return api.getVariantExternalStocks(ids).then((res) => {
+                      if (res?.stocks) setVariantExternalStocks((prev) => ({ ...prev, ...res.stocks }));
+                    });
+                  })
+                  .catch(() => {})
+                  .finally(() => {
+                    setLoadingVariantsByGroup((prev) => ({ ...prev, [key]: false }));
+                  });
+              }
+            } else if (variantId) {
+              api.getVariantExternalStocks([variantId]).then((res) => {
+                if (res?.stocks) setVariantExternalStocks((prev) => ({ ...prev, ...res.stocks }));
+              }).catch(() => {});
+            }
+          }}
+        />
+      )}
     </div>
   );
   return result;
