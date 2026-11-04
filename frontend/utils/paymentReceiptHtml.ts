@@ -156,21 +156,37 @@ export function importeEnLetrasPesos(amount: number): string {
 
 type LiquidacionRow = { fecha: string; factura: string; importe: number };
 
+/** Id interno de pedido LupoHub (ej. O-198367-7nro): no va en el recibo. */
+function isOrderIdLabel(raw: string): boolean {
+  return /^O-[\w-]+$/i.test(String(raw || '').trim());
+}
+
+function stripOrderIdsFromText(raw: string): string {
+  return String(raw || '')
+    .replace(/\bO-[\w-]+\b/gi, ' ')
+    .replace(/\bPedido\s+O-[\w-]+\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function parseLiquidacionFromLabel(label: string, amountApplied: number): LiquidacionRow {
-  const raw = String(label || '').trim();
+  const raw = stripOrderIdsFromText(String(label || '').trim());
   const parts = raw.split(/\s+[—–-]\s+/).map((p) => p.trim()).filter(Boolean);
   let fecha = '';
-  let factura = raw;
+  let factura = '';
   for (const p of parts) {
     if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(p) || /^\d{4}-\d{2}-\d{2}/.test(p)) {
       fecha = formatFechaDmy(p);
     } else if (/^[A-E]?\s*\d{4,5}-\d{6,8}$/i.test(p) || /^\d{4,5}-\d{6,8}$/.test(p) || /^[A-E]\s+\d/i.test(p)) {
       factura = p.replace(/\s+/g, ' ').trim();
-    } else if (/^Remito\s+/i.test(p) || /^Pedido\s+/i.test(p)) {
+    } else if (/^Remito\s+/i.test(p)) {
       factura = p;
     }
   }
-  if (!factura && parts[0]) factura = parts[0];
+  if (!factura && parts[0] && !/^\$/.test(parts[0]) && !isOrderIdLabel(parts[0])) {
+    factura = parts[0];
+  }
+  if (!factura && raw && !isOrderIdLabel(raw)) factura = raw;
   return { fecha, factura, importe: Math.round(Number(amountApplied || 0) * 100) / 100 };
 }
 
@@ -270,11 +286,28 @@ export function buildPaymentReceiptHtml(params: {
   const liquidacion: LiquidacionRow[] = [];
   for (const link of invoiceLinks) {
     const imputa = Number(link.amountApplied) || 0;
-    liquidacion.push(parseLiquidacionFromLabel(String(link.label || link.invoiceId), imputa > 0 ? imputa : 0));
+    const row = parseLiquidacionFromLabel(String(link.label || link.invoiceId), imputa > 0 ? imputa : 0);
+    if (row.factura || row.importe > 0.005) liquidacion.push(row);
   }
-  for (const link of orderLinks) {
-    const imputa = Number(link.amountApplied) || 0;
-    liquidacion.push(parseLiquidacionFromLabel(String(link.label || link.orderId), imputa > 0 ? imputa : 0));
+  // Pedidos sin factura: no imprimir el id O-…; si ya hay facturas, no duplicar filas de pedido.
+  if (invoiceLinks.length === 0) {
+    for (const link of orderLinks) {
+      const imputa = Number(link.amountApplied) || 0;
+      const rawLabel = String(link.label || '').trim();
+      if (isOrderIdLabel(rawLabel) || isOrderIdLabel(String(link.orderId || ''))) {
+        liquidacion.push({
+          fecha: formatFechaDmy(String(payment.date || '')),
+          factura: 'A CUENTA',
+          importe: imputa > 0 ? imputa : 0,
+        });
+        continue;
+      }
+      const row = parseLiquidacionFromLabel(rawLabel || 'A CUENTA', imputa > 0 ? imputa : 0);
+      liquidacion.push({
+        ...row,
+        factura: row.factura || 'A CUENTA',
+      });
+    }
   }
 
   // Si no hay imputaciones con monto, una sola fila a cuenta por el total del recibo.
@@ -307,9 +340,10 @@ export function buildPaymentReceiptHtml(params: {
   const liquidacionHtml = liquidacionRows
     .map((r) => {
       const imp = Number(r.importe) > 0.005 ? `$${formatMoneyAr(r.importe)}` : '';
+      const facturaClean = stripOrderIdsFromText(r.factura);
       return `<tr>
         <td class="c-fecha">${escapeHtmlText(r.fecha)}</td>
-        <td class="c-fact">${escapeHtmlText(r.factura)}</td>
+        <td class="c-fact">${escapeHtmlText(facturaClean)}</td>
         <td class="c-imp">${imp}</td>
       </tr>`;
     })
