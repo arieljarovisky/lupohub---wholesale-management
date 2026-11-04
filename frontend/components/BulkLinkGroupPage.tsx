@@ -316,6 +316,49 @@ function isMercadoLibrePublicationId(value: string): boolean {
   return /^ML[A-Z]{1,5}\d+$/i.test((value || '').trim());
 }
 
+/** Busca la fila del catálogo ML cargado para un ID de variación (+ publicación opcional). */
+function findMlCatalogRow(
+  variationId: string,
+  itemId: string | undefined,
+  mlList: MlVariationRow[],
+  mlSources: PublicationSource[]
+): MlVariationRow | undefined {
+  const vid = (variationId || '').trim();
+  if (!vid) return undefined;
+  if (isMercadoLibrePublicationId(vid)) {
+    return mlList.find(
+      (m) =>
+        mercadoLibreItemIdsMatch(m.itemId, vid) ||
+        m.variationId === vid ||
+        (!!m.sourceId && mercadoLibreItemIdsMatch(m.sourceId, vid))
+    );
+  }
+  return mlList.find(
+    (m) =>
+      m.variationId === vid &&
+      (!itemId ||
+        mercadoLibreItemIdsMatch(itemId, m.itemId) ||
+        mlSources.some((s) => mlRowBelongsToSource(m, s.id)))
+  );
+}
+
+/** True si todas las asignaciones ML de la fila existen en el catálogo cargado. */
+function assignmentMlExistsInCatalog(
+  a: VariantAssignment | undefined,
+  mlList: MlVariationRow[],
+  mlSources: PublicationSource[]
+): boolean {
+  if (!hasAnyMlAssignment(a)) return true;
+  const ml = a?.ml?.trim() || '';
+  if (ml && !findMlCatalogRow(ml, a?.mlItemId, mlList, mlSources)) return false;
+  for (const [itemId, variationId] of Object.entries(a?.mlByItemId || {})) {
+    const vid = String(variationId || '').trim();
+    if (!vid) continue;
+    if (!findMlCatalogRow(vid, itemId, mlList, mlSources)) return false;
+  }
+  return true;
+}
+
 function findMlCatalogMatchForLocal(
   local: { sku: string; size: string; color: string },
   mlList: MlVariationRow[],
@@ -694,6 +737,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
   const [skuEdits, setSkuEdits] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [unlinking, setUnlinking] = useState(false);
+  const [unlinkingVariantId, setUnlinkingVariantId] = useState<string | null>(null);
   const [mlSearch, setMlSearch] = useState('');
   const [tnSearch, setTnSearch] = useState('');
   const [showMlTip, setShowMlTip] = useState(false);
@@ -1502,6 +1546,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
           if (platform === 'mercadolibre' || platform === 'both') {
             row.ml = '';
             row.mlItemId = undefined;
+            row.mlByItemId = undefined;
           }
           if (platform === 'tiendanube' || platform === 'both') {
             row.tn = '';
@@ -1518,6 +1563,73 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       showToast('error', e?.message || 'Error al desvincular');
     } finally {
       setUnlinking(false);
+    }
+  };
+
+  const handleUnlinkVariant = async (
+    variantId: string,
+    platform: 'mercadolibre' | 'tiendanube' | 'both'
+  ) => {
+    const variant = variants.find((v) => v.variantId === variantId);
+    const label =
+      platform === 'both'
+        ? 'Mercado Libre y Tienda Nube'
+        : platform === 'mercadolibre'
+          ? 'Mercado Libre'
+          : 'Tienda Nube';
+    const rowLabel = variant ? formatOptionLabel(variant) : variantId;
+    if (
+      !window.confirm(
+        `¿Desvincular solo esta variante (${rowLabel}) de ${label}? Se quitan el vínculo principal y las publicaciones de ese canal en esta fila.`
+      )
+    ) {
+      return;
+    }
+    setUnlinkingVariantId(variantId);
+    try {
+      await api.unlinkVariantPlatforms(variantId, {
+        tiendaNube: platform === 'tiendanube' || platform === 'both',
+        mercadoLibre: platform === 'mercadolibre' || platform === 'both',
+      });
+      setAssignments((prev) => {
+        const row = { ...(prev[variantId] || {}) };
+        if (platform === 'mercadolibre' || platform === 'both') {
+          row.ml = '';
+          row.mlItemId = undefined;
+          row.mlByItemId = undefined;
+        }
+        if (platform === 'tiendanube' || platform === 'both') {
+          row.tn = '';
+          row.tnProductId = undefined;
+        }
+        return { ...prev, [variantId]: row };
+      });
+      setVariants((prev) =>
+        prev.map((v) => {
+          if (v.variantId !== variantId) return v;
+          const externalIds = { ...(v.externalIds || {}) };
+          if (platform === 'mercadolibre' || platform === 'both') {
+            externalIds.mercadoLibreVariant = null;
+            externalIds.mercadoLibreItemId = null;
+          }
+          if (platform === 'tiendanube' || platform === 'both') {
+            externalIds.tiendaNubeVariant = null;
+          }
+          return { ...v, externalIds };
+        })
+      );
+      try {
+        const pubs = await api.getVariantPublications(variantId);
+        refreshPublicationCount(variantId, pubs.length);
+      } catch {
+        /* el conteo se refresca al abrir "Más" */
+      }
+      showToast('success', `Variante desvinculada de ${label}.`);
+      onImportComplete?.();
+    } catch (e: any) {
+      showToast('error', e?.message || 'Error al desvincular la variante');
+    } finally {
+      setUnlinkingVariantId(null);
     }
   };
 
@@ -2082,6 +2194,34 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
     for (const v of variants) {
       const a = saveAssignments[v.variantId];
       const tn = a?.tn?.trim() || '';
+      const wantsMl = hasAnyMlAssignment(a);
+      const wantsTn = !!tn;
+      if ((wantsMl || wantsTn) && !variantHasStock(v)) {
+        showToast(
+          'error',
+          `No se puede vincular "${formatOptionLabel(v)}": sin stock en Lupo Hub.`
+        );
+        return;
+      }
+      if (wantsMl) {
+        if (mlSources.length > 0 && mlVariations.length === 0) {
+          showToast(
+            'error',
+            'Cargá las variaciones de Mercado Libre en el Paso 1 antes de vincular.'
+          );
+          return;
+        }
+        if (
+          mlVariations.length > 0 &&
+          !assignmentMlExistsInCatalog(a, mlVariations, mlSources)
+        ) {
+          showToast(
+            'error',
+            `La variación ML de "${formatOptionLabel(v)}" no existe en Mercado Libre (o no está en las publicaciones cargadas).`
+          );
+          return;
+        }
+      }
       for (const mlKey of iterMlAssignmentKeys(a)) {
         const other = mlSeen.get(mlKey);
         if (other) {
@@ -2114,9 +2254,11 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
       }
       const mlUnlinks = variants.filter((v) => {
         const a = saveAssignments[v.variantId];
-        // Con publicaciones en el paso 1, guardar no desvincula: solo el botón Desvincular lo hace.
-        if (mlSources.length > 0) return false;
         return variantHadMlLink(v.externalIds) && !hasMlAssignment(a);
+      });
+      const tnUnlinks = variants.filter((v) => {
+        const a = saveAssignments[v.variantId];
+        return variantHadTnLink(v.externalIds) && !(a?.tn?.trim());
       });
       const links = variants
         .map((v) => {
@@ -2149,18 +2291,22 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
         .filter(
           (l) => l.mercadoLibreVariantId != null || l.mercadoLibreItemId != null || l.tiendaNubeVariantId != null
         );
-      if (links.length === 0 && mlUnlinks.length === 0) {
+      if (links.length === 0 && mlUnlinks.length === 0 && tnUnlinks.length === 0) {
         showToast('info', 'Asigná al menos una variación ML o variante TN.');
         setSaving(false);
         return;
       }
-      for (const v of mlUnlinks) {
-        await api.updateVariantExternalIds(v.variantId, {
-          mercadoLibreVariantId: null,
-          mercadoLibreItemId: null,
+      const unlinkIds = new Set([
+        ...mlUnlinks.map((v) => v.variantId),
+        ...tnUnlinks.map((v) => v.variantId),
+      ]);
+      for (const variantId of unlinkIds) {
+        await api.unlinkVariantPlatforms(variantId, {
+          mercadoLibre: mlUnlinks.some((v) => v.variantId === variantId),
+          tiendaNube: tnUnlinks.some((v) => v.variantId === variantId),
         });
       }
-      let updated = mlUnlinks.length;
+      let updated = unlinkIds.size;
       let synced = 0;
       if (links.length > 0) {
         const allMlOwn =
@@ -2760,13 +2906,20 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                     : undefined;
                   const hasDuplicateTn = duplicateTnByVariant.has(v.variantId);
                   const hasAssignmentConflict = hasDuplicateMl || hasDuplicateTn;
+                  const canLink = variantHasStock(v);
+                  const mlMissingInCatalog =
+                    hasMlLinked &&
+                    mlVariations.length > 0 &&
+                    !assignmentMlExistsInCatalog(rowAssignment, mlVariations, mlSources);
 
                   return (
                     <React.Fragment key={v.variantId}>
                     <tr
                       className={`border-b border-slate-700/40 transition-colors hover:bg-slate-800/40 ${
-                        hasAssignmentConflict
+                        hasAssignmentConflict || mlMissingInCatalog
                           ? 'bg-rose-950/20'
+                          : !canLink
+                          ? 'bg-slate-900/40 opacity-90'
                           : status === 'complete'
                           ? 'bg-emerald-950/10'
                           : status === 'partial'
@@ -2830,12 +2983,17 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                           </p>
                           <p
                             className={`text-[11px] font-semibold pl-0.5 ${
-                              Number(v.stock ?? 0) > 0 ? 'text-emerald-400' : 'text-slate-500'
+                              canLink ? 'text-emerald-400' : 'text-slate-500'
                             }`}
                             title="Stock actual en Lupo Hub"
                           >
                             Stock Lupo Hub: {Number(v.stock ?? 0)}
                           </p>
+                          {!canLink && (
+                            <p className="text-[10px] text-slate-500 pl-0.5">
+                              Sin stock: no se puede vincular.
+                            </p>
+                          )}
                         </div>
                       </td>
                       <td className="p-3 align-top min-w-[220px]">
@@ -2845,6 +3003,11 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                               Misma variación ML que otra fila
                               {mlConflictPartner ? ` (${formatOptionLabel(mlConflictPartner)})` : ''}
                               . Corregí o unificá las variantes duplicadas.
+                            </p>
+                          )}
+                          {mlMissingInCatalog && (
+                            <p className="text-[10px] text-rose-400 pl-0.5">
+                              Esta variación no existe en Mercado Libre (o no está en las publicaciones cargadas). Desvinculá o elegí otra.
                             </p>
                           )}
                           {mlSources.length > 0 ? (
@@ -2874,20 +3037,42 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                                   {mlVariations.length > 0 || pubRows.length > 0 ? (
                                     <select
                                       value={selectedVar}
+                                      disabled={!canLink}
                                       onChange={(e) => {
                                         const variationId = e.target.value;
                                         if (!variationId) {
-                                          setAssignments((prev) => ({
-                                            ...prev,
-                                            [v.variantId]: syncPrimaryMlAssignment(
-                                              setMlVariationForItem(prev[v.variantId], src.id, ''),
-                                              mlSources
-                                            ),
-                                          }));
+                                          setAssignments((prev) => {
+                                            const cleared = setMlVariationForItem(prev[v.variantId], src.id, '');
+                                            const mapLeft = Object.values(cleared.mlByItemId || {}).some(
+                                              (x) => !!String(x || '').trim()
+                                            );
+                                            if (!mapLeft) return { ...prev, [v.variantId]: clearMlAssignmentFields(cleared) };
+                                            const primaryItem = primaryMlSourceItemId(mlSources);
+                                            const clearedPrimary =
+                                              (primaryItem && mlItemKey(src.id) === primaryItem) ||
+                                              (!!cleared.mlItemId && mercadoLibreItemIdsMatch(cleared.mlItemId, src.id));
+                                            return {
+                                              ...prev,
+                                              [v.variantId]: clearedPrimary
+                                                ? { ...cleared, ml: '', mlItemId: undefined }
+                                                : cleared,
+                                            };
+                                          });
+                                          return;
+                                        }
+                                        if (!canLink) {
+                                          showToast('error', 'Sin stock en Lupo Hub: no se puede vincular.');
                                           return;
                                         }
                                         const chosen = options.find((m) => m.variationId === variationId);
-                                        const conflictItemId = chosen?.itemId || src.id;
+                                        if (!chosen) {
+                                          showToast(
+                                            'error',
+                                            'Esa variación no existe en Mercado Libre (o no está en las publicaciones cargadas).'
+                                          );
+                                          return;
+                                        }
+                                        const conflictItemId = chosen.itemId || src.id;
                                         const conflict = findMlAssignmentConflict(
                                           v.variantId,
                                           variationId,
@@ -2907,14 +3092,14 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                                             {
                                               ...setMlVariationForItem(prev[v.variantId], src.id, variationId),
                                               ml: variationId,
-                                              mlItemId: chosen?.itemId || src.id,
+                                              mlItemId: chosen.itemId || src.id,
                                             },
                                             mlSources
                                           ),
                                         }));
                                       }}
-                                      className={`w-full bg-slate-800 border rounded-lg px-2 py-1.5 text-slate-300 text-xs outline-none ${
-                                        hasDuplicateMl
+                                      className={`w-full bg-slate-800 border rounded-lg px-2 py-1.5 text-slate-300 text-xs outline-none disabled:opacity-50 disabled:cursor-not-allowed ${
+                                        hasDuplicateMl || mlMissingInCatalog
                                           ? 'border-rose-500/70 focus:border-rose-400'
                                           : 'border-slate-600 focus:border-amber-500/60'
                                       }`}
@@ -2964,8 +3149,24 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                               <input
                                 type="text"
                                 value={mlVal}
+                                disabled={!canLink}
                                 onChange={(e) => {
                                   const trimmed = e.target.value.trim();
+                                  if (trimmed && !canLink) {
+                                    showToast('error', 'Sin stock en Lupo Hub: no se puede vincular.');
+                                    return;
+                                  }
+                                  if (
+                                    trimmed &&
+                                    mlVariations.length > 0 &&
+                                    !findMlCatalogRow(trimmed, undefined, mlVariations, mlSources)
+                                  ) {
+                                    showToast(
+                                      'error',
+                                      'Esa variación no existe en Mercado Libre (o no está en las publicaciones cargadas).'
+                                    );
+                                    return;
+                                  }
                                   setAssignments((prev) => ({
                                     ...prev,
                                     [v.variantId]: !trimmed
@@ -2980,8 +3181,8 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                                   }));
                                 }}
                                 placeholder={mlVariations.length > 0 ? 'ID variación o MLA' : 'MLA o variación'}
-                                className={`w-full bg-slate-800/80 border rounded-lg px-2.5 py-2 text-white text-xs font-mono outline-none ${
-                                  hasDuplicateMl
+                                className={`w-full bg-slate-800/80 border rounded-lg px-2.5 py-2 text-white text-xs font-mono outline-none disabled:opacity-50 disabled:cursor-not-allowed ${
+                                  hasDuplicateMl || mlMissingInCatalog
                                     ? 'border-rose-500/70 focus:border-rose-400'
                                     : 'border-amber-800/40 focus:border-amber-500/70'
                                 }`}
@@ -2994,6 +3195,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                               {mlVariations.length > 0 ? (
                                 <select
                                   value={mlSelectValue(mlVal, rowAssignment?.mlItemId, mlVariations)}
+                                  disabled={!canLink}
                                   onChange={(e) => {
                                     const val = e.target.value;
                                     if (!val) {
@@ -3003,7 +3205,18 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                                       }));
                                       return;
                                     }
+                                    if (!canLink) {
+                                      showToast('error', 'Sin stock en Lupo Hub: no se puede vincular.');
+                                      return;
+                                    }
                                     const [itemId, variationId] = val.split('::');
+                                    if (!findMlCatalogRow(variationId, itemId, mlVariations, mlSources)) {
+                                      showToast(
+                                        'error',
+                                        'Esa variación no existe en Mercado Libre (o no está en las publicaciones cargadas).'
+                                      );
+                                      return;
+                                    }
                                     const conflict = findMlAssignmentConflict(v.variantId, variationId, itemId);
                                     if (conflict) {
                                       const other = variants.find((x) => x.variantId === conflict);
@@ -3021,8 +3234,8 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                                       ),
                                     }));
                                   }}
-                                  className={`w-full bg-slate-800 border rounded-lg px-2 py-1.5 text-slate-300 text-xs outline-none ${
-                                    hasDuplicateMl
+                                  className={`w-full bg-slate-800 border rounded-lg px-2 py-1.5 text-slate-300 text-xs outline-none disabled:opacity-50 disabled:cursor-not-allowed ${
+                                    hasDuplicateMl || mlMissingInCatalog
                                       ? 'border-rose-500/70 focus:border-rose-400'
                                       : 'border-slate-600 focus:border-amber-500/60'
                                   }`}
@@ -3046,6 +3259,22 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                               )}
                             </>
                           )}
+                          {(hasMlLinked || variantHadMlLink(v.externalIds)) && (
+                            <button
+                              type="button"
+                              onClick={() => void handleUnlinkVariant(v.variantId, 'mercadolibre')}
+                              disabled={saving || unlinking || unlinkingVariantId === v.variantId}
+                              className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-300/90 hover:text-amber-200 disabled:opacity-50"
+                              title="Desvincular solo esta variante de Mercado Libre"
+                            >
+                              {unlinkingVariantId === v.variantId ? (
+                                <Loader2 size={11} className="animate-spin" />
+                              ) : (
+                                <Unlink size={11} />
+                              )}
+                              Desvincular ML
+                            </button>
+                          )}
                         </div>
                       </td>
                       <td className="p-3 align-top min-w-[220px]">
@@ -3053,8 +3282,13 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                           <input
                             type="text"
                             value={tnVal}
+                            disabled={!canLink}
                             onChange={(e) => {
                               const trimmed = e.target.value.trim();
+                              if (trimmed && !canLink) {
+                                showToast('error', 'Sin stock en Lupo Hub: no se puede vincular.');
+                                return;
+                              }
                               setAssignments((prev) => ({
                                 ...prev,
                                 [v.variantId]: !trimmed
@@ -3066,7 +3300,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                               }));
                             }}
                             placeholder={tnVariants.length > 0 ? 'ID variante TN' : 'ID variante TN'}
-                            className={`w-full bg-slate-800/80 border rounded-lg px-2.5 py-2 text-white text-xs font-mono outline-none ${
+                            className={`w-full bg-slate-800/80 border rounded-lg px-2.5 py-2 text-white text-xs font-mono outline-none disabled:opacity-50 disabled:cursor-not-allowed ${
                               hasDuplicateTn
                                 ? 'border-rose-500/70 focus:border-rose-400'
                                 : 'border-cyan-800/40 focus:border-cyan-500/70'
@@ -3075,8 +3309,13 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                           <input
                             type="text"
                             value={tnProductId}
+                            disabled={!canLink}
                             onChange={(e) => {
                               const trimmed = e.target.value.trim();
+                              if (trimmed && !canLink) {
+                                showToast('error', 'Sin stock en Lupo Hub: no se puede vincular.');
+                                return;
+                              }
                               setAssignments((prev) => ({
                                 ...prev,
                                 [v.variantId]: {
@@ -3086,11 +3325,12 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                               }));
                             }}
                             placeholder="ID producto TN (opcional)"
-                            className="w-full bg-slate-900/60 border border-cyan-900/40 rounded-lg px-2.5 py-1.5 text-cyan-100/80 text-[11px] font-mono outline-none focus:border-cyan-500/60"
+                            className="w-full bg-slate-900/60 border border-cyan-900/40 rounded-lg px-2.5 py-1.5 text-cyan-100/80 text-[11px] font-mono outline-none focus:border-cyan-500/60 disabled:opacity-50 disabled:cursor-not-allowed"
                           />
                           {tnVariants.length > 0 ? (
                             <select
                               value={tnSelectValue(tnVal, tnProductId, tnVariants)}
+                              disabled={!canLink}
                               onChange={(e) => {
                                 const raw = e.target.value;
                                 if (!raw) {
@@ -3098,6 +3338,10 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                                     ...prev,
                                     [v.variantId]: { ...prev[v.variantId], tn: '', tnProductId: undefined },
                                   }));
+                                  return;
+                                }
+                                if (!canLink) {
+                                  showToast('error', 'Sin stock en Lupo Hub: no se puede vincular.');
                                   return;
                                 }
                                 const [productId, tnValNew] = raw.includes('::')
@@ -3125,7 +3369,7 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                                   },
                                 }));
                               }}
-                              className={`w-full bg-slate-800 border rounded-lg px-2 py-1.5 text-slate-300 text-xs outline-none ${
+                              className={`w-full bg-slate-800 border rounded-lg px-2 py-1.5 text-slate-300 text-xs outline-none disabled:opacity-50 disabled:cursor-not-allowed ${
                                 hasDuplicateTn
                                   ? 'border-rose-500/70 focus:border-rose-400'
                                   : 'border-slate-600 focus:border-cyan-500/60'
@@ -3152,6 +3396,22 @@ const BulkLinkGroupPage: React.FC<BulkLinkGroupPageProps> = ({
                             <p className="text-[10px] text-rose-400 pl-0.5">
                               Misma variante TN que otra fila — si U y XG son el mismo artículo, unificá las filas.
                             </p>
+                          )}
+                          {(!!tnVal || variantHadTnLink(v.externalIds)) && (
+                            <button
+                              type="button"
+                              onClick={() => void handleUnlinkVariant(v.variantId, 'tiendanube')}
+                              disabled={saving || unlinking || unlinkingVariantId === v.variantId}
+                              className="inline-flex items-center gap-1 text-[10px] font-semibold text-cyan-300/90 hover:text-cyan-200 disabled:opacity-50"
+                              title="Desvincular solo esta variante de Tienda Nube"
+                            >
+                              {unlinkingVariantId === v.variantId ? (
+                                <Loader2 size={11} className="animate-spin" />
+                              ) : (
+                                <Unlink size={11} />
+                              )}
+                              Desvincular TN
+                            </button>
                           )}
                         </div>
                       </td>

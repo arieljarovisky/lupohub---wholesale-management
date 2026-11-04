@@ -1606,6 +1606,20 @@ export const api = {
     }, null, 'unlinkProductPlatforms');
   },
 
+  /** Desvincula solo una variante de ML y/o TN (vínculo principal + publicaciones del canal). */
+  unlinkVariantPlatforms: async (
+    variantId: string,
+    opts: { tiendaNube?: boolean; mercadoLibre?: boolean }
+  ): Promise<{ ok: boolean; variantId: string; tiendaNube?: boolean; mercadoLibre?: boolean } | null> => {
+    return handleRequest(async () => {
+      return await request<{ ok: boolean; variantId: string; tiendaNube?: boolean; mercadoLibre?: boolean }>(
+        `/products/variants/${encodeURIComponent(variantId)}/unlink`,
+        'POST',
+        opts || {}
+      );
+    }, null, 'unlinkVariantPlatforms');
+  },
+
   bulkLinkVariants: async (payload: {
     productId?: string;
     mercadoLibreItemId?: string;

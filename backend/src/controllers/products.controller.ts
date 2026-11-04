@@ -752,6 +752,54 @@ export const updateVariantExternalIds = async (req: any, res: any) => {
   }
 };
 
+/** Desvincular una sola variante de Tienda Nube y/o Mercado Libre (columnas + publicaciones del canal). */
+export const unlinkVariantPlatforms = async (req: any, res: any) => {
+  const { variantId } = req.params;
+  const body = req.body || {};
+  const tiendaNube = body.tiendaNube === true;
+  const mercadoLibre = body.mercadoLibre === true;
+  if (!variantId) return res.status(400).json({ message: 'ID de variante inválido' });
+  if (!tiendaNube && !mercadoLibre) {
+    return res.status(400).json({ message: 'Debe indicar tiendaNube y/o mercadoLibre.' });
+  }
+
+  try {
+    const exists = await get(`SELECT id FROM product_variants WHERE id = ? LIMIT 1`, [variantId]);
+    if (!exists) return res.status(404).json({ message: 'Variante no encontrada' });
+
+    const result: any = { variantId, tiendaNube: false, mercadoLibre: false };
+
+    if (tiendaNube) {
+      await execute(`UPDATE product_variants SET tienda_nube_variant_id = NULL WHERE id = ?`, [variantId]);
+      await execute(
+        `DELETE FROM variant_publications WHERE platform = 'tiendanube' AND variant_id = ?`,
+        [variantId]
+      );
+      result.tiendaNube = true;
+    }
+
+    if (mercadoLibre) {
+      await execute(
+        `UPDATE product_variants
+         SET mercado_libre_variant_id = NULL,
+             mercado_libre_item_id = NULL
+         WHERE id = ?`,
+        [variantId]
+      );
+      await execute(
+        `DELETE FROM variant_publications WHERE platform = 'mercadolibre' AND variant_id = ?`,
+        [variantId]
+      );
+      result.mercadoLibre = true;
+    }
+
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Error desvinculando variante' });
+  }
+};
+
 /** Desvincular un artículo de Tienda Nube y/o Mercado Libre (producto padre + variantes). */
 export const unlinkProductPlatforms = async (req: any, res: any) => {
   const { id } = req.params;
