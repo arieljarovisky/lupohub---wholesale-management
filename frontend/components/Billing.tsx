@@ -1799,7 +1799,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                     <td className="px-3 py-2 align-middle text-right whitespace-nowrap tabular-nums">
                       <div className="flex flex-col items-end gap-0.5">
                         <span>${formatMoneyAr(item.importe ?? 0)}</span>
-                        {item.tipo === 'FACTURA' && Number(item.agipRetPer || 0) > 0.005 && (
+                        {(item.tipo === 'FACTURA' || item.tipo === 'NC') && Number(item.agipRetPer || 0) > 0.005 && (
                           <span className="text-[10px] font-bold text-amber-300/90">
                             incl. IIBB ${formatMoneyAr(Number(item.agipRetPer || 0))}
                           </span>
@@ -2717,7 +2717,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
               <p className="text-xs text-slate-400 leading-relaxed">
                 Para facturas o NC emitidas fuera de LupoHub. El importe es{' '}
                 <span className="text-slate-200">bruto (con IVA incluido)</span>, el mismo que figura en el comprobante.
-                En facturas, la percepción IIBB se suma aparte al saldo.
+                La percepción IIBB se suma aparte al saldo, tanto en facturas como en notas de crédito.
               </p>
               <label className="flex items-start gap-3 p-3 rounded-xl bg-slate-950/80 border border-slate-800 cursor-pointer">
                 <input
@@ -2833,8 +2833,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                     placeholder="0"
                   />
                 </div>
-                {manualTipo === 'FACTURA' && (
-                  <div className="col-span-2">
+                <div className="col-span-2">
                     <label className="block text-xs font-black text-slate-500 uppercase mb-1">
                       Percepción IIBB (opcional)
                     </label>
@@ -2845,7 +2844,6 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                       placeholder="0"
                     />
                   </div>
-                )}
                 {!manualSinDetalle && (
                   <div className="col-span-2">
                     <label className="block text-xs font-black text-slate-500 uppercase mb-1">CAE (opcional)</label>
@@ -2975,7 +2973,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                             cae: manualCae.trim() || undefined
                           }),
                       importeBruto: bruto,
-                      agipRetPer: manualTipo === 'FACTURA' ? parseMoneyInput(manualAgip || '0') : 0,
+                      agipRetPer: parseMoneyInput(manualAgip || '0'),
                       notes: manualNotes.trim() || undefined,
                       refInvoiceId,
                       refManualComprobanteId,

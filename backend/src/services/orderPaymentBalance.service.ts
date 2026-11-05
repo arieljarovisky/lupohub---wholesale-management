@@ -152,6 +152,23 @@ export const SQL_INVOICE_AGIP_RET_PER = `COALESCE((
   SELECT i.agip_ret_per FROM invoices i WHERE i.order_id = o.id LIMIT 1
 ), 0)`;
 
+/** Neto que sigue sin acreditar (amount_credited de la NC es neto AFIP). */
+const SQL_ORDER_NET_REMAINING_AFTER_NC = `GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0))`;
+
+/**
+ * Percepción que queda en el pedido: la NC se lleva la parte proporcional al neto acreditado.
+ * Si la NC cubre todo el neto, la percepción también sale del saldo.
+ */
+export const SQL_ORDER_AGIP_REMAINING = `CASE
+  WHEN COALESCE((${SQL_INVOICE_AGIP_RET_PER}), 0) <= 0.005 THEN 0
+  WHEN (${SQL_ORDER_NETO_GRAVADO}) <= 0.005 THEN 0
+  ELSE ROUND(
+    COALESCE((${SQL_INVOICE_AGIP_RET_PER}), 0)
+    * (${SQL_ORDER_NET_REMAINING_AFTER_NC})
+    / (${SQL_ORDER_NETO_GRAVADO}),
+  2)
+END`;
+
 export const SQL_ORDER_BASE_MINUS_NC = ORDER_PRICES_INCLUDE_IVA
   ? `GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - ROUND(COALESCE(cn.cn_total, 0) * ${IVA_MULTIPLIER}, 2))`
   : `GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0))`;
@@ -169,7 +186,7 @@ export const SQL_ORDER_CARGO_SALDO = `CASE
     THEN ROUND(
       (${SQL_ORDER_BASE_MINUS_NC})${
         ORDER_PRICES_INCLUDE_IVA ? '' : ` * ${IVA_MULTIPLIER}`
-      } + (${SQL_INVOICE_AGIP_RET_PER}),
+      } + (${SQL_ORDER_AGIP_REMAINING}),
     2)
   ELSE ROUND((${SQL_ORDER_BASE_MINUS_NC}), 2)
 END`;
@@ -239,7 +256,15 @@ export async function getInvoiceOutstandingConIva(
            WHEN COALESCE(i.cbte_tipo, 0) = 19
              THEN GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0))
            ELSE GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0)) * 1.21
-             + COALESCE(i.agip_ret_per, 0)
+             + CASE
+                 WHEN COALESCE(i.agip_ret_per, 0) <= 0.005 THEN 0
+                 WHEN (${SQL_ORDER_NETO_GRAVADO}) <= 0.005 THEN 0
+                 ELSE ROUND(
+                   COALESCE(i.agip_ret_per, 0)
+                   * GREATEST(0, (${SQL_ORDER_NETO_GRAVADO}) - COALESCE(cn.cn_total, 0))
+                   / (${SQL_ORDER_NETO_GRAVADO}),
+                 2)
+               END
          END,
        2) AS cargo_iva,
        COALESCE((
