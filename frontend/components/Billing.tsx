@@ -94,6 +94,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const billingCustomersFileInputRef = useRef<HTMLInputElement | null>(null);
   const agipPadronInputRef = useRef<HTMLInputElement | null>(null);
   const [payReceipt, setPayReceipt] = useState('');
+  const [payReceiptLoading, setPayReceiptLoading] = useState(false);
   const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [payCustomerId, setPayCustomerId] = useState<string>('ALL');
   const [payInvoiceIds, setPayInvoiceIds] = useState<string[]>([]);
@@ -582,6 +583,15 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     setPayMethod('');
     setCreatePedidoOptions([]);
     setShowPaymentModal(true);
+    setPayReceiptLoading(true);
+    api
+      .getNextReceiptNumber()
+      .then((r) => setPayReceipt(String(r?.receiptNumber || '').trim()))
+      .catch(() => {
+        setPayReceipt('');
+        showToast('error', 'No se pudo calcular el número. Se asigna al guardar.');
+      })
+      .finally(() => setPayReceiptLoading(false));
   };
 
   const openLinkPaymentModal = (p: Payment) => {
@@ -2357,14 +2367,15 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                 <div>
                   <label className="block text-xs font-black text-slate-500 uppercase mb-1">Nº Recibo</label>
                   <input
-                    value={payReceipt}
-                    readOnly={paymentModalMode === 'link'}
-                    onChange={(e) => setPayReceipt(e.target.value)}
-                    className={`w-full border border-slate-800 rounded-xl p-3 text-white outline-none ${
-                      paymentModalMode === 'link' ? 'bg-slate-900 text-slate-400' : 'bg-slate-950'
-                    }`}
-                    placeholder="R0001-00001234"
+                    value={paymentModalMode === 'create' && payReceiptLoading ? 'Calculando…' : payReceipt}
+                    readOnly
+                    className="w-full border border-slate-800 rounded-xl p-3 text-white outline-none bg-slate-900 text-slate-200 font-mono"
                   />
+                  {paymentModalMode === 'create' && (
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      Se asigna el número que sigue al último recibo.
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-black text-slate-500 uppercase mb-1">Fecha</label>
@@ -2651,7 +2662,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                       return;
                     }
                     const amount = parseMoneyInput(payAmount || '0');
-                    if (!payReceipt.trim()) { showToast('error', 'Falta Nº recibo'); return; }
+                    if (payReceiptLoading) { showToast('error', 'Esperá a que se calcule el Nº de recibo'); return; }
                     if (!payDate) { showToast('error', 'Falta fecha'); return; }
                     if (!payCustomerId || payCustomerId === 'ALL') { showToast('error', 'Seleccioná un cliente'); return; }
                     if (Number.isNaN(amount) || amount <= 0) { showToast('error', 'Importe inválido (debe ser mayor a 0)'); return; }
@@ -2669,9 +2680,11 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                       orderId: payOrderIds[0] || null,
                       orderIds: payOrderIds,
                     });
+                    const assigned = String((created as { receiptNumber?: string }).receiptNumber || '').trim();
+                    const note = (created as { allocationNote?: string }).allocationNote;
                     showToast(
                       'success',
-                      (created as { allocationNote?: string }).allocationNote || 'Pago cargado.'
+                      [note || 'Pago cargado.', assigned ? `Recibo ${assigned}.` : ''].filter(Boolean).join(' ')
                     );
                     setShowPaymentModal(false);
                     loadPayments();

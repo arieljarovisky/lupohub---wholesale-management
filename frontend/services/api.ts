@@ -4916,6 +4916,10 @@ export const api = {
 
   // ============ PAGOS (recibos) ============
 
+  getNextReceiptNumber: async (): Promise<{ receiptNumber: string }> => {
+    return await request<{ receiptNumber: string }>('/payments/next-number', 'GET');
+  },
+
   getPayments: async (params?: { customerId?: string; invoiceId?: string; orderId?: string; desde?: string; hasta?: string; province?: string }): Promise<import('../types').Payment[]> => {
     const queryParams = new URLSearchParams();
     if (params?.customerId) queryParams.append('customerId', params.customerId);
@@ -4940,7 +4944,8 @@ export const api = {
     orderIds?: string[];
     invoiceId?: string | null;
     invoiceIds?: string[];
-    receiptNumber: string;
+    /** Lo asigna el servidor: siempre es el siguiente al último recibo. */
+    receiptNumber?: string;
     date: string;
     amount: number;
     notes?: string;

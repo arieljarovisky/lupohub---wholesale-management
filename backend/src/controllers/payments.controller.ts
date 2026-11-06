@@ -20,6 +20,7 @@ import {
   getImportedReceiptEntry,
   getPaymentAllocationIds,
 } from '../services/importedReceiptPayment.service';
+import { allocateNextReceiptNumber, peekNextReceiptNumber } from '../services/receiptSequence.service';
 
 const PAYMENT_METHODS = ['transferencia', 'echeq', 'efectivo', 'deposito'] as const;
 type PaymentMethodValue = (typeof PAYMENT_METHODS)[number];
@@ -654,7 +655,22 @@ export const deletePayment = async (req: any, res: Response) => {
   }
 };
 
-/** Crear pago/recibo. */
+/** Próximo Nº de recibo (no lo consume). */
+export const getNextReceiptNumber = async (req: any, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user || !canManagePayments(user.role)) {
+      return res.status(403).json({ message: 'No autorizado' });
+    }
+    const receiptNumber = await peekNextReceiptNumber();
+    return res.json({ receiptNumber });
+  } catch (e: any) {
+    console.error('getNextReceiptNumber:', e);
+    return res.status(500).json({ message: 'Error calculando el próximo recibo', detail: e?.message });
+  }
+};
+
+/** Crear pago/recibo. El número es siempre el siguiente al último recibo. */
 export const createPayment = async (req: any, res: Response) => {
   try {
     const user = req.user;
@@ -680,13 +696,11 @@ export const createPayment = async (req: any, res: Response) => {
     };
 
     const customerId = (body.customerId || '').toString().trim();
-    const receiptNumber = (body.receiptNumber || '').toString().trim();
     const date = (body.date || '').toString().trim();
     const amount = body.amount != null ? Number(body.amount) : 0;
     const paymentMethod = normalizePaymentMethod(body.paymentMethod);
 
     if (!customerId) return res.status(400).json({ message: 'Falta customerId' });
-    if (!receiptNumber) return res.status(400).json({ message: 'Falta número de recibo' });
     if (!date) return res.status(400).json({ message: 'Falta fecha' });
     if (!Number.isFinite(amount) || amount < 0) return res.status(400).json({ message: 'Monto inválido' });
     if (body.paymentMethod != null && String(body.paymentMethod).trim() && !paymentMethod) {
@@ -757,6 +771,7 @@ export const createPayment = async (req: any, res: Response) => {
       return res.status(e?.statusCode || 400).json({ message: e.message });
     }
 
+    const receiptNumber = await allocateNextReceiptNumber();
     const receiptStrict = normalizeReceiptNumberStrict(receiptNumber);
     const existing = await get(
       `SELECT id, customer_id, seller_id, order_id, invoice_id, receipt_number, date, amount, notes, payment_method, created_at

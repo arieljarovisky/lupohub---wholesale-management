@@ -3,6 +3,7 @@ import multer from 'multer';
 import { authMiddleware } from '../middleware/auth';
 import {
   listPayments,
+  getNextReceiptNumber,
   createPayment,
   importPaymentsFromExcel,
   updatePaymentDate,
@@ -21,6 +22,7 @@ router.use(authMiddleware as any);
 const upload = multer({ storage: multer.memoryStorage() });
 
 router.get('/', listPayments as any);
+router.get('/next-number', getNextReceiptNumber as any);
 router.get('/imported/link-info', getImportedReceiptLinkInfo as any);
 router.get('/invoice-outstanding', getInvoicesOutstandingHandler as any);
 router.get('/order-outstanding', getOrdersOutstandingHandler as any);
