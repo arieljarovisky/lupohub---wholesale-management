@@ -4448,6 +4448,57 @@ export const api = {
     }, { message: 'Error' }, 'createStockSnapshot');
   },
 
+  listStockDailySnapshots: async (): Promise<{
+    today: string;
+    days: Array<{ date: string; variants: number; variantsWithStock: number; units: number; takenAt: string | null }>;
+  }> => {
+    return await request('/stock/daily-snapshots', 'GET', undefined, undefined, 60000);
+  },
+
+  createStockDailySnapshot: async (): Promise<{
+    message: string;
+    date: string;
+    variants: number;
+    variantsWithStock: number;
+    units: number;
+    replaced: boolean;
+  }> => {
+    return await request('/stock/daily-snapshot', 'POST', {}, undefined, 120000);
+  },
+
+  compareStockDailySnapshots: async (from: string, to: string): Promise<{
+    from: string;
+    to: string;
+    toLabel: string;
+    truncated: boolean;
+    summary: { variantsDown: number; unitsDown: number; variantsUp: number; unitsUp: number };
+    rows: Array<{
+      sku: string;
+      productSku: string;
+      productName: string;
+      color: string;
+      size: string;
+      fromStock: number;
+      toStock: number;
+      delta: number;
+    }>;
+  }> => {
+    const q = new URLSearchParams({ from, to });
+    return await request(`/stock/daily-snapshot/compare?${q.toString()}`, 'GET', undefined, undefined, 120000);
+  },
+
+  downloadStockDailySnapshotCompare: async (from: string, to: string): Promise<void> => {
+    const blob = await getBlob(`/stock/daily-snapshot/compare.xlsx?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, 120000);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `stock_${from}_vs_${to}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
   // Eliminar snapshot inicial para poder crear uno nuevo
   deleteStockSnapshot: async (): Promise<{ message: string; deleted: number }> => {
     return handleRequest(async () => {

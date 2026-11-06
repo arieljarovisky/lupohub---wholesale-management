@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { getStockMovements, forceSyncStock, createStockSnapshot, deleteStockSnapshot, importSalesHistory, updateVariantStockEndpoint, importStockFromExcel, importStockGridToDespacho } from '../controllers/stock.controller';
+import { compareDailySnapshots, createDailySnapshot, exportDailySnapshotCompare, listDailySnapshots } from '../controllers/stockDailySnapshot.controller';
 import { getBrazilOrderSuggestion, exportBrazilOrderSuggestion } from '../controllers/brazilOrderSuggestion.controller';
 import { authMiddleware, adminOrDepositoMiddleware } from '../middleware/auth';
 
@@ -16,6 +17,12 @@ router.put('/variant/:variantId', authMiddleware, updateVariantStockEndpoint);
 
 // Forzar sincronización de una variante a TN y ML
 router.post('/sync/:variantId', forceSyncStock);
+
+// Fotos diarias del stock, para comparar cómo se descuenta día a día
+router.get('/daily-snapshots', authMiddleware, adminOrDepositoMiddleware, listDailySnapshots);
+router.post('/daily-snapshot', authMiddleware, adminOrDepositoMiddleware, createDailySnapshot);
+router.get('/daily-snapshot/compare.xlsx', authMiddleware, adminOrDepositoMiddleware, exportDailySnapshotCompare);
+router.get('/daily-snapshot/compare', authMiddleware, adminOrDepositoMiddleware, compareDailySnapshots);
 
 // Crear snapshot inicial del stock actual
 router.post('/snapshot', createStockSnapshot);

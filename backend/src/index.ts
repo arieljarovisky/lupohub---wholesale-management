@@ -23,6 +23,7 @@ import paymentsRoutes from './routes/payments.routes';
 import userTasksRoutes from './routes/userTasks.routes';
 import { authMiddleware } from './middleware/auth';
 import { addStockMovementsTable } from './database/add_stock_movements_table';
+import { addStockDailySnapshots } from './database/add_stock_daily_snapshots';
 import { addDispatchedAtToOrders } from './database/add_dispatched_at_orders';
 import { fixIntegrationsTable } from './database/fix_integrations_table';
 import { addDespachosTable } from './database/add_despachos_table';
@@ -232,6 +233,7 @@ async function initDatabase() {
       await initSchema();
       await ensureAdminUser();
       await addStockMovementsTable();
+      await addStockDailySnapshots();
       await addDispatchedAtToOrders();
       await fixIntegrationsTable();
       await addDespachosTable();
