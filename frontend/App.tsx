@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, lazy, Suspense, useCallback, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
 import { channelLogoForView } from './components/ChannelLogos';
-import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Percent, Megaphone, Wallet, ChevronRight, MessageCircle, Star, RefreshCw, PackagePlus } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Percent, Megaphone, Wallet, ChevronRight, MessageCircle, Star, RefreshCw, PackagePlus, Tag } from 'lucide-react';
 import { isCompanyFinanceUser, COMPANY_FINANCE_VIEW } from './utils/companyFinanceAccess';
 import {
   MARKETING_HUB_VIEW,
@@ -73,6 +73,7 @@ const MarketingTopProducts = lazyWithReload(() => import('./components/Marketing
 const MetaAdsCampaigns = lazyWithReload(() => import('./components/MetaAdsCampaigns'));
 const GoogleAdsCampaigns = lazyWithReload(() => import('./components/GoogleAdsCampaigns'));
 const MarketingLeads = lazyWithReload(() => import('./components/MarketingLeads'));
+const ShowroomPriceList = lazyWithReload(() => import('./components/ShowroomPriceList'));
 
 const ViewFallback = () => (
   <div className="flex items-center justify-center py-24">
@@ -176,6 +177,7 @@ const App: React.FC = () => {
     sellers: [Role.ADMIN, Role.SELLER],
     visits: [Role.ADMIN, Role.SELLER],
     catalogs: [Role.ADMIN, Role.SELLER, Role.CUSTOMER],
+    showroom_prices: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.DEPOSITO],
     settings: [Role.ADMIN],
     facturacion: [Role.ADMIN, Role.WAREHOUSE],
     order_picking: [Role.ADMIN, Role.WAREHOUSE],
@@ -1041,6 +1043,7 @@ const App: React.FC = () => {
       { id: 'sellers', label: 'Vendedores', icon: Percent, roles: [Role.ADMIN, Role.SELLER] },
       { id: 'visits', label: 'Visitas', icon: MapPin, roles: [Role.ADMIN, Role.SELLER] },
       { id: 'catalogs', label: 'Catálogos', icon: BookOpen, roles: [Role.ADMIN, Role.SELLER, Role.CUSTOMER] },
+      { id: 'showroom_prices', label: 'Precios showroom', icon: Tag, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.DEPOSITO] },
       { id: 'facturacion', label: 'Facturación', icon: DollarSign, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'settings', label: 'Configuración', icon: SettingsIcon, roles: [Role.ADMIN, Role.WAREHOUSE] },
     ]},
@@ -1192,6 +1195,7 @@ const App: React.FC = () => {
                  {baseView === 'customers' && 'Clientes'}
                  {baseView === 'sellers' && (currentUser.role === Role.SELLER ? 'Mis comisiones' : 'Vendedores y comisiones')}
                  {baseView === 'catalogs' && 'Catálogos'}
+                 {baseView === 'showroom_prices' && 'Precios showroom'}
                  {baseView === 'visits' && 'Visitas'}
                  {baseView === 'settings' && 'Configuración'}
                  {baseView === 'facturacion' && 'Facturación'}
@@ -1476,6 +1480,11 @@ const App: React.FC = () => {
           {baseView === 'catalogs' && (
             <Suspense fallback={<ViewFallback />}>
               <Catalogs role={currentUser.role} priceLists={priceLists} userId={currentUser.id} />
+            </Suspense>
+          )}
+          {baseView === 'showroom_prices' && (
+            <Suspense fallback={<ViewFallback />}>
+              <ShowroomPriceList />
             </Suspense>
           )}
           {baseView === 'stock_sync' && (

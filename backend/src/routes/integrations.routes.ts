@@ -94,6 +94,7 @@ import {
   uploadTnProductImagesMiddleware,
 } from '../controllers/tiendanubeProductImages.controller';
 import { getTiendaNubeCatalog } from '../controllers/tiendanubeCatalog.controller';
+import { getShowroomPriceList } from '../controllers/showroomPriceList.controller';
 import {
   getTiendaNubeCatalogConfig,
   saveTiendaNubeCatalogConfig,
@@ -211,6 +212,7 @@ router.get('/marketing/top-products-export', authMiddleware, exportMarketingTopP
 router.get('/tiendanube/category-images/preview', authMiddleware, listTiendaNubeCategoryMatches);
 router.get('/tiendanube/category-images/download', authMiddleware, downloadTiendaNubeCategoryImagesZip);
 router.get('/tiendanube/catalog', authMiddleware, getTiendaNubeCatalog);
+router.get('/tiendanube/showroom-prices', authMiddleware, getShowroomPriceList);
 router.get('/tiendanube/catalog/config', authMiddleware, getTiendaNubeCatalogConfig);
 router.put('/tiendanube/catalog/config', authMiddleware, saveTiendaNubeCatalogConfig);
 router.get('/tiendanube/express-tracking-page/config', authMiddleware, getTiendaNubeExpressTrackingPageConfig);

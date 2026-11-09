@@ -5099,6 +5099,16 @@ export const api = {
       { config }
     );
   },
+  getShowroomPriceList: async (refresh = false): Promise<ShowroomPriceList> => {
+    const qs = refresh ? '?refresh=1' : '';
+    return request<ShowroomPriceList>(
+      `/integrations/tiendanube/showroom-prices${qs}`,
+      'GET',
+      undefined,
+      undefined,
+      300000
+    );
+  },
   /** Sube una imagen propia para el catálogo y devuelve su URL absoluta. */
   uploadCatalogImage: async (file: File): Promise<string> => {
     const formData = new FormData();
@@ -5147,4 +5157,27 @@ export interface TiendaNubeCatalog {
   sections: TiendaNubeCatalogSection[];
   priceListId?: string;
   priceListName?: string;
+}
+
+export interface ShowroomPriceItem {
+  id: string;
+  productId: number;
+  name: string;
+  articleCode: string;
+  barcode: string | null;
+  brand: string | null;
+  image: string | null;
+  stock: number | null;
+  priceTransfer: number | null;
+  priceCard: number | null;
+  compareAtPrice: number | null;
+  url: string | null;
+}
+
+export interface ShowroomPriceList {
+  generatedAt: string;
+  productCount: number;
+  transferDiscountPercent: number;
+  cardDiscountPercent: number;
+  items: ShowroomPriceItem[];
 }
