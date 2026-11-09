@@ -5264,8 +5264,12 @@ export interface ShowroomPriceItem {
   brand: string | null;
   image: string | null;
   stock: number | null;
+  variantCount?: number;
+  searchText?: string;
   priceTransfer: number | null;
+  priceTransferMax?: number | null;
   priceCard: number | null;
+  priceCardMax?: number | null;
   compareAtPrice: number | null;
   url: string | null;
 }

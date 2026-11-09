@@ -13,11 +13,20 @@ export type ShowroomPriceItem = {
   barcode: string | null;
   brand: string | null;
   image: string | null;
+  /** Unidades sumadas de todas las variantes del artículo. */
   stock: number | null;
+  /** Cuántas variantes (talle/color) quedaron dentro de esta fila. */
+  variantCount: number;
+  /** SKUs, EAN y nombres para buscar una variante sin listarla aparte. */
+  searchText: string;
   /** Precio de venta con el descuento de transferencia de Pago Nube (0% si no hay). */
   priceTransfer: number | null;
+  /** Si las variantes no comparten el mismo precio de transferencia. */
+  priceTransferMax: number | null;
   /** Precio de venta con tarjeta en 1 pago (sin interés de cuotas). */
   priceCard: number | null;
+  /** Si las variantes no comparten el mismo precio de tarjeta. */
+  priceCardMax: number | null;
   /** Precio tachado de la ficha, si es mayor al de venta. */
   compareAtPrice: number | null;
   url: string | null;
@@ -108,12 +117,37 @@ function productUrl(product: any, storeBase: string): string | null {
   return null;
 }
 
-function variantOptionLabel(variant: any): string {
-  const values = Array.isArray(variant?.values) ? variant.values : [];
-  return values
-    .map((value: unknown) => lang(value).trim())
-    .filter(Boolean)
-    .join(' / ');
+/** Código de artículo Lupo/Trifil, sin talle, color ni sufijo de pack. */
+export function articleCodeFromSku(sku: string): string {
+  let raw = String(sku || '').trim();
+  if (!raw) return '';
+  raw = raw.replace(/-surt-x\d+$/i, '').replace(/-x\d+$/i, '');
+  const parts = raw.split('-').filter(Boolean);
+  if (parts.length >= 3) return parts[0].toUpperCase();
+  const letter = raw.match(/^([A-Za-z]+)(\d+)$/);
+  if (letter) {
+    const num = letter[2];
+    const articleNum = num.length >= 13 ? num.slice(0, 7) : num.length === 10 ? num.slice(0, 7) : num.length > 9 ? num.slice(0, -6) : num;
+    return `${letter[1]}${articleNum}`.toUpperCase();
+  }
+  const digits = raw.replace(/\D/g, '');
+  if (!digits) return raw;
+  if (digits.length >= 13 || digits.length === 10) return digits.slice(0, 7);
+  if (digits.length > 9) return digits.slice(0, -6);
+  return digits;
+}
+
+function packSizeOf(sku: string, productName: string): string {
+  const fromSku = sku.match(/-x(\d+)$/i);
+  if (fromSku) return fromSku[1];
+  const fromName = productName.match(/pack\s*x\s*(\d+)/i);
+  if (fromName) return fromName[1];
+  return '1';
+}
+
+function sameMoney(a: number | null, b: number | null): boolean {
+  if (a == null || b == null) return a == null && b == null;
+  return Math.abs(a - b) < 0.009;
 }
 
 export function readPaymentDiscount(html: string, methodId: string): number {
@@ -196,12 +230,63 @@ async function fetchPaymentDiscounts(pageUrl: string): Promise<{ transfer: numbe
   }
 }
 
-function mapItems(
+type PriceGroup = {
+  id: string;
+  productId: number;
+  pack: string;
+  names: Map<string, number>;
+  articleCode: string;
+  brand: string | null;
+  image: string | null;
+  url: string | null;
+  stock: number;
+  stockKnown: boolean;
+  transfer: number[];
+  card: number[];
+  compareAt: number[];
+  skus: string[];
+  barcodes: string[];
+  variantCount: number;
+};
+
+function commonPrefix(values: string[]): string {
+  if (!values.length) return '';
+  let prefix = values[0];
+  for (const value of values.slice(1)) {
+    let i = 0;
+    while (i < prefix.length && i < value.length && prefix[i] === value[i]) i += 1;
+    prefix = prefix.slice(0, i);
+  }
+  return prefix;
+}
+
+function preferredName(names: Map<string, number>): string {
+  const unique = [...names.keys()];
+  if (unique.length === 1) return unique[0];
+  const prefix = commonPrefix(unique).replace(/[\s·\-/|,]+$/g, '').trim();
+  if (prefix.length >= 4) return prefix;
+  const ranked = [...names.entries()].sort((a, b) => b[1] - a[1] || a[0].length - b[0].length);
+  return ranked[0]?.[0] || 'Sin nombre';
+}
+
+function span(values: number[]): { min: number | null; max: number | null } {
+  if (!values.length) return { min: null, max: null };
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  return { min, max: sameMoney(min, max) ? null : max };
+}
+
+/**
+ * Una fila por artículo (y por pack, si el mismo artículo se vende suelto y en pack).
+ * Talles y colores del mismo precio quedan juntos.
+ */
+export function mapShowroomItems(
   products: any[],
   storeBase: string,
   discounts: { transfer: number; card: number }
 ): ShowroomPriceItem[] {
-  const items: ShowroomPriceItem[] = [];
+  const groups = new Map<string, PriceGroup>();
+
   for (const product of products) {
     if (product?.published === false) continue;
     const productId = Number(product?.id);
@@ -212,40 +297,97 @@ function mapItems(
     const image = imageUrl(product);
     const url = productUrl(product, storeBase);
     const variants = (Array.isArray(product?.variants) ? product.variants : []).filter(
-      (variant: any) => variant?.visible !== false
+      (variant: any) => variant?.visible !== false && variant?.id != null
     );
-    const multi = variants.length > 1;
+    if (!variants.length) continue;
 
     for (const variant of variants) {
-      const variantId = variant?.id != null ? String(variant.id) : '';
-      if (!variantId) continue;
       const sku = String(variant?.sku || '').trim();
-      const barcodeRaw = String(variant?.barcode || '').trim();
-      const barcode = barcodeRaw && barcodeRaw !== sku ? barcodeRaw : null;
-      const option = variantOptionLabel(variant);
-      const name = multi && option ? `${productName} · ${option}` : productName;
-      const { selling, compareAt } = resolveVariantPrices(variant);
-      const stockRaw = variant?.stock;
-      const stock =
-        stockRaw == null || stockRaw === '' || !Number.isFinite(Number(stockRaw))
-          ? null
-          : Math.max(0, Math.trunc(Number(stockRaw)));
+      const articleCode = articleCodeFromSku(sku);
+      const pack = packSizeOf(sku, productName);
+      const key = articleCode ? `${articleCode}|x${pack}` : `product:${productId}`;
+      let group = groups.get(key);
+      if (!group) {
+        group = {
+          id: articleCode ? key : `product:${productId}`,
+          productId,
+          pack,
+          names: new Map(),
+          articleCode: articleCode || sku,
+          brand,
+          image,
+          url,
+          stock: 0,
+          stockKnown: false,
+          transfer: [],
+          card: [],
+          compareAt: [],
+          skus: [],
+          barcodes: [],
+          variantCount: 0,
+        };
+        groups.set(key, group);
+      }
 
-      items.push({
-        id: variantId,
-        productId,
-        name,
-        articleCode: sku,
-        barcode,
-        brand,
-        image,
-        stock,
-        priceTransfer: applyPaymentDiscount(selling, discounts.transfer),
-        priceCard: applyPaymentDiscount(selling, discounts.card),
-        compareAtPrice: compareAt,
-        url,
-      });
+      group.names.set(productName, (group.names.get(productName) || 0) + 1);
+      group.variantCount += 1;
+      if (!group.brand && brand) group.brand = brand;
+      if (!group.image && image) group.image = image;
+      if (!group.url && url) group.url = url;
+      if (sku && !group.skus.includes(sku)) group.skus.push(sku);
+
+      const barcodeRaw = String(variant?.barcode || '').trim();
+      if (barcodeRaw && barcodeRaw !== sku && !group.barcodes.includes(barcodeRaw)) {
+        group.barcodes.push(barcodeRaw);
+      }
+
+      const stockRaw = variant?.stock;
+      if (stockRaw != null && stockRaw !== '' && Number.isFinite(Number(stockRaw))) {
+        group.stockKnown = true;
+        group.stock += Math.max(0, Math.trunc(Number(stockRaw)));
+      }
+
+      const { selling, compareAt } = resolveVariantPrices(variant);
+      const transfer = applyPaymentDiscount(selling, discounts.transfer);
+      const card = applyPaymentDiscount(selling, discounts.card);
+      if (transfer != null) group.transfer.push(transfer);
+      if (card != null) group.card.push(card);
+      if (compareAt != null) group.compareAt.push(compareAt);
     }
+  }
+
+  const items: ShowroomPriceItem[] = [];
+  for (const group of groups.values()) {
+    const transfer = span(group.transfer);
+    const card = span(group.card);
+    const compare = span(group.compareAt);
+    const sellingTop = Math.max(transfer.max ?? transfer.min ?? 0, card.max ?? card.min ?? 0);
+    const compareAtPrice =
+      compare.min != null && compare.max == null && compare.min > sellingTop + 0.009 ? compare.min : null;
+    let name = preferredName(group.names);
+    if (group.pack !== '1' && !new RegExp(`pack\\s*x\\s*${group.pack}\\b`, 'i').test(name)) {
+      name = `${name} · Pack x${group.pack}`;
+    }
+    const searchText = [group.articleCode, name, ...group.names.keys(), ...group.skus, ...group.barcodes].join(' ');
+
+    items.push({
+      id: group.id,
+      productId: group.productId,
+      name,
+      articleCode: group.articleCode,
+      barcode: group.barcodes.length === 1 ? group.barcodes[0] : null,
+      brand: group.brand,
+      image: group.image,
+      stock: group.stockKnown ? group.stock : null,
+      variantCount: group.variantCount,
+      searchText,
+      priceTransfer: transfer.min,
+      priceTransferMax: transfer.max,
+      priceCard: card.min,
+      priceCardMax: card.max,
+      compareAtPrice,
+      url: group.url,
+    });
   }
 
   items.sort((a, b) => {
@@ -267,7 +409,7 @@ async function compute(): Promise<ShowroomPriceList> {
 
   const sample = products.find((product) => productUrl(product, storeBase));
   const discounts = await fetchPaymentDiscounts(sample ? productUrl(sample, storeBase) || '' : '');
-  const items = mapItems(products, storeBase, discounts);
+  const items = mapShowroomItems(products, storeBase, discounts);
 
   return {
     generatedAt: new Date().toISOString(),

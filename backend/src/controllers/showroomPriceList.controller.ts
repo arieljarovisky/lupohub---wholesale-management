@@ -3,7 +3,7 @@ import { buildShowroomPriceList } from '../services/showroomPriceList.service';
 
 /**
  * GET /integrations/tiendanube/showroom-prices
- * Lista plana de productos publicados en Tienda Nube con precio de transferencia
+ * Lista de precios de Tienda Nube agrupada por artículo, con precio de transferencia
  * y precio con tarjeta en 1 pago. ?refresh=1 ignora la caché de unos minutos.
  */
 export const getShowroomPriceList = async (req: Request, res: Response) => {

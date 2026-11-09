@@ -22,10 +22,16 @@ function normalizeCode(value: string): string {
 function matchesQuery(item: ShowroomPriceItem, query: string): boolean {
   const q = normalizeCode(query);
   if (!q) return true;
-  const haystack = [item.articleCode, item.barcode || '', item.name, item.brand || '']
+  const haystack = [item.articleCode, item.barcode || '', item.name, item.brand || '', item.searchText || '']
     .map(normalizeCode)
     .join(' ');
   return haystack.includes(q);
+}
+
+function formatPriceSpan(min: number | null, max?: number | null): string {
+  if (min == null || !Number.isFinite(min)) return '—';
+  if (max == null || !Number.isFinite(max) || Math.abs(max - min) < 0.009) return formatMoney(min);
+  return `${formatMoney(min)} – ${formatMoney(max)}`;
 }
 
 function highlight(text: string, query: string): React.ReactNode {
@@ -42,21 +48,21 @@ function highlight(text: string, query: string): React.ReactNode {
   );
 }
 
-function stockLabel(stock: number | null): string | null {
+function stockLabel(stock: number | null, variantCount: number): string | null {
   if (stock == null) return null;
   if (stock <= 0) return 'Sin stock';
-  return `Stock ${stock}`;
+  return variantCount > 1 ? `Stock total ${stock}` : `Stock ${stock}`;
 }
 
 const PricePair: React.FC<{ item: ShowroomPriceItem }> = ({ item }) => (
   <div className="grid grid-cols-2 gap-2 min-w-[220px]">
     <div>
       <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-300/80">Transferencia</p>
-      <p className="text-lg font-black tabular-nums text-emerald-300 leading-tight">{formatMoney(item.priceTransfer)}</p>
+      <p className="text-lg font-black tabular-nums text-emerald-300 leading-tight">{formatPriceSpan(item.priceTransfer, item.priceTransferMax)}</p>
     </div>
     <div>
       <p className="text-[10px] font-bold uppercase tracking-wider text-sky-300/80">Tarjeta</p>
-      <p className="text-lg font-black tabular-nums text-sky-300 leading-tight">{formatMoney(item.priceCard)}</p>
+      <p className="text-lg font-black tabular-nums text-sky-300 leading-tight">{formatPriceSpan(item.priceCard, item.priceCardMax)}</p>
     </div>
   </div>
 );
@@ -77,11 +83,12 @@ const ProductCell: React.FC<{ item: ShowroomPriceItem; query: string }> = ({ ite
       <p className="text-sm text-slate-200 truncate">{highlight(item.name, query)}</p>
       <p className="text-xs text-slate-500 truncate">
         {item.brand ? <span>{highlight(item.brand, query)}</span> : null}
-        {item.brand && item.barcode ? ' · ' : null}
-        {item.barcode ? <span>EAN {highlight(item.barcode, query)}</span> : null}
-        {(item.brand || item.barcode) && stockLabel(item.stock) ? ' · ' : null}
-        {stockLabel(item.stock) ? (
-          <span className={item.stock === 0 ? 'text-amber-400' : undefined}>{stockLabel(item.stock)}</span>
+        {item.brand && (item.barcode || (item.variantCount || 0) > 1) ? ' · ' : null}
+        {(item.variantCount || 0) > 1 ? <span>{item.variantCount} variantes</span> : null}
+        {(item.variantCount || 0) <= 1 && item.barcode ? <span>EAN {highlight(item.barcode, query)}</span> : null}
+        {(item.brand || item.barcode || (item.variantCount || 0) > 1) && stockLabel(item.stock, item.variantCount || 1) ? ' · ' : null}
+        {stockLabel(item.stock, item.variantCount || 1) ? (
+          <span className={item.stock === 0 ? 'text-amber-400' : undefined}>{stockLabel(item.stock, item.variantCount || 1)}</span>
         ) : null}
       </p>
       {item.compareAtPrice != null && (
@@ -185,7 +192,7 @@ const ShowroomPriceListView: React.FC = () => {
         <p className="mt-2 text-sm text-slate-400" aria-live="polite">
           {loading && !data
             ? 'Buscando precios en Tienda Nube…'
-            : `${filtered.length.toLocaleString('es-AR')} de ${(data?.productCount || 0).toLocaleString('es-AR')} publicaciones${updatedLabel ? ` · actualizado ${updatedLabel}` : ''}`}
+            : `${filtered.length.toLocaleString('es-AR')} de ${(data?.productCount || 0).toLocaleString('es-AR')} artículos${updatedLabel ? ` · actualizado ${updatedLabel}` : ''}`}
         </p>
       </div>
 
@@ -259,10 +266,10 @@ const ShowroomPriceListView: React.FC = () => {
                       <ProductCell item={item} query={query} />
                     </td>
                     <td className="px-4 py-3 align-middle">
-                      <span className="text-xl font-black tabular-nums text-emerald-300">{formatMoney(item.priceTransfer)}</span>
+                      <span className="text-xl font-black tabular-nums text-emerald-300">{formatPriceSpan(item.priceTransfer, item.priceTransferMax)}</span>
                     </td>
                     <td className="px-4 py-3 align-middle">
-                      <span className="text-xl font-black tabular-nums text-sky-300">{formatMoney(item.priceCard)}</span>
+                      <span className="text-xl font-black tabular-nums text-sky-300">{formatPriceSpan(item.priceCard, item.priceCardMax)}</span>
                     </td>
                     <td className="px-2 py-3 align-middle">
                       {item.url && (
