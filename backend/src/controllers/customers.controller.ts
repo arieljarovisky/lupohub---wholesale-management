@@ -28,6 +28,7 @@ import {
   ORDER_PRICES_INCLUDE_IVA,
   invoiceLedgerImporte,
   sqlAmountWithIvaFromOrderLines,
+  sqlCreditNoteSaldoAmount,
   sqlInvoiceAmountFromOrderTotal,
   sqlNetoAfipToAmountWithIva
 } from '../config/orderPricing';
@@ -561,9 +562,10 @@ export const exportCustomersBySheetsXlsx = async (req: Request, res: Response) =
                LPAD(COALESCE(cn.cbte_desde, 0), 8, '0')
              ) AS comprobante,
              cn.order_id AS order_id,
-             ROUND(COALESCE(cn.amount_credited, 0) * 1.21, 2) AS importe
+             ${sqlCreditNoteSaldoAmount('i')} AS importe
            FROM credit_notes cn
            JOIN orders o ON o.id = cn.order_id
+           LEFT JOIN invoices i ON i.id = cn.invoice_id
            WHERE o.customer_id = ?
          ) b
          ORDER BY b.fecha DESC`,
@@ -1790,17 +1792,19 @@ const SQL_CARTERA_AFIP_INVOICES_SUBQUERY = `
 `;
 
 /**
- * NC AFIP (× IVA) que restan del saldo. Mismos puntos de venta que facturas LupoHub.
+ * NC AFIP (neto + IVA + percepción IIBB prorrateada) que restan del saldo.
+ * Mismos puntos de venta que facturas LupoHub.
  * Excluye NC de reemisión IIBB (superseded_by_reinvoice): la factura anterior no figura en cartera
  * porque se actualiza en el mismo registro; solo cuenta la factura nueva.
  */
 const SQL_CARTERA_AFIP_NC_SUBQUERY = `
   SELECT
     o.customer_id,
-    SUM(${sqlNetoAfipToAmountWithIva('COALESCE(cn.amount_credited, 0)')}) AS nc_iva
+    SUM(${sqlCreditNoteSaldoAmount('i')}) AS nc_iva
   FROM credit_notes cn
   INNER JOIN orders o ON o.id = cn.order_id
   INNER JOIN customers co ON co.id = o.customer_id
+  LEFT JOIN invoices i ON i.id = cn.invoice_id
   WHERE cn.punto_venta IN (${SQL_CARTERA_PV_IN})
     AND COALESCE(cn.superseded_by_reinvoice, 0) = 0
     AND ${SQL_OPENING_AFIP_CN_DATE_WHERE}
@@ -2164,7 +2168,7 @@ export const getCarteraTotals = async (req: Request, res: Response) => {
       GROUP BY m.customer_id
     ) mfac ON mfac.customer_id = c.id
     LEFT JOIN (
-      SELECT m.customer_id, SUM(ROUND(m.importe_neto, 2)) AS manual_nc
+      SELECT m.customer_id, SUM(ROUND(m.importe_neto + COALESCE(m.agip_ret_per, 0), 2)) AS manual_nc
       FROM customer_manual_comprobantes m
       INNER JOIN customers co ON co.id = m.customer_id
       WHERE m.tipo = 'NC' AND ${SQL_OPENING_MANUAL_DATE_WHERE}
@@ -2299,7 +2303,7 @@ export async function queryCarteraTotalsForCustomer(
       GROUP BY m.customer_id
     ) mfac ON mfac.customer_id = c.id
     LEFT JOIN (
-      SELECT m.customer_id, SUM(ROUND(m.importe_neto, 2)) AS manual_nc
+      SELECT m.customer_id, SUM(ROUND(m.importe_neto + COALESCE(m.agip_ret_per, 0), 2)) AS manual_nc
       FROM customer_manual_comprobantes m
       INNER JOIN customers co ON co.id = m.customer_id
       WHERE m.tipo = 'NC' AND ${SQL_OPENING_MANUAL_DATE_WHERE}
@@ -2402,7 +2406,7 @@ async function fetchCarteraSaldoUnificadoMap(
       GROUP BY m.customer_id
     ) mfac ON mfac.customer_id = c.id
     LEFT JOIN (
-      SELECT m.customer_id, SUM(ROUND(m.importe_neto, 2)) AS manual_nc
+      SELECT m.customer_id, SUM(ROUND(m.importe_neto + COALESCE(m.agip_ret_per, 0), 2)) AS manual_nc
       FROM customer_manual_comprobantes m
       INNER JOIN customers co ON co.id = m.customer_id
       WHERE m.tipo = 'NC' AND ${SQL_OPENING_MANUAL_DATE_WHERE}
@@ -2692,7 +2696,7 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
           ) AS comprobante,
           cn.order_id AS order_id,
           0 AS debe,
-          ROUND(COALESCE(cn.amount_credited, 0) * 1.21, 2) AS haber
+          ${sqlCreditNoteSaldoAmount('inv')} AS haber
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
         LEFT JOIN invoices inv ON inv.id = cn.invoice_id
@@ -2967,7 +2971,7 @@ export const exportSaldosMovimientosSistemaXlsx = async (req: Request, res: Resp
           ) AS comprobante,
           cn.order_id AS order_id,
           0 AS debe,
-          ROUND(COALESCE(cn.amount_credited, 0) * 1.21, 2) AS haber
+          ${sqlCreditNoteSaldoAmount('inv')} AS haber
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
         LEFT JOIN invoices inv ON inv.id = cn.invoice_id
@@ -3313,7 +3317,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           ) AS comprobante,
           cn.order_id AS order_id,
           0 AS debe,
-          ROUND(COALESCE(cn.amount_credited, 0) * 1.21, 2) AS haber
+          ${sqlCreditNoteSaldoAmount('inv')} AS haber
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
         LEFT JOIN invoices inv ON inv.id = cn.invoice_id
@@ -3342,7 +3346,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
           ) AS comprobante,
           cn.order_id AS order_id,
           0 AS debe,
-          ROUND(COALESCE(cn.amount_credited, 0) * 1.21, 2) AS haber
+          ${sqlCreditNoteSaldoAmount('inv')} AS haber
         FROM credit_notes cn
         JOIN orders o ON o.id = cn.order_id
         LEFT JOIN invoices inv ON inv.id = cn.invoice_id
@@ -3470,7 +3474,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
             ELSE 0
           END AS debe,
           CASE
-            WHEN m.tipo = 'NC' THEN ROUND(COALESCE(m.importe_neto, 0), 2)
+            WHEN m.tipo = 'NC' THEN ROUND(COALESCE(m.importe_neto, 0) + COALESCE(m.agip_ret_per, 0), 2)
             ELSE 0
           END AS haber
         FROM customer_manual_comprobantes m
@@ -3502,7 +3506,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
             ELSE 0
           END AS debe,
           CASE
-            WHEN m.tipo = 'NC' THEN ROUND(COALESCE(m.importe_neto, 0), 2)
+            WHEN m.tipo = 'NC' THEN ROUND(COALESCE(m.importe_neto, 0) + COALESCE(m.agip_ret_per, 0), 2)
             ELSE 0
           END AS haber
         FROM customer_manual_comprobantes m
@@ -5614,12 +5618,13 @@ async function buildCustomerFinancialSummary(
         ) AS comprobante,
         cn.order_id AS order_id,
         0 AS debe,
-        ROUND(COALESCE(cn.amount_credited, 0) * 1.21, 2) AS haber,
+        ${sqlCreditNoteSaldoAmount('i')} AS haber,
         CONCAT('NC sobre pedido ', COALESCE(cn.order_id, '')) AS detalle,
         COALESCE(cn.superseded_by_reinvoice, 0) AS superseded_by_reinvoice,
         NULL AS payment_id
       FROM credit_notes cn
       JOIN orders o ON o.id = cn.order_id
+      LEFT JOIN invoices i ON i.id = cn.invoice_id
       WHERE o.customer_id = ?
 
       UNION ALL
@@ -5639,7 +5644,7 @@ async function buildCustomerFinancialSummary(
         ) AS comprobante,
         m.ref_order_id AS order_id,
         CASE WHEN m.tipo = 'FACTURA' THEN ROUND(m.importe_neto + COALESCE(m.agip_ret_per, 0), 2) ELSE 0 END AS debe,
-        CASE WHEN m.tipo = 'NC' THEN ROUND(m.importe_neto, 2) ELSE 0 END AS haber,
+        CASE WHEN m.tipo = 'NC' THEN ROUND(m.importe_neto + COALESCE(m.agip_ret_per, 0), 2) ELSE 0 END AS haber,
         CONCAT('Comprobante manual', COALESCE(CONCAT(' · ', m.notes), '')) AS detalle,
         0 AS superseded_by_reinvoice,
         NULL AS payment_id
@@ -6210,7 +6215,7 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
     const manualAgg = await get(
       `SELECT
          ROUND(COALESCE(SUM(CASE WHEN tipo = 'FACTURA' THEN importe_neto + COALESCE(agip_ret_per, 0) ELSE 0 END), 0), 2) AS manual_fac,
-         ROUND(COALESCE(SUM(CASE WHEN tipo = 'NC' THEN importe_neto ELSE 0 END), 0), 2) AS manual_nc
+         ROUND(COALESCE(SUM(CASE WHEN tipo = 'NC' THEN importe_neto + COALESCE(agip_ret_per, 0) ELSE 0 END), 0), 2) AS manual_nc
        FROM customer_manual_comprobantes
        WHERE customer_id = ?`,
       [customerId]

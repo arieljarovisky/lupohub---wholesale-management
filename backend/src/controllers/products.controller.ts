@@ -733,9 +733,22 @@ export const updateVariantExternalIds = async (req: any, res: any) => {
     try {
       const stockRow = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [variantId]);
       const currentStock = Number(stockRow?.stock ?? 0);
-      await syncStockToExternalPlatforms(variantId, currentStock);
+      const syncRes = await syncStockToExternalPlatforms(variantId, currentStock);
+      const incomplete =
+        (syncRes.mlAttempted > 0 && syncRes.mlOk < syncRes.mlAttempted) ||
+        (syncRes.tnAttempted > 0 && syncRes.tnOk < syncRes.tnAttempted);
+      if (incomplete) {
+        const { enqueueSync } = await import('../stockEngine/ledger');
+        await enqueueSync([variantId], 0, 1).catch(() => undefined);
+      }
     } catch (syncErr: any) {
       console.error('[updateVariantExternalIds] Error enviando stock local a plataformas externas:', syncErr?.message || syncErr);
+      try {
+        const { enqueueSync } = await import('../stockEngine/ledger');
+        await enqueueSync([variantId], 0, 1);
+      } catch {
+        /* ignore */
+      }
     }
 
     res.json({
@@ -749,6 +762,78 @@ export const updateVariantExternalIds = async (req: any, res: any) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Error actualizando IDs externos de variante' });
+  }
+};
+
+/** Desvincular una sola variante de Tienda Nube y/o Mercado Libre (columnas + publicaciones del canal). */
+export const unlinkVariantPlatforms = async (req: any, res: any) => {
+  const { variantId } = req.params;
+  const body = req.body || {};
+  const tiendaNube = body.tiendaNube === true;
+  const mercadoLibre = body.mercadoLibre === true;
+  if (!variantId) return res.status(400).json({ message: 'ID de variante inválido' });
+  if (!tiendaNube && !mercadoLibre) {
+    return res.status(400).json({ message: 'Debe indicar tiendaNube y/o mercadoLibre.' });
+  }
+
+  try {
+    const exists = await get(`SELECT id FROM product_variants WHERE id = ? LIMIT 1`, [variantId]);
+    if (!exists) return res.status(404).json({ message: 'Variante no encontrada' });
+
+    const result: any = { variantId, tiendaNube: false, mercadoLibre: false, stockZeroed: false };
+
+    // Antes de borrar vínculos: dejar stock 0 en las publicaciones que se desvinculan.
+    const platforms: Array<'mercadolibre' | 'tiendanube'> = [];
+    if (mercadoLibre) platforms.push('mercadolibre');
+    if (tiendaNube) platforms.push('tiendanube');
+    try {
+      const syncRes = await syncStockToExternalPlatforms(variantId, 0, {
+        platforms,
+        forceStock: 0,
+      });
+      result.stockZeroed = true;
+      result.stockSync = {
+        mlAttempted: syncRes.mlAttempted,
+        mlOk: syncRes.mlOk,
+        tnAttempted: syncRes.tnAttempted,
+        tnOk: syncRes.tnOk,
+        logs: syncRes.logs,
+      };
+    } catch (syncErr: any) {
+      console.warn(
+        '[unlinkVariantPlatforms] No se pudo poner stock 0 en plataformas externas:',
+        syncErr?.message || syncErr
+      );
+    }
+
+    if (tiendaNube) {
+      await execute(`UPDATE product_variants SET tienda_nube_variant_id = NULL WHERE id = ?`, [variantId]);
+      await execute(
+        `DELETE FROM variant_publications WHERE platform = 'tiendanube' AND variant_id = ?`,
+        [variantId]
+      );
+      result.tiendaNube = true;
+    }
+
+    if (mercadoLibre) {
+      await execute(
+        `UPDATE product_variants
+         SET mercado_libre_variant_id = NULL,
+             mercado_libre_item_id = NULL
+         WHERE id = ?`,
+        [variantId]
+      );
+      await execute(
+        `DELETE FROM variant_publications WHERE platform = 'mercadolibre' AND variant_id = ?`,
+        [variantId]
+      );
+      result.mercadoLibre = true;
+    }
+
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Error desvinculando variante' });
   }
 };
 
@@ -768,18 +853,42 @@ export const unlinkProductPlatforms = async (req: any, res: any) => {
 
     const result: any = { productId: id, tiendaNube: false, mercadoLibre: false, variants: unlinkVariants };
 
-    if (tiendaNube) {
-      await execute(`UPDATE products SET tienda_nube_id = NULL WHERE id = ?`, [id]);
-      result.tiendaNube = true;
-      if (unlinkVariants) {
-        const rows = await query(
+    const variantRows = unlinkVariants
+      ? await query(
           `SELECT pv.id AS variant_id
            FROM product_variants pv
            JOIN product_colors pc ON pc.id = pv.product_color_id
            WHERE pc.product_id = ?`,
           [id]
-        );
-        const variantIds = (rows || []).map((r: any) => r.variant_id).filter(Boolean);
+        )
+      : [];
+    const variantIds = (variantRows || []).map((r: any) => r.variant_id).filter(Boolean);
+
+    // Antes de borrar vínculos: stock 0 en ML/TN de cada variante afectada.
+    if (variantIds.length > 0) {
+      const platforms: Array<'mercadolibre' | 'tiendanube'> = [];
+      if (mercadoLibre) platforms.push('mercadolibre');
+      if (tiendaNube) platforms.push('tiendanube');
+      for (const variantId of variantIds) {
+        try {
+          await syncStockToExternalPlatforms(String(variantId), 0, {
+            platforms,
+            forceStock: 0,
+          });
+        } catch (syncErr: any) {
+          console.warn(
+            `[unlinkProductPlatforms] No se pudo poner stock 0 en variante ${variantId}:`,
+            syncErr?.message || syncErr
+          );
+        }
+      }
+      result.stockZeroedVariants = variantIds.length;
+    }
+
+    if (tiendaNube) {
+      await execute(`UPDATE products SET tienda_nube_id = NULL WHERE id = ?`, [id]);
+      result.tiendaNube = true;
+      if (unlinkVariants) {
         await execute(
           `UPDATE product_variants pv
            JOIN product_colors pc ON pc.id = pv.product_color_id
@@ -800,14 +909,6 @@ export const unlinkProductPlatforms = async (req: any, res: any) => {
       await execute(`UPDATE products SET mercado_libre_id = NULL WHERE id = ?`, [id]);
       result.mercadoLibre = true;
       if (unlinkVariants) {
-        const rows = await query(
-          `SELECT pv.id AS variant_id
-           FROM product_variants pv
-           JOIN product_colors pc ON pc.id = pv.product_color_id
-           WHERE pc.product_id = ?`,
-          [id]
-        );
-        const variantIds = (rows || []).map((r: any) => r.variant_id).filter(Boolean);
         await execute(
           `UPDATE product_variants pv
            JOIN product_colors pc ON pc.id = pv.product_color_id
@@ -1025,10 +1126,23 @@ export const bulkLinkVariants = async (req: Request, res: Response) => {
           try {
             const stockRow = await get(`SELECT stock FROM stocks WHERE variant_id = ?`, [link.variantId]);
             const currentStock = Number(stockRow?.stock ?? 0);
-            await syncStockToExternalPlatforms(link.variantId!, currentStock);
-            return 1;
+            const syncRes = await syncStockToExternalPlatforms(link.variantId!, currentStock);
+            const incomplete =
+              (syncRes.mlAttempted > 0 && syncRes.mlOk < syncRes.mlAttempted) ||
+              (syncRes.tnAttempted > 0 && syncRes.tnOk < syncRes.tnAttempted);
+            if (incomplete) {
+              const { enqueueSync } = await import('../stockEngine/ledger');
+              await enqueueSync([String(link.variantId)], 0, 1).catch(() => undefined);
+            }
+            return syncRes.mlOk + syncRes.tnOk > 0 ? 1 : 0;
           } catch (err: any) {
             console.warn('[bulkLinkVariants] Error enviando stock local a plataformas externas para variante', link.variantId, ':', err?.message || err);
+            try {
+              const { enqueueSync } = await import('../stockEngine/ledger');
+              await enqueueSync([String(link.variantId)], 0, 1);
+            } catch {
+              /* ignore */
+            }
             return 0;
           }
         })
@@ -2142,6 +2256,45 @@ export const deleteVariantPublication = async (req: Request, res: Response) => {
   const { variantId, publicationId } = req.params;
   if (!variantId || !publicationId) return res.status(400).json({ message: 'variantId y publicationId requeridos' });
   try {
+    const pub = await get(
+      `SELECT id, platform, external_product_id, external_variant_id, pack_size
+       FROM variant_publications WHERE id = ? AND variant_id = ? LIMIT 1`,
+      [publicationId, variantId]
+    );
+    if (!pub) {
+      return res.status(404).json({ message: 'Publicación no encontrada o no pertenece a esta variante' });
+    }
+
+    // Dejar stock 0 en esa publicación antes de desvincularla.
+    try {
+      const { pushMercadoLibre, pushTiendaNube } = await import('../stockEngine/pushers');
+      const productId = String(pub.external_product_id || '').trim();
+      const extVar = String(pub.external_variant_id || '').trim();
+      if (pub.platform === 'tiendanube' && productId && extVar) {
+        await pushTiendaNube(productId, extVar, 0);
+      } else if (pub.platform === 'mercadolibre' && productId) {
+        const meta = await get(
+          `SELECT COALESCE(pv.external_sku, pv.sku) AS sku, c.name AS color_name, sz.size_code
+           FROM product_variants pv
+           JOIN product_colors pc ON pc.id = pv.product_color_id
+           LEFT JOIN colors c ON c.id = pc.color_id
+           LEFT JOIN sizes sz ON sz.id = pv.size_id
+           WHERE pv.id = ?`,
+          [variantId]
+        );
+        await pushMercadoLibre(productId, extVar || null, 0, {
+          sku: meta?.sku || null,
+          color: meta?.color_name || null,
+          size: meta?.size_code || null,
+        });
+      }
+    } catch (syncErr: any) {
+      console.warn(
+        '[deleteVariantPublication] No se pudo poner stock 0 en la publicación:',
+        syncErr?.message || syncErr
+      );
+    }
+
     const result = await execute(
       'DELETE FROM variant_publications WHERE id = ? AND variant_id = ?',
       [publicationId, variantId]
@@ -2150,7 +2303,7 @@ export const deleteVariantPublication = async (req: Request, res: Response) => {
     if (deleted === 0) {
       return res.status(404).json({ message: 'Publicación no encontrada o no pertenece a esta variante' });
     }
-    res.json({ deleted: true });
+    res.json({ deleted: true, stockZeroed: true });
   } catch (error: any) {
     console.error('deleteVariantPublication:', error);
     res.status(500).json({ message: 'Error eliminando publicación' });

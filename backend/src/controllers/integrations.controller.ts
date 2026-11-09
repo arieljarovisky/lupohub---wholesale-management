@@ -3645,6 +3645,9 @@ export const getVariantExternalStocks = async (req: Request, res: Response) => {
               COALESCE(pv.external_sku, pv.sku) AS sku,
               c.code AS color_code, c.name AS color_name,
               s.size_code,
+              COALESCE(st.stock, 0) AS hub_stock,
+              COALESCE(NULLIF(p.mercado_libre_pack_size, 0), 1) AS ml_pack,
+              COALESCE(NULLIF(p.tienda_nube_pack_size, 0), 1) AS tn_pack,
               p.mercado_libre_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
               p.tienda_nube_id, pv.tienda_nube_variant_id
        FROM product_variants pv
@@ -3652,6 +3655,7 @@ export const getVariantExternalStocks = async (req: Request, res: Response) => {
        JOIN colors c ON c.id = pc.color_id
        JOIN products p ON p.id = pc.product_id
        LEFT JOIN sizes s ON s.id = pv.size_id
+       LEFT JOIN stocks st ON st.variant_id = pv.id
        WHERE pv.id IN (${placeholders})`,
       variantIds
     );
@@ -3703,24 +3707,36 @@ export const getVariantExternalStocks = async (req: Request, res: Response) => {
       variantLinkMeta.set(variantId, meta);
     }
 
-    const pubsByVariant = new Map<string, Array<{ itemId: string; variationId: string | null }>>();
+    const pubsByVariant = new Map<string, Array<{ itemId: string; variationId: string | null; packSize: number }>>();
+    const packByVariantPlatform = new Map<string, { ml: number; tn: number }>();
     try {
       const pubRows = await query(
-        `SELECT variant_id, external_product_id, external_variant_id
+        `SELECT variant_id, platform, external_product_id, external_variant_id, pack_size
          FROM variant_publications
-         WHERE platform = 'mercadolibre' AND variant_id IN (${placeholders})`,
+         WHERE variant_id IN (${placeholders})`,
         variantIds
       );
       for (const pr of pubRows || []) {
         const vid = String((pr as any).variant_id || '');
+        const platform = String((pr as any).platform || '');
         const itemId = String((pr as any).external_product_id || '').trim();
-        if (!vid || !itemId) continue;
-        if (!pubsByVariant.has(vid)) pubsByVariant.set(vid, []);
-        const extVar = (pr as any).external_variant_id;
-        pubsByVariant.get(vid)!.push({
-          itemId,
-          variationId: extVar != null && String(extVar).trim() !== '' ? String(extVar).trim() : null
-        });
+        const pack = Math.max(1, Math.floor(Number((pr as any).pack_size) || 1));
+        if (!vid) continue;
+        if (!packByVariantPlatform.has(vid)) packByVariantPlatform.set(vid, { ml: 1, tn: 1 });
+        const packs = packByVariantPlatform.get(vid)!;
+        if (platform === 'mercadolibre') {
+          packs.ml = Math.max(packs.ml, pack);
+          if (!itemId) continue;
+          if (!pubsByVariant.has(vid)) pubsByVariant.set(vid, []);
+          const extVar = (pr as any).external_variant_id;
+          pubsByVariant.get(vid)!.push({
+            itemId,
+            variationId: extVar != null && String(extVar).trim() !== '' ? String(extVar).trim() : null,
+            packSize: pack,
+          });
+        } else if (platform === 'tiendanube') {
+          packs.tn = Math.max(packs.tn, pack);
+        }
       }
     } catch {
       /* variant_publications opcional */
@@ -3867,6 +3883,63 @@ export const getVariantExternalStocks = async (req: Request, res: Response) => {
           // ignore per-product errors
         }
       }
+    }
+
+    // Hub = fuente de verdad: si ML/TN vinculados no coinciden con el stock esperado, empujar ya.
+    try {
+      const { syncStockToExternalPlatforms } = await import('./stock.controller');
+      const { unitsForListing } = await import('../stockEngine/targets');
+      const rowByVariant = new Map<string, any>();
+      for (const r of rows || []) {
+        rowByVariant.set(String((r as any).variant_id || ''), r);
+      }
+
+      const MAX_AUTO_HEAL = 25;
+      let healed = 0;
+      for (const variantId of variantIds) {
+        if (healed >= MAX_AUTO_HEAL) break;
+        const row = rowByVariant.get(variantId);
+        if (!row) continue;
+        const hubStock = Math.max(0, Math.floor(Number((row as any).hub_stock) || 0));
+        const packs = packByVariantPlatform.get(variantId);
+        const mlPack = Math.max(1, packs?.ml || Number((row as any).ml_pack) || 1);
+        const tnPack = Math.max(1, packs?.tn || Number((row as any).tn_pack) || 1);
+        const expectedMl = unitsForListing(hubStock, mlPack);
+        const expectedTn = unitsForListing(hubStock, tnPack);
+
+        const hasMlLink =
+          !!(row as any).mercado_libre_variant_id ||
+          !!(row as any).mercado_libre_item_id ||
+          !!(row as any).mercado_libre_id ||
+          (pubsByVariant.get(variantId) || []).length > 0;
+        const hasTnLink = !!(row as any).tienda_nube_variant_id && !!(row as any).tienda_nube_id;
+
+        const platforms: Array<'mercadolibre' | 'tiendanube'> = [];
+        const curMl = stocks[variantId]?.stockML;
+        const curTn = stocks[variantId]?.stockTN;
+        // Si está vinculado y el remoto no coincide (o no se pudo leer), empujar Hub.
+        if (hasMlLink && (curMl === undefined || Number(curMl) !== expectedMl)) {
+          platforms.push('mercadolibre');
+        }
+        if (hasTnLink && (curTn === undefined || Number(curTn) !== expectedTn)) {
+          platforms.push('tiendanube');
+        }
+        if (platforms.length === 0) continue;
+
+        const syncRes = await syncStockToExternalPlatforms(variantId, hubStock, { platforms });
+        healed++;
+        if (platforms.includes('mercadolibre') && syncRes.mlOk > 0) {
+          stocks[variantId].stockML = expectedMl;
+        }
+        if (platforms.includes('tiendanube') && syncRes.tnOk > 0) {
+          stocks[variantId].stockTN = expectedTn;
+        }
+      }
+    } catch (healErr: any) {
+      console.warn(
+        '[getVariantExternalStocks] No se pudo auto-alinear stock externo con Hub:',
+        healErr?.message || healErr
+      );
     }
 
     res.json({ stocks });

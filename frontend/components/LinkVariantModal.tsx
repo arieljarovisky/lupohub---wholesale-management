@@ -236,6 +236,10 @@ const LinkVariantModal: React.FC<LinkVariantModalProps> = ({ variant, onClose, o
       showToast('error', 'Ingresá el ID o el link de la publicación');
       return;
     }
+    if (Number(variant?.stock ?? 0) <= 0) {
+      showToast('error', 'Sin stock en Lupo Hub: no se puede vincular esta variante.');
+      return;
+    }
     const mlProd = normalizeMercadoLibreItemId(addPubProductId);
     const tnProd = normalizeTiendaNubeProductId(addPubProductId);
     const externalProductId = addPubPlatform === 'mercadolibre' ? mlProd : tnProd;
@@ -258,6 +262,20 @@ const LinkVariantModal: React.FC<LinkVariantModalProps> = ({ variant, onClose, o
 
     if (addPubVariants && addPubVariants.length > 1 && !externalVariantId) {
       showToast('error', 'Elegí una variante de la lista');
+      return;
+    }
+    if (
+      addPubPlatform === 'mercadolibre' &&
+      addPubVariants &&
+      addPubVariants.length > 0 &&
+      externalVariantId &&
+      !addPubVariants.some((row) => row.id === externalVariantId)
+    ) {
+      showToast('error', 'Esa variación no existe en Mercado Libre para esta publicación.');
+      return;
+    }
+    if (addPubPlatform === 'mercadolibre' && addPubVariants && addPubVariants.length === 0) {
+      showToast('error', 'No hay variaciones en Mercado Libre para esta publicación.');
       return;
     }
 
@@ -326,20 +344,33 @@ const LinkVariantModal: React.FC<LinkVariantModalProps> = ({ variant, onClose, o
   };
 
   const handleUnlink = async (platform: 'tiendanube' | 'mercadolibre' | 'both') => {
-    if (!linkProduct?.id) {
-      showToast('error', 'No se pudo resolver el artículo para desvincular.');
+    if (!variant?.id) {
+      showToast('error', 'No se pudo resolver la variante para desvincular.');
+      return;
+    }
+    const label =
+      platform === 'both' ? 'TN y ML' : platform === 'tiendanube' ? 'TN' : 'ML';
+    if (
+      !window.confirm(
+        `¿Desvincular solo esta variante de ${label}? Se quitan el vínculo principal y las publicaciones de ese canal en esta variante.`
+      )
+    ) {
       return;
     }
     try {
-      const opts =
+      await api.unlinkVariantPlatforms(variant.id, {
+        tiendaNube: platform === 'tiendanube' || platform === 'both',
+        mercadoLibre: platform === 'mercadolibre' || platform === 'both',
+      });
+      showToast(
+        'success',
         platform === 'both'
-          ? { tiendaNube: true, mercadoLibre: true, variants: true }
+          ? 'Variante desvinculada de TN y ML. Stock externo en 0.'
           : platform === 'tiendanube'
-            ? { tiendaNube: true, mercadoLibre: false, variants: true }
-            : { tiendaNube: false, mercadoLibre: true, variants: true };
-      await api.unlinkProductPlatforms(linkProduct.id, opts);
-      showToast('success', platform === 'both' ? 'Desvinculado de TN y ML' : platform === 'tiendanube' ? 'Desvinculado de TN' : 'Desvinculado de ML');
-      onSaved?.({ variantId: variant!.id });
+            ? 'Variante desvinculada de TN. Stock TN en 0.'
+            : 'Variante desvinculada de ML. Stock ML en 0.'
+      );
+      onSaved?.({ variantId: variant.id });
       onClose();
     } catch (e: any) {
       showToast('error', e?.message || 'Error al desvincular');
@@ -351,6 +382,7 @@ const LinkVariantModal: React.FC<LinkVariantModalProps> = ({ variant, onClose, o
   const variantSize = formatSizeForLink(variant.size || '');
   const variantColor = variant.color || '';
   const isMl = addPubPlatform === 'mercadolibre';
+  const canLinkLocal = Number(variant.stock ?? 0) > 0;
   const filteredAddVariants = (addPubVariants || []).filter((v) => {
     const q = addPubSearch.trim().toLowerCase();
     if (!q) return true;
@@ -372,7 +404,15 @@ const LinkVariantModal: React.FC<LinkVariantModalProps> = ({ variant, onClose, o
             {(variantSize || variantColor) && (
               <span className="text-xs text-slate-400">{[variantSize, variantColor].filter(Boolean).join(' · ')}</span>
             )}
+            <span className={`text-xs font-semibold ${canLinkLocal ? 'text-emerald-400' : 'text-slate-500'}`}>
+              Stock: {Number(variant.stock ?? 0)}
+            </span>
           </div>
+          {!canLinkLocal && (
+            <p className="text-[11px] text-amber-300/90 mt-2">
+              Sin stock en Lupo Hub: no se puede vincular esta variante.
+            </p>
+          )}
         </div>
         <button type="button" onClick={onClose} className="p-2.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-700/80 shrink-0" aria-label="Cerrar">
           <X size={20} />
@@ -586,7 +626,7 @@ const LinkVariantModal: React.FC<LinkVariantModalProps> = ({ variant, onClose, o
             <button
               type="button"
               onClick={handleAddPublication}
-              disabled={addPubSaving || !addPubProductId.trim()}
+              disabled={addPubSaving || !addPubProductId.trim() || !canLinkLocal}
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold disabled:opacity-50"
             >
               {addPubSaving ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
@@ -639,7 +679,7 @@ const LinkVariantModal: React.FC<LinkVariantModalProps> = ({ variant, onClose, o
           </div>
 
           <div className="rounded-xl border border-slate-700/60 bg-slate-900/50 p-4 space-y-2 flex-1 min-h-0">
-            <p className="text-[10px] font-bold text-slate-500 uppercase">Desvincular</p>
+            <p className="text-[10px] font-bold text-slate-500 uppercase">Desvincular esta variante</p>
             <button
               type="button"
               onClick={() => handleUnlink('tiendanube')}
@@ -659,7 +699,7 @@ const LinkVariantModal: React.FC<LinkVariantModalProps> = ({ variant, onClose, o
               onClick={() => handleUnlink('both')}
               className="w-full py-2 rounded-lg text-xs font-semibold text-red-200 bg-red-900/25 border border-red-800/40 hover:bg-red-900/40"
             >
-              Desvincular todo
+              Desvincular ML y TN
             </button>
           </div>
 

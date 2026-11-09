@@ -35,11 +35,25 @@ export function codigoTalleParaSku(nameOrCode: string | undefined | null): strin
   return TALLE_NOMBRE_A_CODIGO[s] ?? s;
 }
 
+/** Talles numéricos (infantiles). En la matriz solo si algún artículo del pedido los tiene. */
+export const ORDER_FORM_NUMERIC_SIZE_CODES = ['4', '6', '8', '10', '12', '14'] as const;
+
+/** Códigos Tango de talle de letra (P, M, G, …). Siempre van en la matriz. */
+const ORDER_FORM_LETTER_CODES = new Set(['130', '140', '150', '160', '170', '180', '200', '240', '250']);
+
 /** Orden de columnas en la matriz de pedidos (guía de talles). */
 export const ORDER_FORM_SIZE_CODES = [
-  '4', '6', '8', '10', '12', '14',
+  ...ORDER_FORM_NUMERIC_SIZE_CODES,
   '130', '140', '150', '160', '170', '180', '200', '250',
 ] as const;
+
+/** Talle que se muestra como número (4, 6, 8…), no como código Tango de letra. */
+export function isNumericOrderSizeCode(code: string | undefined | null): boolean {
+  const c = String(code ?? '').trim();
+  if (!/^\d{1,3}$/.test(c)) return false;
+  if (ORDER_FORM_LETTER_CODES.has(c) || TALLE_CODIGO_A_NOMBRE[c]) return false;
+  return true;
+}
 
 export function sortOrderFormSizeCodes(a: string, b: string): number {
   const ia = ORDER_FORM_SIZE_CODES.indexOf(a as (typeof ORDER_FORM_SIZE_CODES)[number]);

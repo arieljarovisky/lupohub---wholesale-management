@@ -17,13 +17,14 @@ import {
 } from 'lucide-react';
 import { MercadoLibreLogo, TiendaNubeLogo } from './ChannelLogos';
 import { ArticleHistory, stockSyncApi, StockSyncOverview, SyncVariant, VariantLink, WholesaleOrderRef } from '../services/stockSyncApi';
+import StockDayCompare from './StockDayCompare';
 import { useNotification } from '../context/NotificationContext';
 import { INVENTORY_STORAGE_KEY } from '../utils/inventoryUtils';
 
 const REFRESH_MS = 15000;
 const PAGE = 15;
 
-type Tab = 'review' | 'recent' | 'tools';
+type Tab = 'review' | 'recent' | 'tools' | 'fotos';
 type ReviewFilter = 'all' | 'unmatched' | 'failing' | 'alerts';
 
 function timeAgo(value: string | null | undefined): string {
@@ -981,6 +982,7 @@ const StockSync: React.FC = () => {
       {/* Pestañas */}
       <div className="flex items-center gap-1 border-b border-slate-800 pb-2">
         {tabBtn('recent', 'Historial')}
+        {tabBtn('fotos', 'Fotos de stock')}
         {tabBtn('review', 'Para revisar', problems)}
         {tabBtn('tools', 'Herramientas')}
       </div>
@@ -1153,6 +1155,8 @@ const StockSync: React.FC = () => {
           onShowMore={() => setShown((n) => n + PAGE)}
         />
       )}
+
+      {tab === 'fotos' && <StockDayCompare />}
 
       {tab === 'tools' && (
         <div className="rounded-lg border border-slate-800 divide-y divide-slate-800">

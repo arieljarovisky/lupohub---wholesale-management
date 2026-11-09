@@ -42,6 +42,14 @@ export async function addCreditNotesTable(): Promise<void> {
       await execute(`ALTER TABLE credit_notes ADD COLUMN item_index INT NULL AFTER scope`);
       console.log('[DB] credit_notes: columnas scope e item_index añadidas');
     }
+    const colDesc = await get(
+      `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'credit_notes' AND COLUMN_NAME = 'description'`
+    );
+    if (!colDesc) {
+      await execute(`ALTER TABLE credit_notes ADD COLUMN description VARCHAR(255) NULL AFTER item_index`);
+      console.log('[DB] credit_notes: columna description añadida');
+    }
   } catch (e: any) {
     console.error('[DB] Error creando tabla credit_notes:', e?.message);
   }

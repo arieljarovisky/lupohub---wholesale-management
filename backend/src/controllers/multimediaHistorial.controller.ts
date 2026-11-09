@@ -14,7 +14,12 @@ import {
   type MultimediaMovementRow,
 } from '../utils/multimediaHistorialExcel';
 import { INCLUDE_TANGO_IMPORT_IN_SYSTEM, SQL_WHERE_PAYMENT_SOLO_LUPOHUB } from '../sql/carteraImportedSql';
-import { invoiceLedgerImporte, ncLedgerImporte, ndLedgerImporte } from '../config/orderPricing';
+import {
+  invoiceLedgerImporte,
+  ncLedgerImporteConPercepcion,
+  ncPercepcionImporte,
+  ndLedgerImporte,
+} from '../config/orderPricing';
 import { movementOnOrAfterOpeningDate, normalizeYmdDate } from '../sql/customerOpeningBalance';
 import {
   backfillPaymentOrdersFromLegacy,
@@ -32,6 +37,34 @@ import {
 } from '../utils/ledgerRunningSaldo';
 
 const SQL_ORDER_ACTIVE_COND = `o.status NOT IN ('Cancelado', 'Borrador') AND (o.archived = 0 OR o.archived IS NULL)`;
+
+type CreditNoteLedgerRow = {
+  amount_credited?: number | string;
+  cbte_tipo?: number | string;
+  superseded_by_reinvoice?: number | string;
+  order_total?: number | string;
+  invoice_agip_ret_per?: number | string;
+  invoice_agip_alicuota?: number | string;
+  invoice_cbte_tipo?: number | string;
+};
+
+function creditNotePercepcionArgs(cn: CreditNoteLedgerRow) {
+  return {
+    amountCreditedNeto: Number(cn.amount_credited || 0),
+    agipRetPer: Number(cn.invoice_agip_ret_per || 0),
+    agipAlicuota: Number(cn.invoice_agip_alicuota || 0),
+    orderTotal: Number(cn.order_total || 0),
+    supersededByReinvoice: !!Number(cn.superseded_by_reinvoice),
+    cbteTipo: Number(cn.cbte_tipo || 0),
+    invoiceCbteTipo: Number(cn.invoice_cbte_tipo || 0),
+  };
+}
+
+/** Importe de NC en el historial de saldo: neto + IVA + percepción IIBB prorrateada. */
+function creditNoteLedgerImporte(cn: CreditNoteLedgerRow): number {
+  const args = creditNotePercepcionArgs(cn);
+  return ncLedgerImporteConPercepcion(args.amountCreditedNeto, args);
+}
 
 function normalizeNameForMatch(v: unknown): string {
   return String(v ?? '')
@@ -551,9 +584,14 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
          cn.voided_invoice_cbte_tipo,
          cn.voided_invoice_punto_venta,
          cn.voided_invoice_cbte_desde,
-         o.date AS order_date
+         o.date AS order_date,
+         o.total AS order_total,
+         i.agip_ret_per AS invoice_agip_ret_per,
+         i.agip_alicuota AS invoice_agip_alicuota,
+         i.cbte_tipo AS invoice_cbte_tipo
        FROM credit_notes cn
        JOIN orders o ON o.id = cn.order_id
+       LEFT JOIN invoices i ON i.id = cn.invoice_id
        WHERE o.customer_id = ?
        ORDER BY cn.created_at ASC, cn.id ASC`,
       [id]
@@ -695,7 +733,7 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
           ledgerMovementVisibleAfterOpening(openingBalanceDate, cn.order_date, cn.created_at)
       )
       .map((cn, idx) => {
-        const importe = ncLedgerImporte(Number(cn.amount_credited || 0));
+        const importe = creditNoteLedgerImporte(cn);
         const numero = formatAfipComprobanteNumero(
           Number(cn.voided_invoice_punto_venta || 0),
           Number(cn.voided_invoice_cbte_desde || 0)
@@ -737,7 +775,8 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
     const creditNoteAsEntries = creditNoteRows
       .filter((cn) => ledgerMovementVisibleAfterOpening(openingBalanceDate, cn.created_at))
       .map((cn, idx) => {
-        const importe = ncLedgerImporte(Number(cn.amount_credited || 0));
+        const importe = creditNoteLedgerImporte(cn);
+        const percepcion = ncPercepcionImporte(creditNotePercepcionArgs(cn));
         const reemision = !!Number(cn.superseded_by_reinvoice);
         const numero = formatAfipComprobanteNumero(Number(cn.punto_venta || 0), Number(cn.cbte_desde || 0));
         const voidedInvoiceNumero =
@@ -773,7 +812,11 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
           saldo: null,
           detalle: reemision
             ? `Pedido ${cn.order_id || ''} · NC AFIP LupoHub (reemisión IIBB)`
-            : `Pedido ${cn.order_id || ''} · NC AFIP LupoHub`,
+            : `Pedido ${cn.order_id || ''} · NC AFIP LupoHub${
+                percepcion > 0.005
+                  ? ` · Percepción IIBB $${percepcion.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                  : ''
+              }`,
           /** Par informativo con la FAC anulada: la factura nueva ya está en cartera. */
           excluirDeSaldo: reemision,
           supersededByReinvoice: reemision,
@@ -811,10 +854,7 @@ export const getCustomerMultimediaLedger = async (req: Request, res: Response) =
         };
       });
     const manualComprobanteAsEntries = manualComprobanteRows.filter((m) => movementOnOrAfterOpening(m.fecha || m.created_at)).map((m, idx) => {
-      const importe =
-        m.tipo === 'FACTURA'
-          ? Math.round((Number(m.importe_neto || 0) + Number(m.agip_ret_per || 0)) * 100) / 100
-          : Math.round(Number(m.importe_neto || 0) * 100) / 100;
+      const importe = Math.round((Number(m.importe_neto || 0) + Number(m.agip_ret_per || 0)) * 100) / 100;
       const sinDetalle = !!Number(m.sin_detalle);
       const numero = sinDetalle
         ? 'Sin nº AFIP'

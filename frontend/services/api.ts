@@ -1606,6 +1606,20 @@ export const api = {
     }, null, 'unlinkProductPlatforms');
   },
 
+  /** Desvincula solo una variante de ML y/o TN (vínculo principal + publicaciones del canal). */
+  unlinkVariantPlatforms: async (
+    variantId: string,
+    opts: { tiendaNube?: boolean; mercadoLibre?: boolean }
+  ): Promise<{ ok: boolean; variantId: string; tiendaNube?: boolean; mercadoLibre?: boolean } | null> => {
+    return handleRequest(async () => {
+      return await request<{ ok: boolean; variantId: string; tiendaNube?: boolean; mercadoLibre?: boolean }>(
+        `/products/variants/${encodeURIComponent(variantId)}/unlink`,
+        'POST',
+        opts || {}
+      );
+    }, null, 'unlinkVariantPlatforms');
+  },
+
   bulkLinkVariants: async (payload: {
     productId?: string;
     mercadoLibreItemId?: string;
@@ -1817,6 +1831,7 @@ export const api = {
     puntoVta?: number;
     agipAlicuota?: number;
     agipRetPer?: number;
+    createdAt?: string;
     monedaId?: string;
     monedaCtz?: number;
     exportDstCmp?: number;
@@ -1921,7 +1936,8 @@ export const api = {
         cbteDesde: r.cbteDesde,
         cbteHasta: r.cbteHasta,
         amountCredited: Number(r.amountCredited),
-        scope: r.scope === 'item' ? 'item' : 'total',
+        scope: r.scope === 'item' ? 'item' : r.scope === 'monto' ? 'monto' : 'total',
+        description: r.description ? String(r.description) : undefined,
         itemIndex: r.itemIndex,
         itemIndexes,
         amountByItemIndex: sanitizeNumMap(r.amountByItemIndex),
@@ -1942,15 +1958,20 @@ export const api = {
     });
   },
 
-  /** Emite una Nota de Crédito AFIP: todo el pedido (tipo: 'total') o un ítem (tipo: 'item', itemIndex, quantity opcional). */
+  /** Emite una Nota de Crédito AFIP: todo el pedido, ítems, o un neto fijo / porcentaje del pedido. */
   emitirNotaCredito: async (
     orderId: string,
     data: {
-      tipo: 'total' | 'item' | 'items';
+      tipo: 'total' | 'item' | 'items' | 'monto';
       itemIndex?: number;
       quantity?: number;
       items?: Array<{ itemIndex: number; quantity: number }>;
-      /** Si es false, no devuelve unidades al inventario (solo anulación fiscal). Por defecto true. */
+      /** Neto sin IVA. Alternativa a `percent` cuando tipo es 'monto'. */
+      netAmount?: number;
+      /** Porcentaje del neto del pedido (0–100). Alternativa a `netAmount` cuando tipo es 'monto'. */
+      percent?: number;
+      description?: string;
+      /** Si es false, no devuelve unidades al inventario (solo anulación fiscal). Por defecto true. En tipo 'monto' no se devuelve stock. */
       restoreStock?: boolean;
     }
   ): Promise<{ id: string; orderId: string; cae: string; caeFchVto?: string; puntoVta: number; cbteTipo: number; cbteDesde: number; cbteHasta: number; amountCredited: number; stockRestored?: boolean }> => {
@@ -3950,6 +3971,16 @@ export const api = {
     }, { totalProducts: 0, totalStock: 0, lowStockCount: 0, noStockCount: 0 }, 'getMercadoLibreStockTotals');
   },
 
+  previewMercadoLibreVariants: async (productId: string, anchorItemId?: string) => {
+    const q = new URLSearchParams({ productId });
+    if (anchorItemId?.trim()) q.set('anchorItemId', anchorItemId.trim());
+    return request<any>(`/integrations/mercadolibre/variant-create-preview?${q.toString()}`, 'GET', undefined, undefined, 120000);
+  },
+
+  createMercadoLibreVariants: async (body: { productId: string; anchorItemId?: string; variantIds: string[] }) => {
+    return request<any>('/integrations/mercadolibre/variants', 'POST', body, undefined, 180000);
+  },
+
   getMercadoLibreItemVariations: async (itemId: string): Promise<{ variations: { variationId: number | string; itemId?: string; sku: string; color: string; size: string; stock: number }[]; singleProduct?: boolean; itemId: string; resolvedItemId?: string }> => {
     return request<{ variations: { variationId: number | string; itemId?: string; sku: string; color: string; size: string; stock: number }[]; singleProduct?: boolean; itemId: string; resolvedItemId?: string }>(
       `/integrations/mercadolibre/items/${encodeURIComponent(itemId)}/variations?_=${Date.now()}`,
@@ -4415,6 +4446,57 @@ export const api = {
     return handleRequest(async () => {
       return await request<{ message: string; variantsProcessed?: number }>('/stock/snapshot', 'POST');
     }, { message: 'Error' }, 'createStockSnapshot');
+  },
+
+  listStockDailySnapshots: async (): Promise<{
+    today: string;
+    days: Array<{ date: string; variants: number; variantsWithStock: number; units: number; takenAt: string | null }>;
+  }> => {
+    return await request('/stock/daily-snapshots', 'GET', undefined, undefined, 60000);
+  },
+
+  createStockDailySnapshot: async (): Promise<{
+    message: string;
+    date: string;
+    variants: number;
+    variantsWithStock: number;
+    units: number;
+    replaced: boolean;
+  }> => {
+    return await request('/stock/daily-snapshot', 'POST', {}, undefined, 120000);
+  },
+
+  compareStockDailySnapshots: async (from: string, to: string): Promise<{
+    from: string;
+    to: string;
+    toLabel: string;
+    truncated: boolean;
+    summary: { variantsDown: number; unitsDown: number; variantsUp: number; unitsUp: number };
+    rows: Array<{
+      sku: string;
+      productSku: string;
+      productName: string;
+      color: string;
+      size: string;
+      fromStock: number;
+      toStock: number;
+      delta: number;
+    }>;
+  }> => {
+    const q = new URLSearchParams({ from, to });
+    return await request(`/stock/daily-snapshot/compare?${q.toString()}`, 'GET', undefined, undefined, 120000);
+  },
+
+  downloadStockDailySnapshotCompare: async (from: string, to: string): Promise<void> => {
+    const blob = await getBlob(`/stock/daily-snapshot/compare.xlsx?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, 120000);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `stock_${from}_vs_${to}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   },
 
   // Eliminar snapshot inicial para poder crear uno nuevo
@@ -4885,6 +4967,10 @@ export const api = {
 
   // ============ PAGOS (recibos) ============
 
+  getNextReceiptNumber: async (): Promise<{ receiptNumber: string }> => {
+    return await request<{ receiptNumber: string }>('/payments/next-number', 'GET');
+  },
+
   getPayments: async (params?: { customerId?: string; invoiceId?: string; orderId?: string; desde?: string; hasta?: string; province?: string }): Promise<import('../types').Payment[]> => {
     const queryParams = new URLSearchParams();
     if (params?.customerId) queryParams.append('customerId', params.customerId);
@@ -4909,10 +4995,12 @@ export const api = {
     orderIds?: string[];
     invoiceId?: string | null;
     invoiceIds?: string[];
-    receiptNumber: string;
+    /** Lo asigna el servidor: siempre es el siguiente al último recibo. */
+    receiptNumber?: string;
     date: string;
     amount: number;
     notes?: string;
+    paymentMethod?: 'transferencia' | 'echeq' | 'efectivo' | 'deposito' | string | null;
   }): Promise<
     import('../types').Payment & {
       allocationNote?: string;
@@ -5040,6 +5128,14 @@ export const api = {
   },
   updatePaymentDate: async (paymentId: string, date: string): Promise<import('../types').Payment> => {
     return await request<any>(`/payments/${encodeURIComponent(paymentId)}/date`, 'PATCH', { date }) as any;
+  },
+  updatePaymentMethod: async (
+    paymentId: string,
+    paymentMethod: 'transferencia' | 'echeq' | 'efectivo' | 'deposito' | string
+  ): Promise<import('../types').Payment> => {
+    return await request<any>(`/payments/${encodeURIComponent(paymentId)}/payment-method`, 'PATCH', {
+      paymentMethod,
+    }) as any;
   },
   updateImportedPaymentDate: async (payload: { customerId: string; importedLineOrder: number; date: string }): Promise<{ ok: boolean; customerId: string; importedLineOrder: number; date: string }> => {
     return await request<any>(`/payments/imported/date`, 'PATCH', payload) as any;

@@ -1213,7 +1213,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
           </button>
           <div>
              <h2 className="text-2xl font-bold text-white">Pedido #{selectedOrder.id}</h2>
-             <p className="text-sm text-slate-400">Detalles de la compra</p>
+             <p className="text-sm text-slate-400">
+               Lista: {selectedOrder.priceListName?.trim() || 'Precio base'}
+             </p>
           </div>
         </div>
 
@@ -2848,6 +2850,9 @@ const Customers: React.FC<CustomersProps> = ({ customers, role, sellerId, onCrea
                        <div>
                           <div className="flex items-center gap-2 flex-wrap">
                              <span className="font-bold text-white">Pedido #{order.id}</span>
+                             <span className="text-[10px] font-bold px-2 py-0.5 rounded border border-violet-700/45 bg-violet-950/55 text-violet-100 max-w-[180px] truncate" title="Lista de precios con la que se facturó">
+                               {order.priceListName?.trim() || 'Precio base'}
+                             </span>
                              <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded ${getStatusColor(order.status)}`}>
                                 {order.status}
                              </span>

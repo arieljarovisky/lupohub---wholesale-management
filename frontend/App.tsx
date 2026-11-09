@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, lazy, Suspense, useCallback, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
 import { channelLogoForView } from './components/ChannelLogos';
-import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Percent, Megaphone, Wallet, ChevronRight, MessageCircle, Star, RefreshCw, PackagePlus, Tag } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Percent, Megaphone, Wallet, ChevronRight, MessageCircle, Star, RefreshCw, PackagePlus, Route, Tag } from 'lucide-react';
 import { isCompanyFinanceUser, COMPANY_FINANCE_VIEW } from './utils/companyFinanceAccess';
 import {
   MARKETING_HUB_VIEW,
@@ -64,6 +64,7 @@ const BulkInvoicing = lazyWithReload(() => import('./components/BulkInvoicing'))
 const StockSync = lazyWithReload(() => import('./components/StockSync'));
 const BrazilOrder = lazyWithReload(() => import('./components/BrazilOrder'));
 const Despachos = lazyWithReload(() => import('./components/Despachos'));
+const Repartos = lazyWithReload(() => import('./components/Repartos'));
 const SellersCommissions = lazyWithReload(() => import('./components/SellersCommissions'));
 const ChannelMargins = lazyWithReload(() => import('./components/ChannelMargins'));
 const CompanyFinance = lazyWithReload(() => import('./components/CompanyFinance'));
@@ -173,6 +174,7 @@ const App: React.FC = () => {
     meta_ads: [Role.ADMIN, Role.MARKETING],
     google_ads: [Role.ADMIN, Role.MARKETING],
     despachos: [Role.ADMIN],
+    repartos: [Role.ADMIN, Role.WAREHOUSE, Role.DEPOSITO],
     customers: [Role.ADMIN, Role.SELLER],
     sellers: [Role.ADMIN, Role.SELLER],
     visits: [Role.ADMIN, Role.SELLER],
@@ -536,9 +538,20 @@ const App: React.FC = () => {
 
   const handleUpdateOrderStatus = async (orderId: string, status: OrderStatus, pickedBy?: string) => {
      const previousOrders = [...orders];
+     const previous = previousOrders.find((o) => o.id === orderId);
      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status, ...(pickedBy ? { pickedBy } : {}), ...(status === OrderStatus.DISPATCHED ? { dispatchedAt: new Date().toISOString() } : {}) } : o));
      try {
        await api.updateOrderStatus(orderId, status, pickedBy);
+       if (
+         status === OrderStatus.CONFIRMED &&
+         (previous?.status === OrderStatus.PENDING_ADMIN_CONFIRMATION ||
+           previous?.status === OrderStatus.DRAFT)
+       ) {
+         showToast(
+           'success',
+           'Pedido confirmado. Para facturar AFIP: hacé picking o usá «Showroom» / «Emitir AFIP» en la tarjeta.'
+         );
+       }
      } catch (error) {
        setOrders(previousOrders);
        showToast('error', 'Error actualizando estado del pedido');
@@ -609,10 +622,15 @@ const App: React.FC = () => {
     return c?.priceListId ?? null;
   };
 
+  const priceListIdForExistingOrder = (order: Order): string | null => {
+    if (Object.prototype.hasOwnProperty.call(order, 'priceListId')) return order.priceListId || null;
+    return resolveCustomerPriceListId(order.customerId);
+  };
+
   const handleEditOrder = (order: Order) => {
     setDuplicateSourceOrder(null);
     editingOrderIdRef.current = order.id;
-    setCreateOrderPriceListId(resolveCustomerPriceListId(order.customerId));
+    setCreateOrderPriceListId(priceListIdForExistingOrder(order));
     setEditingOrder(order);
     setCurrentView('create_order');
   };
@@ -620,7 +638,7 @@ const App: React.FC = () => {
   const handleDuplicateOrder = (order: Order) => {
     setEditingOrder(null);
     editingOrderIdRef.current = null;
-    setCreateOrderPriceListId(resolveCustomerPriceListId(order.customerId));
+    setCreateOrderPriceListId(priceListIdForExistingOrder(order));
     setDuplicateSourceOrder(order);
     setCurrentView('create_order');
   };
@@ -1022,6 +1040,7 @@ const App: React.FC = () => {
     ]},
     { title: 'Pedidos y canales', items: [
       { id: 'orders', label: 'Mayoristas', icon: ShoppingCart, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER, Role.DEPOSITO] },
+      { id: 'repartos', label: 'Repartos', icon: Route, roles: [Role.ADMIN, Role.WAREHOUSE, Role.DEPOSITO] },
       { id: 'create_order', label: 'Nuevo pedido', icon: ShoppingCart, roles: [Role.ADMIN, Role.SELLER, Role.WAREHOUSE, Role.CUSTOMER] },
       { id: 'bulk_invoicing', label: 'Facturación masiva', icon: FileText, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'channel_margins', label: 'Márgenes', icon: DollarSign, roles: [Role.ADMIN, Role.WAREHOUSE] },
@@ -1192,6 +1211,7 @@ const App: React.FC = () => {
                  {baseView === 'stock_sync' && 'Stock y ventas'}
                  {baseView === 'brazil_order' && 'Qué pedir a Brasil'}
                  {baseView === 'despachos' && 'Despachos'}
+                 {baseView === 'repartos' && 'Repartos'}
                  {baseView === 'customers' && 'Clientes'}
                  {baseView === 'sellers' && (currentUser.role === Role.SELLER ? 'Mis comisiones' : 'Vendedores y comisiones')}
                  {baseView === 'catalogs' && 'Catálogos'}
@@ -1500,6 +1520,11 @@ const App: React.FC = () => {
           {baseView === 'despachos' && (
             <Suspense fallback={<ViewFallback />}>
               <Despachos />
+            </Suspense>
+          )}
+          {baseView === 'repartos' && (
+            <Suspense fallback={<ViewFallback />}>
+              <Repartos orders={orders} customers={getVisibleCustomers} transportes={transportes} />
             </Suspense>
           )}
         </div>

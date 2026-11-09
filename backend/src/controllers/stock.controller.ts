@@ -351,39 +351,59 @@ export type SyncExternalPlatform = 'mercadolibre' | 'tiendanube';
 export type SyncStockExternalResult = {
   mlAttempted: number;
   mlOk: number;
+  mlSkipped: number;
   tnAttempted: number;
   tnOk: number;
+  tnSkipped: number;
   logs: string[];
 };
 
 /**
  * Envía YA el stock actual (de la base) de una variante a sus publicaciones.
- * `_newStock` se ignora a propósito: siempre se manda lo que dice el Hub en este momento.
+ * `_newStock` se ignora salvo que opts.forceStock esté definido (p. ej. poner 0 al desvincular).
+ * Un push "skipped" (FULL, under_review, etc.) NO cuenta como ok: el stock remoto puede quedar distinto.
  */
 export const syncStockToExternalPlatforms = async (
   variantId: string,
   _newStock?: number,
-  opts?: { platforms?: SyncExternalPlatform[] }
+  opts?: { platforms?: SyncExternalPlatform[]; forceStock?: number }
 ): Promise<SyncStockExternalResult> => {
-  const result: SyncStockExternalResult = { mlAttempted: 0, mlOk: 0, tnAttempted: 0, tnOk: 0, logs: [] };
+  const result: SyncStockExternalResult = {
+    mlAttempted: 0,
+    mlOk: 0,
+    mlSkipped: 0,
+    tnAttempted: 0,
+    tnOk: 0,
+    tnSkipped: 0,
+    logs: [],
+  };
   try {
-    const outcome = await pushVariant(variantId, opts?.platforms);
+    const outcome = await pushVariant(
+      variantId,
+      opts?.platforms,
+      opts?.forceStock != null ? { forceStock: opts.forceStock } : undefined
+    );
     for (const r of outcome.results) {
       const ok = r.result.ok;
+      const skipped = !!(ok && r.result.skipped);
       if (r.target.platform === 'tiendanube') {
         result.tnAttempted++;
-        if (ok) result.tnOk++;
+        if (ok && !skipped) result.tnOk++;
+        else if (skipped) result.tnSkipped++;
       } else {
         result.mlAttempted++;
-        if (ok) result.mlOk++;
+        if (ok && !skipped) result.mlOk++;
+        else if (skipped) result.mlSkipped++;
       }
       result.logs.push(
-        r.result.ok
-          ? `[OK] ${variantId} → ${r.target.label} = ${r.qty}${r.result.skipped ? ` (${r.result.skipped})` : ''}`
+        ok
+          ? skipped
+            ? `[SKIP] ${variantId} → ${r.target.label}: ${r.result.skipped}`
+            : `[OK] ${variantId} → ${r.target.label} = ${r.qty}`
           : `[ERROR] ${variantId} → ${r.target.label}: ${r.result.error}`
       );
     }
-    // Si algo falló, que la cola lo reintente sola.
+    // Si algo falló de verdad, que la cola lo reintente sola (skipped no se reencola en loop).
     if (outcome.results.some((r) => !r.result.ok)) await enqueueSync([variantId], 30000);
   } catch (error: any) {
     result.logs.push(`[ERROR] variant=${variantId}: ${error?.message || error}`);

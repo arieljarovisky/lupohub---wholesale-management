@@ -26,6 +26,7 @@ import {
   syncOrderPaymentStatus,
 } from '../services/orderPaymentBalance.service';
 import { calcFobYield, lookupFobPrice, resolveFobPriceList } from '../utils/channelMarginUtils';
+import { nowMysqlArgentina, todayYmdArgentina } from '../utils/argentinaDate';
 
 /** Evita dos POST simultáneos al mismo pedido; el segundo espera el mismo resultado AFIP. */
 const emitFacturaInFlight = new Map<string, Promise<Record<string, unknown>>>();
@@ -269,28 +270,46 @@ async function getItemLabelForWarning(item: any, variantId: string): Promise<str
 /** Estados en los que el pedido ya pasó por picking: neto AFIP y stock usan cantidad pickeada por línea. */
 const PICKING_DONE_STATUSES_AFIP = new Set(['Falta controlar', 'Controlado', 'Despachado']);
 
+/**
+ * Cantidad a facturar por línea.
+ * Tras picking se usa lo pickeado. Si ninguna línea tiene picking cargado, se factura lo pedido
+ * (pedidos que pasaron a control sin `picked`, o el armado se guardó en 0).
+ */
+function lineQtyForInvoice(
+  quantity: unknown,
+  picked: unknown,
+  usePicked: boolean,
+  pickedWasRecorded: boolean
+): number {
+  const q = Math.max(0, Number(quantity) || 0);
+  if (!usePicked || !pickedWasRecorded) return q;
+  const p = Math.max(0, Number(picked) || 0);
+  return Math.min(q, p);
+}
+
 /** Neto gravado según líneas; tras picking (control/despacho) alinea con lo pickeado para factura AFIP. */
 async function getOrderNetFromLineItems(orderId: string): Promise<number> {
   const meta = await get(
-    `SELECT COALESCE(o.no_stock_impact, 0) AS no_stock_impact, o.status
+    `SELECT COALESCE(o.no_stock_impact, 0) AS no_stock_impact, o.status, o.total
      FROM orders o WHERE o.id = ? LIMIT 1`,
     [orderId]
-  ) as { no_stock_impact?: number; status?: string } | undefined;
+  ) as { no_stock_impact?: number; status?: string; total?: string | number } | undefined;
   const usePicked =
     !Number(meta?.no_stock_impact) && PICKING_DONE_STATUSES_AFIP.has(String(meta?.status || ''));
   const rows = await query(
     `SELECT quantity, picked, price_at_moment FROM order_items WHERE order_id = ? ORDER BY id`,
     [orderId]
   ) as { quantity: number; picked: number | null; price_at_moment: string | number }[];
+  const pickedWasRecorded = rows.some((r) => (Number(r.picked) || 0) > 0);
   let sum = 0;
   for (const r of rows) {
-    const q = Number(r.quantity) || 0;
-    const p = Number(r.picked) || 0;
-    const lineQty = usePicked ? Math.min(q, Math.max(0, p)) : q;
+    const lineQty = lineQtyForInvoice(r.quantity, r.picked, usePicked, pickedWasRecorded);
     const price = Number(r.price_at_moment) || 0;
     sum += Math.round(lineQty * price * 100) / 100;
   }
-  return Math.round(sum * 100) / 100;
+  sum = Math.round(sum * 100) / 100;
+  if (sum > 0.005) return sum;
+  return Math.round((Number(meta?.total) || 0) * 100) / 100;
 }
 
 /** Líneas del pedido para Factura E (descripción + neto unitario en ARS). */
@@ -328,11 +347,10 @@ async function getOrderItemsForExport(orderId: string): Promise<
     color_name: string;
     size_code: string;
   }[];
+  const pickedWasRecorded = rows.some((r) => (Number(r.picked) || 0) > 0);
   const out: { description: string; quantity: number; unitPriceArs: number }[] = [];
   for (const r of rows) {
-    const q = Number(r.quantity) || 0;
-    const p = Number(r.picked) || 0;
-    const lineQty = usePicked ? Math.min(q, Math.max(0, p)) : q;
+    const lineQty = lineQtyForInvoice(r.quantity, r.picked, usePicked, pickedWasRecorded);
     if (lineQty <= 0) continue;
     const price = Math.round((Number(r.price_at_moment) || 0) * 100) / 100;
     const parts = [r.product_name, r.color_name, r.size_code, r.sku].filter(Boolean);
@@ -552,11 +570,13 @@ export const getOrders = async (req: any, res: any) => {
     const ordersRow = await query(
       `SELECT o.*, c.business_name AS customer_business_name, c.name AS customer_name, c.cuit AS customer_cuit,
               cu.name AS created_by_name, cu.role AS created_by_role,
-              su.name AS seller_name
+              su.name AS seller_name,
+              pl.name AS price_list_current_name
        FROM orders o
        LEFT JOIN customers c ON c.id = o.customer_id
        LEFT JOIN users cu ON cu.id = o.created_by
        LEFT JOIN users su ON su.id = o.seller_id
+       LEFT JOIN price_lists pl ON pl.id = o.price_list_id
        WHERE 1=1 ${whereArchived}${whereUserScope}${whereCustomer}${whereOrderId}
        ORDER BY o.date DESC`,
       ordersParams
@@ -783,6 +803,7 @@ export const getOrders = async (req: any, res: any) => {
       remitoNumber: order.remito_number != null ? Number(order.remito_number) : undefined,
       matrixImportLabel: order.matrix_import_label ? String(order.matrix_import_label) : undefined,
       notes: order.notes ? String(order.notes) : undefined,
+      ...mapOrderPriceList(order),
       items: itemsByOrderId[order.id] || [],
       invoice: inv ?? undefined,
       creditNotesCount: creditNotesCountByOrderId[order.id] ?? 0,
@@ -814,13 +835,57 @@ export const getOrders = async (req: any, res: any) => {
   }
 };
 
+function priceListFromBody(body: any): { provided: boolean; raw: unknown } {
+  if (!body || typeof body !== 'object') return { provided: false, raw: undefined };
+  if (Object.prototype.hasOwnProperty.call(body, 'priceListId')) return { provided: true, raw: body.priceListId };
+  if (Object.prototype.hasOwnProperty.call(body, 'price_list_id')) return { provided: true, raw: body.price_list_id };
+  return { provided: false, raw: undefined };
+}
+
+/** Lista explícita del pedido, o la del cliente si el alta no la envió. */
+async function resolveOrderPriceListSnapshot(
+  explicitRaw: unknown,
+  explicitProvided: boolean,
+  customerId: string
+): Promise<{ id: string | null; name: string | null }> {
+  let id: string | null = null;
+  if (explicitProvided) {
+    const s = explicitRaw != null ? String(explicitRaw).trim() : '';
+    id = s || null;
+  } else if (customerId) {
+    const c = await get('SELECT price_list_id FROM customers WHERE id = ? LIMIT 1', [customerId]);
+    id =
+      c?.price_list_id != null && String(c.price_list_id).trim()
+        ? String(c.price_list_id).trim()
+        : null;
+  }
+  if (!id) return { id: null, name: null };
+  const list = await get('SELECT id, name FROM price_lists WHERE id = ? LIMIT 1', [id]);
+  if (!list?.id) return { id: null, name: null };
+  const name = String(list.name || '').trim().slice(0, 120) || null;
+  return { id: String(list.id), name };
+}
+
+function mapOrderPriceList(row: any): { priceListId: string | null; priceListName: string | null } {
+  const id =
+    row?.price_list_id != null && String(row.price_list_id).trim()
+      ? String(row.price_list_id).trim()
+      : null;
+  const snapshot = row?.price_list_name != null ? String(row.price_list_name).trim() : '';
+  const current = row?.price_list_current_name != null ? String(row.price_list_current_name).trim() : '';
+  return { priceListId: id, priceListName: snapshot || current || null };
+}
+
 async function buildPersistedOrderResponse(orderId: string, newOrder: Order, despachoWarnings: string[]): Promise<any> {
   const created = await get(
     `SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
-            o.created_by, o.matrix_import_label, o.notes, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
+            o.created_by, o.matrix_import_label, o.notes, o.price_list_id, o.price_list_name,
+            pl.name AS price_list_current_name,
+            cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
      FROM orders o
      LEFT JOIN users cu ON cu.id = o.created_by
      LEFT JOIN users su ON su.id = o.seller_id
+     LEFT JOIN price_lists pl ON pl.id = o.price_list_id
      WHERE o.id = ?`,
     [orderId]
   );
@@ -889,6 +954,7 @@ async function buildPersistedOrderResponse(orderId: string, newOrder: Order, des
       ? String((created as any).matrix_import_label)
       : undefined,
     notes: (created as any).notes ? String((created as any).notes) : undefined,
+    ...mapOrderPriceList(created),
     despachoWarnings,
   };
 }
@@ -959,6 +1025,12 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
       ? String(matrixImportLabelRaw).trim().slice(0, 120)
       : null;
   const notesForSql = normalizeOrderNotes((newOrder as any).notes);
+  const plBody = priceListFromBody(newOrder);
+  const priceListSnapshot = await resolveOrderPriceListSnapshot(
+    plBody.raw,
+    plBody.provided,
+    String(newOrder.customerId || '')
+  );
 
   const skippedNoVariant: string[] = [];
   const despachoWarnings: string[] = [];
@@ -1042,8 +1114,8 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
   try {
     await conn.beginTransaction();
     await conn.execute(
-      `INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact, created_by, matrix_import_label, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [orderId, newOrder.customerId, sellerId, sqlDate, statusToSave, totalRecalculated, paymentStatus, noStockImpact, createdBy, matrixImportLabelForSql, notesForSql]
+      `INSERT INTO orders (id, customer_id, seller_id, date, status, total, payment_status, no_stock_impact, created_by, matrix_import_label, notes, price_list_id, price_list_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [orderId, newOrder.customerId, sellerId, sqlDate, statusToSave, totalRecalculated, paymentStatus, noStockImpact, createdBy, matrixImportLabelForSql, notesForSql, priceListSnapshot.id, priceListSnapshot.name]
     );
     for (const pr of preparedRows) {
       for (const alloc of pr.allocations) {
@@ -1431,6 +1503,7 @@ export const importOrdersFromMatrix = async (req: any, res: any) => {
           total,
           status: OrderStatus.DRAFT,
           date: dateStr,
+          priceListId: priceListIdForImport,
         };
         const saved = await persistNewWholesaleOrder(newOrder, user, newOrder.id);
         created.push(saved);
@@ -1466,20 +1539,29 @@ export const updateOrderStatus = async (req: any, res: any) => {
     const noStockImpact = !!currentOrder?.no_stock_impact;
     if (!previousStatus) return res.status(404).json({ message: 'Pedido no encontrado' });
 
-    const isAdmin = user?.role === 'ADMIN';
+    const canConfirmPending = ['ADMIN', 'WAREHOUSE', 'DEPOSITO'].includes(String(user?.role || ''));
     const requestedStatus = String(status || previousStatus);
     const nextStatus =
-      requestedStatus === 'Confirmado' && !isAdmin
+      requestedStatus === 'Confirmado' && !canConfirmPending
         ? 'Pendiente confirmación admin'
         : requestedStatus;
 
-    // Mientras esté pendiente de admin, solo puede cancelarse o confirmarse por ADMIN.
+    // Mientras esté pendiente de admin, solo puede cancelarse o confirmarse (admin/depósito).
     if (
       previousStatus === 'Pendiente confirmación admin' &&
       !['Pendiente confirmación admin', 'Confirmado', 'Cancelado'].includes(nextStatus)
     ) {
       return res.status(400).json({
         message: 'El pedido está pendiente de confirmación de admin.'
+      });
+    }
+    if (
+      previousStatus === 'Pendiente confirmación admin' &&
+      nextStatus === 'Confirmado' &&
+      !canConfirmPending
+    ) {
+      return res.status(403).json({
+        message: 'Solo admin o depósito pueden confirmar pedidos pendientes.'
       });
     }
 
@@ -1522,18 +1604,30 @@ export const updateOrder = async (req: any, res: any) => {
     };
     const sqlDate = toSqlDate(updated.date);
     const sellerId = updated.sellerId ?? null;
-    const paymentStatus =
-      (updated as any).paymentStatus === 'pagado' || (updated as any).paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
-    const noStockImpact = (updated as any).noStockImpact === true || (updated as any).no_stock_impact === 1 ? 1 : 0;
+    const before = await get('SELECT status, payment_status, no_stock_impact FROM orders WHERE id = ?', [id]);
+    if (!before) return res.status(404).json({ message: 'Pedido no encontrado' });
+    const has = (k: string) => Object.prototype.hasOwnProperty.call(updated, k);
+    const isShowroomSale =
+      (updated as any).showroomSale === true || (updated as any).showroom_sale === true;
+    // El editor de pedidos no siempre manda estos campos: si faltan se conservan los del pedido
+    // (antes se pisaban: el pedido volvía a "Confirmado", a "pendiente" de pago y perdía "sin impacto en stock").
+    if (!updated.status) (updated as any).status = before.status;
+    if (isShowroomSale) {
+      (updated as any).status = 'Controlado';
+    }
+    let paymentStatus = has('paymentStatus')
+      ? ((updated as any).paymentStatus === 'pagado' || (updated as any).paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente')
+      : (before.payment_status === 'pagado' ? 'pagado' : 'pendiente');
+    if (isShowroomSale) paymentStatus = 'pagado';
+    const noStockImpact =
+      has('noStockImpact') || has('no_stock_impact')
+        ? ((updated as any).noStockImpact === true || (updated as any).no_stock_impact === 1 ? 1 : 0)
+        : (Number(before.no_stock_impact) ? 1 : 0);
     const notesForSql = normalizeOrderNotes((updated as any).notes);
-    const before = await get('SELECT status FROM orders WHERE id = ?', [id]);
-    const previousStatusForStock: string | undefined =
-      before && String(before.status || '') !== String(updated.status || '') ? String(before.status || '') : undefined;
-    await execute(
-      'UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ?, payment_status = ?, no_stock_impact = ?, notes = ? WHERE id = ?',
-      [updated.customerId, sellerId, sqlDate, updated.status, updated.total, paymentStatus, noStockImpact, notesForSql, id]
-    );
-    await execute("DELETE FROM order_items WHERE order_id = ?", [id]);
+
+    // Resolver variantes ANTES de tocar los ítems: si alguna falla no se borra nada
+    // (antes se borraban los ítems y el pedido quedaba incompleto, y el stock se recalculaba con lo que quedó).
+    const resolvedVariantIds: string[] = [];
     for (const item of updated.items as any[]) {
       let variantId = item.variantId;
       if (!variantId && item.sku && item.colorCode && item.sizeCode) {
@@ -1551,6 +1645,48 @@ export const updateOrder = async (req: any, res: any) => {
       }
       if (!variantId) {
         return res.status(400).json({ message: "Falta variantId o sku+colorCode+sizeCode en item" });
+      }
+      resolvedVariantIds.push(String(variantId));
+    }
+    // Armado previo por variante: si el ítem llega sin `picked` (editor de pedidos), se conserva.
+    // Si se perdía, un pedido ya armado recalculaba el stock como si no se hubiera armado nada.
+    const prevPickedRows = (await query(
+      `SELECT variant_id, SUM(COALESCE(picked, 0)) AS picked FROM order_items WHERE order_id = ? GROUP BY variant_id`,
+      [id]
+    )) as any[];
+    const prevPicked = new Map<string, number>(
+      prevPickedRows.map((r) => [String(r.variant_id), Math.max(0, Math.floor(Number(r.picked) || 0))])
+    );
+
+    const invoiced = await get('SELECT id FROM invoices WHERE order_id = ? LIMIT 1', [id]);
+    const plBody = priceListFromBody(updated);
+    const priceListSnapshot = invoiced
+      ? null
+      : await resolveOrderPriceListSnapshot(plBody.raw, plBody.provided, String(updated.customerId || ''));
+    const previousStatusForStock: string | undefined =
+      before && String(before.status || '') !== String(updated.status || '') ? String(before.status || '') : undefined;
+    if (priceListSnapshot) {
+      await execute(
+        'UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ?, payment_status = ?, no_stock_impact = ?, notes = ?, price_list_id = ?, price_list_name = ? WHERE id = ?',
+        [updated.customerId, sellerId, sqlDate, updated.status, updated.total, paymentStatus, noStockImpact, notesForSql, priceListSnapshot.id, priceListSnapshot.name, id]
+      );
+    } else {
+      await execute(
+        'UPDATE orders SET customer_id = ?, seller_id = ?, date = ?, status = ?, total = ?, payment_status = ?, no_stock_impact = ?, notes = ? WHERE id = ?',
+        [updated.customerId, sellerId, sqlDate, updated.status, updated.total, paymentStatus, noStockImpact, notesForSql, id]
+      );
+    }
+    await execute("DELETE FROM order_items WHERE order_id = ?", [id]);
+    for (let itemIdx = 0; itemIdx < (updated.items as any[]).length; itemIdx++) {
+      const item = (updated.items as any[])[itemIdx];
+      const variantId = resolvedVariantIds[itemIdx];
+      if (isShowroomSale) {
+        item.picked = Math.max(0, Math.floor(Number(item.quantity) || 0));
+      } else if (item.picked === undefined || item.picked === null) {
+        const left = prevPicked.get(variantId) ?? 0;
+        const take = Math.min(left, Math.max(0, Math.floor(Number(item.quantity) || 0)));
+        prevPicked.set(variantId, left - take);
+        item.picked = take;
       }
       const sellAsPack = item.sellAsPack === true || item.sellAsPack === 1 ? 1 : 0;
       const explicitDespachoId = await resolveDespachoIdForItem(item, variantId);
@@ -1579,10 +1715,12 @@ export const updateOrder = async (req: any, res: any) => {
     await syncWholesaleOrderStock(id, { previousStatus: previousStatusForStock });
     const created = await get(
       `SELECT o.id, o.customer_id, o.seller_id, o.date, o.status, o.total, o.picked_by, o.dispatched_at, o.payment_status, o.no_stock_impact,
-              o.created_by, o.notes, cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
+              o.created_by, o.notes, o.price_list_id, o.price_list_name, pl.name AS price_list_current_name,
+              cu.name AS created_by_name, cu.role AS created_by_role, su.name AS seller_name
        FROM orders o
        LEFT JOIN users cu ON cu.id = o.created_by
        LEFT JOIN users su ON su.id = o.seller_id
+       LEFT JOIN price_lists pl ON pl.id = o.price_list_id
        WHERE o.id = ?`,
       [id]
     );
@@ -1637,6 +1775,7 @@ export const updateOrder = async (req: any, res: any) => {
       paymentStatus: mapPaymentStatus(created),
       noStockImpact: !!created.no_stock_impact,
       notes: (created as any).notes ? String((created as any).notes) : undefined,
+      ...mapOrderPriceList(created),
       despachoWarnings
     });
   } catch (error) {
@@ -2008,13 +2147,14 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
       return res.status(400).json({ message: 'El neto del pedido debe ser mayor a 0 para reemitir.' });
     }
 
+    const emissionYmd = todayYmdArgentina();
     const agip = await getAgipRetentionForOrder({
-      orderDate: orderRow.date,
+      orderDate: emissionYmd,
       customerCuit: customerRow.cuit,
       netAmount: totalForAfip
     });
     if (!agip || !(agip.amount > 0.005)) {
-      const orderPeriod = agipPeriodYyyymmFromOrderDate(orderRow.date);
+      const orderPeriod = agipPeriodYyyymmFromOrderDate(emissionYmd);
       return res.status(400).json({
         message:
           `No hay percepción IIBB calculable para reemitir (CUIT incompleto o sin alícuota en padrón AGIP${orderPeriod ? ` para ${orderPeriod}` : ''}). Cargá el padrón del mes o usá “Guardar IIBB” si solo querés actualizar el PDF sin nuevo CAE.`
@@ -2096,7 +2236,7 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
         forceCbteTipo
       );
 
-      const { nowMysqlArgentina } = await import('../utils/argentinaDate');
+      const emittedAt = nowMysqlArgentina();
       await execute(
         `UPDATE invoices SET cae = ?, cae_fch_vto = ?, punto_venta = ?, cbte_tipo = ?, cbte_desde = ?, cbte_hasta = ?, agip_alicuota = ?, agip_ret_per = ?, created_at = ?
          WHERE order_id = ?`,
@@ -2109,7 +2249,7 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
           faResult.cbteHasta,
           agip.alicuota,
           agip.amount,
-          nowMysqlArgentina(),
+          emittedAt,
           id
         ]
       );
@@ -2120,7 +2260,7 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
       await syncAllOrderPaymentStatusForCustomer(String(orderRow.customer_id));
 
       const padronHint =
-        agip.periodUsed && agipPeriodYyyymmFromOrderDate(orderRow.date) !== agip.periodUsed
+        agip.periodUsed && agipPeriodYyyymmFromOrderDate(emissionYmd) !== agip.periodUsed
           ? ` (padrón AGIP ${agip.periodUsed})`
           : '';
       res.status(201).json({
@@ -2147,7 +2287,8 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
           cbteDesde: faResult.cbteDesde,
           cbteHasta: faResult.cbteHasta,
           agipAlicuota: agip.alicuota,
-          agipRetPer: agip.amount
+          agipRetPer: agip.amount,
+          createdAt: emittedAt
         }
       });
     } catch (faErr: any) {
@@ -2307,11 +2448,12 @@ export const emitirFactura = async (req: any, res: any) => {
       }
     }
 
+    const emissionYmd = todayYmdArgentina();
     const agip =
       isFacturaE
         ? null
         : await getAgipRetentionForOrder({
-            orderDate: orderRow.date,
+            orderDate: emissionYmd,
             customerCuit: customerRow.cuit,
             netAmount: totalForAfip
           });
@@ -2401,10 +2543,11 @@ export const emitirFactura = async (req: any, res: any) => {
           throw Object.assign(new Error('Este pedido ya tiene una factura emitida'), { status: 409 });
         }
         const invoiceId = uuidv4();
+        const emittedAt = nowMysqlArgentina();
         await execute(
           `INSERT INTO invoices (id, order_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta,
-                                 agip_alicuota, agip_ret_per, moneda_id, moneda_ctz, export_dst_cmp, export_incoterms, export_tipo_expo)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                 agip_alicuota, agip_ret_per, moneda_id, moneda_ctz, export_dst_cmp, export_incoterms, export_tipo_expo, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             invoiceId,
             id,
@@ -2420,7 +2563,8 @@ export const emitirFactura = async (req: any, res: any) => {
             result.monedaCtz ?? null,
             result.exportDstCmp ?? null,
             result.exportIncoterms ?? null,
-            result.exportTipoExpo ?? null
+            result.exportTipoExpo ?? null,
+            emittedAt
           ]
         );
         await execute('UPDATE orders SET total = ? WHERE id = ?', [
@@ -2440,6 +2584,7 @@ export const emitirFactura = async (req: any, res: any) => {
           cbteHasta: result.cbteHasta,
           agipAlicuota: isFacturaE ? 0 : agip?.alicuota ?? 0,
           agipRetPer: isFacturaE ? 0 : agip?.amount ?? 0,
+          createdAt: emittedAt,
           monedaId: result.monedaId,
           monedaCtz: result.monedaCtz,
           exportDstCmp: result.exportDstCmp,
@@ -2489,7 +2634,7 @@ export const getOrderCreditNotes = async (req: any, res: any) => {
   if (!id) return res.status(400).json({ message: 'ID de pedido inválido' });
   try {
     const rows = (await query(
-      `SELECT id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index, created_at,
+      `SELECT id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index, description, created_at,
               voided_invoice_cae, voided_invoice_punto_venta, voided_invoice_cbte_tipo, voided_invoice_cbte_desde,
               COALESCE(superseded_by_reinvoice, 0) AS superseded_by_reinvoice
        FROM credit_notes WHERE order_id = ? ORDER BY created_at DESC, id ASC`,
@@ -2515,11 +2660,12 @@ export const getOrderCreditNotes = async (req: any, res: any) => {
       cbteDesde: number;
       cbteHasta: number;
       amountCredited: number;
-      scope: 'total' | 'item';
+      scope: 'total' | 'item' | 'monto';
       itemIndex?: number;
       itemIndexes: number[];
       amountByItemIndex: Record<number, number>;
       quantityByItemIndex: Record<number, number>;
+      description?: string;
       createdAt: string | null;
       voidedInvoice?: {
         cae: string;
@@ -2546,11 +2692,12 @@ export const getOrderCreditNotes = async (req: any, res: any) => {
           cbteDesde: r.cbte_desde,
           cbteHasta: r.cbte_hasta,
           amountCredited: 0,
-          scope: (r.scope ?? 'total') as 'total' | 'item',
+          scope: r.scope === 'item' ? 'item' : r.scope === 'monto' ? 'monto' : 'total',
           itemIndex: r.item_index ?? undefined,
           itemIndexes: [],
           amountByItemIndex: {},
           quantityByItemIndex: {},
+          description: r.description ? String(r.description) : undefined,
           createdAt: r.created_at ?? null,
           voidedInvoice: r.voided_invoice_cae
             ? {
@@ -2597,7 +2744,7 @@ export const getOrderCreditNotes = async (req: any, res: any) => {
   }
 };
 
-/** Emite una Nota de Crédito AFIP: todo el pedido o un ítem. Solo ADMIN/WAREHOUSE/DEPOSITO. */
+/** Emite una Nota de Crédito AFIP: todo el pedido, ítems, o un monto/porcentaje. Solo ADMIN/WAREHOUSE/DEPOSITO. */
 export const emitirNotaCredito = async (req: any, res: any) => {
   const { id } = req.params;
   const user = req.user;
@@ -2605,9 +2752,9 @@ export const emitirNotaCredito = async (req: any, res: any) => {
     return res.status(403).json({ message: 'Solo ADMIN o Depósito pueden emitir notas de crédito' });
   }
   if (!id) return res.status(400).json({ message: 'ID de pedido inválido' });
-  const { tipo, itemIndex, quantity, items, restoreStock: restoreStockRaw } = req.body || {};
-  if (!tipo || (tipo !== 'total' && tipo !== 'item' && tipo !== 'items')) {
-    return res.status(400).json({ message: 'Body debe incluir tipo: "total", "item" o "items"' });
+  const { tipo, itemIndex, quantity, items, restoreStock: restoreStockRaw, netAmount, percent, description } = req.body || {};
+  if (!tipo || !['total', 'item', 'items', 'monto'].includes(tipo)) {
+    return res.status(400).json({ message: 'Body debe incluir tipo: "total", "item", "items" o "monto"' });
   }
   const restoreStock =
     restoreStockRaw === false ||
@@ -2633,13 +2780,15 @@ export const emitirNotaCredito = async (req: any, res: any) => {
     );
     if (!customerRow) return res.status(400).json({ message: 'Cliente del pedido no encontrado' });
 
-    // Validar: si ya existe NC por el total, no se permite ninguna NC más (ni total ni por ítem)
+    // Validar: si ya existe NC por el total vigente, no se permite ninguna NC más.
     const existingNCs = await query(
-      `SELECT scope, item_index, amount_credited FROM credit_notes WHERE order_id = ?`,
+      `SELECT scope, item_index, amount_credited, COALESCE(superseded_by_reinvoice, 0) AS superseded_by_reinvoice
+       FROM credit_notes WHERE order_id = ?`,
       [id]
-    ) as { scope?: string; item_index?: number | null; amount_credited: string }[];
+    ) as { scope?: string; item_index?: number | null; amount_credited: string; superseded_by_reinvoice?: number | string }[];
+    const activeNCs = existingNCs.filter((r) => !Number(r.superseded_by_reinvoice));
 
-    const yaExisteNCTotal = existingNCs.some(
+    const yaExisteNCTotal = activeNCs.some(
       (r) => (r.scope || 'total') === 'total'
     );
     if (yaExisteNCTotal) {
@@ -2648,13 +2797,46 @@ export const emitirNotaCredito = async (req: any, res: any) => {
       });
     }
 
+    const orderNetCap = await getOrderNetForCreditNoteTotal(id);
+    const alreadyCredited = Math.round(
+      activeNCs.reduce((sum, r) => sum + Number(r.amount_credited || 0), 0) * 100
+    ) / 100;
+    const remainingCredit = Math.max(0, Math.round((orderNetCap - alreadyCredited) * 100) / 100);
+
     let amountToCredit: number;
     let creditNoteItemQuantity: number | null = null;
+    let creditNoteDescription: string | null = null;
     let itemsToCredit: Array<{ itemIndex: number; quantity: number; amount: number }> = [];
 
     if (tipo === 'total') {
-      amountToCredit = await getOrderNetForCreditNoteTotal(id);
+      amountToCredit = orderNetCap;
       if (amountToCredit <= 0) return res.status(400).json({ message: 'El total del pedido debe ser mayor a 0.' });
+    } else if (tipo === 'monto') {
+      const pctRaw = percent != null && percent !== '' ? Number(percent) : NaN;
+      const amtRaw = netAmount != null && netAmount !== '' ? Number(netAmount) : NaN;
+      const usePercent = Number.isFinite(pctRaw) && pctRaw > 0;
+      if (usePercent) {
+        if (pctRaw > 100) {
+          return res.status(400).json({ message: 'El porcentaje debe ser mayor a 0 y como máximo 100.' });
+        }
+        amountToCredit = Math.round((orderNetCap * pctRaw) / 100 * 100) / 100;
+      } else if (Number.isFinite(amtRaw) && amtRaw > 0) {
+        amountToCredit = Math.round(amtRaw * 100) / 100;
+      } else {
+        return res.status(400).json({ message: 'Para un crédito por monto enviá netAmount o percent mayor a 0.' });
+      }
+      if (!(amountToCredit > 0)) {
+        return res.status(400).json({ message: 'El monto a creditar debe ser mayor a 0.' });
+      }
+      const customDesc = description != null && String(description).trim() ? String(description).trim().slice(0, 255) : '';
+      if (customDesc) {
+        creditNoteDescription = customDesc;
+      } else if (usePercent) {
+        const pctLabel = Math.round(pctRaw * 100) / 100;
+        creditNoteDescription = `Crédito del ${Number.isInteger(pctLabel) ? String(pctLabel) : pctLabel}%`;
+      } else {
+        creditNoteDescription = 'Crédito por monto';
+      }
     } else if (tipo === 'item') {
       const itemsRows = await query(
         `SELECT quantity, price_at_moment FROM order_items WHERE order_id = ? ORDER BY id`,
@@ -2676,7 +2858,7 @@ export const emitirNotaCredito = async (req: any, res: any) => {
       amountToCredit = Math.round(qty * price * 100) / 100;
       if (amountToCredit <= 0) return res.status(400).json({ message: 'El monto a creditar del ítem es 0.' });
       const itemLineTotal = Math.round(Number(item.quantity) * price * 100) / 100;
-      const yaCreditadoItem = existingNCs
+      const yaCreditadoItem = activeNCs
         .filter((r) => (r.scope || '') === 'item' && r.item_index === idx)
         .reduce((sum, r) => sum + Number(r.amount_credited || 0), 0);
       if (yaCreditadoItem + amountToCredit > itemLineTotal + 0.01) {
@@ -2720,7 +2902,7 @@ export const emitirNotaCredito = async (req: any, res: any) => {
           return res.status(400).json({ message: `El monto a creditar del itemIndex ${idx} es 0.` });
         }
         const itemLineTotal = Math.round(Number(item.quantity) * price * 100) / 100;
-        const yaCreditadoItem = existingNCs
+        const yaCreditadoItem = activeNCs
           .filter((r) => (r.scope || '') === 'item' && r.item_index === idx)
           .reduce((sum, r) => sum + Number(r.amount_credited || 0), 0);
         if (yaCreditadoItem + lineAmount > itemLineTotal + 0.01) {
@@ -2734,6 +2916,12 @@ export const emitirNotaCredito = async (req: any, res: any) => {
       if (amountToCredit <= 0) {
         return res.status(400).json({ message: 'El monto total a creditar debe ser mayor a 0.' });
       }
+    }
+
+    if (amountToCredit > remainingCredit + 0.01) {
+      return res.status(400).json({
+        message: `El monto supera lo que queda por creditar de la factura. Disponible: $${remainingCredit.toFixed(2)} (neto $${orderNetCap.toFixed(2)}, ya creditado $${alreadyCredited.toFixed(2)}).`,
+      });
     }
 
     const netFromOrder = await getOrderNetFromLineItems(id);
@@ -2807,9 +2995,9 @@ export const emitirNotaCredito = async (req: any, res: any) => {
         );
       } else {
         await execute(
-          `INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index,
+          `INSERT INTO credit_notes (id, order_id, invoice_id, cae, cae_fch_vto, punto_venta, cbte_tipo, cbte_desde, cbte_hasta, amount_credited, scope, item_index, description,
             voided_invoice_cae, voided_invoice_punto_venta, voided_invoice_cbte_tipo, voided_invoice_cbte_desde, superseded_by_reinvoice)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, 0)`,
           [
             firstCreditNoteId,
             id,
@@ -2823,12 +3011,14 @@ export const emitirNotaCredito = async (req: any, res: any) => {
             amountToCredit,
             scope,
             itemIndexVal,
+            creditNoteDescription,
           ]
         );
       }
     }
 
-    if (restoreStock) {
+    const applyStock = restoreStock && tipo !== 'monto';
+    if (applyStock) {
       if (scope === 'total') {
         const stockResult = await restoreStockForOrder(id);
         if (!stockResult.success) {
@@ -2860,7 +3050,7 @@ export const emitirNotaCredito = async (req: any, res: any) => {
       cbteDesde: result.cbteDesde,
       cbteHasta: result.cbteHasta,
       amountCredited: amountToCredit,
-      stockRestored: restoreStock,
+      stockRestored: applyStock,
     });
   } catch (error: any) {
     console.error('emitirNotaCredito:', error);

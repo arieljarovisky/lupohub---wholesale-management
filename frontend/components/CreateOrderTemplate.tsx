@@ -4,7 +4,7 @@ import { Order, OrderStatus, Product, Customer, Role } from '../types';
 import type { PriceList } from '../types';
 import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
-import { labelTalle, codigoTalleParaSku, ORDER_FORM_SIZE_CODES, sortOrderFormSizeCodes } from '../utils/tallesTango';
+import { labelTalle, codigoTalleParaSku, ORDER_FORM_SIZE_CODES, isNumericOrderSizeCode, sortOrderFormSizeCodes } from '../utils/tallesTango';
 import { parseOrderMatrixExcel } from '../utils/orderImportMatrix';
 import { articleCodesMatch, articleCodeForOrderRow, resolveDisplayArticleCode, skuLookupCandidates, variantColorKey } from '../utils/articleCodeUtils';
 
@@ -498,26 +498,33 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
 
   const sizeColumns = useMemo(() => {
     const map = new Map<string, { code: string; name: string }>();
+    // Los numéricos (4, 6, 8…) solo entran si algún artículo del pedido tiene esa variante.
+    // No usar quantitiesBySize: se precarga en 0 con todo el catálogo.
+    const usedByArticles = new Set<string>();
+    for (const r of rows) {
+      for (const [code, variantId] of Object.entries(r.variantBySize || {})) {
+        const c = String(code || '').trim();
+        if (c && variantId) usedByArticles.add(c);
+      }
+    }
+    const includeCode = (code: string) => !isNumericOrderSizeCode(code) || usedByArticles.has(code);
+    const labelFor = (code: string, fromApi?: { name?: string }) =>
+      fromApi?.name || labelTalle(code) || code;
+
     for (const code of ORDER_FORM_SIZE_CODES) {
+      if (!includeCode(code)) continue;
       const fromApi = sizes.find((s) => String(s.code).trim() === code);
-      map.set(code, { code, name: fromApi?.name || labelTalle(code) || code });
+      map.set(code, { code, name: labelFor(code, fromApi) });
     }
     for (const s of sizes) {
       const code = String(s.code || '').trim();
-      if (!code || !/^\d{1,3}$/.test(code)) continue;
-      if (!map.has(code)) map.set(code, { code, name: s.name || labelTalle(code) || code });
+      if (!code || !/^\d{1,3}$/.test(code) || !includeCode(code)) continue;
+      if (!map.has(code)) map.set(code, { code, name: labelFor(code, s) });
     }
-    for (const r of rows) {
-      for (const code of Object.keys(r.variantBySize || {})) {
-        const c = String(code || '').trim();
-        if (!c || map.has(c)) continue;
-        map.set(c, { code: c, name: labelTalle(c) || c });
-      }
-      for (const code of Object.keys(r.quantitiesBySize || {})) {
-        const c = String(code || '').trim();
-        if (!c || map.has(c)) continue;
-        map.set(c, { code: c, name: labelTalle(c) || c });
-      }
+    for (const c of usedByArticles) {
+      if (!c || map.has(c)) continue;
+      const fromApi = sizes.find((s) => String(s.code).trim() === c);
+      map.set(c, { code: c, name: labelFor(c, fromApi) });
     }
     return Array.from(map.values()).sort((a, b) => sortOrderFormSizeCodes(a.code, b.code));
   }, [sizes, rows]);
@@ -554,7 +561,13 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
 
     setSelectedCustomerId(hydrateSourceOrder.customerId);
     if (!priceListUserOverrideRef.current) {
-      applyCustomerPriceList(hydrateSourceOrder.customerId);
+      if (hydrateSourceOrder.priceListId) {
+        onPriceListChange?.(hydrateSourceOrder.priceListId);
+      } else if (hydrateSourceOrder.priceListId === null) {
+        onPriceListChange?.(null);
+      } else {
+        applyCustomerPriceList(hydrateSourceOrder.customerId);
+      }
     }
     setOrderNotes(isDuplicating ? '' : String(hydrateSourceOrder.notes ?? '').trim());
     setOrderDate(isDuplicating ? new Date().toISOString().slice(0, 10) : hydrateSourceOrder.date);
@@ -1171,13 +1184,32 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       sellerId: initialOrder?.sellerId ?? duplicateFromOrder?.sellerId ?? sellerId ?? null,
       items: items.map(i => ({ ...i, productId: undefined })),
       total,
-      status: showroomSale
-        ? OrderStatus.CONTROLLED
-        : (role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO)
-          ? OrderStatus.CONFIRMED
-          : OrderStatus.PENDING_ADMIN_CONFIRMATION,
+      // Al editar se conserva el estado (salvo borrador / pendiente de admin: al confirmar pasan a Confirmado).
+      // Volver a "Confirmado" un pedido ya armado le cambiaba el stock.
+      status: (() => {
+        const canConfirmDirectly =
+          role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO;
+        if (showroomSale) return OrderStatus.CONTROLLED;
+        if (!initialOrder?.status) {
+          return canConfirmDirectly ? OrderStatus.CONFIRMED : OrderStatus.PENDING_ADMIN_CONFIRMATION;
+        }
+        if (
+          canConfirmDirectly &&
+          (initialOrder.status === OrderStatus.PENDING_ADMIN_CONFIRMATION ||
+            initialOrder.status === OrderStatus.DRAFT)
+        ) {
+          return OrderStatus.CONFIRMED;
+        }
+        return initialOrder.status;
+      })(),
+      ...(initialOrder
+        ? { paymentStatus: initialOrder.paymentStatus, noStockImpact: initialOrder.noStockImpact }
+        : {}),
       date: orderDate,
       notes: orderNotes.trim() || undefined,
+      priceListId: showPriceListSelector
+        ? (selectedPriceListId ?? null)
+        : (selectedPriceListId || selectedCustomer?.priceListId || null),
       ...(showroomSale
         ? { showroomSale: true as const, paymentStatus: 'pagado' as const }
         : {}),
@@ -1362,7 +1394,9 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
           <h1 className="text-lg md:text-xl font-bold text-white tracking-tight truncate">
             {readOnly ? 'Ver pedido' : (isEditing ? 'Editar pedido' : isDuplicating ? 'Duplicar pedido' : 'Nuevo pedido')}
           </h1>
-          <p className="text-xs text-slate-500 truncate hidden sm:block">
+          <p className="text-xs text-slate-500 truncate">
+            <span className="font-medium text-violet-200/90">Lista: {selectedPriceListLabel}</span>
+            {' · '}
             {orderNotes.trim()
               ? orderNotes.trim()
               : isDuplicating && duplicateFromOrder

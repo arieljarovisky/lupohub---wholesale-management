@@ -334,14 +334,27 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
         despachoId: r.despachoId || undefined
       })),
       total,
-      status:
-        initialOrder?.status ??
-        ((role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO)
-          ? OrderStatus.CONFIRMED
-          : OrderStatus.PENDING_ADMIN_CONFIRMATION),
+      status: (() => {
+        const canConfirmDirectly =
+          role === Role.ADMIN || role === Role.WAREHOUSE || role === Role.DEPOSITO;
+        if (!initialOrder?.status) {
+          return canConfirmDirectly ? OrderStatus.CONFIRMED : OrderStatus.PENDING_ADMIN_CONFIRMATION;
+        }
+        if (
+          canConfirmDirectly &&
+          (initialOrder.status === OrderStatus.PENDING_ADMIN_CONFIRMATION ||
+            initialOrder.status === OrderStatus.DRAFT)
+        ) {
+          return OrderStatus.CONFIRMED;
+        }
+        return initialOrder.status;
+      })(),
       date: orderDate,
       paymentStatus: initialOrder?.paymentStatus ?? 'pendiente',
-      noStockImpact: initialOrder?.noStockImpact
+      noStockImpact: initialOrder?.noStockImpact,
+      priceListId: showPriceListSelector
+        ? (selectedPriceListId ?? null)
+        : (selectedPriceListId || customers.find((c) => c.id === selectedCustomerId)?.priceListId || null)
     });
   };
 

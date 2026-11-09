@@ -51,10 +51,9 @@ function round2(n: number): number {
 
 /** Columna importe_neto: guarda importe BRUTO del comprobante (IVA incluido). */
 export const SQL_MANUAL_FAC_TOTAL = `ROUND(importe_neto + COALESCE(agip_ret_per, 0), 2)`;
-export const SQL_MANUAL_NC_TOTAL = `ROUND(importe_neto, 2)`;
+export const SQL_MANUAL_NC_TOTAL = `ROUND(importe_neto + COALESCE(agip_ret_per, 0), 2)`;
 
-function importeTotalBruto(tipo: 'FACTURA' | 'NC', bruto: number, agip: number): number {
-  if (tipo === 'NC') return round2(Math.max(0, bruto));
+function importeTotalBruto(_tipo: 'FACTURA' | 'NC', bruto: number, agip: number): number {
   return round2(Math.max(0, bruto) + Math.max(0, agip));
 }
 
@@ -231,7 +230,7 @@ function parseCreateBody(raw: Record<string, unknown>) {
       : cbteDesde;
 
   const importeBruto = round2(Number(raw.importeBruto ?? raw.importeNeto));
-  const agipRetPer = tipo === 'FACTURA' ? round2(Number(raw.agipRetPer || 0)) : 0;
+  const agipRetPer = round2(Math.max(0, Number(raw.agipRetPer || 0)));
   const cae = raw.cae != null && String(raw.cae).trim() ? String(raw.cae).trim() : null;
   const caeFchVto =
     raw.caeFchVto != null && String(raw.caeFchVto).trim() ? String(raw.caeFchVto).trim() : null;

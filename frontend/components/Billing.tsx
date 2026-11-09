@@ -8,6 +8,14 @@ import {
   mergeServerInvoiceIntoOrder,
   type ManualFacturaFields,
 } from '../utils/wholesaleInvoiceHtml';
+import { buildPaymentReceiptHtml } from '../utils/paymentReceiptHtml';
+import {
+  PAYMENT_METHODS,
+  isPaymentMethod,
+  normalizePaymentMethod,
+  paymentMethodLabel,
+  type PaymentMethodValue,
+} from '../utils/paymentMethods';
 import { Customer, Order, Payment, Product, Role, User } from '../types';
 import EmitDebitNoteModal from './EmitDebitNoteModal';
 import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2, Percent, RefreshCcw, FileMinus, ExternalLink, Printer, MoreHorizontal, ChevronDown, Download, Upload, Wallet, FilePlus, FileText, Pencil, Trash2 } from 'lucide-react';
@@ -86,6 +94,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const billingCustomersFileInputRef = useRef<HTMLInputElement | null>(null);
   const agipPadronInputRef = useRef<HTMLInputElement | null>(null);
   const [payReceipt, setPayReceipt] = useState('');
+  const [payReceiptLoading, setPayReceiptLoading] = useState(false);
   const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [payCustomerId, setPayCustomerId] = useState<string>('ALL');
   const [payInvoiceIds, setPayInvoiceIds] = useState<string[]>([]);
@@ -93,6 +102,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [paySellerId, setPaySellerId] = useState<string>('');
   const [payAmount, setPayAmount] = useState<string>('');
   const [payNotes, setPayNotes] = useState<string>('');
+  const [payMethod, setPayMethod] = useState<PaymentMethodValue | ''>('');
   const [paySubmitting, setPaySubmitting] = useState(false);
   const [invoiceOutstanding, setInvoiceOutstanding] = useState<Record<string, number>>({});
   const [payAllocPreview, setPayAllocPreview] = useState<Awaited<
@@ -570,8 +580,18 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     setPaySellerId('');
     setPayAmount('');
     setPayNotes('');
+    setPayMethod('');
     setCreatePedidoOptions([]);
     setShowPaymentModal(true);
+    setPayReceiptLoading(true);
+    api
+      .getNextReceiptNumber()
+      .then((r) => setPayReceipt(String(r?.receiptNumber || '').trim()))
+      .catch(() => {
+        setPayReceipt('');
+        showToast('error', 'No se pudo calcular el número. Se asigna al guardar.');
+      })
+      .finally(() => setPayReceiptLoading(false));
   };
 
   const openLinkPaymentModal = (p: Payment) => {
@@ -837,6 +857,79 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
         }
       },
     });
+  };
+
+  const handlePrintPayment = async (p: Payment) => {
+    let method = normalizePaymentMethod(p.paymentMethod);
+    if (!method) {
+      const raw = window.prompt(
+        'Medio de cobro (cargo banco):\ntransferencia | echeq | efectivo | deposito',
+        'transferencia'
+      );
+      if (raw == null) return;
+      method = normalizePaymentMethod(raw);
+      if (!method) {
+        showToast('error', 'Medio inválido. Usá: transferencia, echeq, efectivo o deposito');
+        return;
+      }
+      const canPersist =
+        !isSeller &&
+        p.source !== 'imported' &&
+        !String(p.id || '').startsWith('mm-');
+      if (canPersist) {
+        try {
+          await api.updatePaymentMethod(p.id, method);
+          setPayments((prev) =>
+            prev.map((row) => (row.id === p.id ? { ...row, paymentMethod: method } : row))
+          );
+        } catch {
+          /* igual imprimimos con el medio elegido */
+        }
+      }
+    }
+
+    const customer = customers.find((c) => c.id === p.customerId);
+    const invoiceLinks =
+      Array.isArray(p.invoiceLinks) && p.invoiceLinks.length > 0
+        ? p.invoiceLinks.map((link) => ({
+            ...link,
+            label: facturaOptionById.get(link.invoiceId) || link.label || link.invoiceId,
+          }))
+        : (Array.isArray(p.invoiceIds) ? p.invoiceIds : []).map((id) => ({
+            invoiceId: id,
+            label: facturaOptionById.get(id) || id,
+            amountApplied: 0,
+            invoiceOutstanding: NaN,
+          }));
+    const orderLinks =
+      Array.isArray(p.orderLinks) && p.orderLinks.length > 0
+        ? p.orderLinks.map((link) => ({
+            ...link,
+            label: pedidoOptionById.get(link.orderId) || link.label || link.orderId,
+          }))
+        : (Array.isArray(p.orderIds) ? p.orderIds : []).map((id) => ({
+            orderId: id,
+            label: pedidoOptionById.get(id) || id,
+            amountApplied: 0,
+            orderOutstanding: NaN,
+          }));
+    const paymentForPrint: Payment = { ...p, invoiceLinks, orderLinks, paymentMethod: method };
+    const html = buildPaymentReceiptHtml({
+      payment: paymentForPrint,
+      customer,
+      remitente: mergedRemitenteForFactura() as any,
+    });
+    if (!html) {
+      showToast('error', 'No se pudo generar el comprobante de pago');
+      return;
+    }
+    const w = window.open('', '_blank');
+    if (w) {
+      w.document.write(html);
+      w.document.close();
+    } else {
+      showToast('error', 'No se pudo abrir la ventana de impresión (bloqueador de popups?)');
+    }
   };
 
   const handleVer = async (item: any) => {
@@ -1716,7 +1809,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                     <td className="px-3 py-2 align-middle text-right whitespace-nowrap tabular-nums">
                       <div className="flex flex-col items-end gap-0.5">
                         <span>${formatMoneyAr(item.importe ?? 0)}</span>
-                        {item.tipo === 'FACTURA' && Number(item.agipRetPer || 0) > 0.005 && (
+                        {(item.tipo === 'FACTURA' || item.tipo === 'NC') && Number(item.agipRetPer || 0) > 0.005 && (
                           <span className="text-[10px] font-bold text-amber-300/90">
                             incl. IIBB ${formatMoneyAr(Number(item.agipRetPer || 0))}
                           </span>
@@ -2040,6 +2133,12 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                         Recibo <span className="font-mono text-slate-300">{p.receiptNumber}</span>
                         <span className="text-slate-600"> · </span>
                         {formatDate(p.date)}
+                        {paymentMethodLabel(p.paymentMethod) ? (
+                          <>
+                            <span className="text-slate-600"> · </span>
+                            <span className="text-sky-300/90">{paymentMethodLabel(p.paymentMethod)}</span>
+                          </>
+                        ) : null}
                         {p.sellerName ? (
                           <>
                             <span className="text-slate-600"> · </span>
@@ -2148,6 +2247,15 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                 </div>
 
                 <div className="flex items-center gap-2 flex-wrap justify-end lg:justify-start">
+                  <button
+                    type="button"
+                    className="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-[11px] font-bold text-slate-200 hover:bg-slate-800 touch-manipulation inline-flex items-center gap-1 whitespace-nowrap"
+                    onClick={() => handlePrintPayment(p)}
+                    title="Imprimir comprobante de pago"
+                  >
+                    <Printer size={12} />
+                    Imprimir
+                  </button>
                   <button
                     type="button"
                     className="px-2.5 py-1.5 rounded-lg bg-emerald-900/40 border border-emerald-700/50 text-[11px] font-bold text-emerald-200 hover:bg-emerald-900/60 touch-manipulation whitespace-nowrap"
@@ -2259,14 +2367,15 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                 <div>
                   <label className="block text-xs font-black text-slate-500 uppercase mb-1">Nº Recibo</label>
                   <input
-                    value={payReceipt}
-                    readOnly={paymentModalMode === 'link'}
-                    onChange={(e) => setPayReceipt(e.target.value)}
-                    className={`w-full border border-slate-800 rounded-xl p-3 text-white outline-none ${
-                      paymentModalMode === 'link' ? 'bg-slate-900 text-slate-400' : 'bg-slate-950'
-                    }`}
-                    placeholder="R0001-00001234"
+                    value={paymentModalMode === 'create' && payReceiptLoading ? 'Calculando…' : payReceipt}
+                    readOnly
+                    className="w-full border border-slate-800 rounded-xl p-3 text-white outline-none bg-slate-900 text-slate-200 font-mono"
                   />
+                  {paymentModalMode === 'create' && (
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      Se asigna el número que sigue al último recibo.
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-black text-slate-500 uppercase mb-1">Fecha</label>
@@ -2493,6 +2602,22 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                     </div>
                   </div>
                   <div>
+                    <label className="block text-xs font-black text-slate-500 uppercase mb-1">Cargo banco / medio de cobro</label>
+                    <select
+                      value={payMethod}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setPayMethod(isPaymentMethod(v) ? v : '');
+                      }}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none"
+                    >
+                      <option value="">Seleccionar…</option>
+                      {PAYMENT_METHODS.map((m) => (
+                        <option key={m.value} value={m.value}>{m.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
                     <label className="block text-xs font-black text-slate-500 uppercase mb-1">Observaciones</label>
                     <textarea value={payNotes} onChange={(e) => setPayNotes(e.target.value)} rows={3} className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white outline-none resize-y" />
                   </div>
@@ -2537,25 +2662,29 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                       return;
                     }
                     const amount = parseMoneyInput(payAmount || '0');
-                    if (!payReceipt.trim()) { showToast('error', 'Falta Nº recibo'); return; }
+                    if (payReceiptLoading) { showToast('error', 'Esperá a que se calcule el Nº de recibo'); return; }
                     if (!payDate) { showToast('error', 'Falta fecha'); return; }
                     if (!payCustomerId || payCustomerId === 'ALL') { showToast('error', 'Seleccioná un cliente'); return; }
                     if (Number.isNaN(amount) || amount <= 0) { showToast('error', 'Importe inválido (debe ser mayor a 0)'); return; }
+                    if (!payMethod) { showToast('error', 'Seleccioná el medio de cobro (cargo banco)'); return; }
                     const created = await api.createPayment({
                       customerId: payCustomerId,
                       receiptNumber: payReceipt.trim(),
                       date: payDate,
                       amount,
                       notes: payNotes?.trim() || undefined,
+                      paymentMethod: payMethod,
                       sellerId: paySellerId || null,
                       invoiceId: payInvoiceIds[0] || null,
                       invoiceIds: payInvoiceIds,
                       orderId: payOrderIds[0] || null,
                       orderIds: payOrderIds,
                     });
+                    const assigned = String((created as { receiptNumber?: string }).receiptNumber || '').trim();
+                    const note = (created as { allocationNote?: string }).allocationNote;
                     showToast(
                       'success',
-                      (created as { allocationNote?: string }).allocationNote || 'Pago cargado.'
+                      [note || 'Pago cargado.', assigned ? `Recibo ${assigned}.` : ''].filter(Boolean).join(' ')
                     );
                     setShowPaymentModal(false);
                     loadPayments();
@@ -2601,7 +2730,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
               <p className="text-xs text-slate-400 leading-relaxed">
                 Para facturas o NC emitidas fuera de LupoHub. El importe es{' '}
                 <span className="text-slate-200">bruto (con IVA incluido)</span>, el mismo que figura en el comprobante.
-                En facturas, la percepción IIBB se suma aparte al saldo.
+                La percepción IIBB se suma aparte al saldo, tanto en facturas como en notas de crédito.
               </p>
               <label className="flex items-start gap-3 p-3 rounded-xl bg-slate-950/80 border border-slate-800 cursor-pointer">
                 <input
@@ -2717,8 +2846,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                     placeholder="0"
                   />
                 </div>
-                {manualTipo === 'FACTURA' && (
-                  <div className="col-span-2">
+                <div className="col-span-2">
                     <label className="block text-xs font-black text-slate-500 uppercase mb-1">
                       Percepción IIBB (opcional)
                     </label>
@@ -2729,7 +2857,6 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                       placeholder="0"
                     />
                   </div>
-                )}
                 {!manualSinDetalle && (
                   <div className="col-span-2">
                     <label className="block text-xs font-black text-slate-500 uppercase mb-1">CAE (opcional)</label>
@@ -2859,7 +2986,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
                             cae: manualCae.trim() || undefined
                           }),
                       importeBruto: bruto,
-                      agipRetPer: manualTipo === 'FACTURA' ? parseMoneyInput(manualAgip || '0') : 0,
+                      agipRetPer: parseMoneyInput(manualAgip || '0'),
                       notes: manualNotes.trim() || undefined,
                       refInvoiceId,
                       refManualComprobanteId,

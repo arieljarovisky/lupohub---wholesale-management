@@ -60,4 +60,6 @@ export interface Order {
   status: OrderStatus;
   date: string;
   notes?: string;
+  priceListId?: string | null;
+  priceListName?: string | null;
 }

@@ -34,14 +34,14 @@ import {
 
 const GLOSSARY: { term: string; text: string }[] = [
   { term: 'Inversión', text: 'Dinero gastado en anuncios en el período (spend en Meta).' },
-  { term: 'Valor ventas', text: 'Importe de compras atribuidas a los anuncios según Meta (action_values de purchase).' },
+  { term: 'Valor ventas', text: 'Importe de la columna Compras de Meta. Se toma un solo tipo de compra (omni_purchase) para no sumar el mismo pedido varias veces.' },
   { term: 'ROAS', text: 'Return On Ad Spend: cuántos pesos de venta generó cada peso invertido. Ej. 3× = $3 de ventas por $1 gastado.' },
   { term: 'CPA', text: 'Costo por adquisición/compra: inversión dividida conversiones, o el costo por resultado que reporta Meta.' },
   { term: 'CTR', text: 'Click-through rate: porcentaje de impresiones que terminaron en clic.' },
   { term: 'CPC', text: 'Costo por clic promedio.' },
   { term: 'Alcance', text: 'Personas únicas que vieron el anuncio al menos una vez.' },
   { term: 'Frecuencia', text: 'Promedio de veces que cada persona vio el anuncio (impresiones / alcance).' },
-  { term: 'Conversiones', text: 'Compras registradas por el píxel o eventos de compra de Meta en el período.' },
+  { term: 'Conversiones', text: 'Cantidad de la columna Compras de Meta en el período. Una compra cuenta una sola vez.' },
   { term: 'Conjunto de anuncios', text: 'Agrupación de anuncios con audiencia, ubicación y presupuesto dentro de una campaña.' },
   { term: 'Anuncio', text: 'Creatividad concreta (imagen, video, texto) que se muestra a las personas.' }
 ];

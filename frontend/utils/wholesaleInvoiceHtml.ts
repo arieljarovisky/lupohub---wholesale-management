@@ -378,7 +378,9 @@ export function orderNetoFromItemsForAfip(order: Order): number {
   for (const i of order.items) {
     s += lineNetoForCreditNoteItem(i, order, postPicking);
   }
-  return Math.round(s * 100) / 100;
+  const rounded = Math.round(s * 100) / 100;
+  if (rounded > 0.005) return rounded;
+  return Math.round((Number(order.total) || 0) * 100) / 100;
 }
 
 /** Cantidad y neto por línea para NC / AFIP: usa pickeado si hay; si no, cantidad pedida (pedidos ya facturados). */
@@ -776,6 +778,75 @@ export function getGroupedItemsForWholesalePrint(
   return groupOrderItemsByArticleAndSize(itemsSorted, products, getQty);
 }
 
+const MESES_FACTURA = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+];
+const AR_TZ_FACTURA = 'America/Argentina/Buenos_Aires';
+
+/** Día civil en Argentina. Fechas sin zona se toman tal cual (pedido / DATETIME de MySQL). */
+function argentinaCalendarParts(value?: string | null): { y: number; m: number; d: number } | null {
+  if (value == null || String(value).trim() === '') return null;
+  const s = String(value).trim();
+  const ymd = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (!ymd) return null;
+  const hasTime = ymd[4] != null;
+  const hasZone = /[zZ]|[+-]\d{2}:?\d{2}$/.test(s);
+  if (!hasTime || !hasZone) {
+    return { y: Number(ymd[1]), m: Number(ymd[2]), d: Number(ymd[3]) };
+  }
+  const dt = new Date(s);
+  if (isNaN(dt.getTime())) {
+    return { y: Number(ymd[1]), m: Number(ymd[2]), d: Number(ymd[3]) };
+  }
+  const formatted = new Intl.DateTimeFormat('en-CA', {
+    timeZone: AR_TZ_FACTURA,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(dt);
+  const [y, m, d] = formatted.split('-').map(Number);
+  if (!y || !m || !d) return null;
+  return { y, m, d };
+}
+
+function facturaEmissionParts(createdAt?: string | null): { y: number; m: number; d: number } {
+  return argentinaCalendarParts(createdAt) ?? argentinaCalendarParts(new Date().toISOString())!;
+}
+
+function formatDateShort(d: string): string {
+  const s = String(d).trim();
+  const compact = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (compact) {
+    const y = Number(compact[1]);
+    const m = Number(compact[2]);
+    const day = Number(compact[3]);
+    if (m >= 1 && m <= 12 && day >= 1 && day <= 31) {
+      return `${String(day).padStart(2, '0')} ${MESES_FACTURA[m - 1]} ${y}`;
+    }
+  }
+  const p = argentinaCalendarParts(s);
+  if (!p) return s;
+  return `${String(p.d).padStart(2, '0')} ${MESES_FACTURA[p.m - 1]} ${p.y}`;
+}
+
+function formatFacturaEmissionDate(createdAt?: string | null): string {
+  const p = facturaEmissionParts(createdAt);
+  return `${String(p.d).padStart(2, '0')} ${MESES_FACTURA[p.m - 1]} ${p.y}`;
+}
+
+function formatFacturaEmissionYmd(createdAt?: string | null): string {
+  const p = facturaEmissionParts(createdAt);
+  return `${p.y}-${String(p.m).padStart(2, '0')}-${String(p.d).padStart(2, '0')}`;
+}
+
+function facturaPeriodLabels(createdAt?: string | null): { from: string; to: string } {
+  const p = facturaEmissionParts(createdAt);
+  const from = new Date(p.y, p.m - 1, 1);
+  const to = new Date(p.y, p.m, 0);
+  return { from: from.toLocaleDateString('es-AR'), to: to.toLocaleDateString('es-AR') };
+}
+
 export function buildWholesaleFacturaHtml(params: {
   order: Order;
   customer?: Customer;
@@ -789,22 +860,12 @@ export function buildWholesaleFacturaHtml(params: {
 
   const items = getGroupedItemsForWholesalePrint(order, products);
 
-  const formatDateShort = (d: string) => {
-    const x = new Date(d);
-    if (isNaN(x.getTime())) return d;
-    const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
-    const day = x.getDate();
-    const month = meses[x.getMonth()];
-    const year = x.getFullYear();
-    return `${String(day).padStart(2, '0')} ${month} ${year}`;
-  };
-
   const cbteTipoNum = Number((inv as { cbteTipo?: number }).cbteTipo ?? (inv as { cbte_tipo?: number }).cbte_tipo);
   const esExport = isComprobanteExportacion(cbteTipoNum);
   const tipoFactura = esExport ? 'E' : cbteTipoNum === 1 ? 'A' : cbteTipoNum === 11 ? 'C' : 'B';
   const codigoComprobante = esExport ? '019' : cbteTipoNum === 1 ? '001' : cbteTipoNum === 11 ? '011' : '006';
   const nroComprobante = inv.puntoVta != null ? `${String(inv.puntoVta).padStart(5, '0')}-${String(inv.cbteDesde).padStart(8, '0')}` : String(inv.cbteDesde);
-  const fechaComprobante = inv.createdAt ? formatDateShort(inv.createdAt) : formatDateShort(order.date);
+  const fechaComprobante = formatFacturaEmissionDate(inv.createdAt);
   const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
 
   const lineQty = (i: OrderItem) => Number(i.quantity || 0);
@@ -916,15 +977,8 @@ export function buildWholesaleFacturaHtml(params: {
   const dirCliente = clienteDir || '';
   const ptoVta = String(inv.puntoVta ?? '').padStart(5, '0');
   const compNro = String(inv.cbteDesde ?? '').padStart(8, '0');
-  const periodDate = new Date(order.date);
-  const validPeriodDate = !isNaN(periodDate.getTime()) ? periodDate : new Date();
-  const periodFrom = new Date(validPeriodDate.getFullYear(), validPeriodDate.getMonth(), 1).toLocaleDateString('es-AR');
-  const periodTo = new Date(validPeriodDate.getFullYear(), validPeriodDate.getMonth() + 1, 0).toLocaleDateString('es-AR');
-
-  const fechaQrBase = inv.createdAt ? new Date(inv.createdAt) : new Date(order.date);
-  const fechaQr = !isNaN(fechaQrBase.getTime())
-    ? `${fechaQrBase.getFullYear()}-${String(fechaQrBase.getMonth() + 1).padStart(2, '0')}-${String(fechaQrBase.getDate()).padStart(2, '0')}`
-    : '';
+  const { from: periodFrom, to: periodTo } = facturaPeriodLabels(inv.createdAt);
+  const fechaQr = formatFacturaEmissionYmd(inv.createdAt);
   const cuitEmisorNum = Number(String(cuitEmpresa).replace(/\D/g, '')) || 0;
   const cuitReceptorDigits = String(cuitCliente).replace(/\D/g, '');
   const tipoDocRec = cuitReceptorDigits.length === 11 ? 80 : cuitReceptorDigits.length >= 7 ? 96 : 99;
@@ -1181,6 +1235,10 @@ export function buildWholesaleCreditNoteHtml(params: {
     const price = Number(i.priceAtMoment ?? 0);
     const qtyNc = price > 0 ? Math.round((totalNota / price) * 1000) / 1000 : i.quantity;
     rows = wholesalePrintLineRowHtml(i, qtyNc, products, factorNc, netoNc);
+  } else if (scope === 'monto') {
+    const desc = escapeHtmlText(nc.description?.trim() || 'Crédito por monto');
+    const unitPrint = Math.round(netoNc * factorNc * 100) / 100;
+    rows = `<tr><td class="col-c">1</td><td class="col-c col-code">—</td><td class="col-desc">${desc}</td><td class="col-c col-despacho">—</td><td class="col-r">$${formatMoneyAr(unitPrint)}</td><td class="col-r">$${formatMoneyAr(unitPrint)}</td></tr>`;
   } else {
     const itemsForNc = getGroupedItemsForWholesalePrint(order, products);
     rows = itemsForNc
@@ -1206,7 +1264,7 @@ export function buildWholesaleCreditNoteHtml(params: {
          </div>`
     : `<span class="inv-logo-placeholder">${logoPlaceholderNc}</span>`;
 
-  const scopeLabel = scope === 'item' ? 'Crédito por ítem' : 'Crédito total del pedido';
+  const scopeLabel = scope === 'item' ? 'Crédito por ítem' : scope === 'monto' ? 'Crédito por monto' : 'Crédito total del pedido';
   const cuitEmpresa = (remitente.cuit || '').toString();
   const ingresosBrutosEmpresa = (remitente.ingresosBrutos || '901-2113373').toString();
   const inicioActividadEmpresa = (remitente.inicioActividad || '13/06/2005').toString();
