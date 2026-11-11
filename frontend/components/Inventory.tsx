@@ -29,7 +29,8 @@ import {
   extractMercadoLibreVariationIdFromUrl,
   isVariantLinkedToMercadoLibre,
   isVariantLinkedToTiendaNube,
-  getChannelStockDisplay
+  getChannelStockDisplay,
+  getPublicationStockHint
 } from '../utils/mercadoLibreItemId';
 import { normalizeTiendaNubeProductId, extractTiendaNubeVariantFromUrl } from '../utils/tiendaNubeUrl';
 
@@ -307,6 +308,22 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [serverItems, setServerItems] = useState<Product[]>([]);
   const [serverTotal, setServerTotal] = useState(0);
   const [variantExternalStocks, setVariantExternalStocks] = useState<Record<string, { stockML?: number; stockTN?: number; stockLupoShop?: number }>>({});
+  /** Marca cada variante como consultada, aunque la tienda no haya devuelto un número. */
+  const rememberExternalStocks = useCallback((
+    ids: string[],
+    stocks?: Record<string, { stockML?: number; stockTN?: number; stockLupoShop?: number }>
+  ) => {
+    const unique = Array.from(new Set(ids.filter(Boolean)));
+    if (unique.length === 0) return;
+    setVariantExternalStocks((prev) => {
+      const next = { ...prev };
+      for (const id of unique) {
+        const incoming = stocks?.[id];
+        next[id] = incoming ? { ...prev[id], ...incoming } : (prev[id] ?? {});
+      }
+      return next;
+    });
+  }, []);
   const extStocksForMismatchFilter =
     filterSync === 'MISMATCH' ? variantExternalStocks : STABLE_EMPTY_EXTERNAL_STOCKS;
 
@@ -780,11 +797,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         if (cancelled) return;
         const merged: Record<string, { stockML?: number; stockTN?: number; stockLupoShop?: number }> = {};
         results.forEach(r => { if (r?.stocks) Object.assign(merged, r.stocks); });
-        setVariantExternalStocks(prev => ({ ...prev, ...merged }));
+        rememberExternalStocks(idsLimited, merged);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) rememberExternalStocks(idsLimited);
+      });
     return () => { cancelled = true; };
-  }, [filterSync, baseSource]);
+  }, [filterSync, baseSource, rememberExternalStocks]);
 
   // Solo al elegir un color: cargar variantes de pocos grupos para filtrar (máx 8, 2 en paralelo)
   useEffect(() => {
@@ -810,8 +829,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         setLoadedVariants(prev => ({ ...prev, [groupName]: mapped }));
         const ids = mapped.map((p) => p.id);
         api.getVariantExternalStocks(ids).then(res => {
-          if (!cancelled && res?.stocks) setVariantExternalStocks(prev => ({ ...prev, ...res.stocks }));
-        }).catch(() => {});
+          if (!cancelled) rememberExternalStocks(ids, res?.stocks);
+        }).catch(() => {
+          if (!cancelled) rememberExternalStocks(ids);
+        });
       } catch {
         // ignore
       } finally {
@@ -1128,8 +1149,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       // Refrescar stocks externos para ver inmediatamente si quedó sincronizado.
       setTimeout(() => {
         api.getVariantExternalStocks(selectedVariantIds).then((ext) => {
-          if (ext?.stocks) setVariantExternalStocks((prev) => ({ ...prev, ...ext.stocks }));
-        }).catch(() => {});
+          rememberExternalStocks(selectedVariantIds, ext?.stocks);
+        }).catch(() => rememberExternalStocks(selectedVariantIds));
       }, 1200);
     } catch (e: any) {
       showToast('error', e?.message || 'Error al enviar a Tienda Nube');
@@ -1150,8 +1171,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       // Refrescar stocks externos para ver inmediatamente si quedó sincronizado.
       setTimeout(() => {
         api.getVariantExternalStocks(selectedVariantIds).then((ext) => {
-          if (ext?.stocks) setVariantExternalStocks((prev) => ({ ...prev, ...ext.stocks }));
-        }).catch(() => {});
+          rememberExternalStocks(selectedVariantIds, ext?.stocks);
+        }).catch(() => rememberExternalStocks(selectedVariantIds));
       }, 1200);
     } catch (e: any) {
       showToast('error', e?.message || 'Error al enviar a Mercado Libre');
@@ -1181,8 +1202,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       setServerListRefreshKey(k => k + 1);
       setTimeout(() => {
         api.getVariantExternalStocks(ids).then((ext) => {
-          if (ext?.stocks) setVariantExternalStocks((prev) => ({ ...prev, ...ext.stocks }));
-        }).catch(() => {});
+          rememberExternalStocks(ids, ext?.stocks);
+        }).catch(() => rememberExternalStocks(ids));
       }, 1200);
     } catch (e: any) {
       showToast('error', e?.message || 'Error al enviar a ML y TN');
@@ -1215,8 +1236,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       setServerListRefreshKey(k => k + 1);
       setTimeout(() => {
         api.getVariantExternalStocks(ids).then((ext) => {
-          if (ext?.stocks) setVariantExternalStocks((prev) => ({ ...prev, ...ext.stocks }));
-        }).catch(() => {});
+          rememberExternalStocks(ids, ext?.stocks);
+        }).catch(() => rememberExternalStocks(ids));
       }, 1200);
     } catch (e: any) {
       showToast('error', e?.message || `Error al sincronizar ${groupKey}`);
@@ -1298,8 +1319,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const refreshExternalStocksAfterSync = (variantId: string) => {
     const pull = () => {
       api.getVariantExternalStocks([variantId]).then(res => {
-        if (res?.stocks) setVariantExternalStocks(prev => ({ ...prev, ...res.stocks }));
-      }).catch(() => {});
+        rememberExternalStocks([variantId], res?.stocks);
+      }).catch(() => rememberExternalStocks([variantId]));
     };
     pull();
     setTimeout(pull, 2500);
@@ -1651,8 +1672,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         setLoadedVariants(prev => ({ ...prev, [groupName]: mapped }));
         const ids = mapped.map((p) => p.id);
         api.getVariantExternalStocks(ids).then(res => {
-          if (res?.stocks) setVariantExternalStocks(prev => ({ ...prev, ...res.stocks }));
-        }).catch(() => {});
+          rememberExternalStocks(ids, res?.stocks);
+        }).catch(() => rememberExternalStocks(ids));
       }).catch(() => {
         // keep fallback group items
       }).finally(() => {
@@ -1739,9 +1760,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                   const vIds = mapped.map((p) => p.id);
                   if (vIds.length > 0) {
                     const res = await api.getVariantExternalStocks(vIds);
-                    if (res?.stocks) {
-                      setVariantExternalStocks((prev) => ({ ...prev, ...res.stocks }));
-                    }
+                    rememberExternalStocks(vIds, res?.stocks);
                   }
                 } catch {
                   /* ignore */
@@ -2031,7 +2050,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
             const ids = mapped.map((p) => p.id);
             if (ids.length) {
               const res = await api.getVariantExternalStocks(ids);
-              if (res?.stocks) setVariantExternalStocks((prev) => ({ ...prev, ...res.stocks }));
+              rememberExternalStocks(ids, res?.stocks);
             }
           } catch {
             setLoadedVariants((prev) => {
@@ -2236,9 +2255,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
             description: editProductForm.description || '',
           });
           setLoadedVariants(prev => ({ ...prev, [groupKeyToRefetch]: mapped }));
-          api.getVariantExternalStocks(mapped.map(p => p.id)).then(res => {
-            if (res?.stocks) setVariantExternalStocks(prev => ({ ...prev, ...res.stocks }));
-          }).catch(() => {});
+          const refetchedIds = mapped.map(p => p.id);
+          api.getVariantExternalStocks(refetchedIds).then(res => {
+            rememberExternalStocks(refetchedIds, res?.stocks);
+          }).catch(() => rememberExternalStocks(refetchedIds));
         }).catch(() => {});
       }
     } catch (e: any) {
@@ -2306,9 +2326,10 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           price: groupedProducts[groupKey]?.[0]?.price || 0,
         });
         setLoadedVariants(prev => ({ ...prev, [groupKey]: mapped }));
-        api.getVariantExternalStocks(mapped.map(p => p.id)).then(res => {
-          if (res?.stocks) setVariantExternalStocks(prev => ({ ...prev, ...res.stocks }));
-        }).catch(() => {});
+        const reloadedIds = mapped.map(p => p.id);
+        api.getVariantExternalStocks(reloadedIds).then(res => {
+          rememberExternalStocks(reloadedIds, res?.stocks);
+        }).catch(() => rememberExternalStocks(reloadedIds));
       }
     } catch (e: any) {
       showToast('error', e?.message || 'Error al guardar variante');
@@ -3291,26 +3312,60 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                          <span className={`block text-xl font-black leading-none ${isOut ? 'text-red-500' : isLow ? 'text-yellow-500' : 'text-white'}`}>
                                            {product.stock}
                                          </span>
-                                         <span className="text-[9px] text-slate-500 uppercase font-bold">Unidades</span>
+                                         <span className="text-[9px] text-slate-500 uppercase font-bold">En depósito</span>
                                        </div>
-                                       <div className="flex flex-col gap-0.5 text-xs">
+                                       <div className="rounded-lg border border-slate-700/80 bg-slate-900/50 px-2.5 py-1.5 min-w-[13.5rem] max-w-[18rem]">
                                          {(() => {
                                            const mlLinked = isVariantLinkedToMercadoLibre(product.externalIds);
                                            const tnLinked = isVariantLinkedToTiendaNube(product.externalIds);
-                                           const mlDisp = getChannelStockDisplay(mlLinked, variantExternalStocks[product.id]?.stockML);
-                                           const tnDisp = getChannelStockDisplay(tnLinked, variantExternalStocks[product.id]?.stockTN);
+                                           const ext = variantExternalStocks[product.id];
+                                           const reading = ext === undefined;
+                                           const loadingDisp = {
+                                             text: 'Leyendo…',
+                                             className: 'text-slate-500',
+                                             title: 'Estamos consultando el stock publicado.',
+                                           };
+                                           const mlStock = reading ? undefined : ext.stockML;
+                                           const tnStock = reading ? undefined : ext.stockTN;
+                                           const mlDisp = !mlLinked
+                                             ? getChannelStockDisplay('Mercado Libre', false, undefined)
+                                             : reading
+                                               ? loadingDisp
+                                               : getChannelStockDisplay('Mercado Libre', true, mlStock);
+                                           const tnDisp = !tnLinked
+                                             ? getChannelStockDisplay('Tienda Nube', false, undefined)
+                                             : reading
+                                               ? loadingDisp
+                                               : getChannelStockDisplay('Tienda Nube', true, tnStock);
+                                           const hint = reading && (mlLinked || tnLinked)
+                                             ? null
+                                             : getPublicationStockHint({
+                                                 depot: Number(product.stock) || 0,
+                                                 mlLinked,
+                                                 tnLinked,
+                                                 mlStock,
+                                                 tnStock,
+                                               });
                                            return (
                                              <>
-                                         <div className="flex items-center gap-1.5">
-                                           <Zap size={10} className={mlLinked ? 'text-amber-500 shrink-0' : 'text-slate-600 shrink-0'} />
-                                           <span className="text-slate-400">ML:</span>
-                                           <span className={mlDisp.className}>{mlDisp.text}</span>
+                                         <p className="text-[9px] font-bold uppercase tracking-wide text-slate-500 mb-1">En la publicación</p>
+                                         <div className="flex items-baseline justify-between gap-3 text-[11px]" title={mlDisp.title}>
+                                           <span className="text-slate-400 whitespace-nowrap inline-flex items-center gap-1">
+                                             <Zap size={10} className={mlLinked ? 'text-amber-500 shrink-0' : 'text-slate-600 shrink-0'} />
+                                             Mercado Libre
+                                           </span>
+                                           <span className={`${mlDisp.className} text-right`}>{mlDisp.text}</span>
                                          </div>
-                                         <div className="flex items-center gap-1.5">
-                                           <Cloud size={10} className={tnLinked ? 'text-blue-400 shrink-0' : 'text-slate-600 shrink-0'} />
-                                           <span className="text-slate-400">TN:</span>
-                                           <span className={tnDisp.className}>{tnDisp.text}</span>
+                                         <div className="flex items-baseline justify-between gap-3 text-[11px] mt-0.5" title={tnDisp.title}>
+                                           <span className="text-slate-400 whitespace-nowrap inline-flex items-center gap-1">
+                                             <Cloud size={10} className={tnLinked ? 'text-blue-400 shrink-0' : 'text-slate-600 shrink-0'} />
+                                             Tienda Nube
+                                           </span>
+                                           <span className={`${tnDisp.className} text-right`}>{tnDisp.text}</span>
                                          </div>
+                                         {hint && (
+                                           <p className="mt-1 text-[10px] leading-snug text-slate-500">{hint}</p>
+                                         )}
                                              </>
                                            );
                                          })()}
@@ -3331,7 +3386,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                        type="button"
                                        onClick={() => setLinkingVariant(product)}
                                        className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center bg-indigo-950/40 hover:bg-indigo-900/50 rounded-lg text-indigo-300 hover:text-indigo-200 border border-indigo-700/50 transition-colors touch-manipulation"
-                                       title="Vincular esta variante con Mercado Libre y Tienda Nube"
+                                       title="Conectar este talle y color con Mercado Libre y Tienda Nube"
                                       >
                                        <Link size={16} />
                                       </button>
@@ -4479,8 +4534,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                     setLoadedVariants((prev) => ({ ...prev, [key]: mapped }));
                     const ids = mapped.map((p) => p.id);
                     return api.getVariantExternalStocks(ids).then((res) => {
-                      if (res?.stocks) setVariantExternalStocks((prev) => ({ ...prev, ...res.stocks }));
-                    });
+                      rememberExternalStocks(ids, res?.stocks);
+                    }).catch(() => rememberExternalStocks(ids));
                   })
                   .catch(() => {})
                   .finally(() => {
@@ -4489,8 +4544,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               }
             } else if (variantId) {
               api.getVariantExternalStocks([variantId]).then((res) => {
-                if (res?.stocks) setVariantExternalStocks((prev) => ({ ...prev, ...res.stocks }));
-              }).catch(() => {});
+                rememberExternalStocks([variantId], res?.stocks);
+              }).catch(() => rememberExternalStocks([variantId]));
             }
           }}
         />
