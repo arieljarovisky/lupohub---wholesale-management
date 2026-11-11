@@ -3,8 +3,10 @@ import { addReceiptSequence } from '../database/add_receipt_sequence';
 
 /** Tope del talonario R0001 (descarta cargas tipo R0001-112233). */
 const MAX_SEQ = 99999;
-/** Si el máximo queda aislado por más de este salto, es un dato mal cargado. */
+/** Si el último cargado salta más que esto respecto del anterior, es un dato mal cargado. */
 const SPIKE_GAP = 1000;
+
+type ReceiptPoint = { n: number; at: number };
 
 function inRange(n: number): number | null {
   if (!Number.isInteger(n) || n < 1 || n > MAX_SEQ) return null;
@@ -33,38 +35,41 @@ export function parseReceiptSequence(raw: unknown): number | null {
   return null;
 }
 
-/** Siguiente correlativo: máximo vigente + 1, sin reutilizar y sin seguir un pico suelto. */
-export function nextSequenceFromExisting(nums: number[]): number {
-  const uniq = [...new Set(nums.filter((n) => Number.isInteger(n) && n >= 1 && n <= MAX_SEQ))].sort(
-    (a, b) => a - b
-  );
-  while (uniq.length >= 2 && uniq[uniq.length - 1] - uniq[uniq.length - 2] > SPIKE_GAP) {
-    uniq.pop();
+/**
+ * Siguiente correlativo: el del último recibo cargado + 1.
+ * "Último" es el de alta más reciente (el que queda arriba en el listado),
+ * no el número más alto del historial. Un recibo viejo importado con número
+ * mayor no corre el talonario.
+ */
+export function nextSequenceFromLatest(points: ReceiptPoint[]): number {
+  const ordered = points
+    .filter((p) => Number.isInteger(p.n) && p.n >= 1 && p.n <= MAX_SEQ && Number.isFinite(p.at))
+    .sort((a, b) => a.at - b.at || a.n - b.n);
+  while (ordered.length >= 2 && ordered[ordered.length - 1].n - ordered[ordered.length - 2].n > SPIKE_GAP) {
+    ordered.pop();
   }
-  const max = uniq.length ? uniq[uniq.length - 1] : 0;
-  return max + 1;
+  const last = ordered.length ? ordered[ordered.length - 1].n : 0;
+  return last + 1;
 }
 
 export function formatReceiptNumber(n: number): string {
   return `R0001-${String(n).padStart(8, '0')}`;
 }
 
-async function loadSequences(): Promise<number[]> {
-  const payments = (await query(`SELECT receipt_number AS n FROM payments`)) as Array<{ n: string | null }>;
-  const nums = payments.map((r) => parseReceiptSequence(r.n)).filter((n): n is number => n != null);
-  try {
-    const imported = (await query(
-      `SELECT numero AS n FROM customer_multimedia_entries
-       WHERE UPPER(TRIM(COALESCE(tipo, ''))) LIKE 'REC%'`
-    )) as Array<{ n: string | null }>;
-    for (const r of imported) {
-      const n = parseReceiptSequence(r.n);
-      if (n != null) nums.push(n);
-    }
-  } catch {
-    /* sin historial importado */
+/** Recibos del sistema, en el mismo orden en que los muestra el listado (fecha de alta). */
+async function loadReceiptPoints(): Promise<ReceiptPoint[]> {
+  const payments = (await query(
+    `SELECT receipt_number AS n, COALESCE(created_at, date) AS at FROM payments`
+  )) as Array<{ n: string | null; at: string | Date | null }>;
+  const points: ReceiptPoint[] = [];
+  for (const r of payments) {
+    const n = parseReceiptSequence(r.n);
+    if (n == null || r.at == null) continue;
+    const at = new Date(r.at).getTime();
+    if (!Number.isFinite(at)) continue;
+    points.push({ n, at });
   }
-  return nums;
+  return points;
 }
 
 async function readSequenceCursor(): Promise<number> {
@@ -74,19 +79,19 @@ async function readSequenceCursor(): Promise<number> {
   return Number.isFinite(n) && n > 0 ? n : 1;
 }
 
-/** Próximo número, sin consumirlo. */
+/** Próximo número, sin consumirlo. Es el que sigue al último recibo cargado. */
 export async function peekNextReceiptNumber(): Promise<string> {
-  const fromData = nextSequenceFromExisting(await loadSequences());
+  const fromData = nextSequenceFromLatest(await loadReceiptPoints());
   const fromSeq = await readSequenceCursor();
   return formatReceiptNumber(Math.max(fromData, fromSeq));
 }
 
 /**
  * Reserva el siguiente número de forma atómica.
- * Nunca baja del último recibo ya cargado ni reutiliza un número entregado.
+ * Sigue al último recibo cargado y no repite un número ya entregado en esta tanda.
  */
 export async function allocateNextReceiptNumber(): Promise<string> {
-  const desired = nextSequenceFromExisting(await loadSequences());
+  const desired = nextSequenceFromLatest(await loadReceiptPoints());
   await addReceiptSequence();
   const inc = await execute(
     `UPDATE receipt_sequence
