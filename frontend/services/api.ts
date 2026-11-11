@@ -3640,6 +3640,7 @@ export const api = {
         receiver: { name: string; street: string; city: string; state: string; zip: string; comment: string };
       };
       buyer: null | { id: number | null; nickname: string; firstName: string; lastName: string };
+      identificationCode: string | null;
       orders: Array<{
         id: number;
         status: string;
@@ -3647,7 +3648,7 @@ export const api = {
         currency: string;
         dateCreated: string | null;
         packId: number | null;
-        items: Array<{ id: string; title: string; sku: string; quantity: number; unitPrice: number; variation: string }>;
+        items: Array<{ id: string; title: string; sku: string; quantity: number; unitPrice: number; variation: string; color: string; size: string }>;
       }>;
       total: number;
       currency: string;

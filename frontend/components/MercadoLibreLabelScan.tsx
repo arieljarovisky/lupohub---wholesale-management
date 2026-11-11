@@ -46,10 +46,17 @@ function money(value: number, currency: string) {
   return currency === 'ARS' ? `$ ${formatted}` : `${currency} ${formatted}`;
 }
 
+function sheetCodeFrom(result: ScanResult): string {
+  const scanned = result.scannedCode.replace(/\s+/g, '').toUpperCase();
+  if (/^[A-Z0-9]{20,32}$/.test(scanned) && /[A-Z]/.test(scanned) && /\d/.test(scanned)) return scanned;
+  return result.identificationCode || '';
+}
+
 const MercadoLibreLabelScan: React.FC = () => {
   const inputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const frameRef = useRef<HTMLIFrameElement>(null);
+  const sheetRef = useRef<HTMLElement>(null);
   const burstStart = useRef(0);
   const busyRef = useRef(false);
   const scanTimer = useRef<number | null>(null);
@@ -67,6 +74,7 @@ const MercadoLibreLabelScan: React.FC = () => {
   const [cameraOn, setCameraOn] = useState(true);
   const [cameraError, setCameraError] = useState('');
   const [manualOpen, setManualOpen] = useState(false);
+  const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({});
   const [recent, setRecent] = useState<Array<{ code: string; title: string }>>([]);
 
   const stopCamera = () => {
@@ -168,6 +176,7 @@ const MercadoLibreLabelScan: React.FC = () => {
     if (scanTimer.current) window.clearTimeout(scanTimer.current);
     stopCamera();
     setLoading(true);
+    setCheckedItems({});
     setError('');
     setLabelError('');
     setCode('');
@@ -227,6 +236,21 @@ const MercadoLibreLabelScan: React.FC = () => {
       frameRef.current?.contentWindow?.focus();
       frameRef.current?.contentWindow?.print();
     }
+  };
+
+  const printSheet = () => {
+    const html = sheetRef.current?.innerHTML;
+    if (!html) return;
+    const popup = window.open('', '_blank', 'noopener,noreferrer');
+    if (!popup) return;
+    popup.document.write(`<!doctype html><html><head><meta charset="utf-8"><base href="${window.location.origin}/"><title>Hoja Mercado Libre</title>
+      <style>
+        body { margin: 24px; color: #222; font-family: Arial, Helvetica, sans-serif; }
+        button { display: none; }
+      </style></head><body>${html}</body></html>`);
+    popup.document.close();
+    popup.focus();
+    popup.print();
   };
 
   const buyerLine = result?.buyer
@@ -331,6 +355,74 @@ const MercadoLibreLabelScan: React.FC = () => {
 
       {error && (
         <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-red-200 text-sm">{error}</div>
+      )}
+
+      {result && (
+        <section className="space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-lg font-black text-white">Hoja de productos</h3>
+            <button
+              type="button"
+              onClick={printSheet}
+              className="inline-flex items-center gap-2 bg-white text-slate-950 font-bold px-3 py-2 rounded-xl"
+            >
+              <Printer size={16} />
+              Imprimir hoja
+            </button>
+          </div>
+          <article ref={sheetRef} className="bg-white text-neutral-800 rounded-xl overflow-hidden shadow-lg">
+            <header className="flex items-start justify-between gap-4 px-5 pt-5 pb-3 text-[13px] leading-snug">
+              <p>
+                Despacha tus productos cuanto antes <strong>¡No te relajes!</strong> Tu comprador los está esperando.
+              </p>
+              <img src="/icons/mercado-libre.png" alt="Mercado Libre" className="h-10 w-10 shrink-0 object-contain" />
+            </header>
+            <div className="grid grid-cols-1 md:grid-cols-2 bg-neutral-400 text-white text-sm font-bold">
+              <div className="px-4 py-2">Identificación</div>
+              <div className="px-4 py-2">Productos</div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2">
+              <div className="px-4 py-4 md:border-r border-neutral-300 space-y-1 text-sm">
+                {sheetCodeFrom(result) && (
+                  <p className="font-black text-base tracking-wide break-all">{sheetCodeFrom(result)}</p>
+                )}
+                {Array.from(new Set(result.orders.map((order) => order.packId).filter((id): id is number => !!id))).map((packId) => (
+                  <p key={packId}><span className="font-bold">Pack ID:</span> {packId}</p>
+                ))}
+                {result.orders.map((order) => (
+                  <p key={order.id}><span className="font-bold">Venta:</span> {order.id}</p>
+                ))}
+                {buyerLine && <p className="pt-2">{buyerLine}</p>}
+              </div>
+              <div>
+                {result.orders.flatMap((order) =>
+                  order.items.map((item, index) => {
+                    const key = `${order.id}-${item.id}-${index}`;
+                    const checked = !!checkedItems[key];
+                    return (
+                      <label key={key} className="flex gap-3 px-4 py-3 border-b border-neutral-200 text-sm cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => setCheckedItems((prev) => ({ ...prev, [key]: !prev[key] }))}
+                          className="mt-1 h-4 w-4 accent-neutral-800"
+                        />
+                        <span className={checked ? 'opacity-50 line-through' : ''}>
+                          <span className="block font-semibold leading-snug">{item.title}</span>
+                          {item.sku && <span className="block">SKU: <strong>{item.sku}</strong></span>}
+                          <span className="block">Cantidad: {item.quantity}</span>
+                          {item.color && <span className="block">Color: {item.color}</span>}
+                          {item.size && <span className="block">Talle: {item.size}</span>}
+                        </span>
+                      </label>
+                    );
+                  })
+                )}
+                {units === 0 && <p className="px-4 py-3 text-sm text-neutral-500">Mercado Libre no devolvió los productos de esta venta.</p>}
+              </div>
+            </div>
+          </article>
+        </section>
       )}
 
       {result && (

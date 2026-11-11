@@ -126,6 +126,16 @@ function logisticLabel(type: string): string {
   return labels[type] || (type ? type : 'Envío');
 }
 
+function variationField(attrs: any[], keys: string[]): string {
+  for (const attr of attrs) {
+    const name = `${attr?.name || ''} ${attr?.id || ''}`.toLowerCase();
+    if (!keys.some((key) => name.includes(key))) continue;
+    const value = String(attr?.value_name || attr?.value || '').trim();
+    if (value) return value;
+  }
+  return '';
+}
+
 function mapOrderItems(order: any) {
   return (order?.order_items || []).map((item: any) => {
     const attrs = Array.isArray(item?.item?.variation_attributes) ? item.item.variation_attributes : [];
@@ -133,6 +143,13 @@ function mapOrderItems(order: any) {
       .map((attr: any) => String(attr?.value_name || '').trim())
       .filter(Boolean)
       .join(' · ');
+    let color = variationField(attrs, ['color']);
+    let size = variationField(attrs, ['talle', 'talla', 'size']);
+    if ((!color || !size) && variation.includes('·')) {
+      const parts = variation.split('·').map((part: string) => part.trim()).filter(Boolean);
+      if (!color && parts[0]) color = parts[0];
+      if (!size && parts[1]) size = parts[1];
+    }
     return {
       id: item?.item?.id || '',
       title: item?.item?.title || 'Producto',
@@ -140,8 +157,46 @@ function mapOrderItems(order: any) {
       quantity: Number(item?.quantity) || 0,
       unitPrice: Number(item?.unit_price) || 0,
       variation,
+      color,
+      size,
     };
   });
+}
+
+/** Código alfanumérico que Mercado Libre imprime arriba en la hoja de productos. */
+function findSheetCode(shipment: any): string | null {
+  const matches = (value: unknown): string | null => {
+    const text = String(value || '').trim();
+    if (/^[A-Z0-9]{20,32}$/.test(text) && /[A-Z]/.test(text) && /\d/.test(text)) return text;
+    return null;
+  };
+  const preferred = [
+    shipment?.label?.hash,
+    shipment?.label_code,
+    shipment?.hash,
+    shipment?.external_reference,
+    shipment?.tracking_number,
+  ];
+  for (const value of preferred) {
+    const code = matches(value);
+    if (code) return code;
+  }
+  const found: string[] = [];
+  const walk = (value: any, depth: number) => {
+    if (depth > 5 || value == null || found.length) return;
+    if (typeof value === 'string') {
+      const code = matches(value);
+      if (code) found.push(code);
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((item) => walk(item, depth + 1));
+      return;
+    }
+    if (typeof value === 'object') Object.values(value).forEach((item) => walk(item, depth + 1));
+  };
+  walk(shipment, 0);
+  return found[0] || null;
 }
 
 function mapOrder(order: any) {
@@ -300,6 +355,7 @@ export const scanMercadoLibreLabel = async (req: Request, res: Response) => {
           }
         : null,
       buyer: mapBuyer(orders[0]),
+      identificationCode: findSheetCode(shipment),
       orders: mappedOrders,
       total,
       currency,
