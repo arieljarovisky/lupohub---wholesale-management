@@ -110,6 +110,7 @@ import {
   testLupoWebhookEndpoint,
   syncLupoShopMlStockToShopEndpoint,
 } from '../controllers/lupoWebhookSettings.controller';
+import { scanMercadoLibreLabel, getMercadoLibreShipmentLabelPdf } from '../controllers/mercadolibreLabelScan.controller';
 import { authMiddleware, adminOrDepositoMiddleware, marketingAdsAccessMiddleware } from '../middleware/auth';
 import {
   disconnectGoogleAdsEndpoint,
@@ -141,6 +142,8 @@ router.get('/mercadolibre/callback', handleMercadoLibreCallback);
 router.get('/mercadolibre/test', testMercadoLibreConnection);
 router.get('/mercadolibre/debug', debugMercadoLibreItem);
 router.get('/mercadolibre/orders', getMercadoLibreOrders);
+router.get('/mercadolibre/label-scan', authMiddleware, adminOrDepositoMiddleware, scanMercadoLibreLabel);
+router.get('/mercadolibre/shipments/:shipmentId/label', authMiddleware, adminOrDepositoMiddleware, getMercadoLibreShipmentLabelPdf);
 router.get('/mercadolibre/questions', getMercadoLibreQuestions);
 router.get('/mercadolibre/reviews', authMiddleware, getMercadoLibreReviews);
 router.get('/mercadolibre/reviews-export', authMiddleware, exportMercadoLibreReviewsXlsx);

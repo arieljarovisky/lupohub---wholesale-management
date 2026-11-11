@@ -168,17 +168,18 @@ export const getBlob = async (path: string, timeoutMs = 60000): Promise<Blob> =>
     if (axios.isAxiosError(err)) {
       const blob = err.response?.data;
       if (blob instanceof Blob) {
+        let msg = '';
         try {
           const raw = await blob.text();
           const parsed = raw ? JSON.parse(raw) : null;
-          const msg =
+          msg =
             (typeof parsed?.message === 'string' && parsed.message) ||
             (typeof parsed?.error === 'string' && parsed.error) ||
             '';
-          if (msg) throw new Error(msg);
         } catch {
-          // ignore parse errors and use fallback message
+          msg = '';
         }
+        if (msg) throw new Error(msg);
       }
       throw new Error(err.message || 'Error descargando archivo');
     }

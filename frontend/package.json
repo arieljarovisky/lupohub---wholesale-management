@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@google/genai": "^1.40.0",
+    "@zxing/browser": "0.1.5",
     "axios": "^1.13.4",
     "cors": "^2.8.6",
     "dotenv": "^17.2.4",

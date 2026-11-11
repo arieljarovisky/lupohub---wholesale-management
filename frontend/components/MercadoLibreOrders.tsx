@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, Package, User, Truck, ChevronLeft, ChevronRight, Loader2, Calendar, Search, X, Clock, CheckCircle, XCircle, ChevronDown, ExternalLink, ShoppingCart, MessageCircle, Download, Star } from 'lucide-react';
+import { RefreshCw, Package, User, Truck, ChevronLeft, ChevronRight, Loader2, Calendar, Search, X, Clock, CheckCircle, XCircle, ChevronDown, ExternalLink, ShoppingCart, MessageCircle, Download, Star, ScanLine } from 'lucide-react';
 import { MercadoLibreLogo } from './ChannelLogos';
 import { api } from '../services/api';
 import { openExternalInvoicePdf } from '../utils/externalInvoicePdf';
@@ -381,6 +381,14 @@ const MercadoLibreOrders: React.FC<MercadoLibreOrdersProps> = ({ defaultSection 
         >
           <Star size={16} />
           Opiniones
+        </button>
+        <button
+          type="button"
+          onClick={() => { window.location.hash = 'mercadolibre_label_scan'; }}
+          className="ml-auto mb-1 inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-bold text-yellow-200 bg-yellow-500/10 border border-yellow-600/40 hover:bg-yellow-500/20"
+        >
+          <ScanLine size={16} />
+          Escanear etiqueta
         </button>
       </div>
 

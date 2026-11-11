@@ -3626,6 +3626,37 @@ export const api = {
     }, { orders: [], total: 0 }, 'getMercadoLibreOrders');
   },
 
+  scanMercadoLibreLabel: async (code: string) => {
+    const query = new URLSearchParams({ code: code.trim() });
+    return await request<{
+      scannedCode: string;
+      shipment: null | {
+        id: number;
+        status: string;
+        substatus: string | null;
+        trackingNumber: string | null;
+        logisticType: string | null;
+        logisticLabel: string;
+        receiver: { name: string; street: string; city: string; state: string; zip: string; comment: string };
+      };
+      buyer: null | { id: number | null; nickname: string; firstName: string; lastName: string };
+      orders: Array<{
+        id: number;
+        status: string;
+        total: number;
+        currency: string;
+        dateCreated: string | null;
+        packId: number | null;
+        items: Array<{ id: string; title: string; sku: string; quantity: number; unitPrice: number; variation: string }>;
+      }>;
+      total: number;
+      currency: string;
+    }>(`/integrations/mercadolibre/label-scan?${query.toString()}`, 'GET', undefined, undefined, 30000);
+  },
+
+  getMercadoLibreShipmentLabelBlob: (shipmentId: number | string) =>
+    getBlob(`/integrations/mercadolibre/shipments/${encodeURIComponent(String(shipmentId))}/label`, 30000),
+
   /** Preguntas del vendedor en ML (texto de la pregunta y de la respuesta, vía API oficial). */
   getMercadoLibreQuestions: async (params?: {
     offset?: number;

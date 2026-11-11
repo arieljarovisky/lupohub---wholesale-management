@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, lazy, Suspense, useCallback, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
 import { channelLogoForView } from './components/ChannelLogos';
-import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Percent, Megaphone, Wallet, ChevronRight, MessageCircle, Star, RefreshCw, PackagePlus, Route, Tag } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Percent, Megaphone, Wallet, ChevronRight, MessageCircle, Star, RefreshCw, PackagePlus, Route, Tag, ScanLine } from 'lucide-react';
 import { isCompanyFinanceUser, COMPANY_FINANCE_VIEW } from './utils/companyFinanceAccess';
 import {
   MARKETING_HUB_VIEW,
@@ -59,6 +59,7 @@ const Customers = lazyWithReload(() => import('./components/Customers'));
 const OrderPicking = lazyWithReload(() => import('./components/OrderPicking'));
 const TiendaNubeOrders = lazyWithReload(() => import('./components/TiendaNubeOrders'));
 const MercadoLibreOrders = lazyWithReload(() => import('./components/MercadoLibreOrders'));
+const MercadoLibreLabelScan = lazyWithReload(() => import('./components/MercadoLibreLabelScan'));
 const MercadoLibreProductAds = lazyWithReload(() => import('./components/MercadoLibreProductAds'));
 const BulkInvoicing = lazyWithReload(() => import('./components/BulkInvoicing'));
 const StockSync = lazyWithReload(() => import('./components/StockSync'));
@@ -166,6 +167,7 @@ const App: React.FC = () => {
     channel_margins: [Role.ADMIN, Role.WAREHOUSE],
     tiendanube_orders: [Role.ADMIN, Role.WAREHOUSE],
     mercadolibre_orders: [Role.ADMIN, Role.WAREHOUSE],
+    mercadolibre_label_scan: [Role.ADMIN, Role.WAREHOUSE, Role.DEPOSITO],
     mercadolibre_questions: [Role.ADMIN, Role.WAREHOUSE],
     mercadolibre_reviews: [Role.ADMIN, Role.WAREHOUSE],
     mercadolibre_product_ads: [Role.ADMIN, Role.WAREHOUSE, Role.MARKETING],
@@ -1046,6 +1048,7 @@ const App: React.FC = () => {
       { id: 'channel_margins', label: 'Márgenes', icon: DollarSign, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'tiendanube_orders', label: 'Tienda Nube', icon: ShoppingBag, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'mercadolibre_orders', label: 'Mercado Libre', icon: Zap, roles: [Role.ADMIN, Role.WAREHOUSE] },
+      { id: 'mercadolibre_label_scan', label: 'ML — Etiqueta', icon: ScanLine, roles: [Role.ADMIN, Role.WAREHOUSE, Role.DEPOSITO] },
       { id: 'mercadolibre_questions', label: 'ML — Preguntas', icon: MessageCircle, roles: [Role.ADMIN, Role.WAREHOUSE] },
       { id: 'mercadolibre_reviews', label: 'ML — Opiniones', icon: Star, roles: [Role.ADMIN, Role.WAREHOUSE] },
     ]},
@@ -1199,6 +1202,7 @@ const App: React.FC = () => {
                  {baseView === COMPANY_FINANCE_VIEW && 'Resultados empresa'}
                  {baseView === 'tiendanube_orders' && 'Tienda Nube'}
                  {baseView === 'mercadolibre_orders' && 'Mercado Libre — Ventas'}
+                {baseView === 'mercadolibre_label_scan' && 'Mercado Libre — Escanear etiqueta'}
                  {baseView === 'mercadolibre_questions' && 'Mercado Libre — Preguntas'}
                  {baseView === 'mercadolibre_reviews' && 'Mercado Libre — Opiniones'}
                  {baseView === 'mercadolibre_product_ads' && 'Product Ads — campañas y publicaciones'}
@@ -1443,6 +1447,11 @@ const App: React.FC = () => {
           {baseView === COMPANY_FINANCE_VIEW && isCompanyFinanceUser(currentUser.email) && (
             <Suspense fallback={<ViewFallback />}>
               <CompanyFinance />
+            </Suspense>
+          )}
+          {baseView === 'mercadolibre_label_scan' && (
+            <Suspense fallback={<ViewFallback />}>
+              <MercadoLibreLabelScan />
             </Suspense>
           )}
           {(baseView === 'mercadolibre_orders' || baseView === 'mercadolibre_questions' || baseView === 'mercadolibre_reviews') && (
