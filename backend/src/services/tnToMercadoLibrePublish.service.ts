@@ -438,12 +438,15 @@ function shippingFromItem(item: any): Record<string, unknown> | undefined {
   return Object.keys(out).length ? out : undefined;
 }
 
+/** Condiciones que ML devuelve en la publicación modelo y rechaza al crear otra. */
+const SALE_TERM_BLOCK = /CAMPAIGN|LOYALTY_LEVEL|CHECKOUT_EXCHANGE_RATE/i;
+
 function saleTermsFromItem(item: any): Array<Record<string, unknown>> | undefined {
   if (!Array.isArray(item?.sale_terms)) return undefined;
   const out = item.sale_terms
     .map((st: any) => {
       const id = String(st?.id || '').trim();
-      if (!id) return null;
+      if (!id || SALE_TERM_BLOCK.test(id)) return null;
       const row: Record<string, unknown> = { id };
       if (st?.value_id != null && String(st.value_id).trim() !== '') row.value_id = st.value_id;
       const name = String(st?.value_name ?? '').trim();
@@ -478,26 +481,88 @@ function unitFormatAttributes(item: any): any[] {
   return out;
 }
 
-async function requiredAttributeIds(accessToken: string, categoryId: string): Promise<Set<string>> {
-  const ids = new Set<string>();
-  if (!categoryId) return ids;
+type CategoryRules = {
+  required: Set<string>;
+  /** Atributos que la categoría deja escribir. null si no se pudo leer la ficha. */
+  writable: Set<string> | null;
+};
+
+async function loadCategoryRules(accessToken: string, categoryId: string): Promise<CategoryRules> {
+  const required = new Set<string>();
+  if (!categoryId) return { required, writable: null };
   try {
     const res = await axios.get(
       `https://api.mercadolibre.com/categories/${encodeURIComponent(categoryId)}/attributes`,
       { headers: { Authorization: `Bearer ${accessToken}` }, validateStatus: () => true, timeout: 20000 }
     );
-    if (res.status !== 200 || !Array.isArray(res.data)) return ids;
+    if (res.status !== 200 || !Array.isArray(res.data)) return { required, writable: null };
+    const writable = new Set<string>();
     for (const a of res.data) {
+      const id = attrId(a?.id);
+      if (!id) continue;
       const tags = a?.tags || {};
-      if (tags.required || tags.catalog_required || tags.new_required) {
-        const id = attrId(a?.id);
-        if (id) ids.add(id);
-      }
+      if (tags.required || tags.catalog_required || tags.new_required) required.add(id);
+      if (!tags.read_only && !tags.fixed) writable.add(id);
     }
+    return { required, writable };
   } catch {
-    /* si falla, ML va a nombrar el atributo que falte */
+    return { required, writable: null };
   }
-  return ids;
+}
+
+function categoryAllows(rules: CategoryRules, attributeId: string): boolean {
+  if (!rules.writable) return true;
+  return rules.writable.has(attributeId);
+}
+
+function stripSizeGridAttributes(payload: Record<string, unknown>): void {
+  if (!Array.isArray(payload.attributes)) return;
+  payload.attributes = (payload.attributes as any[]).filter((a) => {
+    const id = attrId(a?.id);
+    return id !== 'SIZE_GRID_ID' && id !== 'SIZE_GRID_ROW_ID';
+  });
+}
+
+function stripBlockedSaleTerms(payload: Record<string, unknown>): void {
+  if (!Array.isArray(payload.sale_terms)) return;
+  const kept = (payload.sale_terms as any[]).filter((st) => {
+    const id = String(st?.id || '').trim();
+    return id && !SALE_TERM_BLOCK.test(id);
+  });
+  if (kept.length) payload.sale_terms = kept;
+  else delete payload.sale_terms;
+}
+
+/** Crea el ítem. Si ML rechaza la guía o una condición de solo lectura, reintenta sin esos campos. */
+async function postNewMercadoLibreItem(
+  accessToken: string,
+  payload: Record<string, unknown>
+): Promise<any> {
+  const send = (body: Record<string, unknown>) =>
+    axios.post('https://api.mercadolibre.com/items', body, {
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      validateStatus: () => true,
+      timeout: 40000
+    });
+
+  const body = JSON.parse(JSON.stringify(payload)) as Record<string, unknown>;
+  stripBlockedSaleTerms(body);
+  let res = await send(body);
+  if (res.status === 201 || res.status === 200) return res.data;
+
+  const message = mlErrorText(res.data);
+  const dropGrid = /SIZE_GRID_ID|SIZE_GRID_ROW_ID/i.test(message);
+  const dropTerms = /sale term|INSTALLMENTS_CAMPAIGN/i.test(message);
+  if (!dropGrid && !dropTerms) {
+    throw new TnToMlPublishError(`Mercado Libre rechazó la publicación: ${message}`);
+  }
+  if (dropGrid) stripSizeGridAttributes(body);
+  if (dropTerms) delete body.sale_terms;
+  res = await send(body);
+  if (res.status !== 201 && res.status !== 200) {
+    throw new TnToMlPublishError(`Mercado Libre rechazó la publicación: ${mlErrorText(res.data)}`);
+  }
+  return res.data;
 }
 
 function attributeValue(entry: any): { value_name?: string; value_id?: string } {
@@ -787,7 +852,7 @@ export async function publishTiendaNubeProductToMercadoLibre(
 
   const listing = listingFields(sourceItem);
   if (!listing.category_id) throw new TnToMlPublishError('La publicación modelo no tiene categoría');
-  const required = await requiredAttributeIds(mlToken.access_token, String(listing.category_id));
+  const categoryRules = await loadCategoryRules(mlToken.access_token, String(listing.category_id));
   const colorId = colorAttrIdFromSource(sourceItem);
   const baseAttrs = [
     ...commercialAttributes(sourceItem),
@@ -842,28 +907,20 @@ export async function publishTiendaNubeProductToMercadoLibre(
     delete draft.seller_custom_field;
     try {
       const payload = mlPayloadForMercadoLibreApiPost(draft);
-      appendMissingRequired(payload, sourceItem, required);
-      const res = await axios.post('https://api.mercadolibre.com/items', payload, {
-        headers: { Authorization: `Bearer ${mlToken.access_token}`, 'Content-Type': 'application/json' },
-        validateStatus: () => true,
-        timeout: 40000
-      });
-      if (res.status !== 201 && res.status !== 200) {
-        const message = mlErrorText(res.data);
-        if (!mlCreateErrorRequiresUserProduct(message)) {
-          throw new TnToMlPublishError(`Mercado Libre rechazó la publicación: ${message}`);
-        }
-      } else if (res.data?.id) {
-        const itemId = String(res.data.id);
+      appendMissingRequired(payload, sourceItem, categoryRules.required);
+      if (!categoryAllows(categoryRules, 'SIZE_GRID_ID')) stripSizeGridAttributes(payload);
+      const createdItem = await postNewMercadoLibreItem(mlToken.access_token, payload);
+      if (createdItem?.id) {
+        const itemId = String(createdItem.id);
         await applyDescription(itemId, product.description, mlToken.access_token);
-        const remoteVars = Array.isArray(res.data.variations) ? res.data.variations : [];
+        const remoteVars = Array.isArray(createdItem.variations) ? createdItem.variations : [];
         variants.forEach((variant, idx) => {
           const remote = remoteVars.find(
             (v: any) => String(v?.seller_custom_field || '').trim() === variant.sku
           );
           created.push({
             itemId,
-            permalink: String(res.data.permalink || ''),
+            permalink: String(createdItem.permalink || ''),
             sku: variant.sku,
             color: variant.color,
             size: variant.size,
@@ -892,21 +949,15 @@ export async function publishTiendaNubeProductToMercadoLibre(
           colorId,
           variant.color || 'Único'
         );
-        appendMissingRequired(payload, sourceItem, required);
-        const res = await axios.post('https://api.mercadolibre.com/items', payload, {
-          headers: { Authorization: `Bearer ${mlToken.access_token}`, 'Content-Type': 'application/json' },
-          validateStatus: () => true,
-          timeout: 40000
-        });
-        if (res.status !== 201 && res.status !== 200) {
-          throw new TnToMlPublishError(`Mercado Libre rechazó la publicación: ${mlErrorText(res.data)}`);
-        }
-        const itemId = String(res.data?.id || '');
+        appendMissingRequired(payload, sourceItem, categoryRules.required);
+        if (!categoryAllows(categoryRules, 'SIZE_GRID_ID')) stripSizeGridAttributes(payload);
+        const createdItem = await postNewMercadoLibreItem(mlToken.access_token, payload);
+        const itemId = String(createdItem?.id || '');
         if (!itemId) throw new TnToMlPublishError('Mercado Libre no devolvió el ID de la publicación');
         await applyDescription(itemId, product.description, mlToken.access_token);
         created.push({
           itemId,
-          permalink: String(res.data.permalink || ''),
+          permalink: String(createdItem.permalink || ''),
           sku: variant.sku,
           color: variant.color,
           size: variant.size
