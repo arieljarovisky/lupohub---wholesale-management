@@ -510,19 +510,6 @@ async function loadCategoryRules(accessToken: string, categoryId: string): Promi
   }
 }
 
-function categoryAllows(rules: CategoryRules, attributeId: string): boolean {
-  if (!rules.writable) return true;
-  return rules.writable.has(attributeId);
-}
-
-function stripSizeGridAttributes(payload: Record<string, unknown>): void {
-  if (!Array.isArray(payload.attributes)) return;
-  payload.attributes = (payload.attributes as any[]).filter((a) => {
-    const id = attrId(a?.id);
-    return id !== 'SIZE_GRID_ID' && id !== 'SIZE_GRID_ROW_ID';
-  });
-}
-
 function stripBlockedSaleTerms(payload: Record<string, unknown>): void {
   if (!Array.isArray(payload.sale_terms)) return;
   const kept = (payload.sale_terms as any[]).filter((st) => {
@@ -533,7 +520,76 @@ function stripBlockedSaleTerms(payload: Record<string, unknown>): void {
   else delete payload.sale_terms;
 }
 
-/** Crea el ítem. Si ML rechaza la guía o una condición de solo lectura, reintenta sin esos campos. */
+function upsertPayloadAttribute(
+  attrs: any[],
+  id: string,
+  value: { value_id?: string; value_name?: string }
+): any[] {
+  const upper = attrId(id);
+  const rest = attrs.filter((a) => attrId(a?.id) !== upper);
+  const row: Record<string, unknown> = { id: upper };
+  if (value.value_id) row.value_id = value.value_id;
+  if (value.value_name) row.value_name = value.value_name;
+  rest.push(row);
+  return rest;
+}
+
+/** La ficha de la categoría a veces marca la guía como solo lectura, pero el alta la exige. */
+function forceSizeGridOnPayload(
+  payload: Record<string, unknown>,
+  chartId: string,
+  opts?: { rowId?: string; variationRows?: Array<{ sku: string; rowId: string }> }
+): void {
+  const chart = String(chartId || '').trim();
+  if (!chart) return;
+  let attrs = Array.isArray(payload.attributes) ? [...(payload.attributes as any[])] : [];
+  attrs = attrs.filter((a) => {
+    const id = attrId(a?.id);
+    return id !== 'SIZE_GRID_ID' && id !== 'SIZE_GRID_ROW_ID';
+  });
+  attrs = upsertPayloadAttribute(attrs, 'SIZE_GRID_ID', { value_name: chart });
+
+  const variationRows = opts?.variationRows || [];
+  const variations = Array.isArray(payload.variations) ? (payload.variations as any[]) : [];
+  if (variations.length && variationRows.length) {
+    const bySku = new Map(variationRows.map((r) => [r.sku, r.rowId]));
+    payload.variations = variations.map((v) => {
+      const rowId = bySku.get(String(v?.seller_custom_field || '').trim());
+      if (!rowId) return v;
+      return { ...v, attributes: [{ id: 'SIZE_GRID_ROW_ID', value_name: rowId }] };
+    });
+  } else if (opts?.rowId) {
+    attrs = upsertPayloadAttribute(attrs, 'SIZE_GRID_ROW_ID', { value_name: opts.rowId });
+  }
+  payload.attributes = attrs;
+}
+
+function swapGridValueField(payload: Record<string, unknown>): void {
+  const flip = (list: unknown) => {
+    if (!Array.isArray(list)) return;
+    for (const entry of list) {
+      if (!entry || typeof entry !== 'object') continue;
+      const row = entry as Record<string, unknown>;
+      const id = attrId(row.id);
+      if (id !== 'SIZE_GRID_ID' && id !== 'SIZE_GRID_ROW_ID') continue;
+      const value = String(row.value_name ?? row.value_id ?? '').trim();
+      if (!value) continue;
+      if (row.value_name && row.value_id == null) {
+        row.value_id = value;
+        delete row.value_name;
+      } else {
+        row.value_name = value;
+        delete row.value_id;
+      }
+    }
+  };
+  flip(payload.attributes);
+  if (Array.isArray(payload.variations)) {
+    for (const variation of payload.variations) flip((variation as any)?.attributes);
+  }
+}
+
+/** Crea el ítem. Si ML rechaza una condición de solo lectura, reintenta sin ella. La guía de talles se mantiene. */
 async function postNewMercadoLibreItem(
   accessToken: string,
   payload: Record<string, unknown>
@@ -550,14 +606,14 @@ async function postNewMercadoLibreItem(
   let res = await send(body);
   if (res.status === 201 || res.status === 200) return res.data;
 
-  const message = mlErrorText(res.data);
-  const dropGrid = /SIZE_GRID_ID|SIZE_GRID_ROW_ID/i.test(message);
+  let message = mlErrorText(res.data);
   const dropTerms = /sale term|INSTALLMENTS_CAMPAIGN/i.test(message);
-  if (!dropGrid && !dropTerms) {
+  const gridValueRejected = /SIZE_GRID_ID|SIZE_GRID_ROW_ID/i.test(message) && /not valid|no es válido|invalid/i.test(message);
+  if (!dropTerms && !gridValueRejected) {
     throw new TnToMlPublishError(`Mercado Libre rechazó la publicación: ${message}`);
   }
-  if (dropGrid) stripSizeGridAttributes(body);
   if (dropTerms) delete body.sale_terms;
+  if (gridValueRejected) swapGridValueField(body);
   res = await send(body);
   if (res.status !== 201 && res.status !== 200) {
     throw new TnToMlPublishError(`Mercado Libre rechazó la publicación: ${mlErrorText(res.data)}`);
@@ -695,21 +751,18 @@ async function prepareVariants(
   sourceItem: any,
   variations: TnVariantRow[],
   accessToken: string,
-  userProduct: boolean
+  _userProduct: boolean,
+  chartOverride?: string
 ): Promise<{ chartId: string; variants: PreparedVariant[] }> {
-  const chartId = sizeGridIdFromItem(sourceItem);
-  if (userProduct && !chartId) {
+  const chartId = String(chartOverride || '').trim() || sizeGridIdFromItem(sourceItem);
+  if (!chartId) {
     throw new TnToMlPublishError(
-      'La publicación modelo no tiene guía de talles (SIZE_GRID_ID). Elegí otra publicación del mismo tipo de prenda.'
+      'No hay una guía de talles para esta categoría. Creala en Mercado Libre o elegí una publicación modelo que ya la tenga.'
     );
   }
   const prepared: PreparedVariant[] = [];
   for (const variant of variations) {
     const letter = sizeLetter(variant.size);
-    if (!chartId) {
-      prepared.push({ ...variant, sizeName: letter });
-      continue;
-    }
     const match = await mlFetchSizeGridRowForSize(accessToken, chartId, variant.size || letter);
     if (!match?.rowId) {
       throw new TnToMlPublishError(
@@ -723,6 +776,75 @@ async function prepareVariants(
     });
   }
   return { chartId, variants: prepared };
+}
+
+/** Guía de la cuenta para el dominio de la categoría (POST /catalog/charts/search). */
+async function searchSellerSizeChartId(
+  accessToken: string,
+  sellerId: string,
+  sourceItem: any,
+  preferredChartId: string
+): Promise<string> {
+  const preferred = String(preferredChartId || '').trim();
+  const categoryId = String(sourceItem?.category_id || '').trim();
+  const siteId = (categoryId.match(/^([A-Z]{3})/) || ['', 'MLA'])[1];
+  let domain = '';
+  try {
+    const res = await axios.get(`https://api.mercadolibre.com/categories/${encodeURIComponent(categoryId)}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      validateStatus: () => true,
+      timeout: 20000
+    });
+    domain = String(res.data?.settings?.catalog_domain || '').trim();
+  } catch {
+    domain = '';
+  }
+  if (!domain) return preferred;
+  const short = domain.replace(/^[A-Z]{3}-/, '');
+  const sellerNum = Number(sellerId);
+  if (!Number.isFinite(sellerNum) || sellerNum <= 0) return preferred;
+
+  const gender = (Array.isArray(sourceItem?.attributes) ? sourceItem.attributes : []).find(
+    (a: any) => attrId(a?.id) === 'GENDER'
+  );
+  const genderName = String(gender?.value_name || '').trim();
+  const attributes = genderName ? [{ id: 'GENDER', values: [{ name: genderName }] }] : [];
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    'Content-Type': 'application/json',
+    'x-caller-id': String(sellerNum)
+  };
+  const domains = [short, domain].filter((d, i, arr) => d && arr.indexOf(d) === i);
+  for (const domain_id of domains) {
+    for (const type of ['BRAND', 'SPECIFIC', '']) {
+      const body: Record<string, unknown> = {
+        domain_id,
+        site_id: siteId,
+        seller_id: sellerNum,
+        attributes
+      };
+      if (type) body.type = type;
+      try {
+        const res = await axios.post('https://api.mercadolibre.com/catalog/charts/search', body, {
+          headers,
+          validateStatus: () => true,
+          timeout: 20000
+        });
+        if (res.status !== 200 || !res.data) continue;
+        const charts = Array.isArray(res.data.charts) ? res.data.charts : [];
+        const ids = charts
+          .map((c: any) => String(c?.id || '').trim())
+          .filter((id: string) => /^\d+$/.test(id));
+        if (preferred && ids.includes(preferred)) return preferred;
+        const brand = charts.find((c: any) => String(c?.type || '').toUpperCase() === 'BRAND');
+        const pick = String(brand?.id || ids[0] || '').trim();
+        if (/^\d+$/.test(pick)) return pick;
+      } catch {
+        /* siguiente dominio o tipo */
+      }
+    }
+  }
+  return preferred;
 }
 
 async function applyDescription(itemId: string, description: string, accessToken: string): Promise<void> {
@@ -797,6 +919,16 @@ function withColor(payload: Record<string, unknown>, colorAttrId: string, color:
   return { ...payload, attributes: attrs };
 }
 
+function listingNeedsOneItemPerVariant(message: string): boolean {
+  if (mlCreateErrorRequiresUserProduct(message)) return true;
+  const m = String(message || '').toLowerCase();
+  if (m.includes('size_grid')) return false;
+  return (
+    m.includes('variations') &&
+    (m.includes('not allowed') || m.includes('not supported') || m.includes('invalid'))
+  );
+}
+
 export async function publishTiendaNubeProductToMercadoLibre(
   productId: string,
   input: { sourceItemId: string; title?: string; price?: number; paused?: boolean; linkLocal?: boolean }
@@ -836,11 +968,18 @@ export async function publishTiendaNubeProductToMercadoLibre(
   }
   const paused = input.paused !== false;
   const userProduct = mlItemUsesFamilyNameModel(sourceItem);
+  const chartFromAccount = await searchSellerSizeChartId(
+    mlToken.access_token,
+    String(mlToken.user_id || sellerId),
+    sourceItem,
+    sizeGridIdFromItem(sourceItem)
+  );
   const { chartId, variants } = await prepareVariants(
     sourceItem,
     product.variations,
     mlToken.access_token,
-    userProduct
+    userProduct,
+    chartFromAccount
   );
 
   const uploaded = await uploadPictures(
@@ -891,50 +1030,62 @@ export async function publishTiendaNubeProductToMercadoLibre(
     return draft;
   };
 
-  if (!userProduct) {
-    const variations = variants.map((variant) => ({
+  const variations = variants.map((variant) => {
+    const pics = pictureIdsForVariant(uploaded, product.images, variant);
+    const pictureIds = (pics.length ? pics : sharedPictures).map((p) => p.id);
+    return {
       price,
       available_quantity: Math.max(0, variant.stock),
       seller_custom_field: variant.sku,
+      picture_ids: pictureIds,
       attribute_combinations: [
         { id: colorId, value_name: variant.color || 'Único' },
         { id: 'SIZE', value_name: variant.sizeName }
       ]
-    }));
-    const draft = buildDraft(variants[0], sharedPictures, false);
-    draft.variations = variations;
-    draft.available_quantity = variations.reduce((sum, v) => sum + Number(v.available_quantity || 0), 0);
-    delete draft.seller_custom_field;
-    try {
-      const payload = mlPayloadForMercadoLibreApiPost(draft);
-      appendMissingRequired(payload, sourceItem, categoryRules.required);
-      if (!categoryAllows(categoryRules, 'SIZE_GRID_ID')) stripSizeGridAttributes(payload);
-      const createdItem = await postNewMercadoLibreItem(mlToken.access_token, payload);
-      if (createdItem?.id) {
-        const itemId = String(createdItem.id);
-        await applyDescription(itemId, product.description, mlToken.access_token);
-        const remoteVars = Array.isArray(createdItem.variations) ? createdItem.variations : [];
-        variants.forEach((variant, idx) => {
-          const remote = remoteVars.find(
-            (v: any) => String(v?.seller_custom_field || '').trim() === variant.sku
-          );
-          created.push({
-            itemId,
-            permalink: String(createdItem.permalink || ''),
-            sku: variant.sku,
-            color: variant.color,
-            size: variant.size,
-            variationId: remote?.id != null ? String(remote.id) : remoteVars[idx]?.id != null ? String(remoteVars[idx].id) : undefined
-          });
-        });
-      }
-    } catch (err: any) {
-      if (err instanceof TnToMlPublishError && !mlCreateErrorRequiresUserProduct(err.message)) throw err;
-      if (!(err instanceof TnToMlPublishError) && !mlCreateErrorRequiresUserProduct(String(err?.message || ''))) {
-        throw err;
-      }
-      console.warn('[TN→ML] La categoría exige una publicación por variante. Reintentando.');
+    };
+  });
+  const draft = buildDraft(variants[0], sharedPictures, false);
+  draft.variations = variations;
+  draft.available_quantity = variations.reduce((sum, v) => sum + Number(v.available_quantity || 0), 0);
+  delete draft.seller_custom_field;
+  try {
+    const payload = mlPayloadForMercadoLibreApiPost(draft);
+    appendMissingRequired(payload, sourceItem, categoryRules.required);
+    forceSizeGridOnPayload(payload, chartId, {
+      variationRows: variants
+        .filter((v) => v.sizeGridRowId)
+        .map((v) => ({ sku: v.sku, rowId: v.sizeGridRowId as string }))
+    });
+    const picsBySku = new Map(variations.map((v) => [v.seller_custom_field, v.picture_ids]));
+    if (Array.isArray(payload.variations)) {
+      payload.variations = (payload.variations as any[]).map((v) => {
+        const ids = picsBySku.get(String(v?.seller_custom_field || '').trim());
+        return ids?.length ? { ...v, picture_ids: ids } : v;
+      });
     }
+    const createdItem = await postNewMercadoLibreItem(mlToken.access_token, payload);
+    if (createdItem?.id) {
+      const itemId = String(createdItem.id);
+      await applyDescription(itemId, product.description, mlToken.access_token);
+      const remoteVars = Array.isArray(createdItem.variations) ? createdItem.variations : [];
+      variants.forEach((variant, idx) => {
+        const remote = remoteVars.find(
+          (v: any) => String(v?.seller_custom_field || '').trim() === variant.sku
+        );
+        created.push({
+          itemId,
+          permalink: String(createdItem.permalink || ''),
+          sku: variant.sku,
+          color: variant.color,
+          size: variant.size,
+          variationId: remote?.id != null ? String(remote.id) : remoteVars[idx]?.id != null ? String(remoteVars[idx].id) : undefined
+        });
+      });
+    }
+  } catch (err: any) {
+    const message = err instanceof TnToMlPublishError ? err.message : String(err?.message || '');
+    if (!listingNeedsOneItemPerVariant(message)) throw err;
+    console.warn('[TN→ML] La categoría exige una publicación por variante. Reintentando.');
   }
 
   let failed: { sku: string; color: string; size: string; message: string } | undefined;
@@ -950,7 +1101,7 @@ export async function publishTiendaNubeProductToMercadoLibre(
           variant.color || 'Único'
         );
         appendMissingRequired(payload, sourceItem, categoryRules.required);
-        if (!categoryAllows(categoryRules, 'SIZE_GRID_ID')) stripSizeGridAttributes(payload);
+        forceSizeGridOnPayload(payload, chartId, { rowId: variant.sizeGridRowId });
         const createdItem = await postNewMercadoLibreItem(mlToken.access_token, payload);
         const itemId = String(createdItem?.id || '');
         if (!itemId) throw new TnToMlPublishError('Mercado Libre no devolvió el ID de la publicación');
