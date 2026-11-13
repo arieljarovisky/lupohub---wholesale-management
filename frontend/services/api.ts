@@ -1,6 +1,7 @@
 import { Product, Order, OrderStatus, User, Customer, CustomerDeliveryAddress, Transporte, UserTask } from '../types';
 import { MOCK_PRODUCTS, MOCK_ORDERS, MOCK_USERS } from '../constants';
 import httpClient, { request, requestFormData, getBlob, getBlobResponse, getBaseUrl, postBlob, postFormDataBlob } from './httpClient';
+import { todayYmdArgentina, tryYmdArgentina } from '../utils/formatDate';
 
 /** GET /products con muchas variantes puede tardar >15s (COUNT + JOIN en Railway). */
 const PRODUCTS_LIST_TIMEOUT_MS = 120000;
@@ -62,7 +63,7 @@ async function downloadStockSyncFailuresBlob(platform: 'ml' | 'tn' | 'both'): Pr
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  const stamp = new Date().toISOString().slice(0, 10);
+  const stamp = todayYmdArgentina();
   a.download = `stock_no_actualizados_${platform}_${stamp}.xlsx`;
   document.body.appendChild(a);
   a.click();
@@ -278,15 +279,7 @@ function mapCustomerFromApi(r: any): Customer {
     openingBalanceDate: (() => {
       const raw = r.openingBalanceDate ?? r.opening_balance_date;
       if (raw == null || raw === '') return undefined;
-      if (raw instanceof Date && !Number.isNaN(raw.getTime())) {
-        return raw.toISOString().slice(0, 10);
-      }
-      const s = String(raw).trim();
-      const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-      if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
-      const d = new Date(s);
-      if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
-      return undefined;
+      return tryYmdArgentina(raw) ?? undefined;
     })(),
     shouldRetainIibb: Boolean(r.shouldRetainIibb ?? r.should_retain_iibb),
     agipPadronPeriod: r.agipPadronPeriod ?? r.agip_padron_period ?? undefined,
@@ -2092,7 +2085,7 @@ export const api = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `clientes_individuales_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.download = `clientes_individuales_${todayYmdArgentina()}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -2105,7 +2098,7 @@ export const api = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `clientes_actualizacion_masiva_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.download = `clientes_actualizacion_masiva_${todayYmdArgentina()}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -2120,7 +2113,7 @@ export const api = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `clientes_por_hoja_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.download = `clientes_por_hoja_${todayYmdArgentina()}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -2136,7 +2129,7 @@ export const api = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `metricas_mayorista_top_articulos_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.download = `metricas_mayorista_top_articulos_${todayYmdArgentina()}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -2185,7 +2178,7 @@ export const api = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `saldos_pendientes_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `saldos_pendientes_${todayYmdArgentina()}.csv`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -2198,7 +2191,7 @@ export const api = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `saldos_pendientes_detalle_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.download = `saldos_pendientes_detalle_${todayYmdArgentina()}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -2211,7 +2204,7 @@ export const api = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `movimientos_sistema_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.download = `movimientos_sistema_${todayYmdArgentina()}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -2254,7 +2247,7 @@ export const api = {
       .trim();
     const serverFilename =
       getFilenameFromContentDisposition(headers['content-disposition']) ||
-      `saldos pendientes - ${sellerLabelSafe || 'todos'} - ${new Date().toISOString().slice(0, 10)}.xlsx`;
+      `saldos pendientes - ${sellerLabelSafe || 'todos'} - ${todayYmdArgentina()}.xlsx`;
     a.download = serverFilename;
     document.body.appendChild(a);
     a.click();
@@ -2268,7 +2261,7 @@ export const api = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `saldos_pendientes_resumen_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.download = `saldos_pendientes_resumen_${todayYmdArgentina()}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -2343,7 +2336,7 @@ export const api = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `historial_clientes_multimedias_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.download = `historial_clientes_multimedias_${todayYmdArgentina()}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -2489,7 +2482,7 @@ export const api = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = filename || `cliente_detalle_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.download = filename || `cliente_detalle_${todayYmdArgentina()}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -2529,7 +2522,7 @@ export const api = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `saldo_facturas_recibos_${opts?.includeTango ? 'con_tango_' : ''}${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.download = `saldo_facturas_recibos_${opts?.includeTango ? 'con_tango_' : ''}${todayYmdArgentina()}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -3042,7 +3035,7 @@ export const api = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const stamp = todayYmdArgentina().replace(/-/g, '');
     a.download = `productos_tiendanube_${stamp}.csv`;
     document.body.appendChild(a);
     a.click();
@@ -3297,7 +3290,7 @@ export const api = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `margenes_precios_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.download = `margenes_precios_${todayYmdArgentina()}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -3480,6 +3473,46 @@ export const api = {
       },
       undefined,
       120000
+    );
+  },
+
+  /** Arma el formulario para publicar un producto de Tienda Nube en Mercado Libre. */
+  previewTiendaNubeToMercadoLibre: async (productId: string | number): Promise<{
+    productId: string;
+    title: string;
+    price: number;
+    imageCount: number;
+    variations: Array<{ sku: string; color: string; size: string; stock: number; price: number }>;
+    suggestions: Array<{ id: string; title: string; permalink: string; thumbnail: string; hasSizeGrid: boolean }>;
+    alreadyLinked: Array<{ sku: string; itemId: string }>;
+  }> => {
+    return await request(
+      `/integrations/tiendanube/products/${encodeURIComponent(String(productId))}/mercadolibre-preview`,
+      'GET',
+      undefined,
+      undefined,
+      60000
+    );
+  },
+
+  /** Crea la publicación en Mercado Libre copiando categoría y guía de talles de una MLA modelo. */
+  publishTiendaNubeToMercadoLibre: async (
+    productId: string | number,
+    payload: { sourceItemId: string; title?: string; price?: number; paused?: boolean; linkLocal?: boolean }
+  ): Promise<{
+    message: string;
+    mode: 'user_product' | 'classic';
+    paused: boolean;
+    listings: Array<{ itemId: string; permalink: string; sku: string; color: string; size: string; variationId?: string }>;
+    variantsLinkedLocal: number;
+    failed?: { sku: string; color: string; size: string; message: string };
+  }> => {
+    return await request(
+      `/integrations/tiendanube/products/${encodeURIComponent(String(productId))}/publish-mercadolibre`,
+      'POST',
+      payload,
+      undefined,
+      180000
     );
   },
 
@@ -3788,7 +3821,7 @@ export const api = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const stamp = todayYmdArgentina().replace(/-/g, '');
     a.download = `opiniones_mercadolibre_${stamp}.xlsx`;
     document.body.appendChild(a);
     a.click();
@@ -3811,7 +3844,7 @@ export const api = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const stamp = todayYmdArgentina().replace(/-/g, '');
     a.download = `opiniones_tiendanube_${stamp}.csv`;
     document.body.appendChild(a);
     a.click();
@@ -4440,7 +4473,7 @@ export const api = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `pedido_brasil_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.download = `pedido_brasil_${todayYmdArgentina()}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -4833,7 +4866,7 @@ export const api = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `facturacion_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `facturacion_${todayYmdArgentina()}.csv`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -4952,7 +4985,7 @@ export const api = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    const monthTag = (params?.month || params?.hasta || params?.desde || new Date().toISOString().slice(0, 10)).replace(/-/g, '').slice(0, 7).replace('-', '');
+    const monthTag = (params?.month || params?.hasta || params?.desde || todayYmdArgentina()).replace(/-/g, '').slice(0, 7).replace('-', '');
     a.download = `RetPer_${monthTag}.txt`;
     document.body.appendChild(a);
     a.click();

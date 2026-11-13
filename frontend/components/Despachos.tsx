@@ -8,6 +8,7 @@ import * as XLSX from 'xlsx';
 import { api } from '../services/api';
 import { parseStockExcel } from '../utils/inventoryUtils';
 import { useNotification } from '../context/NotificationContext';
+import { formatOrderDate, todayYmdArgentina } from '../utils/formatDate';
 
 interface Despacho {
   id: string;
@@ -86,7 +87,7 @@ const Despachos: React.FC = () => {
   const [showAsignarTodosModal, setShowAsignarTodosModal] = useState(false);
   const [asignarTodosForm, setAsignarTodosForm] = useState({
     numero_despacho: '',
-    fecha_despacho: new Date().toISOString().split('T')[0],
+    fecha_despacho: todayYmdArgentina(),
     pais_origen: 'Brasil'
   });
   const [savingAsignarTodos, setSavingAsignarTodos] = useState(false);
@@ -130,7 +131,7 @@ const Despachos: React.FC = () => {
   // Form state
   const [form, setForm] = useState({
     numero_despacho: '',
-    fecha_despacho: new Date().toISOString().split('T')[0],
+    fecha_despacho: todayYmdArgentina(),
     pais_origen: 'Brasil',
     proveedor: '',
     descripcion: '',
@@ -175,7 +176,7 @@ const Despachos: React.FC = () => {
   const resetForm = () => {
     setForm({
       numero_despacho: '',
-      fecha_despacho: new Date().toISOString().split('T')[0],
+      fecha_despacho: todayYmdArgentina(),
       pais_origen: 'Brasil',
       proveedor: '',
       descripcion: '',
@@ -463,10 +464,7 @@ const Despachos: React.FC = () => {
     return new Intl.NumberFormat('es-AR', { style: 'currency', currency }).format(value);
   };
 
-  const formatDate = (dateStr: string) => {
-    if (!dateStr) return '-';
-    return new Date(dateStr).toLocaleDateString('es-AR');
-  };
+  const formatDate = (dateStr: string) => formatOrderDate(dateStr) || '-';
 
   return (
     <div className="space-y-6">
@@ -492,7 +490,7 @@ const Despachos: React.FC = () => {
           <button
             onClick={async () => {
               setShowAsignarTodosModal(true);
-              setAsignarTodosForm({ numero_despacho: '', fecha_despacho: new Date().toISOString().split('T')[0], pais_origen: 'Brasil' });
+              setAsignarTodosForm({ numero_despacho: '', fecha_despacho: todayYmdArgentina(), pais_origen: 'Brasil' });
               try {
                 const list = await api.getProductosSinDespacho();
                 setProductosSinDespachoCount(Array.isArray(list) ? list.length : 0);

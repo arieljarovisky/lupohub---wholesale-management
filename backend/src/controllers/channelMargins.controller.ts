@@ -20,6 +20,7 @@ import {
   calcMarginPercent,
   fetchListingSaleFeeAmount,
 } from '../utils/channelMarginUtils';
+import { formatDateTimeArgentina, todayYmdArgentina } from '../utils/argentinaDate';
 import {
   fetchMlItemsMultiget,
   fetchTnProductsBatched,
@@ -483,7 +484,7 @@ export const exportChannelMarginsXlsx = async (req: Request, res: Response) => {
 
     ws.mergeCells('A2:R2');
     ws.getCell('A2').value =
-      `Lista de precios: ${result.config.fobListName || 'sin lista'} | TN: ${result.config.tnFeePresetLabel} | ML CPT: ${result.config.mlPaymentCptPercent}% | Generado: ${new Date().toLocaleString('es-AR')}`;
+      `Lista de precios: ${result.config.fobListName || 'sin lista'} | TN: ${result.config.tnFeePresetLabel} | ML CPT: ${result.config.mlPaymentCptPercent}% | Generado: ${formatDateTimeArgentina(new Date(), { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
 
     const headers = [
       'SKU',
@@ -575,7 +576,7 @@ export const exportChannelMarginsXlsx = async (req: Request, res: Response) => {
     }
 
     const buf = await wb.xlsx.writeBuffer();
-    const dateTag = new Date().toISOString().slice(0, 10);
+    const dateTag = todayYmdArgentina();
     const filename = `margenes_precios_${dateTag}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);

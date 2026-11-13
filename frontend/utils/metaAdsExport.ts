@@ -117,7 +117,7 @@ export async function downloadMetaAdsExcel(params: {
   info.addRow(['Reporte Meta Ads — Lupo Hub']);
   info.addRow(['Período desde', params.dateFrom]);
   info.addRow(['Período hasta', params.dateTo]);
-  info.addRow(['Exportado', new Date().toLocaleString('es-AR')]);
+  info.addRow(['Exportado', new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })]);
   if (params.accountId) info.addRow(['Cuenta act_', params.accountId]);
   if (params.summary) {
     info.addRow([]);

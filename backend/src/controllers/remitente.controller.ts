@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { get, execute } from '../database/db';
+import { tryYmdArgentina } from '../utils/argentinaDate';
 import { getAfipIssuerData } from '../services/afip.service';
 
 export const getRemitente = async (_req: Request, res: Response) => {
@@ -15,7 +16,7 @@ export const getRemitente = async (_req: Request, res: Response) => {
         phone: row.phone ?? '',
         logoUrl: row.logo_url ?? '',
         caiRemito: row.cai_remito ?? '',
-        caiRemitoVencimiento: row.cai_remito_vencimiento ? row.cai_remito_vencimiento.toISOString().slice(0, 10) : ''
+        caiRemitoVencimiento: tryYmdArgentina(row.cai_remito_vencimiento) ?? ''
       });
     }
 

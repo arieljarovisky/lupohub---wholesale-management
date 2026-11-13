@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { RefreshCw, Package, User, Truck, ChevronLeft, ChevronRight, Loader2, Calendar, Search, X, Clock, CheckCircle, XCircle, ChevronDown, ExternalLink, ShoppingCart, MessageCircle, Download, Star, ScanLine } from 'lucide-react';
 import { MercadoLibreLogo } from './ChannelLogos';
 import { api } from '../services/api';
+import { formatDateAr, ymdArgentina } from '../utils/formatDate';
 import { openExternalInvoicePdf } from '../utils/externalInvoicePdf';
 import MercadoLibreQuestions from './MercadoLibreQuestions';
 import MercadoLibreReviews from './MercadoLibreReviews';
@@ -137,14 +138,11 @@ const MercadoLibreOrders: React.FC<MercadoLibreOrdersProps> = ({ defaultSection 
     cancelled: { label: 'Cancelado', color: 'text-red-400' },
   };
 
-  const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
-    return {
-      date: date.toLocaleDateString('es-AR', { day: '2-digit', month: 'short' }),
-      time: date.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }),
-      full: date.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
-    };
-  };
+  const formatDate = (dateStr: string) => ({
+    date: formatDateAr(dateStr, { day: '2-digit', month: 'short' }),
+    time: formatDateAr(dateStr, { hour: '2-digit', minute: '2-digit' }),
+    full: formatDateAr(dateStr, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+  });
 
   const formatCurrency = (value: number) => {
     return value.toLocaleString('es-AR', { minimumFractionDigits: 2 });
@@ -178,8 +176,8 @@ const MercadoLibreOrders: React.FC<MercadoLibreOrdersProps> = ({ defaultSection 
     const to = new Date();
     const from = new Date();
     from.setDate(from.getDate() - days);
-    setDateFrom(from.toISOString().split('T')[0]);
-    setDateTo(to.toISOString().split('T')[0]);
+    setDateFrom(ymdArgentina(from));
+    setDateTo(ymdArgentina(to));
     setOffset(0);
   };
 

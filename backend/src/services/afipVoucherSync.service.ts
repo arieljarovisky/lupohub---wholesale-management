@@ -3,6 +3,7 @@
  * hacia `afip_synced_vouchers` para reportes (Ventas por jurisdicción).
  */
 import { v4 as uuidv4 } from 'uuid';
+import { tryYmdArgentina } from '../utils/argentinaDate';
 import { execute, get } from '../database/db';
 import {
   consultarComprobanteAfip,
@@ -230,14 +231,7 @@ async function getSyncedBounds(puntoVenta: number, cbteTipo: number): Promise<Bo
     [puntoVenta, cbteTipo]
   )) as { max_nro: number; min_nro: number; min_fecha: string | Date | null } | undefined;
 
-  const minFechaRaw = row?.min_fecha;
-  let minFecha: string | null = null;
-  if (minFechaRaw instanceof Date && !Number.isNaN(minFechaRaw.getTime())) {
-    minFecha = minFechaRaw.toISOString().slice(0, 10);
-  } else if (minFechaRaw != null) {
-    const s = String(minFechaRaw).slice(0, 10);
-    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) minFecha = s;
-  }
+  const minFecha = tryYmdArgentina(row?.min_fecha);
 
   return {
     maxNro: Number(row?.max_nro || 0),

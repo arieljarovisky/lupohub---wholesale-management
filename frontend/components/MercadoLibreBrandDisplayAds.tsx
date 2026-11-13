@@ -290,7 +290,7 @@ const MercadoLibreBrandDisplayAdsInner: React.FC<{ kind: MercadoAdsKind }> = ({ 
         accountLabel: accountLabelForExport,
         dateFrom,
         dateTo,
-        exportedAt: new Date().toLocaleString('es-AR'),
+        exportedAt: new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' }),
         scopeNote,
         productTitle: cfg.productTitle
       },

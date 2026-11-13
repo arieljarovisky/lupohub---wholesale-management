@@ -71,6 +71,10 @@ import {
 import { createMercadoLibreVariants, previewMercadoLibreVariants } from '../controllers/mlVariantCreate.controller';
 import { exportMercadolibrePublicationsXlsx } from '../controllers/mercadolibrePublicationsExport.controller';
 import { exportMercadoLibreToTiendaNube } from '../controllers/mlToTiendaNubeExport.controller';
+import {
+  previewTiendaNubeToMercadoLibre,
+  publishTiendaNubeToMercadoLibre
+} from '../controllers/tnToMercadoLibrePublish.controller';
 import { getVariantChannelPrices, bulkUpdateChannelPrices, clearTiendaNubePromotionalPrices } from '../controllers/channelPrices.controller';
 import { getChannelMargins, exportChannelMarginsXlsx } from '../controllers/channelMargins.controller';
 import {
@@ -234,6 +238,8 @@ router.post(
 );
 router.post('/tiendanube/products', createTiendaNubeProduct);
 router.post('/tiendanube/products/:productId/duplicate', duplicateTiendaNubeProduct);
+router.get('/tiendanube/products/:productId/mercadolibre-preview', authMiddleware, previewTiendaNubeToMercadoLibre);
+router.post('/tiendanube/products/:productId/publish-mercadolibre', authMiddleware, publishTiendaNubeToMercadoLibre);
 router.post('/tiendanube/sync', syncProductsFromTiendaNube);
 router.post('/tiendanube/sync-stock', syncAllStockToTiendaNube);
 router.get('/tiendanube/sync-stock/status', getTiendaNubeStockSyncStatus);

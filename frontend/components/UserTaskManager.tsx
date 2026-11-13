@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { BellRing, Trash2 } from 'lucide-react';
 import { api } from '../services/api';
+import { formatDateTimeAr } from '../utils/formatDate';
 import { User, UserTask } from '../types';
 import { useNotification } from '../context/NotificationContext';
 
@@ -115,7 +116,7 @@ const UserTaskManager: React.FC<UserTaskManagerProps> = ({ users }) => {
             <div className="min-w-0">
               <p className="text-slate-100 text-sm">{t.message}</p>
               <p className="text-xs text-slate-400">
-                Para: {t.assignedToEmail} · Hasta: {new Date(t.expiresAt).toLocaleString('es-AR')}
+                Para: {t.assignedToEmail} · Hasta: {formatDateTimeAr(t.expiresAt)}
               </p>
             </div>
             <button

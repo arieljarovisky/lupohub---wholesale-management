@@ -41,6 +41,7 @@ import {
 } from '../utils/ordersListFilters';
 import { downloadOneOrderExcel, downloadOrdersExcel } from '../utils/orderExportExcel';
 import EmitDebitNoteModal from './EmitDebitNoteModal';
+import { formatDateTimeAr, formatOrderDate, todayYmdArgentina, tryYmdArgentina } from '../utils/formatDate';
 
 function customerHasExportTaxIdForFacturaE(c?: Customer | null): boolean {
   if (!c) return false;
@@ -702,14 +703,6 @@ const Orders: React.FC<OrdersProps> = React.memo(({
     return customers.find(c => c.id === id)?.businessName || customers.find(c => c.id === id)?.name || id;
   };
 
-  /** Fecha legible en la lista de pedidos (DD/MM/YYYY). */
-  const formatOrderDate = (dateStr: string) => {
-    if (!dateStr) return '';
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return dateStr;
-    return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  };
-
   /** Nombre seguro para hoja Excel (máx 31 caracteres, sin caracteres inválidos). */
   const safeSheetName = (order: Order) => {
     const base = `#${order.id}`.replace(/[\\/*?:\[\]]/g, '');
@@ -777,19 +770,18 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       sortItemsForFacturaPrint(order.items.map(enrichItem), products),
       products
     );
+    const mesesEs = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
     const formatDateShort = (d: string) => {
-      const x = new Date(d);
-      if (isNaN(x.getTime())) return d;
-      const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-      const day = x.getDate();
-      const month = meses[x.getMonth()];
-      const year = x.getFullYear();
-      return `${String(day).padStart(2,'0')} ${month} ${year}`;
+      const ymd = tryYmdArgentina(d);
+      if (!ymd) return d;
+      const [y, m, day] = ymd.split('-').map(Number);
+      return `${String(day).padStart(2,'0')} ${mesesEs[m - 1]} ${y}`;
     };
     const formatDateDMY = (d: string) => {
-      const x = new Date(d);
-      if (isNaN(x.getTime())) return d;
-      return `${String(x.getDate()).padStart(2, '0')}/${String(x.getMonth() + 1).padStart(2, '0')}/${x.getFullYear()}`;
+      const ymd = tryYmdArgentina(d);
+      if (!ymd) return d;
+      const [y, m, day] = ymd.split('-');
+      return `${day}/${m}/${y}`;
     };
     const esc = (v: unknown) =>
       String(v ?? '')
@@ -1739,7 +1731,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
       await downloadOrdersExcel(list, {
         ...orderExportExcelOptions,
         sheetNameForOrder: (order) => safeSheetName(order),
-        filename: `pedidos_mayoristas_${new Date().toISOString().slice(0, 10)}.xlsx`,
+        filename: `pedidos_mayoristas_${todayYmdArgentina()}.xlsx`,
       });
     } catch (err: unknown) {
       showToast('error', err instanceof Error ? err.message : 'Error al exportar a Excel');
@@ -1750,7 +1742,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
   const exportOneOrderToExcel = async (order: Order, e: React.MouseEvent) => {
     e.stopPropagation();
     const clientNameForFile = getCustomerName(order).replace(/[\\/*?:\[\]"]/g, '').replace(/\s+/g, '_').slice(0, 40) || 'cliente';
-    const dateStr = new Date().toISOString().slice(0, 10);
+    const dateStr = todayYmdArgentina();
     try {
       await downloadOneOrderExcel(order, {
         ...orderExportExcelOptions,
@@ -2083,7 +2075,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                               'Factura AFIP emitida.',
                               `CAE: ${order.invoice.cae}`,
                               order.invoice.puntoVta != null ? `Nº: ${order.invoice.puntoVta}-${order.invoice.cbteDesde}` : `Nº: ${order.invoice.cbteDesde}`,
-                              order.invoice.caeFchVto ? `Vto. CAE: ${new Date(order.invoice.caeFchVto).toLocaleDateString('es-AR')}` : '',
+                              order.invoice.caeFchVto ? `Vto. CAE: ${formatOrderDate(order.invoice.caeFchVto)}` : '',
                               'Consultá en ARCA/AFIP con tu CUIT y este CAE.',
                             ]
                               .filter(Boolean)
@@ -2311,7 +2303,7 @@ const Orders: React.FC<OrdersProps> = React.memo(({
                       <Truck size={12} />
                       Sacado por <span className="text-slate-400 font-medium">{users.find(u => u.id === order.pickedBy)?.name || order.pickedBy}</span>
                       {order.dispatchedAt && (
-                        <> el {new Date(order.dispatchedAt).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</>
+                        <> el {formatDateTimeAr(order.dispatchedAt, { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</>
                       )}
                     </div>
                   )}

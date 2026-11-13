@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect } from 'react';
 import { History, RefreshCw, Loader2, Search, X, Filter, TrendingUp, TrendingDown, Package, Calendar, RotateCcw, ShoppingCart, Download, Camera, CheckCircle, Trash2 } from 'lucide-react';
 import { MercadoLibreLogo, TiendaNubeLogo } from './ChannelLogos';
 import { api } from '../services/api';
+import { formatDateTimeAr, ymdArgentina } from '../utils/formatDate';
 import { useNotification } from '../context/NotificationContext';
 
 interface StockMovement {
@@ -213,29 +214,21 @@ const StockHistory: React.FC = () => {
     mayoristas: filteredMovements.filter(m => m.movement_type === 'PEDIDO_MAYORISTA').length
   };
 
-  const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('es-AR', { 
-      day: '2-digit', 
-      month: '2-digit', 
+  const formatDate = (dateStr: string) =>
+    formatDateTimeAr(dateStr, {
+      day: '2-digit',
+      month: '2-digit',
       year: '2-digit',
       hour: '2-digit',
       minute: '2-digit'
     });
-  };
 
   const setQuickDate = (days: number) => {
     const to = new Date();
     const from = new Date();
     from.setDate(from.getDate() - days);
-    const fmt = (d: Date) => {
-      const y = d.getFullYear();
-      const m = String(d.getMonth() + 1).padStart(2, '0');
-      const day = String(d.getDate()).padStart(2, '0');
-      return `${y}-${m}-${day}`;
-    };
-    setDateFrom(fmt(from));
-    setDateTo(fmt(to));
+    setDateFrom(ymdArgentina(from));
+    setDateTo(ymdArgentina(to));
   };
 
   const clearFilters = () => {

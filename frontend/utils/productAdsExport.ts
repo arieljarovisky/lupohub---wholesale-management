@@ -411,7 +411,7 @@ export async function downloadSingleCampaignExcel(
     ['Site', opts.siteId],
     ['ID anunciante', opts.advertiserId],
     ['Cantidad de publicaciones (hoja Detalle)', ads.length],
-    ['Exportado', new Date().toLocaleString('es-AR')]
+    ['Exportado', new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })]
   ];
   contextPairs.forEach(([label, val], idx) => {
     const row = wsGen.getRow(r);

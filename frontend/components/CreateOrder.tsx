@@ -4,6 +4,7 @@ import { Order, OrderStatus, Product, Customer, OrderItem, Role, PriceList } fro
 import { api } from '../services/api';
 import { labelTalle } from '../utils/tallesTango';
 import { getWholesaleStockImpactMeta } from '../utils/orderStockImpact';
+import { todayYmdArgentina } from '../utils/formatDate';
 
 interface CreateOrderProps {
   products: Product[];
@@ -41,7 +42,7 @@ const CreateOrder: React.FC<CreateOrderProps> = ({ products, customers, onSave, 
   const [clientFilter, setClientFilter] = useState('');
   const [clientDropdownOpen, setClientDropdownOpen] = useState(false);
   const clientDropdownRef = useRef<HTMLDivElement>(null);
-  const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0]);
+  const [orderDate, setOrderDate] = useState(todayYmdArgentina());
   const [rows, setRows] = useState<OrderRow[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');

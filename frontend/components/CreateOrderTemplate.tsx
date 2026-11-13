@@ -7,6 +7,7 @@ import { useNotification } from '../context/NotificationContext';
 import { labelTalle, codigoTalleParaSku, ORDER_FORM_SIZE_CODES, isNumericOrderSizeCode, sortOrderFormSizeCodes } from '../utils/tallesTango';
 import { parseOrderMatrixExcel } from '../utils/orderImportMatrix';
 import { articleCodesMatch, articleCodeForOrderRow, resolveDisplayArticleCode, skuLookupCandidates, variantColorKey } from '../utils/articleCodeUtils';
+import { formatDateAr, todayYmdArgentina } from '../utils/formatDate';
 
 interface CreateOrderTemplateProps {
   products: Product[];
@@ -296,7 +297,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const [showroomSale, setShowroomSale] = useState(false);
   const clientDropdownRef = useRef<HTMLDivElement>(null);
   const matrixFileRef = useRef<HTMLInputElement>(null);
-  const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0]);
+  const [orderDate, setOrderDate] = useState(todayYmdArgentina());
   /** Referencia interna: sucursal, depósito, etc. */
   const [orderNotes, setOrderNotes] = useState('');
   const [sizes, setSizes] = useState<Array<{ code: string; name: string }>>([]);
@@ -570,7 +571,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       }
     }
     setOrderNotes(isDuplicating ? '' : String(hydrateSourceOrder.notes ?? '').trim());
-    setOrderDate(isDuplicating ? new Date().toISOString().slice(0, 10) : hydrateSourceOrder.date);
+    setOrderDate(isDuplicating ? todayYmdArgentina() : hydrateSourceOrder.date);
 
     const rowsByKey = new Map<string, TemplateRow>();
     for (const item of hydrateSourceOrder.items || []) {
@@ -1400,8 +1401,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
             {orderNotes.trim()
               ? orderNotes.trim()
               : isDuplicating && duplicateFromOrder
-                ? `Pedido #${duplicateFromOrder.id} · ${new Date(orderDate).toLocaleDateString('es-AR', { day: 'numeric', month: 'short' })}`
-                : new Date(orderDate).toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short' })}
+                ? `Pedido #${duplicateFromOrder.id} · ${formatDateAr(orderDate, { day: 'numeric', month: 'short' })}`
+                : formatDateAr(orderDate, { weekday: 'short', day: 'numeric', month: 'short' })}
           </p>
         </div>
         <p className="shrink-0 text-xs text-slate-400 tabular-nums hidden md:block">

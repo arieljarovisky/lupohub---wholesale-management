@@ -13,6 +13,7 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import { api } from '../services/api';
+import { formatDateAr } from '../utils/formatDate';
 
 type ReviewRow = {
   id: string | number;
@@ -66,7 +67,7 @@ const Stars: React.FC<{ value: number | null; size?: number }> = ({ value, size 
 const formatDt = (iso: string | null) => {
   if (!iso) return '—';
   try {
-    return new Date(iso).toLocaleString('es-AR', {
+    return formatDateAr(iso, {
       day: '2-digit',
       month: 'short',
       year: 'numeric',

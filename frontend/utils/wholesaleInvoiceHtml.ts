@@ -1172,15 +1172,6 @@ export function buildWholesaleCreditNoteHtml(params: {
   // - ordenado: para visualización cuando la NC es total
   const itemsOriginal = order.items.map((i) => enrichOrderItem(i, products));
 
-  const formatDateShort = (d: string) => {
-    const x = new Date(d);
-    if (isNaN(x.getTime())) return d;
-    const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
-    const day = x.getDate();
-    const month = meses[x.getMonth()];
-    const year = x.getFullYear();
-    return `${String(day).padStart(2, '0')} ${month} ${year}`;
-  };
   const nroNota = nc.puntoVta != null ? `${String(nc.puntoVta).padStart(5, '0')}-${String(nc.cbteDesde).padStart(8, '0')}` : String(nc.cbteDesde);
   const fechaNota = nc.createdAt ? formatDateShort(nc.createdAt) : formatDateShort(order.date);
   const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
@@ -1292,10 +1283,7 @@ export function buildWholesaleCreditNoteHtml(params: {
   const compNroNc = String(nc.cbteDesde ?? '').padStart(8, '0');
   const letraNc = cbteTipoNc === 3 ? 'A' : cbteTipoNc === 13 ? 'C' : 'B';
   const codigoNc = String(cbteTipoNc || 8).padStart(3, '0');
-  const periodDate = new Date(order.date);
-  const validPeriodDate = !isNaN(periodDate.getTime()) ? periodDate : new Date();
-  const periodFrom = new Date(validPeriodDate.getFullYear(), validPeriodDate.getMonth(), 1).toLocaleDateString('es-AR');
-  const periodTo = new Date(validPeriodDate.getFullYear(), validPeriodDate.getMonth() + 1, 0).toLocaleDateString('es-AR');
+  const { from: periodFrom, to: periodTo } = facturaPeriodLabels(order.date);
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Nota de Crédito ${nroNota}</title><!-- lupohub-print-nc-v4 --><style>
       @page { size: A4; margin: 12mm 12mm 14mm 12mm; }
@@ -1444,15 +1432,6 @@ export function buildWholesaleDebitNoteHtml(params: {
   const { order, nd, customer, products, remitente, previewAgip } = params;
   const itemsOriginal = order.items.map((i) => enrichOrderItem(i, products));
 
-  const formatDateShort = (d: string) => {
-    const x = new Date(d);
-    if (isNaN(x.getTime())) return d;
-    const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
-    const day = x.getDate();
-    const month = meses[x.getMonth()];
-    const year = x.getFullYear();
-    return `${String(day).padStart(2, '0')} ${month} ${year}`;
-  };
   const nroNota = nd.puntoVta != null ? `${String(nd.puntoVta).padStart(5, '0')}-${String(nd.cbteDesde).padStart(8, '0')}` : String(nd.cbteDesde);
   const fechaNota = nd.createdAt ? formatDateShort(nd.createdAt) : formatDateShort(order.date);
   const clienteNombre = order.customerBusinessName || customer?.businessName || customer?.name || 'Cliente';
@@ -1556,10 +1535,7 @@ export function buildWholesaleDebitNoteHtml(params: {
   const compNroNd = String(nd.cbteDesde ?? '').padStart(8, '0');
   const letraNd = cbteTipoNd === 2 ? 'A' : cbteTipoNd === 12 ? 'C' : 'B';
   const codigoNd = String(cbteTipoNd || 7).padStart(3, '0');
-  const periodDate = new Date(order.date);
-  const validPeriodDate = !isNaN(periodDate.getTime()) ? periodDate : new Date();
-  const periodFrom = new Date(validPeriodDate.getFullYear(), validPeriodDate.getMonth(), 1).toLocaleDateString('es-AR');
-  const periodTo = new Date(validPeriodDate.getFullYear(), validPeriodDate.getMonth() + 1, 0).toLocaleDateString('es-AR');
+  const { from: periodFrom, to: periodTo } = facturaPeriodLabels(order.date);
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Nota de Débito ${nroNota}</title><!-- lupohub-print-nd-v1 --><style>
       @page { size: A4; margin: 12mm 12mm 14mm 12mm; }
@@ -1741,13 +1717,6 @@ export function buildExternalChannelFacturaHtml(params: {
   remitente: FacturaRemitente;
 }): string {
   const { invoice, products, remitente } = params;
-  const formatDateShort = (d: string) => {
-    const x = new Date(d);
-    if (isNaN(x.getTime())) return d;
-    const meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
-    return `${String(x.getDate()).padStart(2, '0')} ${meses[x.getMonth()]} ${x.getFullYear()}`;
-  };
-
   const cbteTipoNum = Number(invoice.cbteTipo);
   const tipoFactura = cbteTipoNum === 1 ? 'A' : cbteTipoNum === 11 ? 'C' : 'B';
   const codigoComprobante = cbteTipoNum === 1 ? '001' : cbteTipoNum === 11 ? '011' : '006';
@@ -1817,15 +1786,9 @@ export function buildExternalChannelFacturaHtml(params: {
   const dirCliente = [invoice.customerAddress, invoice.customerCity].filter(Boolean).join(', ');
   const ptoVta = String(invoice.puntoVta ?? '').padStart(5, '0');
   const compNro = String(invoice.cbteDesde ?? '').padStart(8, '0');
-  const periodDate = invoice.createdAt ? new Date(invoice.createdAt) : new Date();
-  const validPeriodDate = !isNaN(periodDate.getTime()) ? periodDate : new Date();
-  const periodFrom = new Date(validPeriodDate.getFullYear(), validPeriodDate.getMonth(), 1).toLocaleDateString('es-AR');
-  const periodTo = new Date(validPeriodDate.getFullYear(), validPeriodDate.getMonth() + 1, 0).toLocaleDateString('es-AR');
+  const { from: periodFrom, to: periodTo } = facturaPeriodLabels(invoice.createdAt || new Date().toISOString());
 
-  const fechaQrBase = invoice.createdAt ? new Date(invoice.createdAt) : new Date();
-  const fechaQr = !isNaN(fechaQrBase.getTime())
-    ? `${fechaQrBase.getFullYear()}-${String(fechaQrBase.getMonth() + 1).padStart(2, '0')}-${String(fechaQrBase.getDate()).padStart(2, '0')}`
-    : '';
+  const fechaQr = formatFacturaEmissionYmd(invoice.createdAt || new Date().toISOString());
   const cuitEmisorNum = Number(String(cuitEmpresa).replace(/\D/g, '')) || 0;
   const cuitReceptorDigits = String(cuitCliente).replace(/\D/g, '');
   const tipoDocRec = cuitReceptorDigits.length === 11 ? 80 : cuitReceptorDigits.length >= 7 ? 96 : 99;

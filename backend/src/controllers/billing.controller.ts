@@ -8,6 +8,7 @@ import {
   sqlGroupedCreditNoteSaldoAmount,
   sqlInvoiceAmountFromOrderTotal,
 } from '../config/orderPricing';
+import { todayYmdArgentina, tryYmdArgentina } from '../utils/argentinaDate';
 import {
   afipCbteTipoToJurisdiccionTipo,
   getMercadoLibreAfipPuntosVenta,
@@ -125,19 +126,8 @@ function parseMoney(value: any): number {
 }
 
 function normalizeDate(value: any): string {
-  if (typeof value === 'string') {
-    const raw = value.trim();
-    const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if (m) {
-      const dd = m[1].padStart(2, '0');
-      const mm = m[2].padStart(2, '0');
-      const yyyy = m[3];
-      return `${yyyy}-${mm}-${dd}`;
-    }
-  }
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return String(value || '').slice(0, 10);
-  return d.toISOString().slice(0, 10);
+  if (value == null || value === '') return '';
+  return tryYmdArgentina(value) ?? String(value).slice(0, 10);
 }
 
 function ddmmyyyy(value: any): string {
@@ -1135,7 +1125,7 @@ export const exportBilling = async (req: Request, res: Response) => {
     }
 
     const csv = lines.join('\n');
-    const filename = `facturacion_${new Date().toISOString().slice(0, 10)}.csv`;
+    const filename = `facturacion_${todayYmdArgentina()}.csv`;
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -1304,7 +1294,7 @@ export const printBilling = async (req: Request, res: Response) => {
     const tipoFiltroTexto =
       tipo === 'FACTURA' ? 'Solo facturas' : tipo === 'NC' ? 'Solo notas de crédito' : tipo === 'ND' ? 'Solo notas de débito' : null;
     const totalNeto = totalFacturas + totalND - totalNC;
-    const emitidoEn = formatDateEsLong(new Date().toISOString().slice(0, 10));
+    const emitidoEn = formatDateEsLong(todayYmdArgentina());
 
     const html = `<!DOCTYPE html>
 <html lang="es">
@@ -1625,7 +1615,7 @@ function resolveCustomerCityForProvincia(city: unknown, deliveryAddressesJson: u
 
 /** Convierte 'YYYY-MM-DD' (o Date) al serial de Excel (días desde 1899-12-30, con bug del año bisiesto 1900). */
 function toExcelSerialDate(value: any): number {
-  const s = typeof value === 'string' ? value : value instanceof Date ? value.toISOString().slice(0, 10) : '';
+  const s = tryYmdArgentina(value) ?? '';
   const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!m) return 0;
   const yyyy = Number(m[1]);
@@ -1947,7 +1937,7 @@ export const exportVentasJurisdiccionMlXlsx = async (req: Request, res: Response
         }
         const signed = applySign(tipo, sinIva, iva, otros, importe);
         const party = resolveParty(r.doc_nro);
-        const fechaRaw = r.fecha instanceof Date ? r.fecha.toISOString().slice(0, 10) : String(r.fecha || '').slice(0, 10);
+        const fechaRaw = tryYmdArgentina(r.fecha) ?? '';
         out.push({
           tipo,
           fecha: fechaRaw,
@@ -1982,7 +1972,7 @@ export const exportVentasJurisdiccionMlXlsx = async (req: Request, res: Response
       const split = splitTotalConIva(Number(r.total) || 0, cbteTipo);
       const signed = applySign(tipo, split.sinIva, split.iva, 0, round2(split.sinIva + split.iva));
       const party = resolveParty(r.customer_cuit, r.customer_name);
-      const fechaRaw = r.fecha instanceof Date ? r.fecha.toISOString().slice(0, 10) : String(r.fecha || '').slice(0, 10);
+      const fechaRaw = tryYmdArgentina(r.fecha) ?? '';
       out.push({
         tipo,
         fecha: fechaRaw,
@@ -2047,7 +2037,7 @@ export const exportVentasJurisdiccionMlXlsx = async (req: Request, res: Response
         }
         const signed = applySign(tipo, sinIva, iva, otros, importe);
         const party = resolveParty(r.doc_nro);
-        const fechaRaw = r.fecha instanceof Date ? r.fecha.toISOString().slice(0, 10) : String(r.fecha || '').slice(0, 10);
+        const fechaRaw = tryYmdArgentina(r.fecha) ?? '';
         out.push({
           tipo,
           fecha: fechaRaw,
@@ -2190,7 +2180,7 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
     const whereFacSql = whereFac.length ? `WHERE ${whereFac.join(' AND ')}` : '';
 
     await ensureAgipPadronTable();
-    const period = String((toDate || fromDate || new Date().toISOString().slice(0, 10)).replace(/-/g, '')).slice(0, 6);
+    const period = String((toDate || fromDate || todayYmdArgentina()).replace(/-/g, '')).slice(0, 6);
 
     const ncWhere: string[] = [
       'COALESCE(cn.superseded_by_reinvoice, 0) = 1',
@@ -2290,7 +2280,7 @@ export const exportRetPerTxt = async (req: Request, res: Response) => {
       });
     }
 
-    const monthTag = (toDate || fromDate || new Date().toISOString().slice(0, 10)).replace(/-/g, '').slice(0, 6);
+    const monthTag = (toDate || fromDate || todayYmdArgentina()).replace(/-/g, '').slice(0, 6);
     const filename = `RetPer_${monthTag}.txt`;
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);

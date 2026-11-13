@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Loader2, ChevronLeft, ChevronRight, ExternalLink, Calendar, X, Bot, Send, Sparkles, Trash2 } from 'lucide-react';
 import { api } from '../services/api';
+import { formatDateTimeAr } from '../utils/formatDate';
 
 type QStatus = '' | 'ANSWERED' | 'UNANSWERED';
 type AiMode = 'off' | 'suggest' | 'auto';
@@ -274,8 +275,7 @@ const MercadoLibreQuestions: React.FC = () => {
   const formatDt = (iso: string | null) => {
     if (!iso) return '—';
     try {
-      const d = new Date(iso);
-      return d.toLocaleString('es-AR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+      return formatDateTimeAr(iso, { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     } catch {
       return iso;
     }

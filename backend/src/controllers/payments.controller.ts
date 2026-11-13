@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { tryYmdArgentina } from '../utils/argentinaDate';
 import { query, execute, get } from '../database/db';
 import { v4 as uuidv4 } from 'uuid';
 import * as XLSX from 'xlsx';
@@ -421,9 +422,7 @@ export const listPayments = async (req: any, res: Response) => {
           return `${yyyy}-${mm}-${dd}`;
         }
       }
-      const d = new Date(v);
-      if (Number.isNaN(d.getTime())) return String(v || '').slice(0, 10);
-      return d.toISOString().slice(0, 10);
+      return tryYmdArgentina(v) ?? String(v || '').slice(0, 10);
     };
     const normalizeNumber = (v: any) => String(v || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
     const normalizeAmount = (v: any) => parseMoney(v).toFixed(2);
@@ -1356,10 +1355,7 @@ function normalizeReceiptNumberStrict(v: unknown): string {
 
 function toSqlDate(value: any): string | null {
   if (!value) return null;
-  if (value instanceof Date && !isNaN(value.getTime())) return value.toISOString().slice(0, 10);
-  const d = new Date(value);
-  if (isNaN(d.getTime())) return null;
-  return d.toISOString().slice(0, 10);
+  return tryYmdArgentina(value);
 }
 
 /** Importar pagos desde uno o más Excel (filas REC). */

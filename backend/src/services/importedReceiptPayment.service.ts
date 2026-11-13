@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import { tryYmdArgentina } from '../utils/argentinaDate';
 import { execute, get, query } from '../database/db';
 
 function normalizeReceiptNumberStrict(v: unknown): string {
@@ -34,9 +35,7 @@ function toSqlDate(value: unknown): string {
       return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
     }
   }
-  const d = new Date(value as string | number | Date);
-  if (Number.isNaN(d.getTime())) return String(value || '').slice(0, 10);
-  return d.toISOString().slice(0, 10);
+  return tryYmdArgentina(value) ?? String(value || '').slice(0, 10);
 }
 
 export type ImportedReceiptEntry = {

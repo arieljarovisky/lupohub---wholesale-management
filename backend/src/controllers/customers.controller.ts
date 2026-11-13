@@ -41,6 +41,7 @@ import {
   SQL_CARTERA_MULTIMEDIA_SALDO_EXPR,
   SQL_WHERE_PAYMENT_SOLO_LUPOHUB
 } from '../sql/carteraImportedSql';
+import { todayYmdArgentina, tryYmdArgentina } from '../utils/argentinaDate';
 import {
   SQL_CUSTOMER_OPENING_BALANCE_EXPR,
   SQL_OPENING_AFIP_CN_DATE_WHERE,
@@ -388,7 +389,7 @@ export const exportCustomersIndividualXlsx = async (req: Request, res: Response)
 
     const out = await workbook.xlsx.writeBuffer();
     const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out as ArrayBufferLike));
-    const filename = `clientes_individuales_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const filename = `clientes_individuales_${todayYmdArgentina()}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     return res.send(buf);
@@ -651,7 +652,7 @@ export const exportCustomersBySheetsXlsx = async (req: Request, res: Response) =
 
     const out = await workbook.xlsx.writeBuffer();
     const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out as ArrayBufferLike));
-    const filename = `clientes_por_hoja_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const filename = `clientes_por_hoja_${todayYmdArgentina()}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     return res.send(buf);
@@ -1284,7 +1285,7 @@ export const exportCustomersBulkUpdateXlsx = async (req: Request, res: Response)
 
     const out = await workbook.xlsx.writeBuffer();
     const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out as ArrayBufferLike));
-    const filename = `clientes_actualizacion_masiva_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const filename = `clientes_actualizacion_masiva_${todayYmdArgentina()}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     return res.send(buf);
@@ -2608,7 +2609,7 @@ export const exportSaldosPendientesCsv = async (req: Request, res: Response) => 
     );
   }
   const csv = lines.join('\r\n');
-  const filename = `saldos_pendientes_${new Date().toISOString().slice(0, 10)}.csv`;
+  const filename = `saldos_pendientes_${todayYmdArgentina()}.csv`;
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   res.send('\uFEFF' + csv);
@@ -2886,7 +2887,7 @@ export const exportSaldosPendientesDetalleXlsx = async (req: Request, res: Respo
 
     const out = await workbook.xlsx.writeBuffer();
     const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out as ArrayBufferLike));
-    const filename = `saldos_pendientes_detalle_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const filename = `saldos_pendientes_detalle_${todayYmdArgentina()}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     return res.send(buf);
@@ -3118,7 +3119,7 @@ export const exportSaldosMovimientosSistemaXlsx = async (req: Request, res: Resp
 
     const out = await workbook.xlsx.writeBuffer();
     const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out as ArrayBufferLike));
-    const filename = `movimientos_sistema_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const filename = `movimientos_sistema_${todayYmdArgentina()}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     return res.send(buf);
@@ -4030,7 +4031,7 @@ export const exportSaldosPendientesByCustomerSheetsXlsx = async (req: Request, r
 
     const out = await workbook.xlsx.writeBuffer();
     const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out as ArrayBufferLike));
-    const datePart = new Date().toISOString().slice(0, 10);
+    const datePart = todayYmdArgentina();
     const sellerNameFromFilter =
       sellerIdFilter && customers.length > 0
         ? String(customers.find((x) => String(x.seller_id || '') === sellerIdFilter)?.seller_name || '').trim()
@@ -4403,7 +4404,7 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
     { key: 'movs', width: 13 }
   ];
 
-  const reportDate = new Date().toISOString().slice(0, 10);
+  const reportDate = todayYmdArgentina();
   const infoText = `Saldos pendientes por cliente y vendedor | Clientes: ${mergedList.length} | Fecha: ${reportDate}`;
   ws.addRow([infoText, '', '', '', '', '', '', '', '']);
   ws.mergeCells(1, 1, 1, 9);
@@ -4635,7 +4636,7 @@ export const exportSaldosPendientesMultimediasXlsx = async (req: Request, res: R
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader(
     'Content-Disposition',
-    `attachment; filename="saldos_pendientes_resumen_${new Date().toISOString().slice(0, 10)}.xlsx"`
+    `attachment; filename="saldos_pendientes_resumen_${todayYmdArgentina()}.xlsx"`
   );
   res.send(buf);
 };
@@ -4876,14 +4877,7 @@ function parseAfipCbteFchToYmd(v: unknown): string | null {
 
 function orderDateToYmd(v: unknown): string | null {
   if (!v) return null;
-  if (v instanceof Date && !Number.isNaN(v.getTime())) return v.toISOString().slice(0, 10);
-  const s = String(v).trim();
-  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
-  const ar = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (ar) return `${ar[3]}-${ar[2].padStart(2, '0')}-${ar[1].padStart(2, '0')}`;
-  const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+  return tryYmdArgentina(v);
 }
 
 function ymdToMysqlDatetime(ymd: string | null | undefined): string | null {
@@ -5784,19 +5778,8 @@ async function buildCustomerFinancialSummary(
     return Number.isFinite(n) ? n : 0;
   };
   const normalizeDate = (v: any): string => {
-    if (typeof v === 'string') {
-      const raw = v.trim();
-      const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-      if (m) {
-        const dd = m[1].padStart(2, '0');
-        const mm = m[2].padStart(2, '0');
-        const yyyy = m[3];
-        return `${yyyy}-${mm}-${dd}`;
-      }
-    }
-    const d = new Date(v);
-    if (Number.isNaN(d.getTime())) return String(v || '').slice(0, 10);
-    return d.toISOString().slice(0, 10);
+    if (v == null || v === '') return '';
+    return tryYmdArgentina(v) ?? String(v).slice(0, 10);
   };
   const normalizeDoc = (v: any) => String(v || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
   const classifyImportedEntry = (tipoRaw: string, detalleRaw: string): 'FACTURA' | 'NC' | 'RECIBO' | null => {
@@ -6037,7 +6020,7 @@ export const exportCustomerFinancialSummaryXlsx = async (req: Request, res: Resp
 
     const out = await wb.xlsx.writeBuffer();
     const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out as ArrayBufferLike));
-    const filename = `saldo_facturas_recibos_${includeTango ? 'con_tango_' : ''}${(customer.business_name || customer.name || customer.id).toString().replace(/[^\w\-]+/g, '_').slice(0, 40)}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const filename = `saldo_facturas_recibos_${includeTango ? 'con_tango_' : ''}${(customer.business_name || customer.name || customer.id).toString().replace(/[^\w\-]+/g, '_').slice(0, 40)}_${todayYmdArgentina()}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     return res.send(buf);
@@ -6395,7 +6378,7 @@ export const exportCustomerDetailXlsx = async (req: Request, res: Response) => {
     ws.getColumn('E').numFmt = '#,##0.00';
     const out = await wb.xlsx.writeBuffer();
     const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out as ArrayBufferLike));
-    const filename = `cliente_detalle_${(customer.business_name || customer.name || customer.id).toString().replace(/[^\w\-]+/g, '_').slice(0, 40)}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const filename = `cliente_detalle_${(customer.business_name || customer.name || customer.id).toString().replace(/[^\w\-]+/g, '_').slice(0, 40)}_${todayYmdArgentina()}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     return res.send(buf);

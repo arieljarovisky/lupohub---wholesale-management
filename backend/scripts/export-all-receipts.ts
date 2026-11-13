@@ -10,6 +10,7 @@
 import path from 'path';
 import * as XLSX from 'xlsx';
 import { query } from '../src/database/db';
+import { todayYmdArgentina, tryYmdArgentina } from '../src/utils/argentinaDate';
 
 type ReceiptRow = {
   origen: string;
@@ -58,16 +59,14 @@ function normalizeDate(v: unknown): string {
     }
     if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
   }
-  const d = new Date(v as string | number | Date);
-  if (Number.isNaN(d.getTime())) return String(v || '').slice(0, 10);
-  return d.toISOString().slice(0, 10);
+  return tryYmdArgentina(v) ?? String(v || '').slice(0, 10);
 }
 
 function formatTime(v: unknown): string {
   if (!v) return '';
   const d = new Date(v as string | number | Date);
   if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  return d.toLocaleTimeString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires', hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
 function normalizeNumber(v: unknown): string {
@@ -293,7 +292,7 @@ async function main() {
   const args = process.argv.slice(2);
   const sistemaOnly = args.includes('--sistema');
   const outArg = args.find((a) => !a.startsWith('--'));
-  const dateTag = new Date().toISOString().slice(0, 10);
+  const dateTag = todayYmdArgentina();
 
   const outPath =
     outArg ||

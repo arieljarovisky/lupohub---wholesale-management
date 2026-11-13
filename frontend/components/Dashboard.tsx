@@ -3,7 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { DollarSign, Package, AlertTriangle, Cloud, Zap, ShoppingCart, RefreshCw, Loader2, Award, AlertCircle, Calendar, ClipboardList, Clock, ChevronDown, ChevronRight, User, MapPin } from 'lucide-react';
 import { Product, Order, OrderStatus, Role } from '../types';
 import { api } from '../services/api';
-import { formatOrderDate } from '../utils/formatDate';
+import { formatOrderDate, ymdArgentina } from '../utils/formatDate';
 
 interface CustomerForDashboard {
   id: string;
@@ -39,8 +39,8 @@ const Dashboard: React.FC<DashboardProps> = ({ products: propProducts, orders, r
     const from = new Date();
     from.setDate(from.getDate() - days);
     return {
-      from: from.toISOString().split('T')[0],
-      to: to.toISOString().split('T')[0]
+      from: ymdArgentina(from),
+      to: ymdArgentina(to)
     };
   };
 

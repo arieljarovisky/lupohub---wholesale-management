@@ -405,7 +405,7 @@ function buildPnlSheet(wb: ExcelJS.Workbook, summary: CompanyFinanceExcelSummary
   setupSheet(ws, 6);
   ws.columns = [{ width: 44 }, { width: 18 }, { width: 14 }, { width: 52 }];
 
-  const generated = new Date().toLocaleString('es-AR');
+  const generated = new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' });
   writeBanner(
     ws,
     'LupoHub — Resultados de la empresa',

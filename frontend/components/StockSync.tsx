@@ -20,6 +20,7 @@ import { ArticleHistory, stockSyncApi, StockSyncOverview, SyncVariant, VariantLi
 import StockDayCompare from './StockDayCompare';
 import { useNotification } from '../context/NotificationContext';
 import { INVENTORY_STORAGE_KEY } from '../utils/inventoryUtils';
+import { formatDateTimeAr } from '../utils/formatDate';
 
 const REFRESH_MS = 15000;
 const PAGE = 15;
@@ -65,9 +66,7 @@ function WholesaleLine({ w }: { w: WholesaleOrderRef | null | undefined }) {
 
 function clock(value: string | null | undefined): string {
   if (!value) return '';
-  const d = new Date(value);
-  if (isNaN(d.getTime())) return '';
-  return d.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return formatDateTimeAr(value, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
 function variantName(v: SyncVariant | null | undefined): string {

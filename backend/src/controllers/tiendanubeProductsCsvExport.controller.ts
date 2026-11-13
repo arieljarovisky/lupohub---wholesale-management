@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import axios from 'axios';
 import { get } from '../database/db';
+import { todayYmdArgentina } from '../utils/argentinaDate';
 
 const TN_USER_AGENT = process.env.TIENDA_NUBE_USER_AGENT || 'LupoHub (support@lupo.ar)';
 const TN_BASE = 'https://api.tiendanube.com/v1';
@@ -117,7 +118,7 @@ export const exportTiendaNubeProductsCsv = async (req: Request, res: Response) =
       lines.push([csvEscape(id), csvEscape(name), csvEscape(sku), csvEscape(url)].join(','));
     }
 
-    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const stamp = todayYmdArgentina().replace(/-/g, '');
     const body = lines.join('\n') + '\n';
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="productos_tiendanube_${stamp}.csv"`);

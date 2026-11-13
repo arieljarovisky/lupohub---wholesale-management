@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { query, execute, get } from '../database/db';
 import { v4 as uuidv4 } from 'uuid';
+import { todayYmdArgentina } from '../utils/argentinaDate';
 import {
   applyFobToDespachoItems,
   persistDespachoFobFromList,
@@ -466,7 +467,7 @@ export const asignarDespachoATodos = async (req: Request, res: Response) => {
       return res.status(400).json({ message: 'Número de despacho es requerido' });
     }
 
-    const fecha = fecha_despacho || new Date().toISOString().split('T')[0];
+    const fecha = fecha_despacho || todayYmdArgentina();
 
     const productos = await query(`
       SELECT 

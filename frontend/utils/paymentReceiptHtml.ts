@@ -10,6 +10,7 @@ import {
   type PaymentMethodValue,
 } from './paymentMethods';
 import type { FacturaRemitente } from './wholesaleInvoiceHtml';
+import { tryYmdArgentina } from './formatDate';
 
 function escapeHtmlText(s: string): string {
   return String(s)
@@ -19,36 +20,19 @@ function escapeHtmlText(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function parseYmdLocal(raw: string): Date | null {
-  const s = String(raw || '').trim();
-  const ymd = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (ymd) {
-    const d = new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]));
-    return Number.isNaN(d.getTime()) ? null : d;
-  }
-  const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
-  if (dmy) {
-    const year = Number(dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3]);
-    const d = new Date(year, Number(dmy[2]) - 1, Number(dmy[1]));
-    return Number.isNaN(d.getTime()) ? null : d;
-  }
-  return null;
-}
-
 /** Fecha del talonario: DD-MM-YY */
 function formatFechaTalonario(raw: string): string {
-  const d = parseYmdLocal(raw);
-  if (!d) return String(raw || '').trim() || '';
-  const dd = String(d.getDate()).padStart(2, '0');
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const yy = String(d.getFullYear()).slice(-2);
-  return `${dd}-${mm}-${yy}`;
+  const ymd = tryYmdArgentina(raw);
+  if (!ymd) return String(raw || '').trim() || '';
+  const [y, m, d] = ymd.split('-');
+  return `${d}-${m}-${y.slice(-2)}`;
 }
 
 function formatFechaDmy(raw: string): string {
-  const d = parseYmdLocal(raw);
-  if (!d) return String(raw || '').trim() || '';
-  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+  const ymd = tryYmdArgentina(raw);
+  if (!ymd) return String(raw || '').trim() || '';
+  const [y, m, d] = ymd.split('-');
+  return `${d}/${m}/${y}`;
 }
 
 /** Nº 0001 - 00021103 cuando se puede normalizar; si no, el texto tal cual. */

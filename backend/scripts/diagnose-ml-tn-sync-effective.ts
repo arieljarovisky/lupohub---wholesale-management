@@ -15,6 +15,7 @@ import axios from 'axios';
 import * as XLSX from 'xlsx';
 import { query } from '../src/database/db';
 import { getValidMLToken } from '../src/controllers/integrations.controller';
+import { todayYmdArgentina } from '../src/utils/argentinaDate';
 
 type MlItem = { id: string; status?: string; variations?: { id: number | string }[] } | null;
 
@@ -247,7 +248,7 @@ async function main() {
   printGroup('NO SE ACTUALIZAN EN MERCADO LIBRE', mlBroken);
   printGroup('NO SE ACTUALIZAN EN TIENDA NUBE', tnBroken);
 
-  const outPath = path.join(process.cwd(), `variantes-sin-sync-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  const outPath = path.join(process.cwd(), `variantes-sin-sync-${todayYmdArgentina()}.xlsx`);
   const toSheet = (rows: ResultRow[]) =>
     XLSX.utils.json_to_sheet(
       rows.map((r) => ({

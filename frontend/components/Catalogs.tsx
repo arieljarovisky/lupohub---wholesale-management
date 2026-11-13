@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { BookOpen, Upload, Link as LinkIcon, Trash2, ExternalLink, Loader2, FileText, X, AlertCircle } from 'lucide-react';
 import { Role, PriceList } from '../types';
 import { api } from '../services/api';
+import { formatDateAr } from '../utils/formatDate';
 import TiendaNubeCatalogView from './TiendaNubeCatalog';
 
 interface CatalogItem {
@@ -126,7 +127,7 @@ const Catalogs: React.FC<CatalogsProps> = ({ role, priceLists = [], userId = '' 
 
   const formatDate = (d: string) => {
     try {
-      return new Date(d).toLocaleDateString('es-AR', { day: '2-digit', month: 'short', year: 'numeric' });
+      return formatDateAr(d, { day: '2-digit', month: 'short', year: 'numeric' });
     } catch {
       return d;
     }

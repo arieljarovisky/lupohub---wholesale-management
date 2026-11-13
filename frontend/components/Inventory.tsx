@@ -33,6 +33,7 @@ import {
   getPublicationStockHint
 } from '../utils/mercadoLibreItemId';
 import { normalizeTiendaNubeProductId, extractTiendaNubeVariantFromUrl } from '../utils/tiendaNubeUrl';
+import { formatDateTimeAr, todayYmdArgentina } from '../utils/formatDate';
 
 /** Referencia estable: cuando no hay filtro ML≠TN, el agrupado no debe recalcularse por cada actualización de stocks externos. */
 const STABLE_EMPTY_EXTERNAL_STOCKS: Record<string, { stockML?: number; stockTN?: number; stockLupoShop?: number }> =
@@ -531,17 +532,14 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     }
   };
 
-  const formatMovementDateTime = (value: string) => {
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return value || '—';
-    return d.toLocaleString('es-AR', {
+  const formatMovementDateTime = (value: string) =>
+    formatDateTimeAr(value, {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit'
-    });
-  };
+    }) || value || '—';
 
   const movementTypeLabel = (type: string) => {
     const labels: Record<string, string> = {
@@ -869,7 +867,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       const worksheet = XLSX.utils.json_to_sheet(excelRows);
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Inventario');
-      const filename = `inventario_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const filename = `inventario_${todayYmdArgentina()}.xlsx`;
       XLSX.writeFile(workbook, filename);
       showToast('success', `Exportadas ${rows.length.toLocaleString('es-AR')} variantes.`);
     } catch (e) {
@@ -925,7 +923,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       const worksheet = XLSX.utils.json_to_sheet(excelRows);
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Sync ML-TN');
-      const filename = `sync_ml_tn_errores_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      const filename = `sync_ml_tn_errores_${todayYmdArgentina()}.xlsx`;
       XLSX.writeFile(workbook, filename);
       showToast('success', `Exportados ${rows.length} artículo(s) con problemas de sincronización.`);
     } catch (e: any) {

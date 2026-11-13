@@ -116,3 +116,12 @@ export const DAMIAN_TASKS_BANNER_UNTIL_MS = Date.parse('2026-05-15T11:00:00-03:0
 
 /** Usuario habilitado para asignar tareas con carteles temporales. */
 export const ARIEL_TASKS_OWNER_EMAIL = 'ariel@lupo.ar';
+
+/**
+ * Cartel de pantalla completa solo para facundo@lupo.ar.
+ * Horario Argentina (UTC−3): desde el sábado 14/11/2026 a las 09:00 hasta el final de ese día.
+ */
+export const FACUNDO_ML_PRICES_BANNER_EMAIL = 'facundo@lupo.ar';
+export const FACUNDO_ML_PRICES_BANNER_FROM_MS = Date.parse('2026-11-14T09:00:00-03:00');
+export const FACUNDO_ML_PRICES_BANNER_UNTIL_MS = Date.parse('2026-11-15T00:00:00-03:00');
+export const FACUNDO_ML_PRICES_BANNER_DISMISS_KEY = 'lupo_facundo_ml_prices_banner_2026-11-14';

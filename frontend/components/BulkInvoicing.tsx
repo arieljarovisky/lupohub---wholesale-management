@@ -3,6 +3,7 @@ import { RefreshCw, Loader2, FileText, ChevronLeft, ChevronRight, Download } fro
 import TiendaNubeOrders from './TiendaNubeOrders';
 import MercadoLibreOrders from './MercadoLibreOrders';
 import { api } from '../services/api';
+import { formatDateTimeAr } from '../utils/formatDate';
 import { openExternalInvoicePdf } from '../utils/externalInvoicePdf';
 
 type SourceFilter = 'ALL' | 'TIENDANUBE' | 'MERCADOLIBRE';
@@ -217,7 +218,7 @@ const BulkInvoicing: React.FC = () => {
               <tbody>
                 {history.map((h) => (
                   <tr key={h.id} className="border-t border-slate-700/30">
-                    <td className="p-3 text-slate-300">{h.createdAt ? new Date(h.createdAt).toLocaleString('es-AR') : '-'}</td>
+                    <td className="p-3 text-slate-300">{h.createdAt ? formatDateTimeAr(h.createdAt) : '-'}</td>
                     <td className="p-3">
                       <span className={`px-2 py-1 rounded-lg text-xs font-bold ${h.source === 'TIENDANUBE' ? 'bg-cyan-700/30 text-cyan-300' : 'bg-yellow-700/30 text-yellow-300'}`}>
                         {h.source === 'TIENDANUBE' ? 'TN' : 'ML'}
@@ -330,7 +331,7 @@ const BulkInvoicing: React.FC = () => {
               <div className="text-slate-400">Total</div><div className="text-white font-semibold">${Number(selectedInvoice.total || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 })}</div>
               <div className="text-slate-400">Comprobante</div><div className="text-white font-semibold">{selectedInvoice.cbteTipo} - {selectedInvoice.cbteDesde}</div>
               <div className="text-slate-400">CAE</div><div className="text-emerald-300 font-mono">{selectedInvoice.cae}</div>
-              <div className="text-slate-400">Fecha</div><div className="text-white">{selectedInvoice.createdAt ? new Date(selectedInvoice.createdAt).toLocaleString('es-AR') : '-'}</div>
+              <div className="text-slate-400">Fecha</div><div className="text-white">{selectedInvoice.createdAt ? formatDateTimeAr(selectedInvoice.createdAt) : '-'}</div>
               <div className="text-slate-400">NC</div><div className="text-white">{selectedInvoice.hasCreditNote ? `Sí (${selectedInvoice.creditNote?.cbteTipo}-${selectedInvoice.creditNote?.cbteDesde || ''})` : 'No emitida'}</div>
             </div>
             <div className="flex justify-end gap-2 pt-2">

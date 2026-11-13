@@ -13,6 +13,7 @@ import path from 'path';
 import * as XLSX from 'xlsx';
 import { query } from '../src/database/db';
 import { diagnoseMlTnSyncIssues, getValidMLToken } from '../src/controllers/integrations.controller';
+import { todayYmdArgentina } from '../src/utils/argentinaDate';
 
 async function main() {
   const onlyWithStock = !process.argv.includes('--all');
@@ -76,7 +77,7 @@ async function main() {
     );
   }
 
-  const outPath = path.join(process.cwd(), `diagnostico-sync-ml-tn-${new Date().toISOString().slice(0, 10)}.xlsx`);
+  const outPath = path.join(process.cwd(), `diagnostico-sync-ml-tn-${todayYmdArgentina()}.xlsx`);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(
     wb,

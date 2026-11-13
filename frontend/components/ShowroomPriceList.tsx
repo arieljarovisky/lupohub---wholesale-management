@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Search, RefreshCw, Loader2, AlertCircle, ExternalLink, Package, Tag } from 'lucide-react';
 import { api, ShowroomPriceItem, ShowroomPriceList } from '../services/api';
+import { formatDateAr } from '../utils/formatDate';
 
 const PAGE_SIZE = 80;
 
@@ -147,7 +148,7 @@ const ShowroomPriceListView: React.FC = () => {
   }, [data]);
 
   const updatedLabel = data?.generatedAt
-    ? new Date(data.generatedAt).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
+    ? formatDateAr(data.generatedAt, { hour: '2-digit', minute: '2-digit' })
     : '';
 
   return (

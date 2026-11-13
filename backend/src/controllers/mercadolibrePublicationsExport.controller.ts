@@ -4,6 +4,7 @@ import ExcelJS from 'exceljs';
 import { query } from '../database/db';
 import { getValidMLToken, normalizeMercadoLibreItemId } from './integrations.controller';
 import { lookupFobPrice, resolveFobPriceList } from '../utils/channelMarginUtils';
+import { todayYmdArgentina, ymdArgentina } from '../utils/argentinaDate';
 
 const ML_SYNC_MAX_ITEMS = Math.max(100, parseInt(process.env.ML_SYNC_MAX_ITEMS || '5000', 10));
 const ADS_LOOKBACK_DAYS = 30;
@@ -435,8 +436,8 @@ export const exportMercadolibrePublicationsXlsx = async (req: Request, res: Resp
       return res.status(400).json({ message: 'No hay integración con Mercado Libre o token inválido' });
     }
 
-    const toYmd = (d: Date) => d.toISOString().slice(0, 10);
-    const todayYmd = toYmd(new Date());
+    const toYmd = (d: Date) => ymdArgentina(d);
+    const todayYmd = todayYmdArgentina();
     const qFrom = asYmd(req.query.from || req.query.desde);
     const qTo = asYmd(req.query.to || req.query.hasta);
     const dateToStr = qTo || todayYmd;

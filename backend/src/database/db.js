@@ -35,7 +35,8 @@ function getPoolConfig() {
                 port: parsed.port ? Number(parsed.port) : 3306,
                 waitForConnections: true,
                 connectionLimit: 10,
-                queueLimit: 0
+                queueLimit: 0,
+                timezone: 'Z'
             };
         }
         catch (e) {
@@ -51,7 +52,8 @@ function getPoolConfig() {
         port: Number(process.env.DB_PORT) || 3306,
         waitForConnections: true,
         connectionLimit: 10,
-        queueLimit: 0
+        queueLimit: 0,
+        timezone: 'Z'
     };
 }
 exports.pool = promise_1.default.createPool(getPoolConfig());

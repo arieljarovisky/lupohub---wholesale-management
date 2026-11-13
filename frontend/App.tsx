@@ -3,6 +3,7 @@ import Sidebar from './components/Sidebar';
 import { channelLogoForView } from './components/ChannelLogos';
 import { LayoutDashboard, Package, ShoppingCart, Users, Settings as SettingsIcon, MapPin, LogIn, Lock, AlertCircle, Loader2, Menu, Ship, ShoppingBag, Zap, LogOut, BookOpen, FileText, DollarSign, Percent, Megaphone, Wallet, ChevronRight, MessageCircle, Star, RefreshCw, PackagePlus, Route, Tag, ScanLine } from 'lucide-react';
 import { isCompanyFinanceUser, COMPANY_FINANCE_VIEW } from './utils/companyFinanceAccess';
+import { formatDateAr, formatDateTimeAr } from './utils/formatDate';
 import {
   MARKETING_HUB_VIEW,
   MARKETING_TOP_PRODUCTS_VIEW,
@@ -20,6 +21,10 @@ import {
   DAMIAN_TASKS_BANNER_FROM_MS,
   DAMIAN_TASKS_BANNER_UNTIL_MS,
   ARIEL_TASKS_OWNER_EMAIL,
+  FACUNDO_ML_PRICES_BANNER_EMAIL,
+  FACUNDO_ML_PRICES_BANNER_FROM_MS,
+  FACUNDO_ML_PRICES_BANNER_UNTIL_MS,
+  FACUNDO_ML_PRICES_BANNER_DISMISS_KEY,
 } from './constants';
 import { Role, OrderStatus, User, Order, Product, Attribute, Customer, OrderItem, PriceList, Transporte, UserTask } from './types';
 import { api } from './services/api';
@@ -143,6 +148,29 @@ const App: React.FC = () => {
   /** Lista de precios elegida al crear/editar pedido (null = precio base). Solo aplica para ADMIN/WAREHOUSE. */
   const [createOrderPriceListId, setCreateOrderPriceListId] = useState<string | null>(null);
   const [myUserTasks, setMyUserTasks] = useState<UserTask[]>([]);
+  const [facundoBannerNowMs, setFacundoBannerNowMs] = useState(() => Date.now());
+  const [facundoBannerDismissed, setFacundoBannerDismissed] = useState(() => {
+    try {
+      return sessionStorage.getItem(FACUNDO_ML_PRICES_BANNER_DISMISS_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    const email = currentUser?.email?.trim().toLowerCase();
+    if (email !== FACUNDO_ML_PRICES_BANNER_EMAIL) return;
+    setFacundoBannerNowMs(Date.now());
+    if (Date.now() >= FACUNDO_ML_PRICES_BANNER_UNTIL_MS) return;
+    const timers: number[] = [];
+    const arm = (at: number) => {
+      const delay = at - Date.now();
+      if (delay <= 0 || delay > 2_147_483_647) return;
+      timers.push(window.setTimeout(() => setFacundoBannerNowMs(Date.now()), delay));
+    };
+    arm(FACUNDO_ML_PRICES_BANNER_FROM_MS);
+    arm(FACUNDO_ML_PRICES_BANNER_UNTIL_MS);
+    return () => timers.forEach((id) => window.clearTimeout(id));
+  }, [currentUser?.email]);
   useEffect(() => {
     try {
       localStorage.setItem('lupo_sidebar_collapsed', sidebarCollapsed ? '1' : '0');
@@ -1082,11 +1110,63 @@ const App: React.FC = () => {
     currentUser.email.trim().toLowerCase() === DAMIAN_TASKS_BANNER_EMAIL &&
     nowMs >= DAMIAN_TASKS_BANNER_FROM_MS &&
     nowMs < DAMIAN_TASKS_BANNER_UNTIL_MS;
+  const showFacundoMlPricesBanner =
+    !!currentUser.email &&
+    currentUser.email.trim().toLowerCase() === FACUNDO_ML_PRICES_BANNER_EMAIL &&
+    facundoBannerNowMs >= FACUNDO_ML_PRICES_BANNER_FROM_MS &&
+    facundoBannerNowMs < FACUNDO_ML_PRICES_BANNER_UNTIL_MS &&
+    !facundoBannerDismissed;
   const canManageAssignedTasks =
     !!currentUser.email && currentUser.email.trim().toLowerCase() === ARIEL_TASKS_OWNER_EMAIL;
 
   return (
     <div className="flex w-full bg-slate-950 text-slate-200 flex-col md:flex-row min-h-[100dvh] h-[100dvh] md:h-screen overflow-hidden">
+      {showFacundoMlPricesBanner && (
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="facundo-ml-prices-title"
+          className="fixed inset-0 z-[10000] flex flex-col items-center justify-center overflow-y-auto px-4 py-5 sm:px-10 sm:py-10 text-center"
+          style={{ backgroundColor: '#ff0000' }}
+        >
+          <p className="font-black uppercase tracking-widest text-black text-lg sm:text-3xl md:text-5xl mb-3 sm:mb-6">
+            Urgente
+          </p>
+          <h2
+            id="facundo-ml-prices-title"
+            className="font-black uppercase text-black leading-[0.95] max-w-6xl"
+            style={{ fontSize: 'clamp(1.9rem, 7.2vw, 7.5rem)' }}
+          >
+            Bajar los precios urgente de Mercado Libre
+          </h2>
+          <p
+            className="mt-4 sm:mt-8 font-black uppercase text-black leading-tight max-w-5xl"
+            style={{ fontSize: 'clamp(1.25rem, 4.2vw, 4rem)' }}
+          >
+            No puede ser que una vedetina esté 51 mil pesos o boxers a 60 mil pesos
+          </p>
+          <p
+            className="mt-4 sm:mt-8 font-black uppercase text-black leading-tight max-w-5xl"
+            style={{ fontSize: 'clamp(1.15rem, 3.8vw, 3.4rem)' }}
+          >
+            Hace 2 semanas te dije que bajes el precio. Tiene que estar un 10% más caro que Tienda Nube
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              try {
+                sessionStorage.setItem(FACUNDO_ML_PRICES_BANNER_DISMISS_KEY, '1');
+              } catch {
+                /* ignore */
+              }
+              setFacundoBannerDismissed(true);
+            }}
+            className="mt-6 sm:mt-12 bg-black text-white font-black uppercase tracking-wide px-8 py-4 sm:py-5 rounded-2xl text-lg sm:text-2xl hover:bg-neutral-900"
+          >
+            Entendido, voy a bajar los precios
+          </button>
+        </div>
+      )}
       {!sidebarCollapsed && (
         <Sidebar
           currentView={baseView}
@@ -1184,7 +1264,7 @@ const App: React.FC = () => {
                 >
                   <p className="font-semibold">{t.message}</p>
                   <p className="text-xs text-amber-200/80 mt-1">
-                    Vigente hasta {new Date(t.expiresAt).toLocaleString('es-AR')}
+                    Vigente hasta {formatDateTimeAr(t.expiresAt)}
                   </p>
                 </div>
               ))}
@@ -1228,7 +1308,7 @@ const App: React.FC = () => {
                  {baseView === 'order_picking' && 'Preparando Pedido'}
                </h1>
                <p className="text-xs md:text-sm text-slate-400 mt-0.5">
-                 {new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })}
+                 {formatDateAr(new Date(), { weekday: 'long', day: 'numeric', month: 'long' })}
                </p>
              </div>
             {(currentUser.role === Role.ADMIN || currentUser.role === Role.WAREHOUSE) && baseView !== 'settings' && (

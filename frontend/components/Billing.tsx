@@ -21,7 +21,7 @@ import EmitDebitNoteModal from './EmitDebitNoteModal';
 import { FileSpreadsheet, Filter, RefreshCw, Search, Eye, Loader2, Percent, RefreshCcw, FileMinus, ExternalLink, Printer, MoreHorizontal, ChevronDown, Download, Upload, Wallet, FilePlus, FileText, Pencil, Trash2 } from 'lucide-react';
 import { useNotification } from '../context/NotificationContext';
 import { formatMoneyAr } from '../utils/moneyFormat';
-import { formatOrderDate } from '../utils/formatDate';
+import { formatOrderDate, todayYmdArgentina, tryYmdArgentina } from '../utils/formatDate';
 import { getStoredOrdersListFilters, setStoredOrdersListFilters } from '../utils/ordersListFilters';
 import { buildCityFilterOptions, cityMatchesFilter } from '../utils/cityNormalize';
 
@@ -95,7 +95,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const agipPadronInputRef = useRef<HTMLInputElement | null>(null);
   const [payReceipt, setPayReceipt] = useState('');
   const [payReceiptLoading, setPayReceiptLoading] = useState(false);
-  const [payDate, setPayDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [payDate, setPayDate] = useState<string>(todayYmdArgentina());
   const [payCustomerId, setPayCustomerId] = useState<string>('ALL');
   const [payInvoiceIds, setPayInvoiceIds] = useState<string[]>([]);
   const [payOrderIds, setPayOrderIds] = useState<string[]>([]);
@@ -137,7 +137,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
   const [showManualComprobanteModal, setShowManualComprobanteModal] = useState(false);
   const [manualTipo, setManualTipo] = useState<'FACTURA' | 'NC'>('FACTURA');
   const [manualCustomerId, setManualCustomerId] = useState('ALL');
-  const [manualFecha, setManualFecha] = useState(() => new Date().toISOString().slice(0, 10));
+  const [manualFecha, setManualFecha] = useState(() => todayYmdArgentina());
   const [manualLetra, setManualLetra] = useState<'A' | 'B'>('B');
   const [manualPuntoVta, setManualPuntoVta] = useState('21');
   const [manualNumero, setManualNumero] = useState('');
@@ -426,7 +426,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
         if (yyyymm) return `${yyyymm[1]}${yyyymm[2]}`;
         return '';
       })();
-      const periodFallback = (retPerMonth || hasta || desde || new Date().toISOString().slice(0, 10)).replace(/-/g, '').slice(0, 7).replace('-', '');
+      const periodFallback = (retPerMonth || hasta || desde || todayYmdArgentina()).replace(/-/g, '').slice(0, 7).replace('-', '');
       const period = periodFromFilename || periodFallback;
       const CHUNK_LINES = 1000;
       const CHARS_PER_READ = 2 * 1024 * 1024; // 2MB por lectura para no cargar todo el TXT en memoria
@@ -573,7 +573,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     setLinkTargetPayment(null);
     setLinkResolvedPaymentId(undefined);
     setPayReceipt('');
-    setPayDate(new Date().toISOString().slice(0, 10));
+    setPayDate(todayYmdArgentina());
     setPayCustomerId('ALL');
     setPayInvoiceIds([]);
     setPayOrderIds([]);
@@ -1132,16 +1132,8 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     return customers.filter((c) => cityMatchesFilter((c.city || '').toString(), province));
   }, [customers, province]);
   const normalizeDateKey = (v: any): string => {
-    if (!v) return '';
-    if (typeof v === 'string') {
-      const raw = v.trim();
-      const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-      if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
-      if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
-    }
-    const d = new Date(v);
-    if (Number.isNaN(d.getTime())) return String(v).slice(0, 10);
-    return d.toISOString().slice(0, 10);
+    if (v == null || v === '') return '';
+    return tryYmdArgentina(v) ?? '';
   };
   const filteredBillingItems = useMemo(() => {
     return items.filter((it: any) => {
@@ -1233,7 +1225,7 @@ const Billing: React.FC<BillingProps> = ({ role, customers, users = [], products
     setManualHasPdf(false);
     setManualTipo('FACTURA');
     setManualCustomerId(customerId !== 'ALL' ? customerId : 'ALL');
-    setManualFecha(new Date().toISOString().slice(0, 10));
+    setManualFecha(todayYmdArgentina());
     setManualLetra('B');
     setManualPuntoVta('21');
     setManualNumero('');

@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { api, MarketingLead, MarketingLeadMetrics } from '../services/api';
 import { formatMoneyAr } from '../utils/moneyFormat';
+import { formatDateAr } from '../utils/formatDate';
 import { useNotification } from '../context/NotificationContext';
 import {
   LEAD_SOURCES,
@@ -596,7 +597,7 @@ const MarketingLeads: React.FC = () => {
                             : '—'}
                         </td>
                         <td className="py-2.5 px-3 text-xs text-slate-500 whitespace-nowrap">
-                          {new Date(lead.enteredAt).toLocaleDateString('es-AR')}
+                          {formatDateAr(lead.enteredAt) || '—'}
                         </td>
                         <td className="py-2.5 px-3">
                           <button

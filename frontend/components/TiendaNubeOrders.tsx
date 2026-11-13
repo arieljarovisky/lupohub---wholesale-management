@@ -5,6 +5,7 @@ import { api } from '../services/api';
 import { getRemitente } from '../services/apiIntegration';
 import { openExternalInvoicePdf } from '../utils/externalInvoicePdf';
 import { buildTiendaNubeExpressLabelHtml, buildTiendaNubeExpressLabelInnerHtml, buildTiendaNubeExpressLabelsBulkHtml, EXPRESS_LABEL_CSS } from '../utils/tiendaNubeExpressLabelHtml';
+import { formatDateAr, formatDateTimeAr, todayYmdArgentina, ymdArgentina } from '../utils/formatDate';
 
 const EXPRESS_TRACKING_STATUS_OPTIONS = [
   { value: 'pending', label: 'Pendiente' },
@@ -76,11 +77,11 @@ interface TiendaNubeOrder {
 }
 
 const TiendaNubeOrders: React.FC = () => {
-  const todayIso = new Date().toISOString().split('T')[0];
+  const todayIso = todayYmdArgentina();
   const twoDaysAgoIso = (() => {
     const d = new Date();
     d.setDate(d.getDate() - 2);
-    return d.toISOString().split('T')[0];
+    return ymdArgentina(d);
   })();
   const [orders, setOrders] = useState<TiendaNubeOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -181,14 +182,11 @@ const TiendaNubeOrders: React.FC = () => {
     return method.length > 3;
   };
 
-  const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
-    return {
-      date: date.toLocaleDateString('es-AR', { day: '2-digit', month: 'short' }),
-      time: date.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }),
-      full: date.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
-    };
-  };
+  const formatDate = (dateStr: string) => ({
+    date: formatDateAr(dateStr, { day: '2-digit', month: 'short' }),
+    time: formatDateAr(dateStr, { hour: '2-digit', minute: '2-digit' }),
+    full: formatDateAr(dateStr, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+  });
 
   const formatCurrency = (value: string) => {
     return parseFloat(value).toLocaleString('es-AR', { minimumFractionDigits: 2 });
@@ -219,8 +217,8 @@ const TiendaNubeOrders: React.FC = () => {
     const to = new Date();
     const from = new Date();
     from.setDate(from.getDate() - days);
-    setDateFrom(from.toISOString().split('T')[0]);
-    setDateTo(to.toISOString().split('T')[0]);
+    setDateFrom(ymdArgentina(from));
+    setDateTo(ymdArgentina(to));
     setPage(1);
   };
 
@@ -318,12 +316,8 @@ const TiendaNubeOrders: React.FC = () => {
     const customerName = (order.customer?.name || 'Cliente').toString().trim();
     const customerEmail = (order.customer?.email || '').toString().trim();
     const customerPhone = (order.customer?.phone || '').toString().trim();
-    const createdAt = new Date(order.createdAt);
-    const createdAtStr = isNaN(createdAt.getTime())
-      ? String(order.createdAt)
-      : createdAt.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    const now = new Date();
-    const nowStr = now.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const createdAtStr = formatDateAr(order.createdAt, { day: '2-digit', month: '2-digit', year: 'numeric' }) || String(order.createdAt);
+    const nowStr = formatDateAr(new Date(), { day: '2-digit', month: '2-digit', year: 'numeric' });
     const shipping = order.shippingAddress;
     const line1 = shipping
       ? [shipping.address, shipping.number].filter(Boolean).join(' ').trim()
@@ -1201,7 +1195,7 @@ const TiendaNubeOrders: React.FC = () => {
                               </button>
                               {order.trackingStatusUpdatedAt && (
                                 <p className="text-xs text-slate-500">
-                                  Última actualización: {new Date(order.trackingStatusUpdatedAt).toLocaleString('es-AR')}
+                                  Última actualización: {formatDateTimeAr(order.trackingStatusUpdatedAt)}
                                 </p>
                               )}
                             </div>

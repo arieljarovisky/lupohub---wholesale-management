@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { ymdArgentina } from '../utils/argentinaDate';
 import { query, execute, get } from '../database/db';
 import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
@@ -1022,7 +1023,7 @@ export const importSalesHistory = async (req: Request, res: Response) => {
     // Calcular fecha desde
     const dateFrom = new Date();
     dateFrom.setDate(dateFrom.getDate() - days);
-    const dateFromStr = dateFrom.toISOString().split('T')[0];
+    const dateFromStr = ymdArgentina(dateFrom);
 
     logs.push(`Importando ventas de los últimos ${days} días (desde ${dateFromStr})`);
 

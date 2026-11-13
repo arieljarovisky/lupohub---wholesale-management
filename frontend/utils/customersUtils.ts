@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import { canonicalizeCityInput } from './cityNormalize';
+import { tryYmdArgentina } from './formatDate';
 
 export type CustomerImportRow = {
   name?: string;
@@ -198,18 +199,7 @@ function parseExcelNumber(v: string | number | undefined): number | string | nul
 
 function parseExcelDate(v: string | number | undefined): string | null | undefined {
   if (v == null || v === '') return undefined;
-  if (typeof v === 'number' && Number.isFinite(v)) {
-    const epoch = new Date(Date.UTC(1899, 11, 30));
-    const d = new Date(epoch.getTime() + v * 86400000);
-    if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
-  }
-  const s = String(v).trim();
-  if (!s) return undefined;
-  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
-  const dmy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
-  return s;
+  return tryYmdArgentina(v) ?? (typeof v === 'string' && v.trim() ? v.trim() : undefined);
 }
 
 /**

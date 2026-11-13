@@ -26,7 +26,7 @@ import {
   syncOrderPaymentStatus,
 } from '../services/orderPaymentBalance.service';
 import { calcFobYield, lookupFobPrice, resolveFobPriceList } from '../utils/channelMarginUtils';
-import { nowMysqlArgentina, todayYmdArgentina } from '../utils/argentinaDate';
+import { argentinaWallToIso, nowMysqlArgentina, todayYmdArgentina, ymdArgentina } from '../utils/argentinaDate';
 
 /** Evita dos POST simultáneos al mismo pedido; el segundo espera el mismo resultado AFIP. */
 const emitFacturaInFlight = new Map<string, Promise<Record<string, unknown>>>();
@@ -652,7 +652,7 @@ export const getOrders = async (req: any, res: any) => {
         cbteDesde: inv.cbte_desde,
         cbteHasta: inv.cbte_hasta,
         cbteTipo: inv.cbte_tipo,
-        createdAt: inv.created_at ? new Date(inv.created_at).toISOString() : undefined,
+        createdAt: argentinaWallToIso(inv.created_at),
         agipAlicuota: Number(inv.agip_alicuota || 0),
         agipRetPer: Number(inv.agip_ret_per || 0)
       };
@@ -984,16 +984,7 @@ async function persistNewWholesaleOrder(newOrder: Order, user: any, explicitOrde
     return buildPersistedOrderResponse(orderId, newOrder, []);
   }
 
-  const toSqlDate = (d: string) => {
-    try {
-      const dt = new Date(d);
-      if (isNaN(dt.getTime())) return new Date().toISOString().slice(0, 10);
-      return dt.toISOString().slice(0, 10);
-    } catch {
-      return new Date().toISOString().slice(0, 10);
-    }
-  };
-  const sqlDate = toSqlDate(newOrder.date);
+  const sqlDate = ymdArgentina(newOrder.date);
   let paymentStatus =
     (newOrder as any).paymentStatus === 'pagado' || (newOrder as any).paymentStatus === 'PAGADO' ? 'pagado' : 'pendiente';
   const noStockImpact = (newOrder as any).noStockImpact === true || (newOrder as any).no_stock_impact === 1 ? 1 : 0;
@@ -1389,7 +1380,7 @@ export const importOrdersFromMatrix = async (req: any, res: any) => {
     const body = req.body || {};
     const linesRaw = body.lines as MatrixImportLineInput[] | undefined;
     const dateStr =
-      typeof body.date === 'string' && body.date.trim() ? body.date.trim() : new Date().toISOString().slice(0, 10);
+      typeof body.date === 'string' && body.date.trim() ? body.date.trim() : todayYmdArgentina();
     if (!Array.isArray(linesRaw) || linesRaw.length === 0) {
       return res.status(400).json({ message: 'Se requiere body.lines: array no vacío' });
     }
@@ -1593,16 +1584,7 @@ export const updateOrder = async (req: any, res: any) => {
   }
   try {
     const despachoWarnings: string[] = [];
-    const toSqlDate = (d: string) => {
-      try {
-        const dt = new Date(d);
-        if (isNaN(dt.getTime())) return new Date().toISOString().slice(0, 10);
-        return dt.toISOString().slice(0, 10);
-      } catch {
-        return new Date().toISOString().slice(0, 10);
-      }
-    };
-    const sqlDate = toSqlDate(updated.date);
+    const sqlDate = ymdArgentina(updated.date);
     const sellerId = updated.sellerId ?? null;
     const before = await get('SELECT status, payment_status, no_stock_impact FROM orders WHERE id = ?', [id]);
     if (!before) return res.status(404).json({ message: 'Pedido no encontrado' });
@@ -2288,7 +2270,7 @@ export const reemitirFacturaConAgip = async (req: any, res: any) => {
           cbteHasta: faResult.cbteHasta,
           agipAlicuota: agip.alicuota,
           agipRetPer: agip.amount,
-          createdAt: emittedAt
+          createdAt: argentinaWallToIso(emittedAt)
         }
       });
     } catch (faErr: any) {
@@ -2353,7 +2335,7 @@ export const getOrderInvoice = async (req: any, res: any) => {
       cbteTipo: inv.cbte_tipo,
       cbteDesde: inv.cbte_desde,
       cbteHasta: inv.cbte_hasta,
-      createdAt: inv.created_at,
+      createdAt: argentinaWallToIso(inv.created_at),
       agipAlicuota: agip.alicuota,
       agipRetPer: agip.amount,
       monedaId: inv.moneda_id ?? undefined,
@@ -2584,7 +2566,7 @@ export const emitirFactura = async (req: any, res: any) => {
           cbteHasta: result.cbteHasta,
           agipAlicuota: isFacturaE ? 0 : agip?.alicuota ?? 0,
           agipRetPer: isFacturaE ? 0 : agip?.amount ?? 0,
-          createdAt: emittedAt,
+          createdAt: argentinaWallToIso(emittedAt),
           monedaId: result.monedaId,
           monedaCtz: result.monedaCtz,
           exportDstCmp: result.exportDstCmp,
@@ -3588,7 +3570,7 @@ export const exportTopWholesaleProductsMetricsXlsx = async (req: Request, res: R
 
     const out = await wb.xlsx.writeBuffer();
     const buf = Buffer.from(out instanceof ArrayBuffer ? new Uint8Array(out) : new Uint8Array(out as ArrayBufferLike));
-    const filename = `metricas_mayorista_top_articulos_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    const filename = `metricas_mayorista_top_articulos_${todayYmdArgentina()}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     return res.send(buf);
@@ -3806,7 +3788,7 @@ export const assignDespachosToOrderItems = async (req: Request, res: Response) =
           resolvedPais = paisOrigen || existing.pais_origen || null;
         } else {
           const newId = uuidv4();
-          const fecha = fechaDespachoRaw || new Date().toISOString().slice(0, 10);
+          const fecha = fechaDespachoRaw || todayYmdArgentina();
           const pais = paisOrigen || 'Brasil';
           await execute(
             `INSERT INTO despachos (id, numero_despacho, fecha_despacho, pais_origen, estado, notas)

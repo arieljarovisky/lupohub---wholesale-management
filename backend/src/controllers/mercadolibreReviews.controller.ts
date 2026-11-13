@@ -3,6 +3,7 @@ import axios from 'axios';
 import ExcelJS from 'exceljs';
 import { query } from '../database/db';
 import { getValidMLToken, normalizeMercadoLibreItemId } from './integrations.controller';
+import { todayYmdArgentina } from '../utils/argentinaDate';
 
 const ML_API = 'https://api.mercadolibre.com';
 const ML_REVIEWS_MAX_ITEMS = Math.max(50, parseInt(process.env.ML_REVIEWS_MAX_ITEMS || '2000', 10));
@@ -803,7 +804,7 @@ export const exportMercadoLibreReviewsXlsx = async (req: Request, res: Response)
     }
 
     const buffer = await wb.xlsx.writeBuffer();
-    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const stamp = todayYmdArgentina().replace(/-/g, '');
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="opiniones_mercadolibre_${stamp}.xlsx"`);
     res.send(Buffer.from(buffer));
@@ -876,7 +877,7 @@ export const exportMercadoLibreReviewsTiendaNubeCsv = async (req: Request, res: 
       }
     }
 
-    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const stamp = todayYmdArgentina().replace(/-/g, '');
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="opiniones_tiendanube_${stamp}.csv"`);
     res.send(`\uFEFF${lines.join('\r\n')}`);

@@ -22,7 +22,10 @@ function getPoolConfig(): mysql.PoolOptions {
         port: parsed.port ? Number(parsed.port) : 3306,
         waitForConnections: true,
         connectionLimit: 10,
-        queueLimit: 0
+        queueLimit: 0,
+        // Los DATETIME de la base están en UTC. 'Z' evita que una PC en Argentina
+        // los lea como hora local y los corra 3 horas.
+        timezone: 'Z'
       };
     } catch (e) {
       console.warn('[DB] Invalid MYSQL_URL/DATABASE_URL, using individual vars:', (e as Error).message);
@@ -37,7 +40,8 @@ function getPoolConfig(): mysql.PoolOptions {
     port: Number(process.env.DB_PORT) || 3306,
     waitForConnections: true,
     connectionLimit: 10,
-    queueLimit: 0
+    queueLimit: 0,
+    timezone: 'Z'
   };
 }
 

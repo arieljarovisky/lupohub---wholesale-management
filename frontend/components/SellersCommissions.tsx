@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { Customer, Order, Payment, Role, User } from '../types';
 import { api } from '../services/api';
+import { formatOrderDate, todayYmdArgentina } from '../utils/formatDate';
 import {
   commissionFromGross,
   commissionRateLabelForCustomers,
@@ -115,7 +116,7 @@ const SellersCommissions: React.FC<SellersCommissionsProps> = ({
   onUpdateUser,
   onUpdateCustomer
 }) => {
-  const todayYmd = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const todayYmd = useMemo(() => todayYmdArgentina(), []);
   const monthStartYmd = useMemo(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
@@ -1341,7 +1342,7 @@ function SellerDetailView({
                   </div>
                   <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-500">
                     <Calendar size={12} />
-                    {o.date ? new Date(o.date).toLocaleDateString('es-AR') : '—'}
+                    {o.date ? formatOrderDate(o.date) : '—'}
                     {o.paymentStatus ? (
                       <span className="ml-2 px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700">{o.paymentStatus}</span>
                     ) : null}

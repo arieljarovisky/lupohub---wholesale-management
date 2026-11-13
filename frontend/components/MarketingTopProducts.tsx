@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Award, Loader2, RefreshCw, BarChart3, Package, AlertTriangle, Search, Download } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { api } from '../services/api';
+import { ymdArgentina } from '../utils/formatDate';
 import { Order, OrderStatus } from '../types';
 import { useNotification } from '../context/NotificationContext';
 
@@ -92,8 +93,8 @@ const MarketingTopProducts: React.FC = () => {
     const from = new Date();
     from.setDate(from.getDate() - days);
     return {
-      from: from.toISOString().split('T')[0],
-      to: to.toISOString().split('T')[0]
+      from: ymdArgentina(from),
+      to: ymdArgentina(to)
     };
   };
 

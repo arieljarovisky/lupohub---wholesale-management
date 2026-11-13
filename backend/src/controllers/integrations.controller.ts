@@ -44,6 +44,7 @@ import {
   type StockSyncFailure,
 } from '../services/stockSyncJob.service';
 import ExcelJS from 'exceljs';
+import { todayYmdArgentina } from '../utils/argentinaDate';
 const ML_AUTH_URL = 'https://auth.mercadolibre.com.ar/authorization';
 const ML_TOKEN_URL = 'https://api.mercadolibre.com/oauth/token';
 
@@ -1892,7 +1893,9 @@ export const testMercadoLibreConnection = async (req: Request, res: Response) =>
         email: userRes.data.email,
         country: userRes.data.country_id,
         totalItems: itemsRes.data.paging?.total || itemsRes.data.results?.length || 0,
-        expiresAt: integration?.expires_at ? new Date(integration.expires_at).toLocaleString() : 'N/A'
+        expiresAt: integration?.expires_at
+          ? new Date(integration.expires_at).toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })
+          : 'N/A'
       }
     });
   } catch (error: any) {
@@ -3417,7 +3420,7 @@ export const exportStockSyncFailuresXlsx = async (req: Request, res: Response) =
     }
 
     const buf = await workbook.xlsx.writeBuffer();
-    const stamp = new Date().toISOString().slice(0, 10);
+    const stamp = todayYmdArgentina();
     const filename = `stock_no_actualizados_${platform}_${stamp}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -4910,7 +4913,7 @@ export const invoiceTiendaNubeOrdersBulk = async (req: Request, res: Response) =
         const afipResult = await emitirAfip(
           {
             id: `TN-${order.id}`,
-            date: String(order?.created_at || new Date().toISOString().slice(0, 10)),
+            date: String(order?.created_at || todayYmdArgentina()),
             total: billableTotal,
             customerId
           },
@@ -5066,7 +5069,7 @@ export const invoiceMercadoLibreOrdersBulk = async (req: Request, res: Response)
         payableOrders.push({
           orderId: String(order.id),
           total,
-          date: String(order?.date_created || new Date().toISOString().slice(0, 10)),
+          date: String(order?.date_created || todayYmdArgentina()),
           customerId: `ML-${order?.buyer?.id || order.id}`,
           customerName
         });

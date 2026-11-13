@@ -2,6 +2,7 @@ import path from 'path';
 import * as XLSX from 'xlsx';
 import { execute, query } from '../src/database/db';
 import { v4 as uuidv4 } from 'uuid';
+import { tryYmdArgentina } from '../src/utils/argentinaDate';
 
 type CustomerRow = {
   id: string;
@@ -39,12 +40,7 @@ function normalizeReceiptStrict(v: unknown): string {
 
 function toSqlDate(value: any): string | null {
   if (!value) return null;
-  if (value instanceof Date && !isNaN(value.getTime())) {
-    return value.toISOString().slice(0, 10);
-  }
-  const d = new Date(value);
-  if (isNaN(d.getTime())) return null;
-  return d.toISOString().slice(0, 10);
+  return tryYmdArgentina(value);
 }
 
 function toNumber(v: unknown): number {

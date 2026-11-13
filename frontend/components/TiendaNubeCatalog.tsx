@@ -48,6 +48,7 @@ import {
   pickBestColorSourceImage,
 } from '../utils/catalogColorCrop';
 import { Role, PriceList } from '../types';
+import { formatDateTimeAr } from '../utils/formatDate';
 
 /* ===================== Tipos de configuración editable ===================== */
 
@@ -2891,7 +2892,7 @@ const TiendaNubeCatalogView: React.FC<{ role: Role; priceLists?: PriceList[]; us
                 <span className="ml-1 text-emerald-400">· Recortando miniaturas de colores…</span>
               )}
               {isAdmin && savedAt && (
-                <span className="ml-1 text-slate-500">· Guardado {new Date(savedAt).toLocaleString('es-AR')}</span>
+                <span className="ml-1 text-slate-500">· Guardado {formatDateTimeAr(savedAt)}</span>
               )}
               {(isSeller || isAdmin) && selectedPriceListName && catalog && (
                 <span className="ml-1 text-emerald-400">· Lista: {selectedPriceListName}</span>

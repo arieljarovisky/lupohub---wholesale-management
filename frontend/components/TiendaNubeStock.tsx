@@ -22,6 +22,7 @@ import {
 import { api } from '../services/api';
 import { normalizeTiendaNubeProductId, extractTiendaNubeVariantFromUrl } from '../utils/tiendaNubeUrl';
 import { TiendaNubeBulkImagesModal, TiendaNubeProductImagesModal } from './TiendaNubeProductImagesModal';
+import { MercadoLibreLogo } from './ChannelLogos';
 
 interface TNStockItem {
   id: string;
@@ -44,6 +45,15 @@ interface TNStockItem {
 }
 
 type SortOption = 'title' | 'stock_asc' | 'stock_desc' | 'sold_desc';
+
+type MlPublishPreview = {
+  title: string;
+  price: number;
+  imageCount: number;
+  variations: Array<{ sku: string; color: string; size: string; stock: number; price: number }>;
+  suggestions: Array<{ id: string; title: string; permalink: string; thumbnail: string; hasSizeGrid: boolean }>;
+  alreadyLinked: Array<{ sku: string; itemId: string }>;
+};
 
 interface TiendaNubeStockProps {
   searchTerm?: string;
@@ -77,6 +87,15 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
   const [dupTitleSuffix, setDupTitleSuffix] = useState(' (pack)');
   const [dupSkuSuffix, setDupSkuSuffix] = useState('-PACK');
   const [dupSubmitting, setDupSubmitting] = useState(false);
+  const [mlModal, setMlModal] = useState<{ id: string; title: string } | null>(null);
+  const [mlPreview, setMlPreview] = useState<MlPublishPreview | null>(null);
+  const [mlPreviewLoading, setMlPreviewLoading] = useState(false);
+  const [mlPreviewError, setMlPreviewError] = useState('');
+  const [mlTitle, setMlTitle] = useState('');
+  const [mlPrice, setMlPrice] = useState('');
+  const [mlSourceId, setMlSourceId] = useState('');
+  const [mlPaused, setMlPaused] = useState(true);
+  const [mlSubmitting, setMlSubmitting] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [createName, setCreateName] = useState('');
   const [createPrice, setCreatePrice] = useState('');
@@ -98,6 +117,30 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
       setCopiedId(label);
       setTimeout(() => setCopiedId(null), 2000);
     });
+  };
+
+  const openMlPublish = async (item: TNStockItem) => {
+    setMlModal({ id: item.id, title: item.title });
+    setMlTitle(item.title);
+    setMlPrice(item.price != null ? String(item.price) : '');
+    setMlSourceId('');
+    setMlPaused(true);
+    setMlPreview(null);
+    setMlPreviewError('');
+    setMlPreviewLoading(true);
+    try {
+      const preview = await api.previewTiendaNubeToMercadoLibre(item.id);
+      setMlPreview(preview);
+      if (preview.title) setMlTitle(preview.title);
+      if (preview.price) setMlPrice(String(preview.price));
+      const withGrid = preview.suggestions?.find((s) => s.hasSizeGrid);
+      const first = withGrid || preview.suggestions?.[0];
+      if (first?.id) setMlSourceId(first.id);
+    } catch (err: any) {
+      setMlPreviewError(err?.message || 'No se pudo leer la publicación');
+    } finally {
+      setMlPreviewLoading(false);
+    }
   };
 
   const fetchTotals = async () => {
@@ -640,7 +683,7 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
                               setImportingItemId(null);
                             }
                           }}
-                          disabled={!!importingItemId || dupSubmitting}
+                          disabled={!!importingItemId || dupSubmitting || mlSubmitting}
                           className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold disabled:opacity-50 transition-colors"
                           title="Crear producto en Mi inventario y vincular con Tienda Nube"
                         >
@@ -655,12 +698,25 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
                             setDupTitleSuffix(' (pack)');
                             setDupSkuSuffix('-PACK');
                           }}
-                          disabled={!!importingItemId || dupSubmitting}
+                          disabled={!!importingItemId || dupSubmitting || mlSubmitting}
                           className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 border border-slate-500/80 text-white font-bold disabled:opacity-50 transition-colors"
                           title="Crear una copia en Tienda Nube con otro título y SKU (ideal para packs)"
                         >
                           <SquareStack size={18} />
                           Duplicar en TN
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void openMlPublish(item);
+                          }}
+                          disabled={!!importingItemId || dupSubmitting || mlSubmitting}
+                          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-700 hover:bg-slate-600 border border-amber-500/70 text-white font-bold disabled:opacity-50 transition-colors"
+                          title="Crear esta publicación en Mercado Libre: título, fotos, precio y variantes desde Tienda Nube"
+                        >
+                          <MercadoLibreLogo size={18} />
+                          Publicar en ML
                         </button>
                       </div>
                     {item.permalink && item.permalink !== 'https://tiendanube.com' && (
@@ -1014,6 +1070,170 @@ const TiendaNubeStock: React.FC<TiendaNubeStockProps> = ({ searchTerm: searchTer
               <ChevronRight size={20} className="inline-block -ml-3" strokeWidth={2.5} />
             </button>
           </nav>
+        </div>
+      )}
+
+      {mlModal && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/65 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="tn-ml-modal-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !mlSubmitting) setMlModal(null);
+          }}
+        >
+          <div
+            className="bg-slate-800 border border-amber-700/40 rounded-2xl max-w-lg w-full p-6 shadow-2xl shadow-black/40 max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="tn-ml-modal-title" className="text-lg font-black text-white mb-1 flex items-center gap-2">
+              <MercadoLibreLogo size={22} />
+              Publicar en Mercado Libre
+            </h3>
+            <p className="text-slate-400 text-sm mb-3 line-clamp-2" title={mlModal.title}>{mlModal.title}</p>
+            <p className="text-slate-500 text-xs mb-4">
+              Se copian categoría, marca y guía de talles de una publicación que ya tengas en Mercado Libre.
+              El título, las fotos, el precio y las variantes salen de Tienda Nube. Elegí como modelo una publicación del mismo tipo de prenda.
+            </p>
+            {mlPreviewLoading && (
+              <p className="text-slate-400 text-sm flex items-center gap-2 mb-4">
+                <Loader2 size={16} className="animate-spin" /> Leyendo publicación…
+              </p>
+            )}
+            {mlPreviewError && <p className="text-amber-400 text-sm mb-4">{mlPreviewError}</p>}
+            {mlPreview && (
+              <>
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Título</label>
+                <input
+                  type="text"
+                  value={mlTitle}
+                  onChange={(e) => setMlTitle(e.target.value)}
+                  disabled={mlSubmitting}
+                  className="w-full rounded-xl bg-slate-900 border border-slate-600 px-3 py-2.5 text-white text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                />
+                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Precio</label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={mlPrice}
+                  onChange={(e) => setMlPrice(e.target.value)}
+                  disabled={mlSubmitting}
+                  className="w-full max-w-[180px] rounded-xl bg-slate-900 border border-slate-600 px-3 py-2.5 text-white text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                />
+                <p className="text-xs text-slate-500 mb-2">
+                  {mlPreview.imageCount} foto(s) · {mlPreview.variations.length} variante(s)
+                </p>
+                <div className="max-h-32 overflow-y-auto rounded-xl border border-slate-700 mb-3">
+                  <table className="w-full text-xs">
+                    <tbody>
+                      {mlPreview.variations.map((v) => (
+                        <tr key={`${v.sku}-${v.color}-${v.size}`} className="border-b border-slate-800 last:border-0">
+                          <td className="px-2 py-1.5 text-white">{v.color}</td>
+                          <td className="px-2 py-1.5 text-white">{v.size}</td>
+                          <td className="px-2 py-1.5 text-right text-slate-400">{v.stock}</td>
+                          <td className="px-2 py-1.5 text-slate-500 font-mono">{v.sku}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {mlPreview.alreadyLinked.length > 0 && (
+                  <p className="text-xs text-amber-300 mb-3">
+                    Ya hay publicación ML vinculada para {mlPreview.alreadyLinked.map((l) => l.sku).slice(0, 4).join(', ')}
+                    {mlPreview.alreadyLinked.length > 4 ? '…' : ''}. Se crea otra y, si la variante está en el inventario, también se vincula para sincronizar stock.
+                  </p>
+                )}
+              </>
+            )}
+            <label className="block text-xs font-bold text-slate-400 uppercase tracking-wide mb-1.5">Publicación modelo</label>
+            {mlPreview && mlPreview.suggestions.length > 0 && (
+              <div className="space-y-1.5 mb-3 max-h-40 overflow-y-auto">
+                {mlPreview.suggestions.map((s) => (
+                  <label
+                    key={s.id}
+                    className={`flex items-start gap-2 rounded-xl border px-3 py-2 cursor-pointer ${
+                      mlSourceId === s.id ? 'border-amber-500/70 bg-amber-500/10' : 'border-slate-700 bg-slate-900/50'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="ml-source"
+                      className="mt-1"
+                      checked={mlSourceId === s.id}
+                      onChange={() => setMlSourceId(s.id)}
+                      disabled={mlSubmitting}
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-sm text-white truncate">{s.title}</span>
+                      <span className="block text-[11px] font-mono text-slate-500">
+                        {s.id}
+                        {s.hasSizeGrid ? '' : ' · sin guía de talles'}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+            <input
+              type="text"
+              value={mlSourceId}
+              onChange={(e) => setMlSourceId(e.target.value)}
+              placeholder="MLA123456789 o enlace de la publicación modelo"
+              disabled={mlSubmitting}
+              className="w-full rounded-xl bg-slate-900 border border-slate-600 px-3 py-2.5 text-white text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+            />
+            <label className="flex items-center gap-2 text-sm text-slate-300 mb-5">
+              <input
+                type="checkbox"
+                checked={mlPaused}
+                onChange={(e) => setMlPaused(e.target.checked)}
+                disabled={mlSubmitting}
+              />
+              Dejar en pausa para revisar antes de activar
+            </label>
+            <div className="flex flex-wrap gap-2 justify-end">
+              <button
+                type="button"
+                disabled={mlSubmitting}
+                onClick={() => !mlSubmitting && setMlModal(null)}
+                className="px-4 py-2.5 rounded-xl text-slate-300 hover:bg-slate-700 font-bold text-sm"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={mlSubmitting || mlPreviewLoading || !mlSourceId.trim() || !mlTitle.trim()}
+                onClick={async () => {
+                  const priceNum = Number(String(mlPrice).replace(',', '.'));
+                  setMlSubmitting(true);
+                  try {
+                    const res = await api.publishTiendaNubeToMercadoLibre(mlModal.id, {
+                      sourceItemId: mlSourceId.trim(),
+                      title: mlTitle.trim(),
+                      price: Number.isFinite(priceNum) ? priceNum : undefined,
+                      paused: mlPaused,
+                      linkLocal: true
+                    });
+                    const n = new Set((res.listings || []).map((l) => l.itemId)).size;
+                    showToast?.(
+                      res.failed ? 'warning' : 'success',
+                      res.message || `Se crearon ${n} publicación(es) en Mercado Libre`
+                    );
+                    if (!res.failed) setMlModal(null);
+                  } catch (err: any) {
+                    showToast?.('error', err?.message || 'No se pudo publicar en Mercado Libre');
+                  } finally {
+                    setMlSubmitting(false);
+                  }
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm disabled:opacity-50"
+              >
+                {mlSubmitting ? <Loader2 size={18} className="animate-spin" /> : <MercadoLibreLogo size={18} />}
+                Subir a Mercado Libre
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

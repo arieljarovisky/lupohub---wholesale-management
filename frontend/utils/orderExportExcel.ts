@@ -5,6 +5,7 @@ import ExcelJS from 'exceljs';
 import type { Order, OrderItem, Product } from '../types';
 import { enrichOrderItem, sortOrderItemsForPrint } from './wholesaleInvoiceHtml';
 import { nombreTalleDesdeCodigo } from './tallesTango';
+import { tryYmdArgentina } from './formatDate';
 
 const BORDER = { style: 'thin' as const, color: { argb: 'FF000000' } };
 const ALL_BORDERS = { top: BORDER, left: BORDER, bottom: BORDER, right: BORDER };
@@ -87,13 +88,10 @@ function lineQuantity(item: OrderItem, order: Order): number {
 }
 
 function formatShortDateHeader(dateStr: string): string {
-  if (!dateStr) return '';
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return dateStr;
-  const day = d.getDate();
-  const month = d.getMonth() + 1;
-  const year = String(d.getFullYear()).slice(-2);
-  return `${day}/${month}/${year}`;
+  const ymd = tryYmdArgentina(dateStr);
+  if (!ymd) return dateStr || '';
+  const [y, m, d] = ymd.split('-');
+  return `${Number(d)}/${Number(m)}/${y.slice(-2)}`;
 }
 
 function styleHeaderRow(row: ExcelJS.Row) {

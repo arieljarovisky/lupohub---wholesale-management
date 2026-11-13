@@ -29,6 +29,7 @@ import {
 import { api } from '../services/api';
 import { useNotification } from '../context/NotificationContext';
 import { exportCompanyFinanceExcel } from '../utils/companyFinanceExcel';
+import { argentinaCalendar, todayYmdArgentina } from '../utils/formatDate';
 
 type FinanceEntry = {
   id: string;
@@ -114,15 +115,13 @@ const PnlLine: React.FC<PnlLineProps> = ({
   </li>
 );
 
-const todayIso = () => new Date().toISOString().slice(0, 10);
+const todayIso = () => todayYmdArgentina();
 
 const monthRange = () => {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = d.getMonth();
-  const from = `${y}-${String(m + 1).padStart(2, '0')}-01`;
-  const last = new Date(y, m + 1, 0).getDate();
-  const to = `${y}-${String(m + 1).padStart(2, '0')}-${String(last).padStart(2, '0')}`;
+  const { y, m } = argentinaCalendar();
+  const from = `${y}-${String(m).padStart(2, '0')}-01`;
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const to = `${y}-${String(m).padStart(2, '0')}-${String(last).padStart(2, '0')}`;
   return { from, to };
 };
 

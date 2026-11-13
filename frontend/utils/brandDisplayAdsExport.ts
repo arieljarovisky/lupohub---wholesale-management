@@ -87,7 +87,7 @@ export function downloadSingleBrandDisplayCampaignExcel(
     ['Site', opts.siteId],
     ['ID anunciante', opts.advertiserId],
     [],
-    ['Exportado', new Date().toLocaleString('es-AR')],
+    ['Exportado', new Date().toLocaleString('es-AR', { timeZone: 'America/Argentina/Buenos_Aires' })],
     [],
     ['Nota', 'Métricas del período seleccionado solo para esta campaña.']
   ];
