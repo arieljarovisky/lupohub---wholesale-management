@@ -62,11 +62,14 @@ function parseMoney(raw: unknown): number | null {
   return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null;
 }
 
+/** Misma cuenta que Pago Nube: descuento sobre centavos enteros. */
 export function applyPaymentDiscount(price: number | null, percent: number): number | null {
   if (price == null) return null;
   const pct = Number.isFinite(percent) && percent > 0 && percent < 100 ? percent : 0;
   if (!pct) return price;
-  return Math.round(price * (1 - pct / 100) * 100) / 100;
+  const cents = Math.round(price * 100);
+  const discounted = Math.round((cents * (100 - pct)) / 100);
+  return discounted / 100;
 }
 
 /** Precio que cobra la tienda hoy, y el tachado si existe. */
@@ -150,15 +153,124 @@ function sameMoney(a: number | null, b: number | null): boolean {
   return Math.abs(a - b) < 0.009;
 }
 
+function clampDiscountPercent(raw: unknown): number {
+  const n = typeof raw === 'number' ? raw : Number(String(raw ?? '').replace(',', '.'));
+  return Number.isFinite(n) && n > 0 && n < 100 ? Math.round(n * 100) / 100 : 0;
+}
+
 export function readPaymentDiscount(html: string, methodId: string): number {
   const marker = `id="info-payment-method-${methodId}"`;
   const start = html.indexOf(marker);
   if (start < 0) return 0;
-  const slice = html.slice(start, start + 5000);
-  const match = slice.match(/data-payment-discount=["']([\d.]+)["']/);
-  if (!match) return 0;
-  const n = Number(match[1]);
-  return Number.isFinite(n) && n >= 0 && n < 100 ? n : 0;
+  // Recortamos al bloque del medio de pago (hasta el siguiente método o ~6 KB).
+  const nextMethod = html.indexOf('id="info-payment-method-', start + marker.length);
+  const end = nextMethod > start ? Math.min(nextMethod, start + 8000) : start + 8000;
+  const slice = html.slice(start, end);
+  const attr = slice.match(/data-payment-discount=["']([\d.,]+)["']/);
+  if (attr) {
+    const n = clampDiscountPercent(attr[1]);
+    if (n > 0) return n;
+  }
+  const text = slice.match(/(\d+(?:[.,]\d+)?)\s*%\s*de\s+descuento/i);
+  return text ? clampDiscountPercent(text[1]) : 0;
+}
+
+/** Porcentaje implícito entre precio de lista y precio con descuento de medio de pago. */
+export function inferDiscountFromPrices(listPrice: number, discountedPrice: number): number {
+  if (!(listPrice > 0) || !(discountedPrice > 0) || discountedPrice >= listPrice - 0.009) return 0;
+  const pct = ((listPrice - discountedPrice) / listPrice) * 100;
+  // Pago Nube usa enteros típicos (10, 15…); redondeamos al 0.5 más cercano.
+  const rounded = Math.round(pct * 2) / 2;
+  return clampDiscountPercent(rounded);
+}
+
+function parseArMoney(raw: string): number | null {
+  const cleaned = String(raw || '')
+    .replace(/[^\d.,-]/g, '')
+    .trim();
+  if (!cleaned) return null;
+  // $35.189,15 → 35189.15 ; 35189.15 → 35189.15
+  let normalized = cleaned;
+  if (cleaned.includes(',') && cleaned.includes('.')) {
+    normalized = cleaned.replace(/\./g, '').replace(',', '.');
+  } else if (cleaned.includes(',')) {
+    normalized = cleaned.replace(',', '.');
+  }
+  const n = Number(normalized);
+  return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null;
+}
+
+/**
+ * Lee descuentos de transferencia / tarjeta desde el HTML de la tienda.
+ * Varias estrategias: atributo data-payment-discount, texto “N% de descuento”,
+ * y ratio precio de lista vs precio con descuento embebido en la ficha/listado.
+ */
+export function extractPaymentDiscountsFromHtml(html: string): { transfer: number; card: number } {
+  if (!html) return { transfer: 0, card: 0 };
+
+  let transfer = readPaymentDiscount(html, 'wire_transfer');
+  let card = readPaymentDiscount(html, 'credit_card');
+
+  if (!transfer) {
+    const transferText = html.match(
+      /(\d+(?:[.,]\d+)?)\s*%\s*de\s+descuento(?:<\/[^>]+>)?\s*pagando con\s+Transferencia/i
+    );
+    if (transferText) transfer = clampDiscountPercent(transferText[1]);
+  }
+  if (!transfer) {
+    const accent = html.match(
+      /(\d+(?:[.,]\d+)?)\s*%\s*de\s+descuento<\/span>\s*pagando con\s+Transferencia/i
+    );
+    if (accent) transfer = clampDiscountPercent(accent[1]);
+  }
+
+  if (!transfer) {
+    // JSON de ítem de listado: price_number y price_with_payment_discount_short juntos.
+    const pair =
+      html.match(
+        /"price_number"\s*:\s*([\d.]+)[\s\S]{0,180}?"price_with_payment_discount_short"\s*:\s*"([^"]+)"/
+      ) ||
+      html.match(
+        /price_number&quot;:([\d.]+)[\s\S]{0,180}?price_with_payment_discount_short&quot;:&quot;([^&]+)&quot;/
+      );
+    if (pair) {
+      const discounted = parseArMoney(pair[2]);
+      const list = Number(pair[1]);
+      if (discounted != null) transfer = inferDiscountFromPrices(list, discounted);
+    }
+  }
+
+  if (!transfer) {
+    // Listados: data-priceraw (centavos) junto al precio tachado / compare.
+    const block = html.match(
+      /data-priceraw-without-shipping=["'](\d+)["'][\s\S]{0,500}?Transferencia/i
+    );
+    if (block) {
+      const discounted = Number(block[1]) / 100;
+      // Buscamos un precio de lista cercano en el mismo ítem (hacia atrás).
+      const idx = html.indexOf(block[0]);
+      const windowStart = Math.max(0, idx - 2500);
+      const before = html.slice(windowStart, idx + block[0].length);
+      const listMatch =
+        before.match(/data-product-price=["']([\d.]+)["'](?![\s\S]*data-product-price=)/i) ||
+        before.match(/"price_number"\s*:\s*([\d.]+)(?![\s\S]*"price_number")/) ||
+        before.match(/price_number&quot;:([\d.]+)(?![\s\S]*price_number&quot;)/);
+      // Fallback: el compare tachado junto al descuento ($41.399,00).
+      const compare = block[0].match(/\$\s*([\d.]+,\d{2})/);
+      const list = listMatch
+        ? Number(listMatch[1])
+        : compare
+          ? parseArMoney(compare[1])
+          : null;
+      if (list != null) transfer = inferDiscountFromPrices(list, discounted);
+    }
+  }
+
+  return { transfer, card };
+}
+
+function envDiscount(name: string): number {
+  return clampDiscountPercent(process.env[name]);
 }
 
 async function fetchPublishedProducts(storeId: string, accessToken: string): Promise<any[]> {
@@ -207,27 +319,55 @@ async function fetchStoreBase(storeId: string, accessToken: string): Promise<str
   return '';
 }
 
-async function fetchPaymentDiscounts(pageUrl: string): Promise<{ transfer: number; card: number }> {
-  if (!pageUrl) return { transfer: 0, card: 0 };
+async function fetchHtml(pageUrl: string): Promise<string> {
+  if (!pageUrl) return '';
   try {
     const res = await axios.get(pageUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0',
-        Accept: 'text/html',
+        'User-Agent':
+          'Mozilla/5.0 (compatible; LupoHubShowroom/1.0; +https://lupo.ar) AppleWebKit/537.36',
+        Accept: 'text/html,application/xhtml+xml',
       },
-      timeout: 12000,
+      timeout: 15000,
       validateStatus: () => true,
       responseType: 'text',
       transformResponse: [(data) => data],
+      maxRedirects: 5,
     });
-    if (res.status !== 200 || typeof res.data !== 'string') return { transfer: 0, card: 0 };
-    return {
-      transfer: readPaymentDiscount(res.data, 'wire_transfer'),
-      card: readPaymentDiscount(res.data, 'credit_card'),
-    };
+    if (res.status !== 200 || typeof res.data !== 'string') return '';
+    return res.data;
   } catch {
-    return { transfer: 0, card: 0 };
+    return '';
   }
+}
+
+async function fetchPaymentDiscounts(
+  pageUrls: string[]
+): Promise<{ transfer: number; card: number }> {
+  const envTransfer = envDiscount('SHOWROOM_TRANSFER_DISCOUNT_PERCENT');
+  const envCard = envDiscount('SHOWROOM_CARD_DISCOUNT_PERCENT');
+  // Si el descuento de transferencia está fijado por env, no scrapear.
+  if (envTransfer > 0) {
+    return { transfer: envTransfer, card: envCard };
+  }
+
+  let transfer = 0;
+  let card = 0;
+  const seen = new Set<string>();
+  for (const url of pageUrls) {
+    if (transfer > 0) break;
+    const clean = String(url || '').trim();
+    if (!clean || seen.has(clean)) continue;
+    seen.add(clean);
+    const html = await fetchHtml(clean);
+    if (!html) continue;
+    const parsed = extractPaymentDiscountsFromHtml(html);
+    if (!transfer && parsed.transfer > 0) transfer = parsed.transfer;
+    if (!card && parsed.card > 0) card = parsed.card;
+  }
+
+  if (envCard > 0) card = envCard;
+  return { transfer, card };
 }
 
 type PriceGroup = {
@@ -407,8 +547,22 @@ async function compute(): Promise<ShowroomPriceList> {
     fetchStoreBase(storeId, accessToken),
   ]);
 
-  const sample = products.find((product) => productUrl(product, storeBase));
-  const discounts = await fetchPaymentDiscounts(sample ? productUrl(sample, storeBase) || '' : '');
+  const sampleUrls: string[] = [];
+  for (const product of products) {
+    const url = productUrl(product, storeBase);
+    if (url) sampleUrls.push(url);
+    if (sampleUrls.length >= 3) break;
+  }
+  if (storeBase) sampleUrls.push(storeBase);
+  // Fallback fijo de la tienda pública por si la API no trae dominio.
+  if (!sampleUrls.includes('https://lupo.ar')) sampleUrls.push('https://lupo.ar');
+
+  const discounts = await fetchPaymentDiscounts(sampleUrls);
+  if (!discounts.transfer) {
+    console.warn(
+      '[showroomPriceList] No se pudo leer el descuento por transferencia de Pago Nube; transferencia = precio publicado. Probá SHOWROOM_TRANSFER_DISCOUNT_PERCENT=15'
+    );
+  }
   const items = mapShowroomItems(products, storeBase, discounts);
 
   return {

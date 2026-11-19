@@ -3,7 +3,14 @@
  * Ejecutar: npx ts-node --transpile-only src/tests/showroomPriceList.test.ts
  */
 import assert from 'assert';
-import { articleCodeFromSku, mapShowroomItems } from '../services/showroomPriceList.service';
+import {
+  applyPaymentDiscount,
+  articleCodeFromSku,
+  extractPaymentDiscountsFromHtml,
+  inferDiscountFromPrices,
+  mapShowroomItems,
+  readPaymentDiscount,
+} from '../services/showroomPriceList.service';
 
 let passed = 0;
 function test(name: string, fn: () => void) {
@@ -138,6 +145,47 @@ test('si el precio cambia entre variantes, muestra el rango', () => {
   assert.strictEqual(items.length, 1);
   assert.strictEqual(items[0].priceTransfer, 5000);
   assert.strictEqual(items[0].priceTransferMax, 7000);
+});
+
+test('aplica 15% de transferencia como Pago Nube (centavos)', () => {
+  assert.strictEqual(applyPaymentDiscount(41399, 15), 35189.15);
+  assert.strictEqual(applyPaymentDiscount(17721, 15), 15062.85);
+  const items = mapShowroomItems(
+    [
+      {
+        id: 1,
+        published: true,
+        name: { es: 'Panty' },
+        variants: [variant('150001130280', 17721), variant('150001140280', 27389)],
+      },
+    ],
+    '',
+    { transfer: 15, card: 0 }
+  );
+  assert.strictEqual(items[0].priceTransfer, 15062.85);
+  assert.strictEqual(items[0].priceTransferMax, 23280.65);
+  assert.strictEqual(items[0].priceCard, 17721);
+  assert.strictEqual(items[0].priceCardMax, 27389);
+});
+
+console.log('Descuento Pago Nube');
+test('lee data-payment-discount de wire_transfer', () => {
+  const html = `
+    <div id="info-payment-method-credit_card"><strong data-payment-discount="0">$100</strong></div>
+    <div id="info-payment-method-wire_transfer">
+      <strong>15% de descuento</strong> pagando con Transferencia
+      <strong data-payment-discount="15">$85</strong>
+    </div>`;
+  assert.strictEqual(readPaymentDiscount(html, 'wire_transfer'), 15);
+  assert.strictEqual(readPaymentDiscount(html, 'credit_card'), 0);
+  assert.deepStrictEqual(extractPaymentDiscountsFromHtml(html), { transfer: 15, card: 0 });
+});
+
+test('infiere % desde price_number y precio con descuento (&quot;)', () => {
+  const html =
+    'price_number&quot;:41399,&quot;price_number_raw&quot;:4139900,&quot;price_with_payment_discount_short&quot;:&quot;$35.189,15&quot;';
+  assert.deepStrictEqual(extractPaymentDiscountsFromHtml(html), { transfer: 15, card: 0 });
+  assert.strictEqual(inferDiscountFromPrices(41399, 35189.15), 15);
 });
 
 console.log(`\n${passed} pruebas ok`);
