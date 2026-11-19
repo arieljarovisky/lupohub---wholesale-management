@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Search, RefreshCw, Loader2, AlertCircle, ExternalLink, Package, Tag } from 'lucide-react';
+import { Search, RefreshCw, Loader2, AlertCircle, ExternalLink, Package, Tag, FileSpreadsheet } from 'lucide-react';
 import { api, ShowroomPriceItem, ShowroomPriceList } from '../services/api';
 import { formatDateAr } from '../utils/formatDate';
+import { exportShowroomPriceListExcel } from '../utils/showroomPriceListExcel';
 
 const PAGE_SIZE = 80;
 
@@ -105,6 +106,7 @@ const ShowroomPriceListView: React.FC = () => {
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [exporting, setExporting] = useState(false);
 
   const load = useCallback(async (refresh = false) => {
     setLoading(true);
@@ -151,6 +153,18 @@ const ShowroomPriceListView: React.FC = () => {
     ? formatDateAr(data.generatedAt, { hour: '2-digit', minute: '2-digit' })
     : '';
 
+  const exportExcel = async () => {
+    if (!data || exporting) return;
+    setExporting(true);
+    try {
+      await exportShowroomPriceListExcel(data, filtered);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'No se pudo exportar el Excel');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="space-y-4 max-w-[1400px] mx-auto pb-8">
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
@@ -161,15 +175,26 @@ const ShowroomPriceListView: React.FC = () => {
           </h2>
           <p className="text-slate-400 text-sm mt-1 max-w-2xl">{discountNote || 'Precios publicados en Tienda Nube.'}</p>
         </div>
-        <button
-          type="button"
-          onClick={() => load(true)}
-          disabled={loading}
-          className="inline-flex items-center justify-center gap-2 min-h-11 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 text-sm font-semibold border border-slate-700 disabled:opacity-60"
-        >
-          {loading ? <Loader2 size={16} className="animate-spin" aria-hidden /> : <RefreshCw size={16} aria-hidden />}
-          Actualizar precios
-        </button>
+        <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => void exportExcel()}
+            disabled={!data || exporting || filtered.length === 0}
+            className="inline-flex items-center justify-center gap-2 min-h-11 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-semibold border border-emerald-600 disabled:opacity-60"
+          >
+            {exporting ? <Loader2 size={16} className="animate-spin" aria-hidden /> : <FileSpreadsheet size={16} aria-hidden />}
+            Exportar Excel
+          </button>
+          <button
+            type="button"
+            onClick={() => load(true)}
+            disabled={loading}
+            className="inline-flex items-center justify-center gap-2 min-h-11 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 text-sm font-semibold border border-slate-700 disabled:opacity-60"
+          >
+            {loading ? <Loader2 size={16} className="animate-spin" aria-hidden /> : <RefreshCw size={16} aria-hidden />}
+            Actualizar precios
+          </button>
+        </div>
       </div>
 
       <div className="sticky top-0 z-20 -mx-1 px-1 py-2 bg-slate-950/95 backdrop-blur">
