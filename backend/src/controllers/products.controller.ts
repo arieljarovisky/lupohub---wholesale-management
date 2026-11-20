@@ -1682,17 +1682,30 @@ export const importTangoArticles = async (req: Request, res: Response) => {
       keepStockOnExistingVariants?: boolean;
       /** Si viene, cada fila importada vincula variante/producto a este despacho (ítems + último despacho del producto). */
       despachoId?: string;
+      /**
+       * Solo con despachoId: suma la Cantidad de cada fila al stock del depósito (ingreso de mercadería).
+       * Reimportar es seguro: se aplica solo la diferencia con la cantidad ya registrada en el despacho.
+       */
+      addStockToDepot?: boolean;
     };
     const { rows: rawRows, onlyComplete = true } = body;
     const keepStockOnExistingVariants = body.keepStockOnExistingVariants !== false;
     const despachoIdRaw = body.despachoId != null ? String(body.despachoId).trim() : '';
-    let despachoLink: { id: string; pais_origen: string | null } | null = null;
+    let despachoLink: { id: string; pais_origen: string | null; numero: string } | null = null;
     if (despachoIdRaw) {
-      const dRow = await get(`SELECT id, pais_origen FROM despachos WHERE id = ? LIMIT 1`, [despachoIdRaw]);
+      const dRow = await get(`SELECT id, pais_origen, numero_despacho FROM despachos WHERE id = ? LIMIT 1`, [despachoIdRaw]);
       if (!dRow?.id) {
         return res.status(400).json({ message: 'despachoId no válido: no existe ese despacho.' });
       }
-      despachoLink = { id: dRow.id as string, pais_origen: (dRow as any).pais_origen ?? null };
+      despachoLink = {
+        id: dRow.id as string,
+        pais_origen: (dRow as any).pais_origen ?? null,
+        numero: String((dRow as any).numero_despacho || dRow.id),
+      };
+    }
+    const addStockToDepot = body.addStockToDepot === true;
+    if (addStockToDepot && !despachoLink) {
+      return res.status(400).json({ message: 'Para sumar al stock hace falta indicar el despacho (despachoId).' });
     }
     if (!Array.isArray(rawRows) || rawRows.length === 0) {
       return res.status(400).json({
@@ -1772,6 +1785,8 @@ export const importTangoArticles = async (req: Request, res: Response) => {
     let despachoItemsInserted = 0;
     let despachoItemsUpdated = 0;
     let despachoProductsTagged = 0;
+    let stockUnitsAdded = 0;
+    let stockVariantsIncremented = 0;
     const errors: string[] = [];
     const productNamesByArticulo: Record<string, string> = {};
 
@@ -1843,7 +1858,8 @@ export const importTangoArticles = async (req: Request, res: Response) => {
             `INSERT INTO product_variants (id, product_color_id, size_id, sku) VALUES (?, ?, ?, ?)`,
             [variantId, productColorId, sizeId, variantSku]
           );
-          const qty = Math.max(0, Math.floor(Number(r.initialStock) || 0));
+          // En modo "sumar al stock" la variante nace en 0 y la cantidad entra abajo por el motor de stock.
+          const qty = addStockToDepot ? 0 : Math.max(0, Math.floor(Number(r.initialStock) || 0));
           await execute(`INSERT INTO stocks (variant_id, stock) VALUES (?, ?)`, [variantId, qty]);
           variantsCreated++;
         } else {
@@ -1851,7 +1867,7 @@ export const importTangoArticles = async (req: Request, res: Response) => {
           const variantSku = `${r.articulo}${r.talle}${r.color}`;
           await execute(`UPDATE product_variants SET sku = ? WHERE id = ?`, [variantSku, variantId]);
           variantsUpdated++;
-          if (r.initialStock !== undefined) {
+          if (r.initialStock !== undefined && !addStockToDepot) {
             if (keepStockOnExistingVariants) {
               stockUpdatesSkipped++;
             } else {
@@ -1876,11 +1892,31 @@ export const importTangoArticles = async (req: Request, res: Response) => {
           const prodName = String((prodRow as any)?.name || r.articulo || '').trim();
           const descripcionItem = `${prodName} - ${r.articulo}${r.talle}${r.color}`.trim();
 
+          const di = await get(
+            `SELECT id, cantidad FROM despacho_items WHERE despacho_id = ? AND variant_id = ? LIMIT 1`,
+            [despachoLink.id, variantId]
+          );
+
+          if (addStockToDepot && r.initialStock !== undefined) {
+            // Solo la diferencia con lo ya registrado en este despacho: reimportar no duplica stock.
+            const yaRegistrado = di?.id ? Math.max(0, Math.floor(Number((di as any).cantidad) || 0)) : 0;
+            const delta = qtyDespacho - yaRegistrado;
+            if (delta !== 0) {
+              const { applyEntries } = await import('../stockEngine/ledger');
+              await applyEntries([
+                {
+                  variantId,
+                  delta,
+                  type: 'IMPORTACION_DESPACHO_GRID',
+                  reference: `Despacho ${despachoLink.numero}`,
+                },
+              ]);
+              stockUnitsAdded += delta;
+              stockVariantsIncremented++;
+            }
+          }
+
           if (qtyDespacho > 0) {
-            const di = await get(
-              `SELECT id FROM despacho_items WHERE despacho_id = ? AND variant_id = ? LIMIT 1`,
-              [despachoLink.id, variantId]
-            );
             if (di?.id) {
               await execute(
                 `UPDATE despacho_items SET cantidad = ?, product_id = ?, descripcion_item = ? WHERE id = ?`,
@@ -1895,6 +1931,9 @@ export const importTangoArticles = async (req: Request, res: Response) => {
               );
               despachoItemsInserted++;
             }
+          } else if (addStockToDepot && r.initialStock !== undefined && di?.id) {
+            // Cantidad 0: ya se restó lo registrado; se quita la línea para que reimportar no vuelva a restar.
+            await execute(`DELETE FROM despacho_items WHERE id = ?`, [di.id]);
           }
 
           await execute(`UPDATE products SET ultimo_despacho_id = ?, pais_origen = ? WHERE id = ?`, [
@@ -1925,6 +1964,9 @@ export const importTangoArticles = async (req: Request, res: Response) => {
       despachoItemsInserted,
       despachoItemsUpdated,
       despachoProductsTagged,
+      addStockToDepot,
+      stockUnitsAdded,
+      stockVariantsIncremented,
       errors: errors.slice(0, 50),
     });
   } catch (error: any) {

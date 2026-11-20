@@ -79,6 +79,8 @@ const Despachos: React.FC = () => {
   const [tangoImportingForDespacho, setTangoImportingForDespacho] = useState(false);
   /** Misma lógica que Inventario: al reimportar no pisar stock de variantes ya existentes. */
   const [tangoDespachoKeepStockOnExisting, setTangoDespachoKeepStockOnExisting] = useState(true);
+  /** Importar Excel (Tango) al despacho: sumar la Cantidad al stock del depósito (ingreso de mercadería). */
+  const [tangoDespachoAddStock, setTangoDespachoAddStock] = useState(false);
   const [gridStockImporting, setGridStockImporting] = useState(false);
   /** Al importar planilla matriz: también escribir cantidades en el depósito (desmarcá solo si el stock ya está cargado). */
   const [despachoGridUpdateDepot, setDespachoGridUpdateDepot] = useState(true);
@@ -370,6 +372,7 @@ const Despachos: React.FC = () => {
         const res = await api.importTangoArticles(rows, true, {
           keepStockOnExistingVariants: tangoDespachoKeepStockOnExisting,
           despachoId,
+          addStockToDepot: tangoDespachoAddStock,
         });
         const detail = await api.getDespachoById(despachoId);
         setSelectedDespacho(detail);
@@ -380,7 +383,9 @@ const Despachos: React.FC = () => {
           `${res.despachoProductsTagged || 0} producto(s) con último despacho actualizado`,
           `${res.productsCreated} prod. nuevos, ${res.variantsCreated} var. nuevas, ${res.variantsUpdated} filas existentes`,
         ];
-        if (res.stockUpdatesSkipped) {
+        if (res.addStockToDepot) {
+          parts.push(`stock: ${res.stockUnitsAdded ?? 0} u. sumadas en ${res.stockVariantsIncremented ?? 0} variante(s)`);
+        } else if (res.stockUpdatesSkipped) {
           parts.push(`stock no modificado en ${res.stockUpdatesSkipped} variante(s) ya existente(s)`);
         }
         showToast('success', parts.join(' · '));
@@ -994,6 +999,17 @@ const Despachos: React.FC = () => {
                     />
                     <span className="text-xs text-slate-400 leading-snug">
                       <strong className="text-slate-300">Reimportar sin pisar stock:</strong> si está marcado, las variantes que ya existían no cambian cantidad en depósito (como en Inventario). Las filas se vinculan igual a este despacho con la cantidad del Excel o del stock actual.
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2.5 cursor-pointer select-none max-w-3xl">
+                    <input
+                      type="checkbox"
+                      checked={tangoDespachoAddStock}
+                      onChange={(e) => setTangoDespachoAddStock(e.target.checked)}
+                      className="mt-0.5 rounded border-slate-600 text-emerald-500 focus:ring-emerald-500 shrink-0"
+                    />
+                    <span className="text-xs text-slate-400 leading-snug">
+                      <strong className="text-slate-300">Sumar al stock del depósito</strong> la columna Cantidad (mercadería que ingresa con este despacho). Queda en el historial y se envía a ML/TN. Si reimportás el mismo Excel no se duplica: solo se aplica la diferencia con lo ya cargado en este despacho. Tiene prioridad sobre la opción anterior.
                     </span>
                   </label>
                   <p className="text-[11px] text-slate-500 leading-relaxed">
