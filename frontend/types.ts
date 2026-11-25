@@ -55,6 +55,8 @@ export interface Product {
   externalIds?: ExternalIds; // Link to external platforms
   /** Unidades por pack en venta mayorista (default 1 = solo por unidad) */
   mayorista_pack_size?: number;
+  /** EAN/GTIN de la variante (talle + color) */
+  barcode?: string | null;
   /** Fechas del artículo padre (desde API / inventario) */
   product_created_at?: string | null;
   product_updated_at?: string | null;

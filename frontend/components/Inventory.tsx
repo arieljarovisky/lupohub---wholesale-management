@@ -90,6 +90,14 @@ const INVENTORY_PRODUCT_FETCH_OPTS = { includeRelated: false } as const;
 
 type InventoryVariantRow = Awaited<ReturnType<typeof api.getVariantsBySku>>[number];
 
+function productMatchesInventorySearch(p: { sku?: string; name?: string; barcode?: string | null }, searchLower: string): boolean {
+  const sku = (p.sku || '').toString().toLowerCase();
+  const name = (p.name || '').toString().toLowerCase();
+  const barcode = String(p.barcode || '').toLowerCase();
+  const compact = searchLower.replace(/[\s-]/g, '');
+  return sku.includes(searchLower) || name.includes(searchLower) || (!!barcode && (barcode.includes(searchLower) || barcode.includes(compact)));
+}
+
 function mapInventoryVariantsFromApi(
   groupKey: string,
   variants: InventoryVariantRow[],
@@ -106,6 +114,7 @@ function mapInventoryVariantsFromApi(
     color: v.colorName,
     colorCode: v.colorCode,
     stock: v.stock,
+    barcode: v.barcode ?? null,
     inventoryHidden: v.inventoryHidden === true,
     integrations: {
       local: true,
@@ -237,11 +246,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [editingVariantId, setEditingVariantId] = useState<string | null>(null);
   const [mlVariantsTarget, setMlVariantsTarget] = useState<{ productId: string; productName: string; anchorItemId: string } | null>(null);
   const [linkingVariant, setLinkingVariant] = useState<Product | null>(null);
-  const [editVariantForm, setEditVariantForm] = useState<{ sku: string; externalSku: string }>({ sku: '', externalSku: '' });
+  const [editVariantForm, setEditVariantForm] = useState<{ sku: string; externalSku: string; barcode: string }>({ sku: '', externalSku: '', barcode: '' });
   const [editVariantLinkIds, setEditVariantLinkIds] = useState<{ mlItemId: string | null; mlVariantId: string | null; tnProductId: string | null; tnVariantId: string | null }>({ mlItemId: null, mlVariantId: null, tnProductId: null, tnVariantId: null });
   const [loadingEditVariant, setLoadingEditVariant] = useState(false);
   const [savingEditVariant, setSavingEditVariant] = useState(false);
   const [fetchingExternalSku, setFetchingExternalSku] = useState<'ml' | 'tn' | null>(null);
+  const [fetchingEan, setFetchingEan] = useState(false);
 
   // Despacho Modal State
   const [showDespachoModal, setShowDespachoModal] = useState(false);
@@ -643,7 +653,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       const sku = (p.sku || '').toString().toLowerCase();
       const name = (p.name || '').toString().toLowerCase();
       const searchLower = searchTerm.toLowerCase();
-      const matchesSearch = !searchTerm || sku.includes(searchLower) || name.includes(searchLower);
+      const matchesSearch = !searchTerm || productMatchesInventorySearch(p, searchLower);
       const matchesCategory = filterCategory === 'ALL' || p.category === filterCategory;
       const sizeCode = getProductSizeCode(p);
       const matchesSize = matchesSizeFilter(sizeCode, filterSize);
@@ -677,10 +687,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     // When filtering by color, apply all filters except color (color will be filtered at variant level)
     const source = serverMode ? serverItems : products;
     return source.filter(p => {
-      const sku = (p.sku || '').toString().toLowerCase();
-      const name = (p.name || '').toString().toLowerCase();
-      const searchLower = searchTerm.toLowerCase();
-      const matchesSearch = !searchTerm || sku.includes(searchLower) || name.includes(searchLower);
+      const matchesSearch = !searchTerm || productMatchesInventorySearch(p, searchTerm.toLowerCase());
       const matchesCategory = filterCategory === 'ALL' || p.category === filterCategory;
       const sizeCode = getProductSizeCode(p);
       const matchesSize = matchesSizeFilter(sizeCode, filterSize);
@@ -855,6 +862,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         'Nombre producto': r.product_name,
         'Categoría': r.category || '',
         'SKU variante': r.variant_sku || '',
+        'EAN': r.barcode || '',
         'Talle': r.talle_display
           ? `${r.size_code ?? ''} - ${r.talle_display}`.replace(/^ - /, '')
           : (r.size_code || r.size_name || ''),
@@ -2181,7 +2189,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   useEffect(() => {
     if (!editingVariantId) return;
     const variantId = editingVariantId;
-    setEditVariantForm({ sku: '', externalSku: '' });
+    setEditVariantForm({ sku: '', externalSku: '', barcode: '' });
     setLoadingEditVariant(true);
     setEditVariantLinkIds({ mlItemId: null, mlVariantId: null, tnProductId: null, tnVariantId: null });
     let cancelled = false;
@@ -2190,7 +2198,8 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       if (v) {
         setEditVariantForm({
           sku: v.sku ?? '',
-          externalSku: v.external_sku ?? ''
+          externalSku: v.external_sku ?? '',
+          barcode: v.barcode ?? ''
         });
         setEditVariantLinkIds({
           mlItemId: v.mercado_libre_item_id ?? null,
@@ -2302,15 +2311,39 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
     }
   };
 
+  const handleFetchEanFromTn = async () => {
+    const { tnProductId, tnVariantId } = editVariantLinkIds;
+    if (!tnProductId) return;
+    setFetchingEan(true);
+    try {
+      const res = await api.getTiendaNubeProductVariants(tnProductId);
+      const variants = res?.variants || [];
+      const match = variants.find((v) => String(v.variantId) === String(tnVariantId));
+      const barcode = String(match?.barcode || '').trim();
+      if (barcode) setEditVariantForm(f => ({ ...f, barcode }));
+      else showToast('info', 'Tienda Nube no tiene EAN cargado para esta variante.');
+    } catch (e: any) {
+      showToast('error', e?.message || 'Error al traer el EAN de Tienda Nube');
+    } finally {
+      setFetchingEan(false);
+    }
+  };
+
   const handleSaveEditVariant = async () => {
     if (!editingVariantId) return;
     const variantId = editingVariantId;
+    const ean = editVariantForm.barcode.trim().replace(/[\s-]/g, '');
+    if (ean && !/^\d{8}$|^\d{12,14}$/.test(ean)) {
+      showToast('error', 'El EAN tiene que ser 8, 12, 13 o 14 dígitos.');
+      return;
+    }
     const groupKey = Object.keys(loadedVariants).find(sku => loadedVariants[sku]?.some((v: any) => v.id === variantId));
     setSavingEditVariant(true);
     try {
       await api.updateVariant(variantId, {
         sku: editVariantForm.sku.trim() || undefined,
-        externalSku: editVariantForm.externalSku.trim() || undefined
+        externalSku: editVariantForm.externalSku.trim() || undefined,
+        barcode: ean
       });
       showToast('success', 'Variante actualizada');
       setEditingVariantId(null);
@@ -2635,7 +2668,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={18} />
             <input 
               type="text" 
-              placeholder="Buscar Código de Producto..." 
+              placeholder="Buscar por código, nombre o EAN..." 
               value={searchTerm}
               onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
               className="w-full min-w-0 pl-10 pr-4 py-3 sm:py-3.5 min-h-[48px] bg-slate-900/80 border border-slate-700/50 rounded-2xl focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/50 outline-none text-white text-sm box-border transition-colors"
@@ -3178,6 +3211,11 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                                 <span className="text-[10px] font-mono text-blue-400 bg-blue-900/20 px-1.5 py-0.5 rounded border border-blue-900/30 truncate max-w-[140px] sm:max-w-none">
                                    {product.sku}
                                 </span>
+                                {product.barcode ? (
+                                  <span className="text-[10px] font-mono text-emerald-300 bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-800/50" title="Código de barras">
+                                    EAN {product.barcode}
+                                  </span>
+                                ) : null}
                                 {isHidden && (
                                   <span className="text-[9px] font-bold uppercase tracking-wide text-violet-300 bg-violet-950/50 px-1.5 py-0.5 rounded border border-violet-800/50">
                                     Oculta
@@ -4274,6 +4312,28 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                         Traer de Tienda Nube
                       </button>
                     </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-500 uppercase ml-1">EAN (código de barras)</label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={editVariantForm.barcode}
+                      onChange={(e) => setEditVariantForm(f => ({ ...f, barcode: e.target.value }))}
+                      className="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white focus:border-amber-500 outline-none font-mono"
+                      placeholder="7791234567890"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleFetchEanFromTn}
+                      disabled={!editVariantLinkIds.tnProductId || fetchingEan}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-900/40 hover:bg-blue-800/50 text-blue-200 border border-blue-700/50 text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Rellenar con el código de barras de Tienda Nube"
+                    >
+                      {fetchingEan ? <Loader2 size={14} className="animate-spin" /> : <Cloud size={14} />}
+                      Traer EAN de Tienda Nube
+                    </button>
+                    <p className="text-[10px] text-slate-500">8, 12, 13 o 14 dígitos. Dejalo vacío para borrarlo.</p>
                   </div>
                 </>
               )}

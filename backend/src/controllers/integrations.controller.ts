@@ -6758,6 +6758,7 @@ export const getTiendaNubeProductVariants = async (req: Request, res: Response) 
       return {
         variantId: v?.id,
         sku: v?.sku || '',
+        barcode: String(v?.barcode || '').trim(),
         size: String(toStr(sizeVal)),
         color: String(toStr(colorVal)),
         stock: Number(v?.stock) || 0

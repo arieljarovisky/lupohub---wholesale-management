@@ -48,8 +48,14 @@ export const getProducts = async (req: Request, res: Response) => {
     const conditions: string[] = ['1=1'];
     const params: any[] = [];
     if (search) {
-      conditions.push('(pv.sku LIKE ? OR p.sku LIKE ? OR p.name LIKE ?)');
-      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+      const searchParts = ['pv.sku LIKE ?', 'p.sku LIKE ?', 'p.name LIKE ?', 'pv.barcode LIKE ?'];
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+      const searchDigits = search.replace(/\D/g, '');
+      if (searchDigits.length >= 8 && searchDigits !== search) {
+        searchParts.push('pv.barcode LIKE ?');
+        params.push(`%${searchDigits}%`);
+      }
+      conditions.push(`(${searchParts.join(' OR ')})`);
     }
     if (filterSyncNone) {
       conditions.push('(p.mercado_libre_id IS NULL OR p.mercado_libre_id = \'\') AND (p.tienda_nube_id IS NULL OR p.tienda_nube_id = \'\')');
@@ -89,7 +95,7 @@ export const getProducts = async (req: Request, res: Response) => {
 
     const rows = await query(
       `
-      SELECT pv.id, pv.sku, p.name, p.category, ${priceSelect},
+      SELECT pv.id, pv.sku, pv.barcode, p.name, p.category, ${priceSelect},
              p.id AS product_id, p.sku AS base_sku,
              p.created_at AS product_created_at, p.updated_at AS product_updated_at,
              p.tienda_nube_id, p.mercado_libre_id,
@@ -114,6 +120,7 @@ export const getProducts = async (req: Request, res: Response) => {
     const mapped = (rows || []).map((r: any) => ({
       id: r.id,
       sku: r.sku,
+      barcode: r.barcode ?? null,
       base_sku: r.base_sku,
       product_id: r.product_id,
       product_created_at: r.product_created_at ?? null,
@@ -388,7 +395,7 @@ export const getProductBySku = async (req: any, res: Response) => {
 
     // Variantes del producto y de registros duplicados del mismo artículo (ej. 0127501 + 1275-11)
     const variantsRows = await query(
-      `SELECT p.id AS product_id, p.sku, pv.sku AS variant_sku, pv.external_sku,
+      `SELECT p.id AS product_id, p.sku, pv.sku AS variant_sku, pv.external_sku, pv.barcode,
               c.code AS color_code, c.name AS color_name,
               s.size_code, COALESCE(st.stock,0) AS stock, pv.id AS variant_id,
               pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
@@ -1214,7 +1221,7 @@ export const getVariantById = async (req: Request, res: Response) => {
   if (!variantId) return res.status(400).json({ message: 'ID de variante requerido' });
   try {
     const row = await get(
-      `SELECT pv.id, pv.sku, pv.external_sku, pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
+      `SELECT pv.id, pv.sku, pv.external_sku, pv.barcode, pv.tienda_nube_variant_id, pv.mercado_libre_variant_id, pv.mercado_libre_item_id,
               p.name AS product_name, p.sku AS base_sku, p.tienda_nube_id,
               s.size_code, c.code AS color_code, c.name AS color_name,
               COALESCE(st.stock, 0) AS stock
@@ -1235,13 +1242,24 @@ export const getVariantById = async (req: Request, res: Response) => {
   }
 };
 
-/** Actualizar variante (SKU y/o external_sku). Si la variante está vinculada a ML/TN, envía el SKU a esas plataformas. */
+/** EAN-8, UPC-A (12), EAN-13 o GTIN-14. Vacío borra el código. */
+function normalizeEan(raw: unknown): { ok: true; value: string | null } | { ok: false; message: string } {
+  const compact = String(raw ?? '').trim().replace(/[\s-]/g, '');
+  if (!compact) return { ok: true, value: null };
+  if (!/^\d{8}$|^\d{12,14}$/.test(compact)) {
+    return { ok: false, message: 'El EAN tiene que ser 8, 12, 13 o 14 dígitos.' };
+  }
+  return { ok: true, value: compact };
+}
+
+/** Actualizar variante (SKU, external_sku y/o EAN). Si la variante está vinculada a ML/TN, envía el SKU a esas plataformas. */
 export const updateVariant = async (req: Request, res: Response) => {
   const { variantId } = req.params;
-  const { sku, externalSku, inventoryHidden } = req.body as {
+  const { sku, externalSku, inventoryHidden, barcode } = req.body as {
     sku?: string;
     externalSku?: string;
     inventoryHidden?: boolean;
+    barcode?: string | null;
   };
   if (!variantId) return res.status(400).json({ message: 'ID de variante requerido' });
   try {
@@ -1273,8 +1291,21 @@ export const updateVariant = async (req: Request, res: Response) => {
       updates.push('inventory_hidden = ?');
       values.push(inventoryHidden ? 1 : 0);
     }
+    if (barcode !== undefined) {
+      const normalized = normalizeEan(barcode);
+      if (!normalized.ok) return res.status(400).json({ message: normalized.message });
+      if (normalized.value) {
+        const dup = await get(
+          `SELECT id FROM product_variants WHERE barcode = ? AND id <> ? LIMIT 1`,
+          [normalized.value, variantId]
+        );
+        if (dup) return res.status(409).json({ message: 'Ese EAN ya está cargado en otra variante.' });
+      }
+      updates.push('barcode = ?');
+      values.push(normalized.value);
+    }
     if (updates.length === 0) {
-      return res.status(400).json({ message: 'Indicá al menos un campo a actualizar (sku, externalSku o inventoryHidden)' });
+      return res.status(400).json({ message: 'Indicá al menos un campo a actualizar (sku, externalSku, barcode o inventoryHidden)' });
     }
     values.push(variantId);
     await execute(
@@ -1283,7 +1314,7 @@ export const updateVariant = async (req: Request, res: Response) => {
     );
     await touchProductUpdatedAtByVariantId(variantId);
     const updated = await get(
-      `SELECT pv.id, pv.sku, pv.external_sku, pv.inventory_hidden, pv.mercado_libre_item_id, pv.mercado_libre_variant_id, pv.tienda_nube_variant_id, p.tienda_nube_id
+      `SELECT pv.id, pv.sku, pv.external_sku, pv.barcode, pv.inventory_hidden, pv.mercado_libre_item_id, pv.mercado_libre_variant_id, pv.tienda_nube_variant_id, p.tienda_nube_id
        FROM product_variants pv
        JOIN product_colors pc ON pc.id = pv.product_color_id
        JOIN products p ON p.id = pc.product_id
@@ -1310,10 +1341,14 @@ export const updateVariant = async (req: Request, res: Response) => {
       id: updated.id,
       sku: updated.sku,
       external_sku: updated.external_sku,
+      barcode: updated.barcode ?? null,
       inventory_hidden: Number(updated.inventory_hidden) === 1,
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error(error);
+    if (error?.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ message: 'Ese EAN ya está cargado en otra variante.' });
+    }
     res.status(500).json({ message: 'Error actualizando variante' });
   }
 };
@@ -2198,6 +2233,7 @@ export const exportInventory = async (req: Request, res: Response) => {
         p.tienda_nube_id,
         p.mercado_libre_id,
         pv.sku AS variant_sku,
+        pv.barcode,
         pv.tienda_nube_variant_id,
         pv.mercado_libre_variant_id,
         pv.mercado_libre_item_id,

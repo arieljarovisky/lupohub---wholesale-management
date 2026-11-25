@@ -944,6 +944,7 @@ export const api = {
       price: Number((r as any).base_price ?? (r as any).price ?? 0),
       description: r.description ?? '',
       externalIds: r.externalIds,
+      barcode: r.barcode ?? null,
       mayorista_pack_size: Math.max(1, Number((r as any).mayorista_pack_size) || 1),
       product_created_at: r.product_created_at ?? null,
       product_updated_at: r.product_updated_at ?? null
@@ -1039,6 +1040,7 @@ export const api = {
           price: Number((r as any).base_price ?? (r as any).price ?? 0),
           description: r.description ?? '',
           externalIds: r.externalIds,
+          barcode: r.barcode ?? null,
           product_created_at: r.product_created_at ?? null,
           product_updated_at: r.product_updated_at ?? null
         };
@@ -1054,6 +1056,7 @@ export const api = {
     category: string;
     base_price: number;
     variant_sku: string;
+    barcode?: string | null;
     size_code: string;
     size_name: string;
     color_code: string;
@@ -1106,6 +1109,7 @@ export const api = {
       sizeCode: string;
       stock: number;
       inventoryHidden?: boolean;
+      barcode?: string | null;
       externalIds?: any;
     }>
   > => {
@@ -1123,6 +1127,7 @@ export const api = {
         colorName: v.color_name,
         sizeCode: v.size_code,
         stock: Number(v.stock ?? 0),
+        barcode: v.barcode != null && String(v.barcode).trim() !== '' ? String(v.barcode).trim() : null,
         inventoryHidden: v.inventory_hidden === true || Number(v.inventory_hidden) === 1,
         externalIds: {
           tiendaNube: parentExternalIds.tiendaNube,
@@ -1136,7 +1141,7 @@ export const api = {
     }, [], 'getVariantsBySku');
   },
 
-  getVariantById: async (variantId: string): Promise<{ id: string; sku: string | null; external_sku: string | null; product_name: string; base_sku: string; size_code: string; color_code: string; color_name: string; stock: number } | null> => {
+  getVariantById: async (variantId: string): Promise<{ id: string; sku: string | null; external_sku: string | null; barcode: string | null; product_name: string; base_sku: string; size_code: string; color_code: string; color_name: string; stock: number } | null> => {
     try {
       const res = await request<any>(`/products/variants/${encodeURIComponent(variantId)}`, 'GET');
       return res;
@@ -1147,11 +1152,9 @@ export const api = {
 
   updateVariant: async (
     variantId: string,
-    data: { sku?: string; externalSku?: string; inventoryHidden?: boolean }
-  ): Promise<{ id: string; sku: string | null; external_sku: string | null; inventory_hidden?: boolean }> => {
-    return handleRequest(async () => {
-      return await request<any>(`/products/variants/${encodeURIComponent(variantId)}`, 'PUT', data);
-    }, data, 'updateVariant');
+    data: { sku?: string; externalSku?: string; inventoryHidden?: boolean; barcode?: string | null }
+  ): Promise<{ id: string; sku: string | null; external_sku: string | null; barcode?: string | null; inventory_hidden?: boolean }> => {
+    return await request<any>(`/products/variants/${encodeURIComponent(variantId)}`, 'PUT', data);
   },
 
   getVariantPublications: async (variantId: string): Promise<Array<{ id: string; platform: string; external_product_id: string; external_variant_id: string; pack_size: number; created_at?: string }>> => {
@@ -4379,8 +4382,8 @@ export const api = {
     return await request('/marketing/leads/webhook/config', 'PUT', data);
   },
 
-  getTiendaNubeProductVariants: async (productId: string): Promise<{ variants: { variantId: number | string; sku: string; color: string; size: string; stock: number }[]; productId: number | string }> => {
-    return request<{ variants: { variantId: number | string; sku: string; color: string; size: string; stock: number }[]; productId: number | string }>(
+  getTiendaNubeProductVariants: async (productId: string): Promise<{ variants: { variantId: number | string; sku: string; barcode?: string; color: string; size: string; stock: number }[]; productId: number | string }> => {
+    return request<{ variants: { variantId: number | string; sku: string; barcode?: string; color: string; size: string; stock: number }[]; productId: number | string }>(
       `/integrations/tiendanube/products/${encodeURIComponent(productId)}/variants?_=${Date.now()}`,
       'GET'
     );

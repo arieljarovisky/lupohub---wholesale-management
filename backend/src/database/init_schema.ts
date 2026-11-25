@@ -87,6 +87,7 @@ export async function initSchema(): Promise<void> {
       mercado_libre_variant_id VARCHAR(100) NULL,
       mercado_libre_item_id VARCHAR(100) NULL,
       sku VARCHAR(100) NULL,
+      barcode VARCHAR(32) NULL,
       FOREIGN KEY (product_color_id) REFERENCES product_colors(id) ON DELETE CASCADE,
       FOREIGN KEY (size_id) REFERENCES sizes(id) ON DELETE CASCADE
     )

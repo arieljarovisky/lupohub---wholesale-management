@@ -276,10 +276,10 @@ export const searchVariants = async (req: Request, res: Response) => {
     const like = `%${q.replace(/[%_]/g, (m) => `\\${m}`)}%`;
     const rows = await query(
       `${VARIANT_LABEL_SQL}
-       WHERE p.name LIKE ? OR p.sku LIKE ? OR pv.sku LIKE ? OR pv.external_sku LIKE ? OR c.name LIKE ?
+       WHERE p.name LIKE ? OR p.sku LIKE ? OR pv.sku LIKE ? OR pv.external_sku LIKE ? OR pv.barcode LIKE ? OR c.name LIKE ?
        ORDER BY p.name, c.name, sz.size_code
        LIMIT 40`,
-      [like, like, like, like, like]
+      [like, like, like, like, like, like]
     );
     res.json({ items: (rows as any[]).map(variantDto) });
   } catch (e: any) {
