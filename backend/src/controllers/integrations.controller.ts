@@ -2497,6 +2497,25 @@ export const handleMercadoLibreWebhook = async (req: Request, res: Response) => 
       }
     }
 
+    // La devolución no repone stock al cancelar la venta: hay que esperar a que llegue al depósito.
+    if (topic === 'claims' || topic === 'claims_actions' || topic === 'shipments') {
+      const claimId = resourceRaw.match(/claims\/(\d+)/)?.[1] || '';
+      const shipmentId = !claimId ? resourceRaw.match(/shipments\/(\d+)/)?.[1] || '' : '';
+      if (claimId || shipmentId) {
+        void (async () => {
+          try {
+            const mlReturns = await import('../stockEngine/mlReturns');
+            const orderIds = claimId
+              ? await mlReturns.orderIdsForClaim(claimId)
+              : await mlReturns.orderIdsForShipment(shipmentId);
+            for (const orderId of orderIds) await processMercadoLibreOrder(orderId);
+          } catch (e: any) {
+            console.error('[ML Webhook] Error revisando devolución:', e?.message || e);
+          }
+        })();
+      }
+    }
+
     /** Preguntas: IA según modo (sugerencia o auto-respuesta). */
     if (topic === 'questions') {
       const qm = resourceRaw.match(/questions\/(\d+)/);
@@ -2529,7 +2548,7 @@ export const handleMercadoLibreWebhook = async (req: Request, res: Response) => 
   }
 };
 
-// Procesar orden de Mercado Libre con el motor de stock (pagada → descuenta; cancelada → devuelve).
+// Procesar orden de Mercado Libre (pagada → descuenta; cancelada sin envío → devuelve; devolución → espera a que llegue al depósito).
 const processMercadoLibreOrder = async (orderId: string) => {
   try {
     const { ingestMercadoLibreOrderById } = await import('../stockEngine/channelOrders');

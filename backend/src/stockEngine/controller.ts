@@ -80,7 +80,7 @@ function manualActor(reference: string): { name: string; userId: string } {
   return { name: '', userId: '' };
 }
 
-function movementText(type: string): string {
+function movementText(type: string, reference?: string): string {
   switch (type) {
     case 'VENTA_TIENDA_NUBE':
       return 'Venta en Tienda Nube';
@@ -89,7 +89,9 @@ function movementText(type: string): string {
     case 'CANCEL_VENTA_TIENDA_NUBE':
       return 'Venta cancelada en Tienda Nube';
     case 'CANCEL_VENTA_MERCADO_LIBRE':
-      return 'Venta cancelada en Mercado Libre';
+      return String(reference || '').startsWith('Devolución en depósito')
+        ? 'Devolución de Mercado Libre recibida en el depósito'
+        : 'Venta cancelada en Mercado Libre';
     case 'PEDIDO_MAYORISTA':
       return 'Pedido mayorista';
     case 'DEVOLUCION':
@@ -249,7 +251,7 @@ export const getOverview = async (_req: Request, res: Response) => {
         const actorName = actor ? actor.name || (actor.userId ? userNames.get(actor.userId) || '' : '') : '';
         return {
           id,
-          what: movementText(String(r.movement_type)),
+          what: movementText(String(r.movement_type), r.reference ? String(r.reference) : ''),
           type: String(r.movement_type),
           change: Number(r.quantity_change) || 0,
           stockAfter: Number(r.new_stock) || 0,
@@ -361,7 +363,7 @@ export const getHistory = async (req: Request, res: Response) => {
       }
       return {
         id,
-        what: movementText(String(r.movement_type)),
+        what: movementText(String(r.movement_type), r.reference ? String(r.reference) : ''),
         type: String(r.movement_type),
         change: Number(r.quantity_change) || 0,
         stockBefore: Number(r.previous_stock) || 0,

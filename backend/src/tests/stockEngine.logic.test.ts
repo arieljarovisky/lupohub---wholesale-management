@@ -4,6 +4,7 @@
  */
 import assert from 'assert';
 import { isBeforeCutover, normalizeMercadoLibreOrder, normalizeTiendaNubeOrder } from '../stockEngine/channelOrders';
+import { decideMlCancelStock, mapReturnPayload, returnArrivedAtSellerDepot } from '../stockEngine/mlReturnPolicy';
 import { computeWholesaleDeltas, isPickingDone, itemUnits } from '../stockEngine/wholesale';
 import { computeNextStock } from '../stockEngine/ledger';
 import { unitsForListing } from '../stockEngine/targets';
@@ -55,12 +56,73 @@ test('líneas: id estable, cantidad entera, sin negativos', () => {
 });
 
 console.log('Ventas de Mercado Libre');
-test('paid → descontar; cancelled/invalid → devolver; otros → nada', () => {
+test('paid → descontar; cancelled/invalid → candidato a devolver; otros → nada', () => {
   assert.strictEqual(normalizeMercadoLibreOrder({ id: 1, status: 'paid' }).intent, 'apply');
   assert.strictEqual(normalizeMercadoLibreOrder({ id: 1, status: 'cancelled' }).intent, 'revert');
   assert.strictEqual(normalizeMercadoLibreOrder({ id: 1, status: 'invalid' }).intent, 'revert');
   assert.strictEqual(normalizeMercadoLibreOrder({ id: 1, status: 'payment_required' }).intent, 'ignore');
   assert.strictEqual(normalizeMercadoLibreOrder({ id: 1, status: 'partially_refunded' }).intent, 'ignore');
+});
+test('cancelación sin despacho → el stock vuelve enseguida', () => {
+  const d = decideMlCancelStock({
+    outbound: { status: 'ready_to_ship', substatus: 'printed', status_history: {} },
+    returns: [],
+  });
+  assert.strictEqual(d.action, 'revert_now');
+  assert.strictEqual(d.because, 'never_left');
+});
+test('cancelación con envío en camino → no reponer hasta que llegue la devolución', () => {
+  const d = decideMlCancelStock({
+    outbound: { status: 'delivered', status_history: { date_delivered: '2026-11-01T00:00:00Z' } },
+    returns: [mapReturnPayload({ status: 'shipped', subtype: 'return_total', shipments: [{ status: 'shipped', type: 'return', destination: { name: 'seller_address' } }] })],
+  });
+  assert.strictEqual(d.action, 'await_return');
+});
+test('devolución entregada en el depósito del vendedor → reponer', () => {
+  const ret = mapReturnPayload({
+    status: 'delivered',
+    subtype: 'return_total',
+    shipments: [{ status: 'delivered', type: 'return', destination: { name: 'seller_address' } }],
+  });
+  assert.strictEqual(returnArrivedAtSellerDepot(ret), true);
+  const d = decideMlCancelStock({
+    outbound: { status: 'delivered', status_history: { date_shipped: '2026-11-01T00:00:00Z' } },
+    returns: [ret],
+  });
+  assert.strictEqual(d.action, 'revert_now');
+  assert.strictEqual(d.because, 'return_arrived');
+});
+test('llegó al depósito de Mercado Libre pero todavía no al vendedor → no reponer', () => {
+  const ret = mapReturnPayload({
+    status: 'delivered',
+    subtype: 'return_total',
+    intermediate_check: true,
+    shipments: [
+      { status: 'delivered', type: 'return', destination: { name: 'warehouse' } },
+      { status: 'pending', type: 'return_from_triage', destination: { name: 'seller_address' } },
+    ],
+  });
+  assert.strictEqual(returnArrivedAtSellerDepot(ret), false);
+});
+test('low cost no devuelve la mercadería → no reponer', () => {
+  const ret = mapReturnPayload({ status: 'delivered', subtype: 'low_cost', shipments: [] });
+  assert.strictEqual(returnArrivedAtSellerDepot(ret), false);
+});
+test('envío original ya devuelto al vendedor → reponer', () => {
+  const d = decideMlCancelStock({
+    outbound: { status: 'not_delivered', substatus: 'returned', status_history: { date_shipped: '2026-11-01T00:00:00Z' } },
+    returns: [],
+  });
+  assert.strictEqual(d.action, 'revert_now');
+  assert.strictEqual(d.because, 'back_to_sender');
+});
+test('si no se puede consultar la devolución y ya salió → no reponer todavía', () => {
+  const d = decideMlCancelStock({
+    outbound: { status: 'shipped', status_history: { date_shipped: '2026-11-01T00:00:00Z' } },
+    returns: null,
+  });
+  assert.strictEqual(d.action, 'await_return');
+  assert.strictEqual(d.because, 'unknown');
 });
 test('líneas: clave por posición + ítem + variación; SKU del vendedor', () => {
   const o = normalizeMercadoLibreOrder({

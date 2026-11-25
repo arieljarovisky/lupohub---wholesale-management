@@ -4,6 +4,8 @@
  * Reglas:
  *  - Cada venta se descuenta UNA sola vez (estado en channel_orders + clave de idempotencia por línea).
  *  - Si la venta se cancela, se devuelve exactamente lo que se había descontado.
+ *    En Mercado Libre, si la mercadería ya salió (devolución), el stock no vuelve
+ *    hasta que la devolución llega al depósito del vendedor.
  *  - Si no hay stock suficiente, se descuenta solo lo que hay (el stock queda en 0) y se deja un aviso.
  *    Al cancelar se devuelve exactamente lo que se había descontado, no lo que pedía la venta.
  *  - Si no se sabe qué producto es, la línea queda "sin identificar" para que alguien la elija.
@@ -14,6 +16,7 @@ import axios from 'axios';
 import { execute, get, query } from '../database/db';
 import { applyEntriesInTx, LedgerEntry, MovementType, q, q1, withTransaction } from './ledger';
 import { fetchMlItem, getMlAccessToken, mlItemIdCandidates, withMlRetry } from './mlClient';
+import { lookupMlCancelStock } from './mlReturns';
 import { getEngineState } from './schema';
 
 export type Platform = 'tiendanube' | 'mercadolibre';
@@ -35,7 +38,9 @@ export type NormalizedOrder = {
   /** Cuándo se pagó (si la plataforma lo informa). Decide si la venta es anterior al motor nuevo. */
   paidAt: Date | null;
   remoteStatus: string;
-  intent: 'apply' | 'revert' | 'ignore';
+  intent: 'apply' | 'revert' | 'await_return' | 'ignore';
+  /** ML: el stock que vuelve es porque la devolución llegó al depósito. */
+  revertLabel?: 'cancel' | 'return';
   buyer: string | null;
   lines: OrderLine[];
 };
@@ -460,8 +465,27 @@ export async function ingestOrder(order: NormalizedOrder): Promise<IngestResult>
       return { state, applied: 0, reverted: 0, unmatched: 0, message: 'Venta anterior al sistema nuevo: no se toca' };
     }
 
+    if (order.intent === 'await_return') {
+      if (state === 'applied' || state === 'return_pending') {
+        await touchMeta('return_pending');
+        return {
+          state,
+          applied: 0,
+          reverted: 0,
+          unmatched: 0,
+          message: 'Devolución en camino: el stock vuelve cuando llegue al depósito',
+        };
+      }
+      if (state === 'reverted') {
+        await touchMeta('reverted');
+        return { state, applied: 0, reverted: 0, unmatched: 0, message: 'El stock de esta venta ya se había devuelto' };
+      }
+      await touchMeta('cancelled');
+      return { state, applied: 0, reverted: 0, unmatched: 0, message: 'Cancelada (no había stock descontado)' };
+    }
+
     if (order.intent === 'apply') {
-      if (state === 'applied' || state === 'reverted' || state === 'cancelled') {
+      if (state === 'applied' || state === 'reverted' || state === 'cancelled' || state === 'return_pending') {
         await touchMeta(state);
         return { state, applied: 0, reverted: 0, unmatched: 0, message: 'La venta ya estaba procesada' };
       }
@@ -530,7 +554,7 @@ export async function ingestOrder(order: NormalizedOrder): Promise<IngestResult>
     }
 
     if (order.intent === 'revert') {
-      if (state !== 'applied') {
+      if (state !== 'applied' && state !== 'return_pending') {
         await touchMeta(state === 'reverted' ? 'reverted' : 'cancelled');
         return { state, applied: 0, reverted: 0, unmatched: 0, message: 'Cancelada (no había nada que devolver)' };
       }
@@ -553,7 +577,7 @@ export async function ingestOrder(order: NormalizedOrder): Promise<IngestResult>
           variantId: String(l.variant_id),
           delta: Number(l.units),
           type: cancelType(platform),
-          reference: `Cancelación ${ref}`,
+          reference: order.revertLabel === 'return' ? `Devolución en depósito ${ref}` : `Cancelación ${ref}`,
           source: platform,
           sourceId: externalOrderId,
           idempotencyKey: `${platform}:${externalOrderId}:${l.line_key}:revert`,
@@ -566,7 +590,9 @@ export async function ingestOrder(order: NormalizedOrder): Promise<IngestResult>
         [platform, externalOrderId]
       );
       await touchMeta('reverted', ', reverted_at = NOW()');
-      return { state, applied: 0, reverted: results.filter((x) => x.applied).length, unmatched: 0, message: 'Cancelada: stock devuelto' };
+      const reverted = results.filter((x) => x.applied).length;
+      const message = order.revertLabel === 'return' ? 'Devolución recibida en el depósito: stock devuelto' : 'Cancelada: stock devuelto';
+      return { state, applied: 0, reverted, unmatched: 0, message };
     }
 
     // Sin pagar todavía.
@@ -632,7 +658,13 @@ export async function ingestTiendaNubeOrderById(orderId: string): Promise<Ingest
 export async function ingestMercadoLibreOrderById(orderId: string): Promise<{ result: IngestResult; raw: any | null }> {
   const raw = await fetchMercadoLibreOrder(orderId);
   if (!raw) return { raw: null, result: { state: 'not_found', applied: 0, reverted: 0, unmatched: 0, message: 'No existe en Mercado Libre' } };
-  return { raw, result: await ingestOrder(normalizeMercadoLibreOrder(raw)) };
+  const normalized = normalizeMercadoLibreOrder(raw);
+  if (normalized.intent === 'revert') {
+    const decision = await lookupMlCancelStock(raw);
+    if (decision.action === 'await_return') normalized.intent = 'await_return';
+    else if (decision.because === 'return_arrived' || decision.because === 'back_to_sender') normalized.revertLabel = 'return';
+  }
+  return { raw, result: await ingestOrder(normalized) };
 }
 
 // ---------------------------------------------------------------------------
@@ -693,7 +725,12 @@ export async function pollRecentOrders(sinceMs: number): Promise<{ tn: number; m
         const list: any[] = Array.isArray(r.data?.results) ? r.data.results : [];
         for (const o of list) {
           try {
-            await ingestOrder(normalizeMercadoLibreOrder(o));
+            const normalized = normalizeMercadoLibreOrder(o);
+            if (normalized.intent === 'revert' && normalized.externalOrderId) {
+              await ingestMercadoLibreOrderById(normalized.externalOrderId);
+            } else {
+              await ingestOrder(normalized);
+            }
             mlCount++;
           } catch (e: any) {
             errors.push(`ML orden ${o?.id}: ${e?.message || e}`);
@@ -703,6 +740,23 @@ export async function pollRecentOrders(sinceMs: number): Promise<{ tn: number; m
       }
     } catch (e: any) {
       errors.push(`Mercado Libre: ${e?.message || e}`);
+    }
+    try {
+      const waiting = (await query(
+        `SELECT external_order_id FROM channel_orders WHERE platform = 'mercadolibre' AND state = 'return_pending' LIMIT 200`
+      )) as any[];
+      for (const row of waiting) {
+        const id = s(row?.external_order_id);
+        if (!id) continue;
+        try {
+          await ingestMercadoLibreOrderById(id);
+          mlCount++;
+        } catch (e: any) {
+          errors.push(`ML devolución ${id}: ${e?.message || e}`);
+        }
+      }
+    } catch (e: any) {
+      errors.push(`Mercado Libre devoluciones: ${e?.message || e}`);
     }
   }
 
