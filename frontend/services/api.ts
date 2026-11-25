@@ -1141,6 +1141,29 @@ export const api = {
     }, [], 'getVariantsBySku');
   },
 
+  getVariantByBarcode: async (code: string, priceListId?: string | null): Promise<{
+    variantId: string;
+    product: { id: string; sku: string; name: string; base_price: number; mayorista_pack_size: number };
+    variants: Array<{
+      variant_id: string;
+      product_id: string;
+      variant_sku: string | null;
+      barcode: string | null;
+      color_code: string;
+      color_name: string;
+      size_code: string;
+      stock: number;
+    }>;
+  }> => {
+    const params = new URLSearchParams();
+    if (priceListId) params.set('price_list_id', priceListId);
+    const qs = params.toString();
+    return request(
+      `/products/by-barcode/${encodeURIComponent(code)}${qs ? `?${qs}` : ''}`,
+      'GET'
+    );
+  },
+
   getVariantById: async (variantId: string): Promise<{ id: string; sku: string | null; external_sku: string | null; barcode: string | null; product_name: string; base_sku: string; size_code: string; color_code: string; color_name: string; stock: number } | null> => {
     try {
       const res = await request<any>(`/products/variants/${encodeURIComponent(variantId)}`, 'GET');

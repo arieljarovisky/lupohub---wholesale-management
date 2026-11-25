@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { ArrowLeft, Plus, Trash2, Search, Save, Package, ChevronDown, ChevronRight, Check, Palette, List, Upload, Bookmark, StickyNote } from 'lucide-react';
+import { ArrowLeft, Plus, Trash2, Search, Save, Package, ChevronDown, ChevronRight, Check, Palette, List, Upload, Bookmark, StickyNote, ScanLine } from 'lucide-react';
+import OrderBarcodeScanner, { type BarcodeLookup } from './OrderBarcodeScanner';
 import { Order, OrderStatus, Product, Customer, Role } from '../types';
 import type { PriceList } from '../types';
 import { api } from '../services/api';
@@ -302,7 +303,10 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
   const [orderNotes, setOrderNotes] = useState('');
   const [sizes, setSizes] = useState<Array<{ code: string; name: string }>>([]);
   const [rows, setRows] = useState<TemplateRow[]>([]);
+  const rowsRef = useRef<TemplateRow[]>([]);
+  rowsRef.current = rows;
   const [showAddModal, setShowAddModal] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [addingProduct, setAddingProduct] = useState(false);
   const [savingOrder, setSavingOrder] = useState(false);
@@ -731,7 +735,8 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         const sku = (p.sku || '').toLowerCase();
         const name = (p.name || '').toLowerCase();
         const base = ((p as any).base_sku || '').toLowerCase();
-        const text = `${sku} ${name} ${base}`;
+        const barcode = String(p.barcode || '').toLowerCase();
+        const text = `${sku} ${name} ${base} ${barcode}`;
         return words.every(w => text.includes(w));
       });
     }
@@ -1007,6 +1012,59 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
       stockBySize,
       price
     };
+  };
+
+  const applyBarcodeHit = (hit: BarcodeLookup): string => {
+    const matched = hit.variants.find((v) => String(v.variant_id) === String(hit.variantId)) || hit.variants[0];
+    const sizeCode = normalizeSizeCode(matched?.size_code, matched?.variant_sku || '');
+    if (!matched || !sizeCode) return 'Ese EAN no tiene un talle reconocible.';
+    const displayCode = resolveDisplayArticleCode(hit.product.sku);
+    const colorKey = variantColorKey(matched.color_code ?? '', matched.color_name ?? '');
+    const prev = rowsRef.current;
+    const existing = prev.find((r) => {
+      const sameProduct = String(r.productId) === String(hit.product.id) || articleCodesMatch(rowArticlePrefix(r), displayCode);
+      return sameProduct && variantColorKey(r.colorCode, r.colorName) === colorKey;
+    });
+    const label = labelTalle(sizeCode) || sizeCode;
+    const colorLabel = formatColorCell(matched.color_code ?? '', matched.color_name ?? '');
+    if (existing) {
+      const qty = (existing.quantitiesBySize[sizeCode] || 0) + 1;
+      const next = prev.map((r) => r.id === existing.id ? {
+        ...r,
+        variantBySize: { ...r.variantBySize, [sizeCode]: String(matched.variant_id) },
+        stockBySize: { ...(r.stockBySize || {}), [sizeCode]: Number(matched.stock ?? 0) },
+        quantitiesBySize: { ...r.quantitiesBySize, [sizeCode]: qty },
+      } : r);
+      rowsRef.current = next;
+      setRows(next);
+      setCollapsedGroups((groups) => ({ ...groups, [rowArticlePrefix(existing)]: false }));
+      return `+${qty} · ${hit.product.name} · ${colorLabel} · ${label}`;
+    }
+    const vars = hit.variants.filter((v) => variantColorKey(v.color_code ?? '', v.color_name ?? '') === colorKey);
+    const row = buildRowForColor(
+      { id: hit.product.id, sku: hit.product.sku, name: hit.product.name, base_price: hit.product.base_price } as NonNullable<Awaited<ReturnType<typeof api.getProductBySku>>>,
+      displayCode,
+      String(matched.color_code ?? '').trim(),
+      vars
+    );
+    if (!row.variantBySize[sizeCode]) {
+      row.variantBySize[sizeCode] = String(matched.variant_id);
+      row.stockBySize = { ...(row.stockBySize || {}), [sizeCode]: Number(matched.stock ?? 0) };
+    }
+    row.quantitiesBySize = { ...row.quantitiesBySize, [sizeCode]: 1 };
+    let insertEnd = prev.length;
+    for (let i = prev.length - 1; i >= 0; i--) {
+      if (articleCodesMatch(rowArticlePrefix(prev[i]), displayCode)) {
+        insertEnd = i + 1;
+        break;
+      }
+    }
+    const next = [...prev];
+    next.splice(insertEnd, 0, row);
+    rowsRef.current = next;
+    setRows(next);
+    setCollapsedGroups((groups) => ({ ...groups, [displayCode]: false }));
+    return `Agregué 1 · ${hit.product.name} · ${colorLabel} · ${label}`;
   };
 
   const closeColorPicker = useCallback(() => {
@@ -1411,6 +1469,16 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         </p>
         <button
           type="button"
+          onClick={() => setScanOpen(true)}
+          disabled={readOnly}
+          className="shrink-0 h-9 px-3 flex items-center justify-center gap-1.5 text-white font-semibold text-sm rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 transition touch-manipulation"
+          title="Sumar unidades con la cámara o la pistolita"
+        >
+          <ScanLine size={18} />
+          <span className="hidden sm:inline">Escanear</span>
+        </button>
+        <button
+          type="button"
           onClick={() => setShowAddModal(true)}
           disabled={readOnly}
           className="shrink-0 h-9 px-3 md:px-4 flex items-center justify-center gap-1.5 text-white font-semibold text-sm rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 shadow-md shadow-blue-900/25 transition touch-manipulation"
@@ -1696,20 +1764,30 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         }`}
       >
         {rows.length === 0 ? (
-          <button
-            type="button"
-            onClick={() => setShowAddModal(true)}
-            disabled={readOnly}
-            className="w-full h-full min-h-[12rem] flex flex-col items-center justify-center gap-4 py-12 px-4 border-2 border-dashed border-slate-600/80 hover:border-blue-500/50 hover:bg-slate-800/60 transition-colors group disabled:pointer-events-none disabled:opacity-60"
-          >
-            <span className="w-16 h-16 rounded-2xl bg-slate-700/80 group-hover:bg-blue-500/20 flex items-center justify-center transition-colors">
-              <Plus size={32} className="text-slate-400 group-hover:text-blue-400" strokeWidth={2} />
-            </span>
-            <div className="text-center">
-              <p className="text-base font-semibold text-slate-300 group-hover:text-white transition-colors">El pedido está vacío</p>
-              <p className="text-sm text-slate-500 mt-1">Tocá aquí o en «Agregar artículo» para cargar productos</p>
+          <div className="w-full h-full min-h-[12rem] flex flex-col items-center justify-center gap-4 py-12 px-4">
+            <p className="text-base font-semibold text-slate-300">El pedido está vacío</p>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => setScanOpen(true)}
+                disabled={readOnly}
+                className="h-11 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white font-semibold text-sm inline-flex items-center gap-2 disabled:opacity-50 touch-manipulation"
+              >
+                <ScanLine size={18} />
+                Escanear código
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowAddModal(true)}
+                disabled={readOnly}
+                className="h-11 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm inline-flex items-center gap-2 disabled:opacity-50 touch-manipulation"
+              >
+                <Plus size={18} />
+                Agregar artículo
+              </button>
             </div>
-          </button>
+            <p className="text-sm text-slate-500 text-center max-w-sm">Con la cámara del celular o con la pistolita, cada EAN suma 1 unidad.</p>
+          </div>
         ) : (
             <div className="flex-1 min-h-0 h-full w-full overflow-auto touch-scroll overscroll-contain scroll-area-ios">
               <table className="w-full min-w-max text-sm border-separate border-spacing-0">
@@ -2008,6 +2086,13 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
         </div>
       )}
 
+      <OrderBarcodeScanner
+        open={scanOpen && !readOnly}
+        priceListId={selectedPriceListId}
+        onClose={() => setScanOpen(false)}
+        onFound={applyBarcodeHit}
+      />
+
       {showAddModal && (
         <div className="fixed inset-0 bg-slate-950/95 backdrop-blur-sm z-[100] flex flex-col pt-[env(safe-area-inset-top)] px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <div className="shrink-0 py-3 flex items-center gap-3">
@@ -2033,7 +2118,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" size={20} />
             <input
               type="text"
-              placeholder="Buscar por código o nombre..."
+              placeholder="Buscar por código, nombre o EAN..."
               className="w-full bg-slate-800/80 border border-slate-700 rounded-xl py-3.5 pl-12 pr-4 text-white focus:ring-2 focus:ring-blue-500/50 outline-none min-h-[48px]"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}

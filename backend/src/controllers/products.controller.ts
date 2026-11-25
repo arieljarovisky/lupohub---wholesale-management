@@ -1215,6 +1215,85 @@ export const deleteVariant = async (req: any, res: any) => {
   }
 };
 
+function barcodeLookupCandidates(raw: string): string[] {
+  const digits = String(raw || '').replace(/\D/g, '');
+  const out = new Set<string>();
+  if (digits) out.add(digits);
+  if (digits.length === 13 && digits.startsWith('0')) out.add(digits.slice(1));
+  if (digits.length === 12) out.add(`0${digits}`);
+  return [...out].filter((code) => /^\d{8}$|^\d{12,14}$/.test(code));
+}
+
+/** Variante + hermanas del mismo artículo, para sumar un EAN al armar un pedido. */
+export const getVariantByBarcode = async (req: Request, res: Response) => {
+  const codes = barcodeLookupCandidates(String(req.params.code || ''));
+  if (!codes.length) return res.status(400).json({ message: 'El código no es un EAN válido.' });
+  const priceListId = String(req.query.price_list_id || '').trim() || null;
+  try {
+    const placeholders = codes.map(() => '?').join(',');
+    const match = await get(
+      `SELECT pv.id AS variant_id, p.id AS product_id
+       FROM product_variants pv
+       JOIN product_colors pc ON pc.id = pv.product_color_id
+       JOIN products p ON p.id = pc.product_id
+       WHERE pv.barcode IN (${placeholders})
+       LIMIT 1`,
+      codes
+    );
+    if (!match) return res.status(404).json({ message: 'No hay un producto con ese EAN.' });
+
+    const priceJoin = priceListId
+      ? `LEFT JOIN price_list_items pli ON pli.price_list_id = ? AND pli.product_id = p.id`
+      : '';
+    const priceSelect = priceListId ? `COALESCE(pli.price, p.base_price)` : `p.base_price`;
+    const product = await get(
+      `SELECT p.id, p.sku, p.name, ${priceSelect} AS base_price,
+              COALESCE(NULLIF(p.mayorista_pack_size, 0), 1) AS mayorista_pack_size
+       FROM products p
+       ${priceJoin}
+       WHERE p.id = ?`,
+      [...(priceListId ? [priceListId] : []), match.product_id]
+    );
+    if (!product) return res.status(404).json({ message: 'No hay un producto con ese EAN.' });
+
+    const variants = await query(
+      `SELECT pv.id AS variant_id, p.id AS product_id, pv.sku AS variant_sku, pv.barcode,
+              c.code AS color_code, c.name AS color_name, s.size_code,
+              COALESCE(st.stock, 0) AS stock
+       FROM products p
+       JOIN product_colors pc ON pc.product_id = p.id
+       JOIN colors c ON c.id = pc.color_id
+       JOIN product_variants pv ON pv.product_color_id = pc.id
+       JOIN sizes s ON s.id = pv.size_id
+       LEFT JOIN stocks st ON st.variant_id = pv.id
+       WHERE p.id = ?
+       ORDER BY c.code, s.size_code`,
+      [match.product_id]
+    );
+
+    res.json({
+      variantId: match.variant_id,
+      product: {
+        id: product.id,
+        sku: product.sku,
+        name: product.name,
+        base_price: Number(product.base_price ?? 0),
+        mayorista_pack_size: Math.max(1, Number(product.mayorista_pack_size) || 1),
+      },
+      variants: (variants || []).map((v: any) => ({
+        ...v,
+        stock: Number(v.stock ?? 0),
+      })),
+    });
+  } catch (error: any) {
+    if (error?.code === 'ER_BAD_FIELD_ERROR') {
+      return res.status(500).json({ message: 'Falta la columna de EAN. Reiniciá el backend para crearla.' });
+    }
+    console.error(error);
+    res.status(500).json({ message: 'Error buscando el EAN' });
+  }
+};
+
 /** Obtener una variante por ID (para formulario de edición) */
 export const getVariantById = async (req: Request, res: Response) => {
   const { variantId } = req.params;

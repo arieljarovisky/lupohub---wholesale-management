@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getProducts, createProduct, getProductBySku, getProductById, patchStock, updateProduct, updateProductExternalIds, updateVariantExternalIds, getVariantById, updateVariant, bulkLinkVariants, deleteAllProducts, deleteVariant, deleteProduct, importTangoArticles, exportInventory, getVariantPublications, addVariantPublication, deleteVariantPublication, unlinkProductPlatforms, unlinkVariantPlatforms, getDuplicateProducts, mergeDuplicateProductsBySku, mergeManualProducts, mergeManualVariants } from '../controllers/products.controller';
+import { getProducts, createProduct, getProductBySku, getProductById, getVariantByBarcode, patchStock, updateProduct, updateProductExternalIds, updateVariantExternalIds, getVariantById, updateVariant, bulkLinkVariants, deleteAllProducts, deleteVariant, deleteProduct, importTangoArticles, exportInventory, getVariantPublications, addVariantPublication, deleteVariantPublication, unlinkProductPlatforms, unlinkVariantPlatforms, getDuplicateProducts, mergeDuplicateProductsBySku, mergeManualProducts, mergeManualVariants } from '../controllers/products.controller';
 import { authMiddleware, adminOrDepositoMiddleware } from '../middleware/auth';
 
 const router = Router();
@@ -25,6 +25,7 @@ router.post('/merge-manual', authMiddleware, adminOrDepositoMiddleware, mergeMan
 router.get('/export-inventory', authMiddleware, exportInventory);
 router.get('/', authMiddleware, getProducts);
 router.get('/by-id/:id', authMiddleware, getProductById);
+router.get('/by-barcode/:code', authMiddleware, getVariantByBarcode);
 router.get('/:sku', authMiddleware, getProductBySku);
 router.post('/', authMiddleware, adminOrDepositoMiddleware, createProduct);
 router.patch('/stock', authMiddleware, patchStock);
