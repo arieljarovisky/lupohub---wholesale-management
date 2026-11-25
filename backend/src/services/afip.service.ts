@@ -1407,14 +1407,30 @@ export async function getWsfexParametros(
 export async function getLastExportVoucherNumber(puntoVta: number, cbteTipo = TIPO_CBTE_E): Promise<number> {
   const afip = await createAfipClient();
   const ws = afip.WebService(getWsfexServiceId());
-  const Auth = await wsfexAuthBlock(afip, ws);
+  const authBase = await wsfexAuthBlock(afip, ws);
+  // WSFEX: FEXGetLast_CMP recibe un único parámetro Auth (ClsFEX_LastCMP) que incluye
+  // Pto_venta y Cbte_Tipo. Si van fuera de Auth, el SOAP los descarta y AFIP no devuelve el número.
+  const Auth = { ...authBase, Pto_venta: puntoVta, Cbte_Tipo: cbteTipo };
   const res = (await withAfipRetry('FEXGetLast_CMP', () =>
-    ws.executeRequest('FEXGetLast_CMP', { Auth, Pto_venta: puntoVta, Cbte_Tipo: cbteTipo })
+    ws.executeRequest('FEXGetLast_CMP', { Auth })
   )) as Record<string, unknown>;
   const root = (res?.FEXGetLast_CMPResult ?? res) as Record<string, unknown>;
+  const err = root?.FEXErr as Record<string, unknown> | undefined;
+  const errCode = Number(err?.ErrCode ?? 0);
+  if (errCode && errCode !== 0) {
+    throw new Error(
+      `AFIP FEXGetLast_CMP (PV ${puntoVta}, tipo ${cbteTipo}): [${errCode}] ${String(err?.ErrMsg ?? '').trim()}`
+    );
+  }
   const last = (root?.FEXResult_LastCMP ?? root) as Record<string, unknown>;
-  const nro = Number(last?.Cbte_nro ?? last?.cbte_nro ?? 0);
-  return Number.isFinite(nro) ? nro : 0;
+  const raw = last?.Cbte_nro ?? last?.cbte_nro;
+  const nro = Number(raw);
+  if (raw == null || !Number.isFinite(nro)) {
+    throw new Error(
+      `AFIP no devolvió el último comprobante de exportación (PV ${puntoVta}). Respuesta: ${JSON.stringify(root).slice(0, 500)}`
+    );
+  }
+  return nro;
 }
 
 export type WsfexPuntoVenta = { number: number; blocked: boolean; bajaFecha?: string };
