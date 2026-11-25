@@ -291,6 +291,9 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const [serverListRefreshKey, setServerListRefreshKey] = useState(0);
   const tangoFileInputRef = useRef<HTMLInputElement>(null);
   const stockExcelFileInputRef = useRef<HTMLInputElement>(null);
+  const barcodeFileInputRef = useRef<HTMLInputElement>(null);
+  const [importingBarcodes, setImportingBarcodes] = useState(false);
+  const [barcodeImportResult, setBarcodeImportResult] = useState<{ ok: boolean; message: string; updated: number; unchanged: number; skipped: number; errors: string[] } | null>(null);
 
   // Filter States (inicializar desde sesión para que no se pierdan al re-renderizar)
   const [filterCategory, setFilterCategory] = useState(stored.filterCategory ?? 'ALL');
@@ -871,6 +874,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           : (r.color_name || r.color_code || ''),
         'Stock': Number(r.stock ?? 0),
         'Precio': Number(r.base_price ?? 0),
+        'ID variante': r.variant_id || '',
       }));
       const worksheet = XLSX.utils.json_to_sheet(excelRows);
       const workbook = XLSX.utils.book_new();
@@ -977,6 +981,55 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
       }
     };
     reader.readAsBinaryString(file);
+  };
+
+  /** Celda de EAN → texto de dígitos (Excel puede convertirlo a número y perder ceros a la izquierda). */
+  const eanCellToString = (v: unknown): string => {
+    if (v == null) return '';
+    if (typeof v === 'number') {
+      if (!Number.isFinite(v)) return '';
+      const d = Math.round(v).toFixed(0);
+      if (d.length === 7 || d.length === 11) return `0${d}`;
+      return d;
+    }
+    return String(v).trim();
+  };
+
+  const handleImportBarcodesFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportingBarcodes(true);
+    setBarcodeImportResult(null);
+    try {
+      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const raw: Record<string, unknown>[] = XLSX.utils.sheet_to_json(sheet, { raw: true, defval: '' });
+      const norm = (k: string) => k.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+      const pick = (row: Record<string, unknown>, names: string[]) => {
+        for (const key of Object.keys(row)) if (names.includes(norm(key))) return row[key];
+        return undefined;
+      };
+      const rows = raw
+        .map((r, i) => ({
+          line: i + 2,
+          variantId: String(pick(r, ['id variante', 'variant_id', 'variant id']) ?? '').trim(),
+          sku: String(pick(r, ['sku variante', 'sku']) ?? '').trim(),
+          barcode: eanCellToString(pick(r, ['ean', 'codigo de barras', 'barcode', 'gtin'])),
+        }))
+        .filter((r) => r.barcode);
+      if (rows.length === 0) {
+        showToast('info', 'No encontré EAN para importar. Usá el Excel de "Exportar Excel" y completá la columna EAN.');
+        return;
+      }
+      const res = await api.importVariantBarcodes(rows);
+      setBarcodeImportResult({ ...res, ok: res.ok !== false, errors: res.errors || [] });
+      if (res.updated > 0) setServerListRefreshKey((k) => k + 1);
+    } catch (err: any) {
+      showToast('error', err?.message || 'Error importando EAN.');
+    } finally {
+      setImportingBarcodes(false);
+      if (barcodeFileInputRef.current) barcodeFileInputRef.current.value = '';
+    }
   };
 
   const handleImportStockExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -2546,6 +2599,27 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
         </div>
       )}
 
+      {barcodeImportResult && (
+        <div className={`${barcodeImportResult.ok ? 'bg-emerald-900/40 border-emerald-700' : 'bg-red-900/30 border-red-700'} border rounded-xl px-4 py-3 flex items-start justify-between gap-2`}>
+          <div className={`text-sm ${barcodeImportResult.ok ? 'text-emerald-200' : 'text-red-200'} min-w-0`}>
+            <p className="font-semibold">{barcodeImportResult.ok ? 'Importación de EAN finalizada' : 'Importación de EAN cancelada'}</p>
+            <p className="mt-1">
+              {barcodeImportResult.message}
+              {barcodeImportResult.unchanged > 0 ? ` ${barcodeImportResult.unchanged} ya tenían ese EAN.` : ''}
+            </p>
+            {barcodeImportResult.errors.length > 0 && (
+              <ul className="mt-2 text-xs text-amber-200 space-y-0.5 max-h-40 overflow-y-auto">
+                {barcodeImportResult.errors.slice(0, 50).map((m, i) => <li key={i}>{m}</li>)}
+                {barcodeImportResult.errors.length > 50 && <li>(+{barcodeImportResult.errors.length - 50} más)</li>}
+              </ul>
+            )}
+          </div>
+          <button type="button" onClick={() => setBarcodeImportResult(null)} className="text-slate-400 hover:text-white p-1">
+            <X size={18} />
+          </button>
+        </div>
+      )}
+
       {/* Top Action Bar — acciones en menú */}
       <div className="flex items-center justify-end gap-2">
         <input
@@ -2561,6 +2635,13 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
           accept=".xlsx,.xls"
           className="hidden"
           onChange={handleImportStockExcel}
+        />
+        <input
+          ref={barcodeFileInputRef}
+          type="file"
+          accept=".xlsx,.xls"
+          className="hidden"
+          onChange={handleImportBarcodesFile}
         />
         <div className="relative shrink-0" ref={topDotsRef}>
           <button
@@ -2623,6 +2704,12 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
                 {importingStockExcel ? <Loader2 size={17} className="animate-spin shrink-0" /> : <Package size={17} className="text-slate-400 shrink-0" />}
                 Importar stock Excel
               </button>
+              {isAdminOrWarehouse && (
+                <button type="button" onClick={() => { setTopDotsOpen(false); barcodeFileInputRef.current?.click(); }} disabled={importingBarcodes} className="w-full flex items-center gap-3 mx-1.5 px-3 py-2.5 text-left text-sm text-slate-300 hover:bg-white/5 hover:text-white rounded-xl disabled:opacity-50 max-w-[calc(100%-12px)]" title="Usá el Excel de 'Exportar Excel': completá la columna EAN y volvé a subirlo">
+                  {importingBarcodes ? <Loader2 size={17} className="animate-spin shrink-0" /> : <Upload size={17} className="text-slate-400 shrink-0" />}
+                  Importar EAN
+                </button>
+              )}
               <button type="button" onClick={() => { setTopDotsOpen(false); exportProductsToExcel(); }} disabled={exportingExcel} className="w-full flex items-center gap-3 mx-1.5 px-3 py-2.5 text-left text-sm text-slate-300 hover:bg-white/5 hover:text-white rounded-xl disabled:opacity-50 max-w-[calc(100%-12px)]">
                 {exportingExcel ? <Loader2 size={17} className="animate-spin shrink-0" /> : <Download size={17} className="text-slate-400 shrink-0" />}
                 Exportar Excel

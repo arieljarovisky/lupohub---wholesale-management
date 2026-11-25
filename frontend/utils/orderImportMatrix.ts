@@ -188,6 +188,7 @@ function parseWorksheet(
   let lastCustomer = layout.customerCol < 0 && sheetFallback ? sheetFallback : '';
 
   const out: OrderMatrixImportLine[] = [];
+  const lastRow = ws.rowCount || 1;
   for (let r = 2; r <= lastRow; r++) {
     const row = ws.getRow(r);
     const rawCodigo = getCellDisplayValue(row.getCell(col1(codigoCol)));

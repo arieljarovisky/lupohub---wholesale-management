@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import axios from 'axios';
-import { query, execute, get } from '../database/db';
+import pool, { query, execute, get } from '../database/db';
 import { Product } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { nombreTalleDesdeCodigo, codigoTalleParaSku, sizeCodeLookupCandidates } from '../talles-tango';
@@ -1331,6 +1331,133 @@ function normalizeEan(raw: unknown): { ok: true; value: string | null } | { ok: 
   return { ok: true, value: compact };
 }
 
+/**
+ * Carga masiva de EAN desde el Excel de inventario.
+ * Cada fila: { variantId?, sku?, barcode }. Se busca la variante por ID y, si no viene, por SKU de variante.
+ * EAN vacío = no se toca. Para borrar un EAN escribí "BORRAR".
+ * Valida todo antes de escribir: si hay errores no se aplica nada.
+ */
+export const importVariantBarcodes = async (req: Request, res: Response) => {
+  const rows = Array.isArray(req.body?.rows) ? req.body.rows : null;
+  if (!rows) return res.status(400).json({ message: 'Enviá rows: [{ variantId, sku, barcode }]' });
+  try {
+    const all = await query(`SELECT id, sku, barcode FROM product_variants`);
+    const byId = new Map<string, { id: string; sku: string | null; barcode: string | null }>();
+    const bySku = new Map<string, string[]>();
+    for (const v of all || []) {
+      byId.set(String(v.id), { id: String(v.id), sku: v.sku ?? null, barcode: v.barcode ?? null });
+      const k = String(v.sku || '').trim().toUpperCase();
+      if (k) bySku.set(k, [...(bySku.get(k) || []), String(v.id)]);
+    }
+
+    const errors: string[] = [];
+    const changes = new Map<string, { value: string | null; line: number }>();
+    let unchanged = 0;
+    let skipped = 0;
+
+    rows.forEach((r: any, i: number) => {
+      const line = Number(r?.line) || i + 2; // fila de Excel (1 = encabezado)
+      const rawBarcode = String(r?.barcode ?? '').trim();
+      if (!rawBarcode) { skipped++; return; }
+      const variantIdRaw = String(r?.variantId ?? '').trim();
+      const skuRaw = String(r?.sku ?? '').trim();
+      let variantId: string | null = null;
+      if (variantIdRaw) {
+        if (!byId.has(variantIdRaw)) { errors.push(`Fila ${line}: no existe la variante con ID ${variantIdRaw}`); return; }
+        variantId = variantIdRaw;
+      } else if (skuRaw) {
+        const ids = bySku.get(skuRaw.toUpperCase()) || [];
+        if (ids.length === 0) { errors.push(`Fila ${line}: no existe la variante con SKU ${skuRaw}`); return; }
+        if (ids.length > 1) { errors.push(`Fila ${line}: el SKU ${skuRaw} está en ${ids.length} variantes; usá la columna "ID variante"`); return; }
+        variantId = ids[0];
+      } else {
+        errors.push(`Fila ${line}: falta "ID variante" o "SKU variante"`);
+        return;
+      }
+      let value: string | null;
+      if (rawBarcode.toUpperCase() === 'BORRAR') {
+        value = null;
+      } else {
+        const n = normalizeEan(rawBarcode);
+        if (!n.ok) { errors.push(`Fila ${line}: EAN "${rawBarcode}" inválido (8, 12, 13 o 14 dígitos)`); return; }
+        value = n.value;
+      }
+      const prev = changes.get(variantId);
+      if (prev && prev.value !== value) {
+        errors.push(`Fila ${line}: la variante ya tiene otro EAN en la fila ${prev.line}`);
+        return;
+      }
+      if ((byId.get(variantId)!.barcode ?? null) === value) { unchanged++; return; }
+      changes.set(variantId, { value, line });
+    });
+
+    // Unicidad del estado final (los EAN pueden moverse entre variantes dentro del mismo archivo).
+    const finalOwner = new Map<string, string>();
+    for (const v of byId.values()) {
+      const val = changes.has(v.id) ? changes.get(v.id)!.value : v.barcode;
+      if (!val) continue;
+      const other = finalOwner.get(val);
+      if (other) {
+        const a = changes.get(v.id);
+        const b = changes.get(other);
+        const where = (id: string, c?: { line: number }) => (c ? `fila ${c.line}` : `variante ${byId.get(id)?.sku || id} (ya cargado)`);
+        errors.push(`EAN ${val} repetido: ${where(other, b)} y ${where(v.id, a)}`);
+      } else {
+        finalOwner.set(val, v.id);
+      }
+    }
+
+    if (errors.length > 0) {
+      return res.json({ ok: false, message: `Hay ${errors.length} error(es); no se aplicó ningún cambio.`, errors, updated: 0, unchanged, skipped });
+    }
+    if (changes.size === 0) {
+      return res.json({ ok: true, message: 'No hay EAN nuevos para actualizar.', updated: 0, unchanged, skipped, errors: [] });
+    }
+
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const ids = [...changes.keys()];
+      // Primero liberar los EAN de las variantes que cambian (evita choques del índice único al intercambiar).
+      for (let i = 0; i < ids.length; i += 500) {
+        const chunk = ids.slice(i, i + 500);
+        await conn.query(`UPDATE product_variants SET barcode = NULL WHERE id IN (?)`, [chunk]);
+      }
+      for (const [id, c] of changes) {
+        if (c.value) await conn.query(`UPDATE product_variants SET barcode = ? WHERE id = ?`, [c.value, id]);
+      }
+      for (let i = 0; i < ids.length; i += 500) {
+        const chunk = ids.slice(i, i + 500);
+        await conn.query(
+          `UPDATE products p
+           JOIN product_colors pc ON pc.product_id = p.id
+           JOIN product_variants pv ON pv.product_color_id = pc.id
+           SET p.updated_at = NOW()
+           WHERE pv.id IN (?)`,
+          [chunk]
+        );
+      }
+      await conn.commit();
+    } catch (e) {
+      await conn.rollback();
+      throw e;
+    } finally {
+      conn.release();
+    }
+
+    res.json({ ok: true, message: `EAN actualizados en ${changes.size} variante(s).`, updated: changes.size, unchanged, skipped, errors: [] });
+  } catch (error: any) {
+    console.error('importVariantBarcodes:', error);
+    if (error?.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ message: 'Un EAN del archivo ya está cargado en otra variante.' });
+    }
+    if (error?.code === 'ER_BAD_FIELD_ERROR') {
+      return res.status(500).json({ message: 'Falta la columna de EAN. Reiniciá el backend para crearla.' });
+    }
+    res.status(500).json({ message: error?.message || 'Error importando EAN' });
+  }
+};
+
 /** Actualizar variante (SKU, external_sku y/o EAN). Si la variante está vinculada a ML/TN, envía el SKU a esas plataformas. */
 export const updateVariant = async (req: Request, res: Response) => {
   const { variantId } = req.params;
@@ -2311,6 +2438,7 @@ export const exportInventory = async (req: Request, res: Response) => {
         p.base_price,
         p.tienda_nube_id,
         p.mercado_libre_id,
+        pv.id AS variant_id,
         pv.sku AS variant_sku,
         pv.barcode,
         pv.tienda_nube_variant_id,

@@ -1051,6 +1051,7 @@ export const api = {
 
   /** Inventario completo para exportar Excel: todas las variantes con stock. */
   exportInventory: async (): Promise<Array<{
+    variant_id?: string;
     product_sku: string;
     product_name: string;
     category: string;
@@ -2681,6 +2682,13 @@ export const api = {
   },
 
   /** Importar stock desde Excel (filas con codigo, color, y columnas P, M, G, GG, XG, XXG, XXXG). */
+  /** Carga masiva de EAN por variante (ID variante o SKU variante). Si hay errores no aplica nada. */
+  importVariantBarcodes: async (
+    rows: Array<{ line: number; variantId?: string; sku?: string; barcode: string }>
+  ): Promise<{ ok: boolean; message: string; updated: number; unchanged: number; skipped: number; errors: string[] }> => {
+    return request<any>('/products/variants/import-barcodes', 'POST', { rows }, undefined, PRODUCTS_LIST_TIMEOUT_MS);
+  },
+
   importStockFromExcel: async (rows: Array<Record<string, unknown>>): Promise<{ message: string; updated: number; notFound?: string[]; notFoundCount?: number; errors?: string[] }> => {
     return request<any>('/stock/import-excel', 'POST', { rows });
   },

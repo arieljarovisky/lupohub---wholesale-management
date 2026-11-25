@@ -173,6 +173,8 @@ app.use((req, res, next) => {
   applyCorsHeaders(req, res);
   next();
 });
+// Carga masiva de EAN: la planilla completa puede superar el límite por defecto (100kb).
+app.use('/api/products/variants/import-barcodes', express.json({ limit: '10mb' }) as any);
 app.use(
   express.json({
     verify: (req: any, _res, buf) => {
