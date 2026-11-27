@@ -5311,6 +5311,19 @@ export const api = {
       300000
     );
   },
+  /**
+   * Busca un producto por código EAN/SKU en Tienda Nube y devuelve su precio publicado.
+   * Útil para la consulta de precios con pistola de código de barras.
+   */
+  lookupShowroomPriceByCode: async (code: string): Promise<ShowroomPriceItem> => {
+    return request<ShowroomPriceItem>(
+      `/integrations/tiendanube/showroom-prices/lookup/${encodeURIComponent(code)}`,
+      'GET',
+      undefined,
+      undefined,
+      30000
+    );
+  },
   /** Sube una imagen propia para el catálogo y devuelve su URL absoluta. */
   uploadCatalogImage: async (file: File): Promise<string> => {
     const formData = new FormData();

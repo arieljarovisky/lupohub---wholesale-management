@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Search, RefreshCw, Loader2, AlertCircle, ExternalLink, Package, Tag, ScanLine } from 'lucide-react';
 import { api, ShowroomPriceItem, ShowroomPriceList } from '../services/api';
 import { formatDateAr } from '../utils/formatDate';
-import ShowroomBarcodeScanner from './ShowroomBarcodeScanner';
+import ShowroomPriceLookup from './ShowroomPriceLookup';
 
 const PAGE_SIZE = 80;
 
@@ -171,7 +171,7 @@ const ShowroomPriceListView: React.FC = () => {
             className="inline-flex items-center justify-center gap-2 min-h-11 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold disabled:opacity-60"
           >
             <ScanLine size={16} aria-hidden />
-            Escanear
+            Consultar precio
           </button>
           <button
             type="button"
@@ -316,12 +316,7 @@ const ShowroomPriceListView: React.FC = () => {
         </>
       )}
 
-      <ShowroomBarcodeScanner
-        open={scannerOpen}
-        transferDiscountPercent={data?.transferDiscountPercent || 0}
-        cardDiscountPercent={data?.cardDiscountPercent || 0}
-        onClose={() => setScannerOpen(false)}
-      />
+      <ShowroomPriceLookup open={scannerOpen} onClose={() => setScannerOpen(false)} />
     </div>
   );
 };

@@ -1,43 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { BrowserMultiFormatReader } from '@zxing/browser';
 import { BarcodeFormat, DecodeHintType } from '@zxing/library';
-import { Camera, Loader2, ScanLine, X, Package } from 'lucide-react';
-import { api } from '../services/api';
-
-type Props = {
-  open: boolean;
-  transferDiscountPercent: number;
-  cardDiscountPercent: number;
-  onClose: () => void;
-};
-
-type FoundProduct = {
-  id: string;
-  sku: string;
-  name: string;
-  barcode: string;
-  basePrice: number;
-  priceTransfer: number;
-  priceCard: number;
-  stock: number;
-  variantInfo: string;
-};
-
-function applyDiscount(price: number, percent: number): number {
-  if (!Number.isFinite(percent) || percent <= 0 || percent >= 100) return price;
-  return Math.round(price * (1 - percent / 100) * 100) / 100;
-}
-
-function formatMoney(value: number | null): string {
-  if (value == null || !Number.isFinite(value)) return '—';
-  const whole = Math.abs(value - Math.round(value)) < 0.001;
-  return value.toLocaleString('es-AR', {
-    style: 'currency',
-    currency: 'ARS',
-    minimumFractionDigits: whole ? 0 : 2,
-    maximumFractionDigits: whole ? 0 : 2,
-  });
-}
+import { Camera, Loader2, ScanLine, X, Package, ExternalLink, RefreshCw } from 'lucide-react';
+import { api, ShowroomPriceItem } from '../services/api';
 
 function beep(ok: boolean) {
   try {
@@ -56,55 +21,47 @@ function beep(ok: boolean) {
   }
 }
 
-const ProductResult: React.FC<{ item: FoundProduct }> = ({ item }) => (
-  <div className="rounded-2xl border border-emerald-800/60 bg-emerald-950/40 p-4">
-    <div className="flex items-start gap-3">
-      <div className="w-16 h-16 shrink-0 rounded-xl bg-slate-800 border border-slate-700 overflow-hidden flex items-center justify-center">
-        <Package size={24} className="text-slate-500" aria-hidden />
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="font-mono text-lg font-bold text-white tracking-wide">{item.sku || 'Sin código'}</p>
-        <p className="text-sm text-slate-200 truncate">{item.name}</p>
-        <p className="text-xs text-slate-500 font-mono">EAN {item.barcode}</p>
-        {item.variantInfo && <p className="text-xs text-slate-400">{item.variantInfo}</p>}
-        <p className={`text-xs ${item.stock > 0 ? 'text-slate-400' : 'text-amber-400'}`}>
-          {item.stock > 0 ? `Stock: ${item.stock}` : 'Sin stock'}
-        </p>
-      </div>
-    </div>
-    <div className="mt-4 grid grid-cols-2 gap-3">
-      <div className="rounded-xl bg-emerald-900/40 border border-emerald-700/50 px-3 py-2">
-        <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-300/80">Transferencia</p>
-        <p className="text-2xl font-black tabular-nums text-emerald-300 leading-tight">
-          {formatMoney(item.priceTransfer)}
-        </p>
-      </div>
-      <div className="rounded-xl bg-sky-900/40 border border-sky-700/50 px-3 py-2">
-        <p className="text-[10px] font-bold uppercase tracking-wider text-sky-300/80">Tarjeta</p>
-        <p className="text-2xl font-black tabular-nums text-sky-300 leading-tight">
-          {formatMoney(item.priceCard)}
-        </p>
-      </div>
-    </div>
-  </div>
-);
+function formatMoney(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) return '—';
+  const whole = Math.abs(value - Math.round(value)) < 0.001;
+  return value.toLocaleString('es-AR', {
+    style: 'currency',
+    currency: 'ARS',
+    minimumFractionDigits: whole ? 0 : 2,
+    maximumFractionDigits: whole ? 0 : 2,
+  });
+}
 
-const ShowroomBarcodeScanner: React.FC<Props> = ({ open, transferDiscountPercent, cardDiscountPercent, onClose }) => {
+function formatPriceSpan(min: number | null, max?: number | null): string {
+  if (min == null || !Number.isFinite(min)) return '$ 0';
+  if (max == null || !Number.isFinite(max) || Math.abs(max - min) < 0.009) return formatMoney(min);
+  return `${formatMoney(min)} – ${formatMoney(max)}`;
+}
+
+function stockLabel(stock: number | null): string {
+  if (stock == null) return '';
+  if (stock <= 0) return 'Sin stock';
+  return `Stock: ${stock}`;
+}
+
+type Props = {
+  open: boolean;
+  onClose: () => void;
+};
+
+const ShowroomPriceLookup: React.FC<Props> = ({ open, onClose }) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const stopScanRef = useRef<(() => void) | null>(null);
   const busyRef = useRef(false);
   const lastHit = useRef<{ code: string; at: number; source: 'cam' | 'gun' } | null>(null);
-  const discountsRef = useRef({ transfer: transferDiscountPercent, card: cardDiscountPercent });
-  discountsRef.current = { transfer: transferDiscountPercent, card: cardDiscountPercent };
 
   const [cameraOn, setCameraOn] = useState(false);
   const [cameraError, setCameraError] = useState('');
   const [status, setStatus] = useState('');
   const [statusOk, setStatusOk] = useState(true);
   const [looking, setLooking] = useState(false);
-  const [foundItem, setFoundItem] = useState<FoundProduct | null>(null);
-  const [recent, setRecent] = useState<FoundProduct[]>([]);
+  const [result, setResult] = useState<ShowroomPriceItem | null>(null);
 
   const stopCamera = () => {
     stopScanRef.current?.();
@@ -120,8 +77,7 @@ const ShowroomBarcodeScanner: React.FC<Props> = ({ open, transferDiscountPercent
     if (!open) {
       stopCamera();
       setStatus('');
-      setFoundItem(null);
-      setRecent([]);
+      setResult(null);
       setCameraError('');
       return;
     }
@@ -169,7 +125,7 @@ const ShowroomBarcodeScanner: React.FC<Props> = ({ open, transferDiscountPercent
         video,
         (scanResult) => {
           const text = scanResult?.getText?.()?.trim() || '';
-          if (text.length < 8 || busyRef.current) return;
+          if (text.length < 4 || busyRef.current) return;
           void lookup(text, 'cam');
         }
       )
@@ -194,47 +150,26 @@ const ShowroomBarcodeScanner: React.FC<Props> = ({ open, transferDiscountPercent
   }, [open, cameraOn]);
 
   const lookup = async (raw: string, source: 'cam' | 'gun') => {
-    const code = raw.replace(/\D/g, '');
-    if (!/^\d{8}$|^\d{12,14}$/.test(code) || busyRef.current) return;
+    const code = raw.trim();
+    if (!code || code.length < 4 || busyRef.current) return;
     const prev = lastHit.current;
     const cooldown = source === 'cam' ? 1100 : 280;
     if (prev && prev.code === code && Date.now() - prev.at < cooldown) return;
     lastHit.current = { code, at: Date.now(), source };
     busyRef.current = true;
     setLooking(true);
+    setResult(null);
     if (inputRef.current) inputRef.current.value = '';
-
     try {
-      const result = await api.getVariantByBarcode(code);
-      const basePrice = result.product.base_price;
-      const { transfer, card } = discountsRef.current;
-      
-      const matchedVariant = result.variants.find((v) => 
-        v.barcode?.replace(/\D/g, '') === code
-      ) || result.variants[0];
-      
-      const item: FoundProduct = {
-        id: result.variantId,
-        sku: result.product.sku,
-        name: result.product.name,
-        barcode: code,
-        basePrice,
-        priceTransfer: applyDiscount(basePrice, transfer),
-        priceCard: applyDiscount(basePrice, card),
-        stock: matchedVariant?.stock ?? 0,
-        variantInfo: matchedVariant ? `${matchedVariant.color_name} · ${matchedVariant.size_code}` : '',
-      };
-
-      setFoundItem(item);
+      const item = await api.lookupShowroomPriceByCode(code);
+      setResult(item);
       setStatusOk(true);
-      setStatus(`${item.sku} · ${item.name}`);
-      setRecent((list) => [item, ...list.filter((r) => r.id !== item.id)].slice(0, 8));
+      setStatus(`${item.articleCode} · ${item.name}`);
       beep(true);
       if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(30);
     } catch (e: any) {
-      setFoundItem(null);
+      const message = e?.message || 'No pude leer ese código.';
       setStatusOk(false);
-      const message = e?.message || `No encontré ningún producto con el código ${code}`;
       setStatus(message);
       beep(false);
     } finally {
@@ -250,11 +185,17 @@ const ShowroomBarcodeScanner: React.FC<Props> = ({ open, transferDiscountPercent
     void lookup(value, 'gun');
   };
 
+  const clearResult = () => {
+    setResult(null);
+    setStatus('');
+    inputRef.current?.focus();
+  };
+
   if (!open) return null;
 
   return (
     <div
-      className="fixed inset-0 z-[120] bg-slate-950/95 backdrop-blur-sm flex flex-col pt-[env(safe-area-inset-top)] px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] overflow-y-auto"
+      className="fixed inset-0 z-[120] bg-slate-950/95 backdrop-blur-sm flex flex-col pt-[env(safe-area-inset-top)] px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
       onPointerDown={(e) => {
         const target = e.target as HTMLElement | null;
         if (target?.closest('button, input, video, a')) return;
@@ -266,7 +207,7 @@ const ShowroomBarcodeScanner: React.FC<Props> = ({ open, transferDiscountPercent
           type="button"
           onClick={onClose}
           className="shrink-0 w-11 h-11 flex items-center justify-center rounded-xl bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition touch-manipulation"
-          aria-label="Cerrar escáner"
+          aria-label="Cerrar"
         >
           <X size={22} />
         </button>
@@ -279,7 +220,7 @@ const ShowroomBarcodeScanner: React.FC<Props> = ({ open, transferDiscountPercent
         </div>
       </div>
 
-      <div className="rounded-2xl overflow-hidden border border-slate-700 bg-black relative min-h-[180px] max-h-[32vh] aspect-[4/3] sm:aspect-video">
+      <div className="rounded-2xl overflow-hidden border border-slate-700 bg-black relative min-h-[180px] max-h-[42vh] aspect-[4/3] sm:aspect-video">
         <video ref={videoRef} className="w-full h-full object-cover" muted playsInline />
         {!cameraOn && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center">
@@ -312,7 +253,7 @@ const ShowroomBarcodeScanner: React.FC<Props> = ({ open, transferDiscountPercent
       <input
         ref={inputRef}
         type="text"
-        inputMode="numeric"
+        inputMode="text"
         autoComplete="off"
         placeholder="Apuntá la pistolita acá y dispará"
         className="mt-1 w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white font-mono text-lg outline-none focus:border-emerald-500"
@@ -325,57 +266,82 @@ const ShowroomBarcodeScanner: React.FC<Props> = ({ open, transferDiscountPercent
           }
         }}
       />
-      <p className="mt-1 text-[11px] text-slate-500">
-        La pistolita escribe el EAN y manda Enter. El cursor tiene que estar en este campo.
-      </p>
+      <p className="mt-1 text-[11px] text-slate-500">La pistolita escribe el EAN y manda Enter. El cursor tiene que estar en este campo.</p>
 
-      <div
-        className={`mt-3 rounded-xl border px-3 py-2.5 text-sm min-h-[44px] flex items-center gap-2 ${
-          !status
-            ? 'border-slate-800 text-slate-500'
-            : statusOk
-            ? 'border-emerald-800/60 bg-emerald-950/40 text-emerald-200'
-            : 'border-red-900/50 bg-red-950/30 text-red-200'
-        }`}
-      >
+      <div className={`mt-3 rounded-xl border px-3 py-2.5 text-sm min-h-[44px] flex items-center gap-2 ${
+        !status ? 'border-slate-800 text-slate-500' : statusOk ? 'border-emerald-800/60 bg-emerald-950/40 text-emerald-200' : 'border-red-900/50 bg-red-950/30 text-red-200'
+      }`}>
         {looking && <Loader2 size={16} className="animate-spin shrink-0" />}
         <span>{status || 'Esperando un código…'}</span>
       </div>
 
-      {foundItem && (
-        <div className="mt-4">
-          <ProductResult item={foundItem} />
-        </div>
-      )}
+      {result && (
+        <div className="mt-4 rounded-2xl border border-slate-700 bg-slate-900/80 p-4 space-y-4">
+          <div className="flex items-start gap-3">
+            <div className="w-14 h-14 shrink-0 rounded-xl bg-slate-800 border border-slate-700 overflow-hidden flex items-center justify-center">
+              {result.image ? (
+                <img src={result.image} alt="" className="w-full h-full object-cover" loading="lazy" />
+              ) : (
+                <Package size={22} className="text-slate-500" aria-hidden />
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="font-mono text-lg font-bold text-white tracking-wide">{result.articleCode}</p>
+              <p className="text-sm text-slate-200 truncate">{result.name}</p>
+              <p className="text-xs text-slate-500">
+                {result.barcode && <span>EAN {result.barcode}</span>}
+                {result.barcode && result.stock != null && ' · '}
+                {result.stock != null && (
+                  <span className={result.stock === 0 ? 'text-amber-400' : ''}>{stockLabel(result.stock)}</span>
+                )}
+              </p>
+            </div>
+          </div>
 
-      {recent.length > 1 && (
-        <div className="mt-4">
-          <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Consultas recientes</p>
-          <ul className="space-y-2">
-            {recent.slice(1).map((item) => (
-              <li
-                key={item.id}
-                className="text-sm text-slate-300 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 flex items-center gap-3 cursor-pointer hover:bg-slate-800/60"
-                onClick={() => setFoundItem(item)}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-xl bg-slate-800/60 border border-emerald-800/40 p-3">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-300/80">Transferencia</p>
+              <p className="text-2xl font-black tabular-nums text-emerald-300 leading-tight mt-1">
+                {formatPriceSpan(result.priceTransfer, result.priceTransferMax)}
+              </p>
+            </div>
+            <div className="rounded-xl bg-slate-800/60 border border-sky-800/40 p-3">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-sky-300/80">Tarjeta</p>
+              <p className="text-2xl font-black tabular-nums text-sky-300 leading-tight mt-1">
+                {formatPriceSpan(result.priceCard, result.priceCardMax)}
+              </p>
+            </div>
+          </div>
+
+          {result.compareAtPrice != null && (
+            <p className="text-sm text-slate-500 text-center line-through">Antes {formatMoney(result.compareAtPrice)}</p>
+          )}
+
+          <div className="flex gap-2">
+            {result.url && (
+              <a
+                href={result.url}
+                target="_blank"
+                rel="noreferrer"
+                className="flex-1 h-11 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-sm inline-flex items-center justify-center gap-2 border border-slate-700"
               >
-                <div className="w-10 h-10 shrink-0 rounded-lg bg-slate-800 border border-slate-700 overflow-hidden flex items-center justify-center">
-                  <Package size={16} className="text-slate-500" aria-hidden />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="font-mono font-bold text-white">{item.sku}</p>
-                  <p className="text-xs text-slate-400 truncate">{item.name}</p>
-                </div>
-                <div className="text-right shrink-0">
-                  <p className="text-sm font-bold text-emerald-300 tabular-nums">{formatMoney(item.priceTransfer)}</p>
-                  <p className="text-xs text-sky-300 tabular-nums">{formatMoney(item.priceCard)}</p>
-                </div>
-              </li>
-            ))}
-          </ul>
+                <ExternalLink size={16} />
+                Ver en la tienda
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={clearResult}
+              className="flex-1 h-11 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-sm inline-flex items-center justify-center gap-2 border border-slate-700"
+            >
+              <RefreshCw size={16} />
+              Buscar otro
+            </button>
+          </div>
         </div>
       )}
     </div>
   );
 };
 
-export default ShowroomBarcodeScanner;
+export default ShowroomPriceLookup;
