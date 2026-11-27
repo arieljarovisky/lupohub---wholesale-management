@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Search, RefreshCw, Loader2, AlertCircle, ExternalLink, Package, Tag } from 'lucide-react';
+import { Search, RefreshCw, Loader2, AlertCircle, ExternalLink, Package, Tag, ScanLine } from 'lucide-react';
 import { api, ShowroomPriceItem, ShowroomPriceList } from '../services/api';
 import { formatDateAr } from '../utils/formatDate';
+import ShowroomBarcodeScanner from './ShowroomBarcodeScanner';
 
 const PAGE_SIZE = 80;
 
@@ -105,6 +106,7 @@ const ShowroomPriceListView: React.FC = () => {
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [scannerOpen, setScannerOpen] = useState(false);
 
   const load = useCallback(async (refresh = false) => {
     setLoading(true);
@@ -161,15 +163,26 @@ const ShowroomPriceListView: React.FC = () => {
           </h2>
           <p className="text-slate-400 text-sm mt-1 max-w-2xl">{discountNote || 'Precios publicados en Tienda Nube.'}</p>
         </div>
-        <button
-          type="button"
-          onClick={() => load(true)}
-          disabled={loading}
-          className="inline-flex items-center justify-center gap-2 min-h-11 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 text-sm font-semibold border border-slate-700 disabled:opacity-60"
-        >
-          {loading ? <Loader2 size={16} className="animate-spin" aria-hidden /> : <RefreshCw size={16} aria-hidden />}
-          Actualizar precios
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setScannerOpen(true)}
+            disabled={loading && !data}
+            className="inline-flex items-center justify-center gap-2 min-h-11 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold disabled:opacity-60"
+          >
+            <ScanLine size={16} aria-hidden />
+            Escanear
+          </button>
+          <button
+            type="button"
+            onClick={() => load(true)}
+            disabled={loading}
+            className="inline-flex items-center justify-center gap-2 min-h-11 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 text-sm font-semibold border border-slate-700 disabled:opacity-60"
+          >
+            {loading ? <Loader2 size={16} className="animate-spin" aria-hidden /> : <RefreshCw size={16} aria-hidden />}
+            Actualizar precios
+          </button>
+        </div>
       </div>
 
       <div className="sticky top-0 z-20 -mx-1 px-1 py-2 bg-slate-950/95 backdrop-blur">
@@ -302,6 +315,12 @@ const ShowroomPriceListView: React.FC = () => {
           )}
         </>
       )}
+
+      <ShowroomBarcodeScanner
+        open={scannerOpen}
+        items={data?.items || []}
+        onClose={() => setScannerOpen(false)}
+      />
     </div>
   );
 };
