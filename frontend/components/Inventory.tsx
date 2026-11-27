@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback, startTransition } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical, Eye, EyeOff, Copy, History, GitMerge, Unlink } from 'lucide-react';
+import { Search, Filter, Plus, Cloud, Zap, Package, RefreshCw, AlertTriangle, Minus, CheckCircle2, XCircle, Edit2, Check, ChevronDown, Box, X, Layers, Tag, DollarSign, Palette, Ruler, PlusCircle, Download, Link, Ship, Info, Upload, Lock, Trash2, Loader2, MoreVertical, Eye, EyeOff, Copy, History, GitMerge, Unlink, Camera } from 'lucide-react';
 import { Product, Role, Attribute } from '../types';
 import { api } from '../services/api';
 import { labelTalle, codigoTalleParaSku, nombreTalleDesdeCodigo } from '../utils/tallesTango';
@@ -34,6 +34,7 @@ import {
 } from '../utils/mercadoLibreItemId';
 import { normalizeTiendaNubeProductId, extractTiendaNubeVariantFromUrl } from '../utils/tiendaNubeUrl';
 import { formatDateTimeAr, todayYmdArgentina } from '../utils/formatDate';
+import BarcodeCameraScan from './BarcodeCameraScan';
 
 /** Referencia estable: cuando no hay filtro ML≠TN, el agrupado no debe recalcularse por cada actualización de stocks externos. */
 const STABLE_EMPTY_EXTERNAL_STOCKS: Record<string, { stockML?: number; stockTN?: number; stockLupoShop?: number }> =
@@ -159,6 +160,7 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
   const { showToast, showConfirm } = useNotification();
   const stored = getStoredInventoryState();
   const [searchTerm, setSearchTerm] = useState(stored.search);
+  const [cameraSearchOpen, setCameraSearchOpen] = useState(false);
   const [hideZeroStock, setHideZeroStock] = useState(stored.hideZeroStock ?? false);
   const [showHiddenVariants, setShowHiddenVariants] = useState(stored.showHiddenVariants ?? false);
   const [syncLoading, setSyncLoading] = useState<'tn' | 'ml' | 'both' | 'fromML' | null>(null);
@@ -2758,8 +2760,17 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
               placeholder="Buscar por código, nombre o EAN..." 
               value={searchTerm}
               onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-              className="w-full min-w-0 pl-10 pr-4 py-3 sm:py-3.5 min-h-[48px] bg-slate-900/80 border border-slate-700/50 rounded-2xl focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/50 outline-none text-white text-sm box-border transition-colors"
+              className="w-full min-w-0 pl-10 pr-12 py-3 sm:py-3.5 min-h-[48px] bg-slate-900/80 border border-slate-700/50 rounded-2xl focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500/50 outline-none text-white text-sm box-border transition-colors"
             />
+            <button
+              type="button"
+              onClick={() => setCameraSearchOpen(true)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center rounded-xl text-slate-400 hover:text-white hover:bg-slate-700/80 touch-manipulation"
+              aria-label="Buscar con la cámara"
+              title="Buscar con la cámara"
+            >
+              <Camera size={18} />
+            </button>
           </div>
           <button 
             onClick={() => setShowFilters(!showFilters)}
@@ -2772,6 +2783,16 @@ const Inventory: React.FC<InventoryProps> = ({ products, attributes = [], role, 
             )}
           </button>
         </div>
+        <BarcodeCameraScan
+          open={cameraSearchOpen}
+          onClose={() => setCameraSearchOpen(false)}
+          onCode={(code) => {
+            setCameraSearchOpen(false);
+            setSearchTerm(code);
+            setCurrentPage(1);
+            showToast('success', `Buscando ${code}`);
+          }}
+        />
 
         {/* Filters Panel */}
         {showFilters && (
