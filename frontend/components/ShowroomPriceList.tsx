@@ -318,7 +318,8 @@ const ShowroomPriceListView: React.FC = () => {
 
       <ShowroomBarcodeScanner
         open={scannerOpen}
-        items={data?.items || []}
+        transferDiscountPercent={data?.transferDiscountPercent || 0}
+        cardDiscountPercent={data?.cardDiscountPercent || 0}
         onClose={() => setScannerOpen(false)}
       />
     </div>

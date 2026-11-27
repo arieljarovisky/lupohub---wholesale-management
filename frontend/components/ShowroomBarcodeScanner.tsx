@@ -2,27 +2,30 @@ import React, { useEffect, useRef, useState } from 'react';
 import { BrowserMultiFormatReader } from '@zxing/browser';
 import { BarcodeFormat, DecodeHintType } from '@zxing/library';
 import { Camera, Loader2, ScanLine, X, Package } from 'lucide-react';
-import { ShowroomPriceItem } from '../services/api';
+import { api } from '../services/api';
 
 type Props = {
   open: boolean;
-  items: ShowroomPriceItem[];
+  transferDiscountPercent: number;
+  cardDiscountPercent: number;
   onClose: () => void;
 };
 
-function normalizeCode(value: string): string {
-  return value.toLowerCase().replace(/[\s-]/g, '');
-}
+type FoundProduct = {
+  id: string;
+  sku: string;
+  name: string;
+  barcode: string;
+  basePrice: number;
+  priceTransfer: number;
+  priceCard: number;
+  stock: number;
+  variantInfo: string;
+};
 
-function findByBarcode(items: ShowroomPriceItem[], code: string): ShowroomPriceItem | null {
-  const normalized = code.replace(/\D/g, '');
-  if (!normalized) return null;
-  for (const item of items) {
-    if (item.barcode && item.barcode.replace(/\D/g, '') === normalized) return item;
-    const haystack = normalizeCode(item.searchText || '');
-    if (haystack.includes(normalizeCode(normalized))) return item;
-  }
-  return null;
+function applyDiscount(price: number, percent: number): number {
+  if (!Number.isFinite(percent) || percent <= 0 || percent >= 100) return price;
+  return Math.round(price * (1 - percent / 100) * 100) / 100;
 }
 
 function formatMoney(value: number | null): string {
@@ -34,12 +37,6 @@ function formatMoney(value: number | null): string {
     minimumFractionDigits: whole ? 0 : 2,
     maximumFractionDigits: whole ? 0 : 2,
   });
-}
-
-function formatPriceSpan(min: number | null, max?: number | null): string {
-  if (min == null || !Number.isFinite(min)) return '—';
-  if (max == null || !Number.isFinite(max) || Math.abs(max - min) < 0.009) return formatMoney(min);
-  return `${formatMoney(min)} – ${formatMoney(max)}`;
 }
 
 function beep(ok: boolean) {
@@ -59,59 +56,55 @@ function beep(ok: boolean) {
   }
 }
 
-const ProductResult: React.FC<{ item: ShowroomPriceItem }> = ({ item }) => (
+const ProductResult: React.FC<{ item: FoundProduct }> = ({ item }) => (
   <div className="rounded-2xl border border-emerald-800/60 bg-emerald-950/40 p-4">
     <div className="flex items-start gap-3">
       <div className="w-16 h-16 shrink-0 rounded-xl bg-slate-800 border border-slate-700 overflow-hidden flex items-center justify-center">
-        {item.image ? (
-          <img src={item.image} alt="" className="w-full h-full object-cover" loading="lazy" />
-        ) : (
-          <Package size={24} className="text-slate-500" aria-hidden />
-        )}
+        <Package size={24} className="text-slate-500" aria-hidden />
       </div>
       <div className="min-w-0 flex-1">
-        <p className="font-mono text-lg font-bold text-white tracking-wide">{item.articleCode || 'Sin código'}</p>
+        <p className="font-mono text-lg font-bold text-white tracking-wide">{item.sku || 'Sin código'}</p>
         <p className="text-sm text-slate-200 truncate">{item.name}</p>
-        {item.brand && <p className="text-xs text-slate-400">{item.brand}</p>}
-        {item.barcode && <p className="text-xs text-slate-500 font-mono">EAN {item.barcode}</p>}
+        <p className="text-xs text-slate-500 font-mono">EAN {item.barcode}</p>
+        {item.variantInfo && <p className="text-xs text-slate-400">{item.variantInfo}</p>}
+        <p className={`text-xs ${item.stock > 0 ? 'text-slate-400' : 'text-amber-400'}`}>
+          {item.stock > 0 ? `Stock: ${item.stock}` : 'Sin stock'}
+        </p>
       </div>
     </div>
     <div className="mt-4 grid grid-cols-2 gap-3">
       <div className="rounded-xl bg-emerald-900/40 border border-emerald-700/50 px-3 py-2">
         <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-300/80">Transferencia</p>
         <p className="text-2xl font-black tabular-nums text-emerald-300 leading-tight">
-          {formatPriceSpan(item.priceTransfer, item.priceTransferMax)}
+          {formatMoney(item.priceTransfer)}
         </p>
       </div>
       <div className="rounded-xl bg-sky-900/40 border border-sky-700/50 px-3 py-2">
         <p className="text-[10px] font-bold uppercase tracking-wider text-sky-300/80">Tarjeta</p>
         <p className="text-2xl font-black tabular-nums text-sky-300 leading-tight">
-          {formatPriceSpan(item.priceCard, item.priceCardMax)}
+          {formatMoney(item.priceCard)}
         </p>
       </div>
     </div>
-    {item.compareAtPrice != null && (
-      <p className="mt-2 text-sm text-slate-400 line-through tabular-nums text-center">
-        Antes {formatMoney(item.compareAtPrice)}
-      </p>
-    )}
   </div>
 );
 
-const ShowroomBarcodeScanner: React.FC<Props> = ({ open, items, onClose }) => {
+const ShowroomBarcodeScanner: React.FC<Props> = ({ open, transferDiscountPercent, cardDiscountPercent, onClose }) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const stopScanRef = useRef<(() => void) | null>(null);
   const busyRef = useRef(false);
   const lastHit = useRef<{ code: string; at: number; source: 'cam' | 'gun' } | null>(null);
+  const discountsRef = useRef({ transfer: transferDiscountPercent, card: cardDiscountPercent });
+  discountsRef.current = { transfer: transferDiscountPercent, card: cardDiscountPercent };
 
   const [cameraOn, setCameraOn] = useState(false);
   const [cameraError, setCameraError] = useState('');
   const [status, setStatus] = useState('');
   const [statusOk, setStatusOk] = useState(true);
   const [looking, setLooking] = useState(false);
-  const [foundItem, setFoundItem] = useState<ShowroomPriceItem | null>(null);
-  const [recent, setRecent] = useState<ShowroomPriceItem[]>([]);
+  const [foundItem, setFoundItem] = useState<FoundProduct | null>(null);
+  const [recent, setRecent] = useState<FoundProduct[]>([]);
 
   const stopCamera = () => {
     stopScanRef.current?.();
@@ -210,25 +203,45 @@ const ShowroomBarcodeScanner: React.FC<Props> = ({ open, items, onClose }) => {
     busyRef.current = true;
     setLooking(true);
     if (inputRef.current) inputRef.current.value = '';
-    
-    const item = findByBarcode(items, code);
-    if (item) {
+
+    try {
+      const result = await api.getVariantByBarcode(code);
+      const basePrice = result.product.base_price;
+      const { transfer, card } = discountsRef.current;
+      
+      const matchedVariant = result.variants.find((v) => 
+        v.barcode?.replace(/\D/g, '') === code
+      ) || result.variants[0];
+      
+      const item: FoundProduct = {
+        id: result.variantId,
+        sku: result.product.sku,
+        name: result.product.name,
+        barcode: code,
+        basePrice,
+        priceTransfer: applyDiscount(basePrice, transfer),
+        priceCard: applyDiscount(basePrice, card),
+        stock: matchedVariant?.stock ?? 0,
+        variantInfo: matchedVariant ? `${matchedVariant.color_name} · ${matchedVariant.size_code}` : '',
+      };
+
       setFoundItem(item);
       setStatusOk(true);
-      setStatus(`${item.articleCode} · ${item.name}`);
+      setStatus(`${item.sku} · ${item.name}`);
       setRecent((list) => [item, ...list.filter((r) => r.id !== item.id)].slice(0, 8));
       beep(true);
       if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(30);
-    } else {
+    } catch (e: any) {
       setFoundItem(null);
       setStatusOk(false);
-      setStatus(`No encontré ningún producto con el código ${code}`);
+      const message = e?.message || `No encontré ningún producto con el código ${code}`;
+      setStatus(message);
       beep(false);
+    } finally {
+      busyRef.current = false;
+      setLooking(false);
+      window.setTimeout(() => inputRef.current?.focus(), 30);
     }
-    
-    busyRef.current = false;
-    setLooking(false);
-    window.setTimeout(() => inputRef.current?.focus(), 30);
   };
 
   const submitField = () => {
@@ -346,14 +359,10 @@ const ShowroomBarcodeScanner: React.FC<Props> = ({ open, items, onClose }) => {
                 onClick={() => setFoundItem(item)}
               >
                 <div className="w-10 h-10 shrink-0 rounded-lg bg-slate-800 border border-slate-700 overflow-hidden flex items-center justify-center">
-                  {item.image ? (
-                    <img src={item.image} alt="" className="w-full h-full object-cover" loading="lazy" />
-                  ) : (
-                    <Package size={16} className="text-slate-500" aria-hidden />
-                  )}
+                  <Package size={16} className="text-slate-500" aria-hidden />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="font-mono font-bold text-white">{item.articleCode}</p>
+                  <p className="font-mono font-bold text-white">{item.sku}</p>
                   <p className="text-xs text-slate-400 truncate">{item.name}</p>
                 </div>
                 <div className="text-right shrink-0">
