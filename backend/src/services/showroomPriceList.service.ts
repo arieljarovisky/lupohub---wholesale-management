@@ -438,3 +438,25 @@ export async function buildShowroomPriceList(opts?: { refresh?: boolean }): Prom
   inflight = run;
   return run;
 }
+
+function normalizeCode(value: string): string {
+  return value.toLowerCase().replace(/[\s-]/g, '');
+}
+
+/**
+ * Busca un producto en la lista de precios de Tienda Nube por código de barras, SKU o código de artículo.
+ * Usa la caché existente del showroom.
+ */
+export async function lookupShowroomPriceByCode(code: string): Promise<ShowroomPriceItem | null> {
+  const list = await buildShowroomPriceList();
+  const query = normalizeCode(code);
+  if (!query) return null;
+
+  for (const item of list.items) {
+    if (item.barcode && normalizeCode(item.barcode) === query) return item;
+    if (normalizeCode(item.articleCode) === query) return item;
+    const haystack = normalizeCode(item.searchText);
+    if (haystack.includes(query)) return item;
+  }
+  return null;
+}
