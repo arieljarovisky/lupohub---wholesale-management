@@ -1174,6 +1174,10 @@ export const api = {
     }
   },
 
+  assignVariantBarcode: async (variantId: string, barcode: string): Promise<{ id: string; barcode: string }> => {
+    return request(`/products/variants/${encodeURIComponent(variantId)}/barcode`, 'PUT', { barcode });
+  },
+
   updateVariant: async (
     variantId: string,
     data: { sku?: string; externalSku?: string; inventoryHidden?: boolean; barcode?: string | null }

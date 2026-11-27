@@ -1458,6 +1458,37 @@ export const importVariantBarcodes = async (req: Request, res: Response) => {
   }
 };
 
+/** Guarda el EAN de una variante al escanear un código que todavía no estaba cargado. */
+export const assignVariantBarcode = async (req: Request, res: Response) => {
+  const role = String((req as any).user?.role || '');
+  if (!['ADMIN', 'DEPOSITO', 'WAREHOUSE', 'SELLER'].includes(role)) {
+    return res.status(403).json({ message: 'No podés asignar códigos de barras.' });
+  }
+  const { variantId } = req.params;
+  if (!variantId) return res.status(400).json({ message: 'ID de variante requerido' });
+  const normalized = normalizeEan((req.body as { barcode?: string })?.barcode);
+  if (!normalized.ok) return res.status(400).json({ message: normalized.message });
+  if (!normalized.value) return res.status(400).json({ message: 'El EAN está vacío.' });
+  try {
+    const exists = await get(`SELECT id, barcode FROM product_variants WHERE id = ?`, [variantId]);
+    if (!exists) return res.status(404).json({ message: 'Variante no encontrada' });
+    const dup = await get(
+      `SELECT id FROM product_variants WHERE barcode = ? AND id <> ? LIMIT 1`,
+      [normalized.value, variantId]
+    );
+    if (dup) return res.status(409).json({ message: 'Ese EAN ya está cargado en otra variante.' });
+    await execute(`UPDATE product_variants SET barcode = ? WHERE id = ?`, [normalized.value, variantId]);
+    await touchProductUpdatedAtByVariantId(variantId);
+    res.json({ id: variantId, barcode: normalized.value, replaced: Boolean(exists.barcode) && String(exists.barcode) !== normalized.value });
+  } catch (error: any) {
+    console.error(error);
+    if (error?.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ message: 'Ese EAN ya está cargado en otra variante.' });
+    }
+    res.status(500).json({ message: 'Error asignando el EAN' });
+  }
+};
+
 /** Actualizar variante (SKU, external_sku y/o EAN). Si la variante está vinculada a ML/TN, envía el SKU a esas plataformas. */
 export const updateVariant = async (req: Request, res: Response) => {
   const { variantId } = req.params;

@@ -2088,6 +2088,7 @@ const CreateOrderTemplate: React.FC<CreateOrderTemplateProps> = ({
 
       <OrderBarcodeScanner
         open={scanOpen && !readOnly}
+        products={products}
         priceListId={selectedPriceListId}
         onClose={() => setScanOpen(false)}
         onFound={applyBarcodeHit}

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getProducts, createProduct, getProductBySku, getProductById, getVariantByBarcode, importVariantBarcodes, patchStock, updateProduct, updateProductExternalIds, updateVariantExternalIds, getVariantById, updateVariant, bulkLinkVariants, deleteAllProducts, deleteVariant, deleteProduct, importTangoArticles, exportInventory, getVariantPublications, addVariantPublication, deleteVariantPublication, unlinkProductPlatforms, unlinkVariantPlatforms, getDuplicateProducts, mergeDuplicateProductsBySku, mergeManualProducts, mergeManualVariants } from '../controllers/products.controller';
+import { getProducts, createProduct, getProductBySku, getProductById, getVariantByBarcode, importVariantBarcodes, patchStock, updateProduct, updateProductExternalIds, updateVariantExternalIds, getVariantById, updateVariant, assignVariantBarcode, bulkLinkVariants, deleteAllProducts, deleteVariant, deleteProduct, importTangoArticles, exportInventory, getVariantPublications, addVariantPublication, deleteVariantPublication, unlinkProductPlatforms, unlinkVariantPlatforms, getDuplicateProducts, mergeDuplicateProductsBySku, mergeManualProducts, mergeManualVariants } from '../controllers/products.controller';
 import { authMiddleware, adminOrDepositoMiddleware } from '../middleware/auth';
 
 const router = Router();
@@ -11,6 +11,7 @@ router.post('/variants/merge-manual', authMiddleware, adminOrDepositoMiddleware,
 router.get('/variants/:variantId', authMiddleware, getVariantById);
 // Modificar SKU / externalSku de una variante: solo ADMIN o DEPOSITO
 router.put('/variants/:variantId', authMiddleware, adminOrDepositoMiddleware, updateVariant);
+router.put('/variants/:variantId/barcode', authMiddleware, assignVariantBarcode);
 router.put('/variants/:variantId/external-ids', authMiddleware, adminOrDepositoMiddleware, updateVariantExternalIds);
 router.post('/variants/:variantId/unlink', authMiddleware, adminOrDepositoMiddleware, unlinkVariantPlatforms);
 router.get('/variants/:variantId/publications', authMiddleware, getVariantPublications);
