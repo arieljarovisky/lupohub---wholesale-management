@@ -75,6 +75,7 @@ import { addMarketingLeadsTable } from './database/add_marketing_leads_table';
 import { addMarketingLeadsWebhookSupport } from './database/add_marketing_leads_webhook';
 import marketingLeadsRoutes from './routes/marketingLeads.routes';
 import publicTrackingRoutes from './routes/publicTracking.routes';
+import catalogStockRoutes from './routes/catalogStock.routes';
 import companyFinanceRoutes from './routes/companyFinance.routes';
 import { addRemitoSequence } from './database/add_remito_sequence';
 import { addReceiptSequence } from './database/add_receipt_sequence';
@@ -194,6 +195,8 @@ app.use('/api/colors', colorRoutes);
 app.use('/api/sizes', sizeRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/integrations', integrationRoutes);
+// Stock de solo lectura para catalogo.lupo.ar (servidor a servidor, con CATALOG_STOCK_API_KEY)
+app.use('/api/catalog-stock', catalogStockRoutes);
 app.use('/api/stock', stockRoutes);
 app.use('/api/stock-sync', stockSyncRoutes);
 app.use('/api/publication-bundles', publicationStockBundlesRoutes);
